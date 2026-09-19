@@ -110,7 +110,7 @@ The Windows live integration harness copies the tracked fixture into `build/` an
 
 The harness runs to completion on Windows PowerShell 5.1, including the persistence-rollback case that denies write rights through `icacls`. That case previously aborted the run: it selects its platform branch with `$IsWindows`, an automatic variable introduced in PowerShell 6, which is undefined on 5.1 and so took the POSIX branch and called `chmod`.
 
-The Phase 1 substrate has also been run against Godot 4.6.2 and 4.7.2. The compatibility floor remains Godot 4.5.1; the live CI matrix runs the complete integration harness on 4.5.1 and 4.7.2, and bridge method hashes must remain valid on both versions.
+The Phase 1 substrate has also been run against Godot 4.6.2 and 4.7.2. The compatibility floor remains Godot 4.5.1; the live CI matrix runs the complete integration harness on 4.5.1, 4.6.2 and 4.7.2, which is every line the supported range covers, and bridge method hashes must remain valid on all three versions.
 
 ---
 
@@ -227,7 +227,7 @@ Routes are held per session, so several can be open at once. Two invariants keep
 
 ## Phase 4 tests and release gate
 
-The release gate runs the complete native suite; the runner's reported total remains authoritative as cases evolve. Focused suites cover the existing session/routing/evaluation contracts plus search containment and lexical filtering, two-idle-frame reimport progress, exact diff arithmetic, cache eviction, public response completeness, and restoration guards. `tests/run_godot_integration.ps1` creates disposable concurrent editor/game processes and verifies the complete live workflow on Godot 4.5.1 and 4.7.2. Editor teardown first requests a normal window close, then uses PID-and-start-time-verified termination if a hidden Windows editor keeps an invisible native prompt alive; this fallback is limited to the disposable test process and cannot target a reused PID. Because forced exit cannot run the extension destructor, the harness removes a leftover descriptor only after its regular-file shape, session ID, PID, and process-start identity all match that editor instance.
+The release gate runs the complete native suite; the runner's reported total remains authoritative as cases evolve. Focused suites cover the existing session/routing/evaluation contracts plus search containment and lexical filtering, two-idle-frame reimport progress, exact diff arithmetic, cache eviction, public response completeness, and restoration guards. `tests/run_godot_integration.ps1` creates disposable concurrent editor/game processes and verifies the complete live workflow on Godot 4.5.1, 4.6.2 and 4.7.2. Editor teardown first requests a normal window close, then uses PID-and-start-time-verified termination if a hidden Windows editor keeps an invisible native prompt alive; this fallback is limited to the disposable test process and cannot target a reused PID. Because forced exit cannot run the extension destructor, the harness removes a leftover descriptor only after its regular-file shape, session ID, PID, and process-start identity all match that editor instance.
 
 Run from a clean worktree:
 
@@ -235,6 +235,7 @@ Run from a clean worktree:
 cmake --build build --config Release
 .\build\Release\didi_tests.exe
 .\tests\run_godot_integration.ps1 -GodotExecutable C:\Godot\Godot_v4.5.1-stable_win64_console.exe
+.\tests\run_godot_integration.ps1 -GodotExecutable C:\Godot\Godot_v4.6.2-stable_win64_console.exe
 .\tests\run_godot_integration.ps1 -GodotExecutable C:\Godot\Godot_v4.7.2-stable_win64_console.exe
 ```
 
