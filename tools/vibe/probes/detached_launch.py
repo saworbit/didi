@@ -51,23 +51,47 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from mcp_client import Session  # noqa: E402
 
 
-def os_says_alive(pid: int | None) -> bool | None:
-    """Ask the kernel. Neither `alive` nor the summary can be the witness here."""
+def process_state(pid: int | None) -> str:
+    """What the kernel says this pid is, in one word.
+
+    Not `os.kill(pid, 0)`: a POSIX child whose parent has not reaped it stays in
+    the process table as a zombie and answers that call exactly like a running
+    process. "Still running" and "exited and never reaped" are different
+    findings with different fixes, and the first probe here could not tell them
+    apart.
+    """
     if not pid:
-        return None
+        return "absent"
     if sys.platform == "win32":
         answer = subprocess.run(
             ["powershell", "-NoProfile", "-Command",
-             f"if (Get-Process -Id {pid} -ErrorAction SilentlyContinue) {{'1'}} else {{'0'}}"],
+             f"if (Get-Process -Id {pid} -ErrorAction SilentlyContinue) {{'running'}} "
+             f"else {{'absent'}}"],
             capture_output=True, text=True).stdout.strip()
-        return answer == "1"
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
+        return answer or "absent"
+    if sys.platform == "linux":
+        try:
+            with open(f"/proc/{pid}/stat", encoding="utf-8", errors="replace") as handle:
+                # The comm field can contain spaces and parentheses; state is the
+                # first token after the last ')'.
+                fields = handle.read().rsplit(")", 1)[1].split()
+            return "zombie" if fields[0] == "Z" else f"running ({fields[0]})"
+        except OSError:
+            return "absent"
+    result = subprocess.run(["ps", "-o", "state=", "-p", str(pid)],
+                            capture_output=True, text=True)
+    state = (result.stdout or "").strip()
+    if not state:
+        return "absent"
+    return "zombie" if state.startswith("Z") else f"running ({state})"
+
+
+def os_says_alive(pid: int | None) -> bool | None:
+    """True only for a process that is actually running, not for a zombie."""
+    if not pid:
+        return None
+    state = process_state(pid)
+    return state != "absent" and not state.startswith("zombie")
 
 
 def attach_editor(session: Session, project: Path) -> str | None:
@@ -151,9 +175,9 @@ def one_pass(project: Path, attach_first: bool) -> None:
                 waited += 0.5
             still_alive = os_says_alive(session_pid)
             row("and the kernel agrees it is gone, within 20s", False, still_alive)
-            print(f"       it took {waited:.1f}s for the process to go away"
-                  if not still_alive else
-                  "       still running after 20s")
+            print(f"       the kernel calls pid {session_pid}: "
+                  f"{process_state(session_pid)}"
+                  + (f", after {waited:.1f}s" if not still_alive else " after 20s"))
             if still_alive:
                 # Do not leave an engine behind for the next probe; #387.
                 listed, _ = session.call("runtime_list_sessions", {})
