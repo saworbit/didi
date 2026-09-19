@@ -137,10 +137,12 @@ The accepted JSON for each Godot type:
 | `Vector2`, `Vector3` | `{"x": .., "y": ..}` / `{"x": .., "y": .., "z": ..}` |
 | `Vector2i`, `Vector3i` | the same objects with whole numbers |
 | `Color` | `{"r": .., "g": .., "b": ..}` with an optional `a`, or a `"#rrggbb"` / `"#rrggbbaa"` string |
-| Resource slots | a `res://` path, loaded and refused if the loaded type is not the class the property holds; `null` clears the slot |
+| Resource slots | a `res://` path, loaded and refused if the loaded type is not one the property takes; `null` clears the slot |
 | nil | `null` |
 
 An object with a member the target type does not have is refused rather than dropped, because a `z` written to a `Vector2` is a position nobody asked for. Every write is reread, so `value` is what the property now holds and `applied` says whether it changed.
+
+A resource slot takes a list of classes, not one. Godot spells the classes a property accepts as one comma-separated string and reports it under `class_name`, so `MeshInstance3D.material_override` declares `BaseMaterial3D,ShaderMaterial` and `CanvasItem.material` declares `CanvasItemMaterial,ShaderMaterial`. A resource is accepted when it is, or inherits from, any one of them. An entry written with a leading `-` names a class the slot excludes even though it inherits from one of the others, which is how `Decal.texture_albedo` takes a `Texture2D` and not an `AtlasTexture`; the refusal for one says that it was excluded rather than that it was the wrong kind of thing. This is the rule the editor's own resource picker applies. Comparing the whole declared string as a single class name refused every write to the 34 properties that carry one, every material slot in 2D and 3D among them.
 
 A Godot `float` property is `real_t`, which is 32 bits in a standard build, and `Vector2`, `Vector3` and `Color` are made of the same. A number whose magnitude is above about 3.4e38 becomes `inf` the moment it lands there, so it is refused naming the property, the component when there is one, and the bound. The old behaviour was to write it: the scene file ended up holding `Vector2(inf, 5)`, `inf` propagated through the transform to every child on the next frame, and the value reported back was JSON `null`.
 
@@ -1417,7 +1419,7 @@ Sets one uniform on a `ShaderMaterial` held by a node in the edited scene.
 
 - `target_node`, `property_name` (`string`, required): the same pair `shader_list_uniforms` takes, resolved by the same rules.
 - `uniform_name` (`string`, required): must be a uniform the shader declares.
-- `value` (required): the same JSON spelling `scene_set_property` takes for that Godot type, including `{x,y,z}` for a vector, `{r,g,b}` or `"#rrggbb"` for a colour, and a `res://` path for a texture or other resource uniform, loaded and refused if it is not the class the uniform declares.
+- `value` (required): the same JSON spelling `scene_set_property` takes for that Godot type, including `{x,y,z}` for a vector, `{r,g,b}` or `"#rrggbb"` for a colour, and a `res://` path for a texture or other resource uniform, loaded and refused if it is not one of the classes the uniform declares.
 
 A uniform name the shader does not declare is refused. `set_shader_parameter` accepts any name and does nothing with one it does not know, so a typo would otherwise be reported as a write that worked.
 

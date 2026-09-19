@@ -137,6 +137,26 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **A resource slot takes a list of classes, so materials can be assigned
+  again.** Godot spells the classes a property accepts as one comma-separated
+  string and repeats it under `class_name`, and `scene_set_property` compared
+  the whole string as a single class name. No class is called
+  `BaseMaterial3D,ShaderMaterial`, so every write to such a slot was refused,
+  including one naming a type in the list verbatim (#783). That is 34
+  properties in the pinned class reference, among them every material on every
+  mesh, `CanvasItem.material` which every `Node2D` and every `Control`
+  inherits, the particle process materials, the sky materials, the decal
+  textures and the camera attributes. A game is meshes with materials on them,
+  and none could be given one in 2D or 3D. The declared type is parsed as the
+  list it is now: a resource is accepted when it is, or inherits from, any
+  entry, and an entry written with a leading `-` names a class the slot
+  excludes even though it inherits from another one, which is how
+  `Decal.texture_albedo` takes a `Texture2D` and not an `AtlasTexture`. That is
+  the rule the editor's own resource picker applies. The refusal for a genuine
+  mismatch now names every type the slot takes rather than the raw string, and
+  an excluded type is told that it was excluded. `scene_instantiate_node`'s
+  `properties` and `shader_set_uniform` share the check and are fixed with it.
+
 - **`resource_create` stops writing files Godot cannot load or silently empties.**
   Two faults in the same writer, both reporting success. The composite packed
   arrays came out with a constructor per element --
