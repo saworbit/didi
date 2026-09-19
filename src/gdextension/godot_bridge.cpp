@@ -681,11 +681,92 @@ json wrongNodeTypeError(const std::string& identifier, const std::string& path,
 Result<VariantValue> makeVector2i(int64_t x, int64_t y);
 Result<VariantValue> makeVector3i(int64_t x, int64_t y, int64_t z);
 
+// Splits a declared resource type into the classes it takes and the ones it
+// rules out. Godot spells both in one hint_string, and get_property_list
+// repeats it under class_name, so "BaseMaterial3D,ShaderMaterial" is two
+// entries and "Texture2D,-AtlasTexture" is one of each.
+ResourceTypeHint parseResourceTypeHintImpl(const std::string& declared_type) {
+    ResourceTypeHint hint;
+    size_t start = 0;
+    while (start <= declared_type.size()) {
+        const auto comma = declared_type.find(',', start);
+        const auto end = comma == std::string::npos ? declared_type.size() : comma;
+        std::string entry = declared_type.substr(start, end - start);
+        const auto first = entry.find_first_not_of(" \t");
+        if (first != std::string::npos) {
+            const auto last = entry.find_last_not_of(" \t");
+            entry = entry.substr(first, last - first + 1);
+            if (entry.front() == '-') {
+                if (entry.size() > 1) hint.excluded.push_back(entry.substr(1));
+            } else {
+                hint.accepted.push_back(entry);
+            }
+        }
+        if (comma == std::string::npos) break;
+        start = comma + 1;
+    }
+    return hint;
+}
+
+// The editor's rule, applied to one candidate. An exclusion is checked first
+// because Godot erases the excluded name from the set that the accepted entries
+// filled, so it beats the entry that put it there. A hint with nothing to accept
+// constrains nothing: refusing on a rule that names no type would be worse than
+// the missing check.
+ResourceTypeVerdict resourceTypeVerdictImpl(
+    const ResourceTypeHint& hint, const std::string& resource_class,
+    const std::function<bool(const std::string&)>& inherits) {
+    for (const auto& excluded : hint.excluded) {
+        if (!resource_class.empty() && resource_class == excluded) {
+            return ResourceTypeVerdict::Excluded;
+        }
+    }
+    if (hint.accepted.empty()) return ResourceTypeVerdict::Accepted;
+    for (const auto& accepted : hint.accepted) {
+        if (inherits(accepted)) return ResourceTypeVerdict::Accepted;
+    }
+    return ResourceTypeVerdict::NotAccepted;
+}
+
+// "a BaseMaterial3D or a ShaderMaterial". One entry reads exactly as it did
+// before this list was understood, because that case was always right.
+std::string describeAcceptedTypes(const std::vector<std::string>& accepted) {
+    std::string text;
+    for (size_t index = 0; index < accepted.size(); ++index) {
+        if (index > 0) text += index + 1 == accepted.size() ? " or a " : ", a ";
+        text += accepted[index];
+    }
+    return text;
+}
+
+std::string describeResourceTypeRefusalImpl(const std::string& property_name,
+                                            const ResourceTypeHint& hint,
+                                            const std::string& resource_path,
+                                            const std::string& resource_class,
+                                            ResourceTypeVerdict verdict) {
+    const std::string found = resource_class.empty() ? "an unrecognised type" : resource_class;
+    std::string message = "Property \"" + property_name + "\"";
+    // No shipped hint_string is exclusions alone, but a sentence with a hole
+    // where the type should be is worse than one that says less.
+    message += hint.accepted.empty() ? " takes no type this resource is"
+                                     : " holds a " + describeAcceptedTypes(hint.accepted);
+    message += "; " + resource_path + " is " + found;
+    if (verdict == ResourceTypeVerdict::Excluded) {
+        message += ", which that slot excludes";
+    }
+    return message;
+}
+
 // Loads the resource the caller named and refuses it if it is not what the
 // property holds. Writing a Texture2D into a tile_set slot would either be
 // dropped by Godot or leave a scene nobody can open, and neither is something
 // to report as a successful write. Same check script_attach_to_node makes for a
 // Script.
+//
+// The declared type is a list rather than a name, which is what parsing it
+// through ResourceTypeHint is for. It used to be compared whole, so the 34
+// properties whose declared type carries a comma -- every material slot in 2D
+// and 3D among them -- refused the types they were named after (#783).
 Result<VariantValue> makeResourceForProperty(const std::string& property_name,
                                              const json& value,
                                              const std::string& expected_class) {
@@ -708,18 +789,28 @@ Result<VariantValue> makeResourceForProperty(const std::string& property_name,
         return Error::notFound("Property \"" + property_name + "\": no resource could be loaded from " +
                                path);
     }
-    if (!expected_class.empty()) {
-        auto matches = objectIsClass(loaded.value(), expected_class.c_str());
-        if (matches.isErr()) return matches.error();
-        if (!matches.value()) {
-            auto actual = callObject(loaded.value(), "Object", "get_class", 201670096LL);
-            std::string actual_name = "an unrecognised type";
-            if (actual.isOk()) {
-                auto text = stringFromVariant(actual.value(), GDEXTENSION_VARIANT_TYPE_STRING);
-                if (text.isOk()) actual_name = text.value();
+    const auto hint = parseResourceTypeHintImpl(expected_class);
+    if (!hint.accepted.empty() || !hint.excluded.empty()) {
+        // Read once, before the verdict: an exclusion is decided on the class
+        // the resource actually is, not on what it inherits from.
+        const auto actual_name = nodeClassName(loaded.value());
+        Error engine_failure;
+        bool engine_failed = false;
+        const auto inherits = [&](const std::string& base) {
+            if (engine_failed) return false;
+            auto matches = objectIsClass(loaded.value(), base.c_str());
+            if (matches.isErr()) {
+                engine_failure = matches.error();
+                engine_failed = true;
+                return false;
             }
-            return Error::invalidArgument("Property \"" + property_name + "\" holds a " +
-                                          expected_class + "; " + path + " is " + actual_name);
+            return matches.value();
+        };
+        const auto verdict = resourceTypeVerdictImpl(hint, actual_name, inherits);
+        if (engine_failed) return engine_failure;
+        if (verdict != ResourceTypeVerdict::Accepted) {
+            return Error::invalidArgument(describeResourceTypeRefusalImpl(
+                property_name, hint, path, actual_name, verdict));
         }
     }
     return makeObject(loaded.value());
@@ -2924,6 +3015,25 @@ bool jsonValuesEquivalent(const json& observed, const json& requested) {
 
 std::optional<ShaderHintRange> parseShaderHintRange(const std::string& hint_string) {
     return parseShaderHintRangeImpl(hint_string);
+}
+
+ResourceTypeHint parseResourceTypeHint(const std::string& declared_type) {
+    return parseResourceTypeHintImpl(declared_type);
+}
+
+ResourceTypeVerdict resourceTypeVerdict(const ResourceTypeHint& hint,
+                                        const std::string& resource_class,
+                                        const std::function<bool(const std::string&)>& inherits) {
+    return resourceTypeVerdictImpl(hint, resource_class, inherits);
+}
+
+std::string describeResourceTypeRefusal(const std::string& property_name,
+                                        const ResourceTypeHint& hint,
+                                        const std::string& resource_path,
+                                        const std::string& resource_class,
+                                        ResourceTypeVerdict verdict) {
+    return describeResourceTypeRefusalImpl(property_name, hint, resource_path, resource_class,
+                                           verdict);
 }
 
 namespace {

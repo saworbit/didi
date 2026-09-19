@@ -1850,6 +1850,31 @@ try {
         (Tool-Request 2505 "editor_redo" @{}),
         (Tool-Request 2506 "editor_save_scene" @{}),
         (Tool-Request 2507 "scene_close" @{ discard_unsaved = $true }),
+        # A resource slot whose declared type is a list. Godot spells the
+        # classes a property accepts as one comma-separated hint_string and
+        # repeats it under class_name, so MeshInstance3D.material_override
+        # declares "BaseMaterial3D,ShaderMaterial" and CSGMesh3D.mesh declares
+        # "Mesh,-PlaneMesh,-PointMesh,-QuadMesh,-RibbonTrailMesh". Comparing
+        # that whole string as one class name refused every write to all 34
+        # such properties, which is every material on every node in 2D and 3D
+        # (#783). A scene of its own, because the smoke scene's node counts are
+        # asserted elsewhere.
+        (Tool-Request 2510 "scene_create" @{ scene_path = "res://material_probe.tscn"; root_type = "Node3D"; root_name = "MaterialRoot"; overwrite = $true }),
+        (Tool-Request 2511 "resource_create" @{ save_path = "res://probe_standard_material.tres"; resource_type = "StandardMaterial3D"; properties = @() }),
+        (Tool-Request 2512 "resource_create" @{ save_path = "res://probe_box_mesh.tres"; resource_type = "BoxMesh"; properties = @() }),
+        (Tool-Request 2513 "resource_create" @{ save_path = "res://probe_quad_mesh.tres"; resource_type = "QuadMesh"; properties = @() }),
+        (Tool-Request 2514 "scene_instantiate_node" @{ node_type = "MeshInstance3D"; parent_path = "/root/MaterialRoot"; name = "Surface" }),
+        (Tool-Request 2515 "scene_instantiate_node" @{ node_type = "CSGMesh3D"; parent_path = "/root/MaterialRoot"; name = "Carved" }),
+        # A StandardMaterial3D is a BaseMaterial3D, which is the first entry.
+        (Tool-Request 2516 "scene_set_property" @{ target_node = "/root/MaterialRoot/Surface"; property_name = "material_override"; value = "res://probe_standard_material.tres" }),
+        (Tool-Request 2517 "scene_get_property" @{ target_node = "/root/MaterialRoot/Surface"; property_name = "material_override" }),
+        # Still refused, and the sentence has to name both types the slot takes.
+        (Tool-Request 2518 "scene_set_property" @{ target_node = "/root/MaterialRoot/Surface"; property_name = "material_override"; value = "res://probe_box_mesh.tres" }),
+        # The same slot one class along: a BoxMesh is a Mesh and lands, a
+        # QuadMesh is a Mesh the slot names as excluded and does not.
+        (Tool-Request 2519 "scene_set_property" @{ target_node = "/root/MaterialRoot/Carved"; property_name = "mesh"; value = "res://probe_box_mesh.tres" }),
+        (Tool-Request 2520 "scene_set_property" @{ target_node = "/root/MaterialRoot/Carved"; property_name = "mesh"; value = "res://probe_quad_mesh.tres" }),
+        (Tool-Request 2521 "scene_close" @{ discard_unsaved = $true }),
         (Tool-Request 112 "scene_create" @{ scene_path = "res:////escape.tscn" }),
         # A nested path whose parent directory does not exist yet. ResourceSaver
         # cannot create it, so this used to come back as a bare Error 19 while
@@ -3617,6 +3642,22 @@ try {
     Assert-True ($duplicateProbe -match 'name="DupLeaf" type="Node" parent="DupBranchCopy"') "A duplicated branch reached the saved file without its children: $duplicateProbe"
     Assert-True ($duplicateProbe -match 'name="DupDeep" type="Node" parent="DupBranchCopy/DupLeaf"') "A duplicated branch reached the saved file without its grandchildren: $duplicateProbe"
     Assert-True ((Tool-Payload $byId[2507]).closed -eq $true) "Duplicate probe scene could not be closed."
+    Assert-True ((Tool-Payload $byId[2510]).opened -eq $true) "Material probe scene could not be created: $($byId[2510].result.content[0].text)"
+    Assert-True (-not $byId[2511].result.isError) "The probe material could not be written: $($byId[2511].result.content[0].text)"
+    Assert-True (-not $byId[2512].result.isError) "The probe box mesh could not be written: $($byId[2512].result.content[0].text)"
+    Assert-True (-not $byId[2513].result.isError) "The probe quad mesh could not be written: $($byId[2513].result.content[0].text)"
+    Assert-True (-not $byId[2514].result.isError) "The material probe surface could not be added."
+    Assert-True (-not $byId[2515].result.isError) "The material probe CSG node could not be added."
+    $materialWrite = Tool-Payload $byId[2516]
+    Assert-True ($materialWrite.applied -eq $true) "A StandardMaterial3D was not assigned to material_override, whose declared type lists BaseMaterial3D and ShaderMaterial."
+    Assert-True ((Tool-Payload $byId[2517]).value -match "probe_standard_material") "material_override does not hold the material that was assigned to it."
+    Assert-True ($byId[2518].result.isError -eq $true) "A BoxMesh was accepted into a material slot."
+    $materialRefusal = $byId[2518].result.content[0].text
+    Assert-True ($materialRefusal -match "BaseMaterial3D or a ShaderMaterial") "A material slot's refusal did not name both types it takes: $materialRefusal"
+    Assert-True ((Tool-Payload $byId[2519]).applied -eq $true) "A BoxMesh was not assigned to CSGMesh3D.mesh."
+    Assert-True ($byId[2520].result.isError -eq $true) "A QuadMesh was accepted into a mesh slot that excludes it."
+    Assert-True ($byId[2520].result.content[0].text -match "excludes") "An excluded type was refused without saying it was excluded: $($byId[2520].result.content[0].text)"
+    Assert-True ((Tool-Payload $byId[2521]).closed -eq $true) "Material probe scene could not be closed."
     Assert-True ((Tool-Payload $byId[111]).closed -eq $true) "Smoke scene cleanup failed."
     Assert-True $byId[112].result.isError "Non-normalized res:// scene path was accepted."
     Assert-True ($byId[112].result.content[0].text -match "normalized") "Non-normalized path error was not actionable."

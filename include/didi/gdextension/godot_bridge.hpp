@@ -3,6 +3,7 @@
 #include "didi/common/json.hpp"
 #include "didi/common/types.hpp"
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <optional>
 #include <string>
@@ -44,6 +45,51 @@ struct ShaderHintRange {
 };
 
 [[nodiscard]] std::optional<ShaderHintRange> parseShaderHintRange(const std::string& hint_string);
+
+// What a resource slot's declared type allows, and what it rules out.
+//
+// Godot puts a resource property's accepted types in its PropertyInfo as a
+// PROPERTY_HINT_RESOURCE_TYPE hint_string, and get_property_list repeats that
+// string verbatim under class_name. It is a list, not a name: MeshInstance3D
+// declares material_override as "BaseMaterial3D,ShaderMaterial", and an entry
+// written with a leading "-" names a class the slot excludes, as Decal does
+// with "Texture2D,-AnimatedTexture,-AtlasTexture,...". Twelve such strings
+// cover 34 properties in the pinned class reference, including every material
+// on every node, so treating one as a single class name refused every write to
+// all of them (#783).
+struct ResourceTypeHint {
+    std::vector<std::string> accepted;
+    std::vector<std::string> excluded;
+};
+
+[[nodiscard]] ResourceTypeHint parseResourceTypeHint(const std::string& declared_type);
+
+// Whether a resource of a given class may be written into a slot with this
+// hint, by the rule the editor's own picker applies
+// (EditorResourcePicker::_ensure_allowed_types): each accepted entry stands for
+// itself and everything that inherits from it, and an excluded entry is then
+// erased from that set by name, so an exclusion beats the entry that admitted
+// it. `inherits` answers "is this class, or does it descend from, that one" --
+// the engine's ClassDB question, passed in so the rule can be exercised without
+// a running engine.
+enum class ResourceTypeVerdict {
+    Accepted,
+    NotAccepted,
+    Excluded,
+};
+
+[[nodiscard]] ResourceTypeVerdict resourceTypeVerdict(
+    const ResourceTypeHint& hint, const std::string& resource_class,
+    const std::function<bool(const std::string&)>& inherits);
+
+// The sentence a caller reads when a resource does not suit the slot. Names
+// every type the slot takes, because a list of one was the only case the old
+// message could describe.
+[[nodiscard]] std::string describeResourceTypeRefusal(const std::string& property_name,
+                                                      const ResourceTypeHint& hint,
+                                                      const std::string& resource_path,
+                                                      const std::string& resource_class,
+                                                      ResourceTypeVerdict verdict);
 
 struct ViewportPixels {
     int width{0};
