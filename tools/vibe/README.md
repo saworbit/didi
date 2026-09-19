@@ -1060,6 +1060,23 @@ sentence: 73%. `project_list_input_actions` is 69 KB for five declared actions.
 None of it is a bug and each was a defensible choice, which is exactly why
 nothing had added them up. **A census can measure size as well as correctness.**
 
+**Run your own probe twice before you believe its first run -- and all four of
+this session's failed that.** `resource_fidelity.py` reported eleven rows as
+"Resource already exists" on its second run, because `resource_create` refuses
+an existing path and `overwrite` is confirmation gated; read quickly that is
+"the tool now refuses everything". `ui_authoring.py` met `scene_create`
+refusing an existing path *without opening it* -- session fifteen's trap, one
+session later, in a probe written by someone who had just read the warning --
+and ran the whole menu census against whichever scene the editor already had
+open, reporting every row as "Scene node not found". Both carry a per-run
+token now, the way `game_authoring.py` does, and `ui_authoring.py` falls back
+to `scene_open` and refuses to print rows whose subject it could not establish.
+`project_scope_and_cost.py` and `detached_launch.py` were idempotent already
+but had the other version of the same fault: one read a 503 as an empty answer
+and reported "0 actions, 0% engine" for a question it never asked, and the
+other used `os.kill(pid, 0)`, which cannot tell a running process from an
+unreaped zombie -- and the difference between those two is the whole of #786.
+
 **Asked and green this session.** `scene_duplicate_node` is correct and fast --
 twenty-one copies with sequential names, all persisted, about 100 ms each.
 `project_set_setting`'s `res://` existence check (#490) generalised properly:
@@ -1108,7 +1125,7 @@ than zero` for the write the response reported only as `applied: false`.
 
 | 2026-09-18 | A game rather than a census: a 2D platformer built end to end through the surface -- a physics root, a collision shape as a real resource, a TileSet over an atlas, an autoload, input actions, a signal, a HUD, a script patch, and the game launched, attached, paused, injected and stepped; then a 3D arena and the raycast tools, the only ones whose answer is a node, and a game that crashes. The first session to walk a whole authoring workflow in order rather than asking each tool one question. | `2.0.0+6393d1435a6a`, and the same on the runners | #728-#744, sixteen findings. The thirteen from the 2D arc reproduced on macOS and Ubuntu as well as Windows; #732 is Windows only and the difference diagnosed it. |
 
-| 2026-09-19 | The other half of a game, and somebody else's game. A menu built end to end -- anchors, a theme override, a Button wired to a handler, an `AnimationPlayer`, an audio bus -- then Godot's own `dodge_the_creeps` opened as a project to maintain: read it, search it, rename across a scene and a script, audit it. Then the detached game loop #733 asked for, now that it shipped, and the first measurement of what a call costs the caller. | `2.0.0+6b2627d77c88`, and the same on the runners | #764-#781, eighteen findings. #765 and #764 reproduce byte for byte on macOS and Ubuntu; #773 is Windows only and the macOS run is what diagnosed it. Four more drafts were cut or rewritten against `docs/`, which is the session's main method lesson. |
+| 2026-09-19 | The other half of a game, and somebody else's game. A menu built end to end -- anchors, a theme override, a Button wired to a handler, an `AnimationPlayer`, an audio bus -- then Godot's own `dodge_the_creeps` opened as a project to maintain: read it, search it, rename across a scene and a script, audit it. Then the detached game loop #733 asked for, now that it shipped, and the first measurement of what a call costs the caller. | `2.0.0+6b2627d77c88`, and the same on the runners | #764-#784 and #786, twenty-two findings. #764 and #765 reproduce byte for byte on Windows, macOS and Ubuntu, and so do all four rows of the menu arc. Two split on platform, which is what diagnosed both: #773 is Windows only (two binaries for one program) and #782 and #786 are POSIX only (a 3000 ms attach deadline, and a child nothing reaps). Four drafts were cut or rewritten against `docs/`, which is the session's main method lesson. |
 
 Add a row per session. The table is the reason this directory exists: a finding
 that keeps coming back in a new place is a design problem, and only the log
