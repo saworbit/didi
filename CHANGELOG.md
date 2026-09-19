@@ -141,8 +141,9 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 - **The offline process tools take the whole tree down on timeout.** The
   README states it as fact and the code only sometimes did it.
   `process_runner.cpp` backs `csharp_check_build`, `shader_check_compile`,
-  `script_check_syntax`, `project_export` and `gridmap_export_mesh_library`,
-  and it had neither guard the sibling spawner grew in #351: on Windows it
+  `project_export`, `gridmap_export_mesh_library` and the git and engine runs
+  behind speculative verification, and it had neither guard the sibling spawner
+  grew in #351: on Windows it
   started the child running and assigned the job afterwards, so anything
   spawned in between was outside the job and survived `TerminateJobObject`,
   and `dotnet build` starts MSBuild worker nodes almost immediately. On

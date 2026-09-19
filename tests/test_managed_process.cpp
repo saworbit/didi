@@ -462,9 +462,10 @@ static void offlineRunnerDoesNotHandChildrenTheServerStdin() {
 static void offlineRunnerTimeoutKillsTheWholeProcessTree() {
     // The README states the Phase 5 contract as fact: these tools "terminate
     // the child process group on timeout". process_runner.cpp is what backs
-    // that for csharp_check_build, shader_check_compile, script_check_syntax,
-    // project_export and gridmap_export_mesh_library, and it had neither guard
-    // the sibling spawner in test_runner.cpp grew in #351 (#758). Nothing
+    // that for csharp_check_build, shader_check_compile, project_export,
+    // gridmap_export_mesh_library and speculative verification's git and engine
+    // runs, and it had neither guard the sibling spawner in test_runner.cpp
+    // grew in #351 (#758). Nothing
     // covered the contract at all, so a timeout could leave a dotnet build's
     // MSBuild worker nodes running and answer 124 as though it had not.
     //
