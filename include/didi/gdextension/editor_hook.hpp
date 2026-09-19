@@ -255,6 +255,13 @@ private:
         ReimportProgress progress;
         std::shared_ptr<std::promise<json>> response_promise;
         std::shared_ptr<CommandControl> control;
+        // Set when a path had no .import sidecar, which is when a full scan was
+        // asked for. The editor's scanning flag clears before the importer has
+        // finished writing sidecars, so the first answer after idle reported a
+        // brand-new asset as not imported while it was imported a moment later
+        // (#731). The wait then asks the editor whether its work on each path
+        // is finished rather than watching the flag.
+        bool needs_scan{false};
     };
 
     struct PendingProfilerRead {

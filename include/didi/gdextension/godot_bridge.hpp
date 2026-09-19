@@ -57,8 +57,22 @@ struct ViewportPixels {
 // documented way to tell the editor a plain project file changed on disk.
 struct ReimportBatch {
     std::vector<std::string> paths;
+    // Paths Godot's import system already owns, which is exactly the ones
+    // carrying a .import sidecar. reimport_files reads the importer name out of
+    // that file.
     std::vector<std::string> reimported;
+    // Paths with no sidecar. Two different things live here and the difference
+    // only shows afterwards: a .gd or a .tscn never gets one and is simply
+    // announced to the editor, while an asset the editor has never scanned --
+    // a .png written into the project by something other than Godot -- needs
+    // importing before anything can use it. Reported as refreshed and idle,
+    // that second case read as "done, nothing was stale" for an asset that was
+    // unusable (#731).
     std::vector<std::string> refreshed;
+    // Whether a full EditorFileSystem.scan is needed to find them. Set when any
+    // path has no sidecar: scan_sources looks at files the editor already knows
+    // about, and a file it has never seen is not one of those.
+    bool needs_scan{false};
 };
 
 struct VisibilityRestorePoint {
@@ -126,6 +140,21 @@ public:
     // starts. EditorFileSystem.reimport_files re-enters the main-loop callback,
     // and a nested frame that cannot see the request misses the scanning window.
     Result<ReimportBatch> resolveReimportPaths(const std::vector<std::string>& paths);
+    // Whether a .import sidecar exists for this res:// path right now.
+    // Asked again after a scan, because whether an asset ended up
+    // imported is an observation and not something to infer from the
+    // call that was made.
+    bool assetIsImported(const std::string& resource_path);
+    // Whether the editor still has work outstanding for this path.
+    //
+    // The scanning flag clears before the importer has written its sidecars, so
+    // a wait that ends when the flag does reports a freshly imported asset as
+    // unimported. EditorFileSystemDirectory.get_file_import_is_valid is the
+    // editor's own answer for one file: false while an import is outstanding
+    // and for one that failed, true once it is done and for a file that needs
+    // no importing at all. Unknown when the editor has not indexed the path,
+    // which is itself outstanding work during a scan.
+    bool assetImportSettled(const std::string& resource_path);
     Result<void> startAssetReimport(const ReimportBatch& batch);
     Result<ReimportBatch> beginAssetReimport(const std::vector<std::string>& paths);
     Result<bool> isEditorFilesystemScanning();

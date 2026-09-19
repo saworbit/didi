@@ -3072,9 +3072,75 @@ Result<ReimportBatch> GodotBridge::resolveReimportPaths(
         const bool imported = fs::is_regular_file(sidecar, sidecar_error) && !sidecar_error;
         batch.paths.push_back(resource_path);
         (imported ? batch.reimported : batch.refreshed).push_back(resource_path);
+        if (!imported) batch.needs_scan = true;
     }
 
     return batch;
+}
+
+bool GodotBridge::assetIsImported(const std::string& resource_path) {
+    namespace fs = std::filesystem;
+    if (!strings::startsWith(resource_path, "res://")) return false;
+    auto project_path = resolveGodotProjectPath();
+    if (project_path.isErr()) return false;
+    std::error_code ec;
+    const auto root = fs::weakly_canonical(
+        didi::paths::projectPathFromUtf8(project_path.value()), ec);
+    if (ec) return false;
+    auto sidecar = root / didi::paths::projectPathFromUtf8(resource_path.substr(6));
+    sidecar += ".import";
+    std::error_code sidecar_error;
+    return fs::is_regular_file(sidecar, sidecar_error) && !sidecar_error;
+}
+
+bool GodotBridge::assetImportSettled(const std::string& resource_path) {
+    const auto slash = resource_path.find_last_of('/');
+    if (slash == std::string::npos || slash + 1 >= resource_path.size()) return true;
+    const std::string directory = resource_path.substr(0, slash + 1);
+    const std::string file = resource_path.substr(slash + 1);
+
+    auto editor = editorInterface();
+    if (editor.isErr()) return true;
+    auto filesystem = callObject(editor.value(), "EditorInterface", "get_resource_filesystem", 780151678LL);
+    if (filesystem.isErr()) return true;
+    auto filesystem_object = objectFromVariant(filesystem.value());
+    if (filesystem_object.isErr() || !filesystem_object.value()) return true;
+
+    auto directory_value = makeString(directory);
+    if (directory_value.isErr()) return true;
+    auto found = callObject(filesystem_object.value(), "EditorFileSystem", "get_filesystem_path",
+                            3188521125LL, {&directory_value.value()});
+    if (found.isErr()) return true;
+    auto directory_object = objectFromVariant(found.value());
+    // The editor does not know the directory yet, which during a scan is work
+    // outstanding rather than an answer.
+    if (directory_object.isErr() || !directory_object.value()) return false;
+
+    auto file_value = makeString(file);
+    if (file_value.isErr()) return true;
+    auto index = callObject(directory_object.value(), "EditorFileSystemDirectory",
+                            "find_file_index", 1321353865LL, {&file_value.value()});
+    if (index.isErr()) return true;
+    auto position = scalarFromVariant<int64_t>(index.value(), GDEXTENSION_VARIANT_TYPE_INT);
+    if (position.isErr() || position.value() < 0) return false;
+
+    auto index_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, position.value());
+    if (index_value.isErr()) return true;
+    auto valid = callObject(directory_object.value(), "EditorFileSystemDirectory",
+                            "get_file_import_is_valid", 1116898809LL, {&index_value.value()});
+    if (valid.isErr()) return true;
+    auto flag = scalarFromVariant<GDExtensionBool>(valid.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+    if (flag.isErr()) return true;
+    if (flag.value() != 0) return true;
+
+    // The flag alone is not enough for a file imported during this very pass.
+    // It is computed when the file is indexed, and the import that follows does
+    // not recompute it, so a .png the scan has just imported still reports
+    // false until the next scan while its .import sidecar is already on disk.
+    // The sidecar is the thing the answer is about, so it settles the question
+    // the flag leaves open. Measured: a .gd reports the flag true and needs no
+    // sidecar; a freshly imported .png reports it false and has one.
+    return assetIsImported(resource_path);
 }
 
 Result<void> GodotBridge::startAssetReimport(const ReimportBatch& batch) {
@@ -3093,6 +3159,18 @@ Result<void> GodotBridge::startAssetReimport(const ReimportBatch& batch) {
         auto updated = callObject(object.value(), "EditorFileSystem", "update_file", 83702148LL,
                                   {&godot_path.value()});
         if (updated.isErr()) return updated.error();
+    }
+    // A path with no sidecar may be a file the editor has never seen, and
+    // update_file does not import one: no .import is written, nothing appears
+    // under .godot/imported, and the asset stays unusable while the call
+    // reports it refreshed and idle (#731). scan() is the walk that finds new
+    // files and runs the importer over them; scan_sources, which
+    // editor_reload_project uses, only re-examines files already indexed. It is
+    // asynchronous and sets the scanning flag, which is the window the frame
+    // loop already waits on.
+    if (batch.needs_scan) {
+        auto scanned = callObject(object.value(), "EditorFileSystem", "scan", 3218959716LL);
+        if (scanned.isErr()) return scanned.error();
     }
     if (batch.reimported.empty()) return Result<void>::ok();
     json path_array = batch.reimported;

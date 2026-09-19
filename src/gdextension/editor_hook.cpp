@@ -872,7 +872,7 @@ void EditorHook::scheduleAssetReimport(
     m_pendingAssetReimport.emplace(PendingAssetReimport{
         resolved.value().paths, resolved.value().reimported, resolved.value().refreshed,
         ReimportProgress(now, std::chrono::milliseconds(timeout_ms)),
-        promise, control
+        promise, control, resolved.value().needs_scan
     });
 
     auto started = GodotBridge::instance().startAssetReimport(resolved.value());
@@ -1113,6 +1113,26 @@ void EditorHook::processAssetReimportFrame() {
         } else {
             const auto state = m_pendingAssetReimport->progress.observe(scanning.value(), now);
             if (state == ReimportProgressState::Pending) return;
+            // Idle is not finished when a scan was asked for. The editor clears
+            // its scanning flag before the importer has written the sidecars
+            // the answer is about, so the answer waits for those to settle
+            // instead, bounded by the same timeout as everything else.
+            if (state == ReimportProgressState::Idle && m_pendingAssetReimport->needs_scan) {
+                // Ask the editor, do not wait out a guess. The scanning flag
+                // clears before the importer has written its sidecars, so the
+                // first answer after idle called a freshly imported asset
+                // unimported. A timer instead of a question is the same bug
+                // with a number on it: it passed here and failed on a slower
+                // machine.
+                bool settled = true;
+                for (const auto& path : m_pendingAssetReimport->refreshed) {
+                    if (!GodotBridge::instance().assetImportSettled(path)) {
+                        settled = false;
+                        break;
+                    }
+                }
+                if (!settled) return;
+            }
             const auto elapsed = m_pendingAssetReimport->progress.elapsedMs(now);
             completed = std::move(m_pendingAssetReimport);
             m_pendingAssetReimport.reset();
@@ -1122,13 +1142,38 @@ void EditorHook::processAssetReimportFrame() {
                                         {"data", {{"outcome", "unknown_outcome"},
                                                    {"route_quarantine", false}}}}}};
             } else {
+                // What the scan did, read off the filesystem rather than
+                // inferred from the call that was made. A path with no .import
+                // sidecar is one of two different things -- a .gd or a .tscn,
+                // which never gets one, or an asset the editor had never seen,
+                // which is unusable until it is imported -- and both were
+                // reported as refreshed and idle, which reads as "done, nothing
+                // was stale" (#731). Whether a sidecar exists now tells them
+                // apart without guessing at the file's type.
+                json imported = json::array();
+                json announced = json::array();
+                for (const auto& path : completed->refreshed) {
+                    (GodotBridge::instance().assetIsImported(path) ? imported : announced)
+                        .push_back(path);
+                }
                 response = {{"paths", completed->paths},
                             {"accepted_count", completed->paths.size()},
                             {"reimported", completed->reimported},
                             {"refreshed", completed->refreshed},
+                            {"imported", imported},
+                            {"announced", announced},
                             {"elapsed_ms", elapsed}, {"idle", true},
                             {"execution_mode", "live"}, {"is_live_engine", true},
                             {"session_kind", "editor"}};
+                if (!announced.empty()) {
+                    response["limitation"] =
+                        "Paths under announced carry no .import sidecar after the scan. For a "
+                        "script, a scene or a text resource that is the whole story: Godot's "
+                        "import system does not own those and they are usable as they are. For "
+                        "an asset that needs importing -- an image, an audio file, a font -- it "
+                        "means the editor did not import it, and anything referencing it will "
+                        "load nothing.";
+                }
             }
         }
     }
