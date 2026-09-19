@@ -68,7 +68,8 @@ What the arc turns up:
   restarts.
 
 Needs a live editor on a project it is free to break; everything it writes is
-prefixed `vibe_ui`, so a second run overwrites its own leavings. Pass `--godot`
+prefixed `vibe_ui` and carries a per-run token, so a second run is a fresh
+experiment rather than a reading of the first one. Pass `--godot`
 to have the animation and bus-layout files loaded by a real engine rather than
 believed.
 
@@ -82,14 +83,22 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from mcp_client import Session  # noqa: E402
 
-SCENE = "res://vibe_ui_menu.tscn"
-SCRIPT = "res://vibe_ui_menu.gd"
+# A per-run token in the scene and script this probe builds. A second run over
+# the same sandbox would otherwise meet its own nodes -- Godot sanitises a
+# duplicate name to `Buttons2`, the connection count for `Play` would be two,
+# and the row that counts `[connection]` lines against `origin: "scene"` would
+# be counting the previous run. `scene_create` also refuses an existing path
+# *without opening it*, which is how session fifteen's probe lost two findings.
+RUN = "%04x" % (int(time.time()) & 0xFFFF)
+SCENE = f"res://vibe_ui_menu_{RUN}.tscn"
+SCRIPT = f"res://vibe_ui_menu_{RUN}.gd"
 MENU_GD = (
     "extends Control\n\n"
     "func _on_play_pressed() -> void:\n\tprint(\"play\")\n\n"
@@ -121,8 +130,22 @@ def row(label: str, expected: object, observed: object) -> None:
           f"expected={str(expected):<7} observed={observed}")
 
 
-def build_menu(session: Session) -> None:
-    session.call("scene_create", {"scene_path": SCENE, "root_type": "Control", "root_name": "Menu"})
+def build_menu(session: Session) -> bool:
+    """Open the menu scene, creating it if it is not there.
+
+    `scene_create` refuses an existing path *without opening it*, so a second
+    run over the same sandbox would leave whatever scene was already edited in
+    place and every row below would be about that scene instead. Session
+    fifteen's probe lost two findings to exactly this.
+    """
+    _, errored = session.call("scene_create", {"scene_path": SCENE, "root_type": "Control",
+                                               "root_name": "Menu"})
+    if errored:
+        _, reopen_failed = session.call("scene_open", {"scene_path": SCENE})
+        if reopen_failed:
+            print(f"Could not create or open {SCENE}; every row below would be about "
+                  "whichever scene the editor already had open. Refusing to print them.")
+            return False
     session.call("script_create", {"script_path": SCRIPT, "source_text": MENU_GD, "overwrite": True})
     session.call("script_attach_to_node", {"target_node": "/root/Menu", "script_path": SCRIPT})
     for node_type, parent, name in (
@@ -146,6 +169,7 @@ def build_menu(session: Session) -> None:
                  {"emitter_node": "/root/Menu/Buttons/Play", "signal_name": "pressed",
                   "target_node": "/root/Menu", "target_method": "_on_play_pressed"})
     session.call("editor_save_scene", {})
+    return True
 
 
 def applied_census(session: Session) -> None:
@@ -227,7 +251,7 @@ def animation_and_audio(session: Session, project: Path, godot: str | None) -> N
     print()
     print("=== an animation, and every route from it to a player ===")
     session.call("resource_create", {
-        "save_path": "res://vibe_ui_fade.tres", "resource_type": "Animation", "overwrite": True,
+        "save_path": f"res://vibe_ui_fade_{RUN}.tres", "resource_type": "Animation", "overwrite": True,
         "properties": [
             {"name": "length", "value": 1.0},
             {"name": "tracks/0/type", "value": "value"},
@@ -241,20 +265,20 @@ def animation_and_audio(session: Session, project: Path, godot: str | None) -> N
                            {"r": 1.0, "g": 1.0, "b": 1.0, "a": 1.0}]}},
         ]})
     session.call("resource_create", {
-        "save_path": "res://vibe_ui_lib.tres", "resource_type": "AnimationLibrary",
+        "save_path": f"res://vibe_ui_lib_{RUN}.tres", "resource_type": "AnimationLibrary",
         "overwrite": True,
         "properties": [{"name": "_data", "value": {
-            "fade": {"type": "ExtResource", "path": "res://vibe_ui_fade.tres"}}}]})
+            "fade": {"type": "ExtResource", "path": f"res://vibe_ui_fade_{RUN}.tres"}}}]})
     payload, errored = session.call(
         "scene_set_property",
         {"target_node": "/root/Menu/Anim", "property_name": "libraries",
-         "value": "res://vibe_ui_lib.tres"})
+         "value": f"res://vibe_ui_lib_{RUN}.tres"})
     print(f"  scene_set_property libraries -> "
           f"{(payload.get('error') or {}).get('message', 'accepted')[:90]}")
     payload, errored = session.call(
         "scene_call_method",
         {"target_node": "/root/Menu/Anim", "method_name": "add_animation_library",
-         "arguments": ["", "res://vibe_ui_lib.tres"], "dry_run": True})
+         "arguments": ["", f"res://vibe_ui_lib_{RUN}.tres"], "dry_run": True})
     print(f"  scene_call_method add_animation_library -> "
           f"{(payload.get('error') or {}).get('message', 'previewed')[:90]}")
     payload, _ = session.call("anim_list_tracks", {"animation_player_path": "/root/Menu/Anim"})
@@ -283,11 +307,11 @@ def animation_and_audio(session: Session, project: Path, godot: str | None) -> N
     if not godot:
         print("  (no --godot: the two files above were not loaded, so nothing here passed)")
         return
-    script = project / "vibe_ui_check.gd"
+    script = project / f"vibe_ui_check_{RUN}.gd"
     script.write_text(
         "extends SceneTree\n\n"
         "func _init() -> void:\n"
-        '\tvar lib = ResourceLoader.load("res://vibe_ui_lib.tres")\n'
+        f'\tvar lib = ResourceLoader.load("res://vibe_ui_lib_{RUN}.tres")\n'
         '\tprint("DIDIVIBE|library|", lib, "|", lib.get_animation_list() if lib else [])\n'
         '\tif lib and lib.get_animation_list():\n'
         '\t\tvar a = lib.get_animation(lib.get_animation_list()[0])\n'
@@ -302,7 +326,7 @@ def animation_and_audio(session: Session, project: Path, godot: str | None) -> N
         "\tquit()\n", encoding="utf-8")
     try:
         out = subprocess.run([godot, "--headless", "--path", str(project),
-                              "--script", "res://vibe_ui_check.gd"],
+                              "--script", f"res://vibe_ui_check_{RUN}.gd"],
                              capture_output=True, text=True, timeout=180).stdout
     except (OSError, subprocess.SubprocessError) as exc:
         print(f"  (the engine could not be run: {exc})")
@@ -329,7 +353,8 @@ def main() -> int:
                   "about the offline fallback rather than about the editor, which is a "
                   "different product; refusing to print them.")
             return 2
-        build_menu(session)
+        if not build_menu(session):
+            return 2
         applied_census(session)
         signal_census(session, project)
         animation_and_audio(session, project, args.godot)

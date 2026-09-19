@@ -111,6 +111,9 @@ def row(label: str, expected: object, observed: object) -> None:
           f"expected={str(expected):<9} observed={observed}")
 
 
+LAUNCHED: list[tuple[str, int]] = []
+
+
 def one_pass(project: Path, attach_first: bool) -> None:
     label = "with the editor attached first" if attach_first else "with nothing attached"
     print(f"=== {label} ===")
@@ -139,6 +142,8 @@ def one_pass(project: Path, attach_first: bool) -> None:
 
         structured_pid = payload.get("pid")
         session_pid = game.get("pid")
+        if session_pid:
+            LAUNCHED.append((label, session_pid))
         summary = payload.get("summary") or ""
         match = re.search(r"process (\d+)", summary)
         summary_pid = int(match.group(1)) if match else None
@@ -196,6 +201,13 @@ def main() -> int:
     project = Path(args.project)
     one_pass(project, attach_first=False)
     one_pass(project, attach_first=True)
+    # A POSIX child whose parent never reaps it stays in the process table as a
+    # zombie. Checking once, straight after the stop, says the pid is still
+    # there and not whether it stays there -- so ask again at the end, several
+    # seconds and a whole second pass later, and print the word the kernel uses.
+    print("=== every pid this probe launched, re-asked at the end of the run ===")
+    for label, pid in LAUNCHED:
+        print(f"  {label:32} pid {pid}: {process_state(pid)}")
     return 0
 
 

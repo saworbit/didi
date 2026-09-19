@@ -47,11 +47,19 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from mcp_client import Session  # noqa: E402
+
+# A per-run token in every path this probe writes. `resource_create` refuses an
+# existing path unless `overwrite` is passed, and `overwrite` is confirmation
+# gated -- so a second run against the same sandbox reported every row as
+# "Resource already exists", which reads as the tool refusing everything. A
+# probe whose fixtures outlive it is a different experiment on its second run.
+RUN = "%04x" % (int(time.time()) & 0xFFFF)
 
 # (label, resource_type, property, the type the class reference declares, value)
 #
@@ -126,11 +134,11 @@ def load_in_godot(godot: str | None, project: Path, paths: list[str],
         else:
             lines.append(f'\t\tprint("DIDIVIBE|{path}|loaded|")')
     lines.append("\tquit()")
-    script = project / "vibe_fidelity_check.gd"
+    script = project / f"vibe_fidelity_check_{RUN}.gd"
     script.write_text("\n".join(lines) + "\n", encoding="utf-8")
     try:
         out = subprocess.run([godot, "--headless", "--path", str(project),
-                              "--script", "res://vibe_fidelity_check.gd"],
+                              "--script", f"res://vibe_fidelity_check_{RUN}.gd"],
                              capture_output=True, text=True, timeout=180)
     except (OSError, subprocess.SubprocessError) as exc:
         print(f"  (the engine could not be run: {exc})")
@@ -161,7 +169,7 @@ def main() -> int:
         type_paths: list[str] = []
         read_back: dict[str, str] = {}
         for index, (label, rtype, prop, declared, value) in enumerate(TYPE_ROWS):
-            rel = f"vibe_fid_t{index}.tres"
+            rel = f"vibe_fid_{RUN}_t{index}.tres"
             payload, errored = session.call("resource_create", {
                 "save_path": f"res://{rel}", "resource_type": rtype,
                 "properties": [{"name": prop, "value": value}]})
@@ -180,7 +188,7 @@ def main() -> int:
         print(f"  {'row':40} {'the line the file carries'}")
         packed_paths: list[str] = []
         for index, (label, ptype, values, _composite) in enumerate(PACKED_ROWS):
-            rel = f"vibe_fid_p{index}.tres"
+            rel = f"vibe_fid_{RUN}_p{index}.tres"
             payload, errored = session.call("resource_create", {
                 "save_path": f"res://{rel}", "resource_type": "NavigationPolygon",
                 "properties": [{"name": "vertices", "value": {"type": ptype, "values": values}}]})
@@ -202,7 +210,7 @@ def main() -> int:
             print("  the engine answered nothing; no row here passed or failed")
             return 0
         for index, (label, _rtype, prop, declared, value) in enumerate(TYPE_ROWS):
-            path = f"res://vibe_fid_t{index}.tres"
+            path = f"res://vibe_fid_{RUN}_t{index}.tres"
             if path not in answers:
                 continue
             print(f"  {label:36} sent {json.dumps(value)[:22]:24} -> {answers[path][:60]}")
@@ -211,7 +219,7 @@ def main() -> int:
         print("   whether the file parses at all -- the value it ends up holding is")
         print("   whatever NavigationPolygon.vertices coerces the elements into)")
         for index, (label, _ptype, _values, _composite) in enumerate(PACKED_ROWS):
-            path = f"res://vibe_fid_p{index}.tres"
+            path = f"res://vibe_fid_{RUN}_p{index}.tres"
             if path not in answers:
                 continue
             parsed = "LOAD FAILED" not in answers[path]
