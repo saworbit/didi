@@ -137,6 +137,26 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **`runtime_launch` names the process and the engine the rest of its answer
+  means.** Two fields in one response pointed somewhere else. The `summary`
+  sentence carried the pid of the process Didi spawned while `pid` and
+  `game_session.pid` carried the game's, and on Windows those are two live
+  processes: Godot's console build starts the engine as a child and waits on
+  it, so an agent quoting the sentence named a launcher that `runtime_stop`,
+  `runtime_attach_session` and Task Manager all disagreed with (#773). The
+  sentence is built from the game's pid now. When no session is published
+  there is no game pid to give, and the sentence says the number it has is the
+  process Didi spawned and may be a launcher.
+  And `attached_engine_version` was read after a detached launch had selected
+  the game it just started, so the game answered about itself: a 4.5 editor and
+  a 4.7 game read as agreement, `engine_version` was null because a detached
+  run captures no banner to read it from, and `matches_attached_engine` was
+  null in every configuration there is (#772). The attached session is read
+  before the launch selects the new one, the launched engine names itself
+  through the session the game published, and the comparison is made. This is
+  the press-play loop: an author edits in one engine and the game can run on
+  another, and the field whose name promises to say so said the opposite.
+
 - **A resource slot takes a list of classes, so materials can be assigned
   again.** Godot spells the classes a property accepts as one comma-separated
   string and repeats it under `class_name`, and `scene_set_property` compared
