@@ -249,15 +249,17 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
   assignment replaces, so the text above would join forward again and the
   setting written would not be the setting asked for.
 - An identifier does not end a value. `Vector2 (1, 2)`, the same value with
-  `(1, 2)` on the line below, and `Array[int]([1, 2])` all load on 4.5.1, 4.6.2
+  `(1, 2)` on the line below, and an `Array[int]` with its `([1, 2])` after it
+  all load on 4.5.1, 4.6.2
   and 4.7.2, and the reader ended the value at the space or at the `]` and built
   a key out of what followed -- reporting a setting the engine does not have and,
   once the check above existed, refusing a file that loads. The seven names that
   are a value on their own are matched exactly, so `flag=true` followed by a
   section header is still the boolean and then the section. This is not a
-  hypothetical shape: Godot's own editor writes `$selected_nodes=Array[NodePath]([])`
-  into the editor-state files under `.godot/editor/`, and the reader was
-  building the key `([])2D` out of the tail of it. Running the old walk and the
+  hypothetical shape: Godot's own editor writes `$selected_nodes` as an
+  `Array[NodePath]` with an empty `([])` after it, in the editor state files
+  under `.godot/editor/`, and the reader was building the key `([])2D` out of
+  the tail of it. Running the old walk and the
   new one over 2036 ConfigFiles from three real games, the only lines that
   differ are those, read correctly now.
 
