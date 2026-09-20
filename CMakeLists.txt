@@ -151,6 +151,7 @@ endif()
 # Core sources
 set(CORE_SOURCES
     src/common/logger.cpp
+    src/common/config_file_syntax.cpp
     src/common/base64.cpp
     src/common/png.cpp
     src/common/image_diff.cpp
@@ -385,6 +386,7 @@ set(TEST_SOURCES
     tests/test_blackboard_resources.cpp
     tests/test_project_search.cpp
     tests/test_project_settings_file.cpp
+    tests/test_config_file_syntax.cpp
     tests/test_image_diff.cpp
     tests/test_test_runner.cpp
     tests/test_phase5.cpp

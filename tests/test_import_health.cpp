@@ -315,6 +315,27 @@ void test_multisegment_feature_path_is_checked() {
               "res://.godot/imported/icon.mobile.ctex");
 }
 
+void test_a_spaced_section_header_is_still_remap_and_deps() {
+    // Godot trims a section name, so `[ remap ]` is the remap section and the
+    // file loads without complaint. Comparing the header as a whole line
+    // collected nothing under either section, parseMetadata saw no source_file,
+    // and a valid .import was reported as invalid metadata (#814).
+    ImportHealthFixture fixture("spaced-header");
+    const auto source = fixture.write("art/icon.png", "source");
+    fixture.write(".godot/imported/icon.ctex", "output");
+    fixture.write("art/icon.png.import",
+                  "[ remap ]\n"
+                  "importer=\"texture\"\n"
+                  "path=\"res://.godot/imported/icon.ctex\"\n\n"
+                  "[ deps ]\n"
+                  "source_file=\"res://art/icon.png\"\n"
+                  "dest_files=[\"res://.godot/imported/icon.ctex\"]\n");
+    (void)source;
+    const auto report = didi::offline::inspectImportHealth(fixture.root().string(), 50);
+    ASSERT_EQ(report["scanned_import_metadata"].get<size_t>(), 1u);
+    ASSERT_EQ(report["import_issue_count"].get<size_t>(), 0u);
+}
+
 struct RegisterImportHealthTests {
     RegisterImportHealthTests() {
         registerTest("ImportHealth.Healthy", test_healthy_import_metadata_has_no_issues);
@@ -340,6 +361,8 @@ struct RegisterImportHealthTests {
                      test_empty_remap_path_is_valid_for_importers_without_outputs);
         registerTest("ImportHealth.MultisegmentFeaturePath",
                      test_multisegment_feature_path_is_checked);
+        registerTest("ImportHealth.SpacedSectionHeader",
+                     test_a_spaced_section_header_is_still_remap_and_deps);
     }
 } g_registerImportHealthTests;
 

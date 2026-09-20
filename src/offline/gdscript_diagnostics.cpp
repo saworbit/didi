@@ -369,25 +369,15 @@ std::vector<std::string> GDScriptDiagnostics::projectAutoloadNames() {
     std::vector<std::string> names;
     std::ifstream input(paths::projectPathFromUtf8("project.godot"), std::ios::binary);
     if (!input.is_open()) return names;
-    std::string line;
-    bool in_autoload = false;
-    while (std::getline(input, line)) {
-        if (!line.empty() && line.back() == '\r') line.pop_back();
-        const auto text = strings::trim(line);
-        if (!text.empty() && text.front() == '[') {
-            // The section name is the bracket text, trimmed. Godot reads
-            // `[ autoload ]` as the autoload section, so comparing the whole
-            // line read a hand-spaced file as one with no singletons, and every
-            // one of them came back as an undefined identifier (#809).
-            const auto header = config_file::sectionName(text);
-            in_autoload = header.has_value() && *header == "autoload";
-            continue;
-        }
-        if (!in_autoload || text.empty() || text.front() == ';') continue;
-        const auto equals = text.find('=');
-        if (equals == std::string::npos || equals == 0) continue;
-        auto name = strings::trim(text.substr(0, equals));
-        if (!name.empty()) names.push_back(std::move(name));
+    std::ostringstream contents;
+    contents << input.rdbuf();
+    // The names the engine registers, not the text before each `=`. A
+    // `# disabled for now` note above an entry joins forward and the singleton
+    // loads as `#disabledfornowGood`, so treating `Good` as defined would
+    // suppress the one diagnostic the user needs (#813).
+    for (const auto& entry : config_file::scan(contents.str()).entries) {
+        if (entry.section != "autoload" || entry.key.empty()) continue;
+        names.push_back(entry.key);
     }
     return names;
 }

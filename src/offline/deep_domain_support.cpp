@@ -1,6 +1,8 @@
 #include "didi/offline/deep_domain_support.hpp"
 
+#include "didi/common/config_file_syntax.hpp"
 #include "didi/common/project_path.hpp"
+#include <map>
 #include <algorithm>
 #include <cctype>
 #include <regex>
@@ -150,59 +152,71 @@ std::vector<DomainDiagnostic> parseGodotDiagnostics(const std::string& output) {
 }
 
 ExportPresetsFile readExportPresets(const std::string& contents) {
-    static const std::regex preset_section(R"(^\[preset\.([0-9]+)\]$)");
-    static const std::regex options_section(R"(^\[preset\.([0-9]+)\.options\]$)");
+    // Matched against the section name the engine reads, not against the raw
+    // line. `[ preset.0 ]` is the section preset.0, so an anchored whole-line
+    // pattern skipped every key under it and reported a project with a working
+    // export preset as a project with none (#814).
+    static const std::regex preset_section(R"(^preset\.([0-9]+)$)");
     std::vector<json> presets;
-    std::optional<size_t> current;
-    bool in_options = false;
+    std::map<std::string, size_t> preset_of_section;
     bool malformed = false;
-    bool seen_section = false;
 
-    for (const auto& raw : strings::split(contents, '\n')) {
-        const std::string line = strings::trim(raw);
-        if (line.empty() || line[0] == ';' || line[0] == '#') continue;
+    // `#` is not a comment in a ConfigFile. A `#` line with an `=` is a key
+    // whose name carries the hash, and a `#` line without one joins forward
+    // into the next line that has one, taking any section header in between
+    // with it. Skipping those lines read a file whose presets are not what it
+    // appears to say as a file that parsed (#812), and the key rule underneath
+    // both is #813.
+    const auto scanned = config_file::scan(contents);
+    // A file that ends inside a value is ERR_PARSE_ERROR for the engine and
+    // none of it loads, so nothing read above it describes an export.
+    if (!scanned.complete) malformed = true;
+    // A file with content but no section the engine honours is not an ini. A
+    // trailing `# note` under a preset is not that, which is the difference a
+    // one-token fix could not draw (#812), and an ini whose sections are all
+    // something else is a project with no export presets rather than a broken
+    // file (#651).
+    if (scanned.headers.empty() && (!scanned.entries.empty() || scanned.trailing_key)) {
+        malformed = true;
+    }
+
+    for (const auto& header : scanned.headers) {
         std::smatch match;
-        if (std::regex_match(line, match, preset_section)) {
-            const int index = std::stoi(match[1].str());
-            presets.push_back({{"index", index}, {"name", ""}, {"platform", ""},
-                               {"runnable", false}, {"export_filter", ""}, {"export_path", ""}});
-            current = presets.size() - 1;
-            in_options = false;
-            seen_section = true;
-            continue;
-        }
-        if (std::regex_match(line, match, options_section)) {
-            current.reset();
-            in_options = true;
-            seen_section = true;
-            continue;
-        }
-        if (!line.empty() && line.front() == '[') {
-            current.reset();
-            // Any other section is skipped the way [preset.N.options] is. Its
-            // keys are not about a preset, so they are not evidence that the
-            // file is broken: a valid ini with no preset sections used to be
-            // reported as malformed, which made "this project has no export
-            // presets" an error where the same fact with no file at all was a
-            // success (#651).
-            in_options = true;
-            seen_section = true;
-            continue;
-        }
-        if (in_options) continue;
-        const size_t equals = line.find('=');
+        if (!std::regex_match(header.name, match, preset_section)) continue;
+        if (preset_of_section.count(header.name) != 0) continue;
+        // A run of digits longer than any real preset index would throw out of
+        // std::stoi rather than parse, and a section nobody wrote is not worth
+        // a crash.
+        const auto digits = match[1].str();
+        if (digits.size() > 9) continue;
+        const int index = std::stoi(digits);
+        presets.push_back({{"index", index}, {"name", ""}, {"platform", ""},
+                           {"runnable", false}, {"export_filter", ""}, {"export_path", ""}});
+        preset_of_section.emplace(header.name, presets.size() - 1);
+    }
+
+    for (const auto& entry : scanned.entries) {
         // A key before any section at all is a file this cannot make sense of.
-        if (!current.has_value() || equals == std::string::npos) {
+        // That is also where a swallowed `[preset.N]` header leaves the keys
+        // that were meant to be under it.
+        if (entry.section.empty()) {
             malformed = true;
             continue;
         }
-        const std::string key = strings::trim(line.substr(0, equals));
-        const std::string value = unquote(line.substr(equals + 1));
+        const auto at = preset_of_section.find(entry.section);
+        // [preset.N.options] and any other section are skipped. Their keys are
+        // not about a preset, so they are not evidence that the file is broken:
+        // a valid ini with no preset sections used to be reported as malformed,
+        // which made "this project has no export presets" an error where the
+        // same fact with no file at all was a success (#651).
+        if (at == preset_of_section.end()) continue;
+        const auto& key = entry.key;
+        const std::string value = unquote(entry.value_text);
         if (key == "name" || key == "platform" || key == "export_filter" || key == "export_path") {
-            presets[*current][key] = value;
+            presets[at->second][key] = value;
         } else if (key == "runnable") {
             if (value != "true" && value != "false") malformed = true;
-            else presets[*current][key] = value == "true";
+            else presets[at->second][key] = value == "true";
         }
     }
 
@@ -212,7 +226,6 @@ ExportPresetsFile readExportPresets(const std::string& contents) {
         const std::string platform = preset.value("platform", "");
         if (name.empty() || platform.empty() || !names.insert(name).second) malformed = true;
     }
-    (void)seen_section;
     ExportPresetsFile file;
     file.section_count = presets.size();
     file.malformed = malformed;

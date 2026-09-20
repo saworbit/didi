@@ -10,7 +10,7 @@
 #include <iterator>
 #include <optional>
 #include <set>
-#include <sstream>
+#include <utility>
 #include <tuple>
 #include <system_error>
 #include <vector>
@@ -40,33 +40,25 @@ struct IssueLess {
     }
 };
 
+using ImportField = std::pair<std::string, std::string>;
+
 struct ImportSections {
-    std::vector<std::string> remap;
-    std::vector<std::string> dependencies;
+    std::vector<ImportField> remap;
+    std::vector<ImportField> dependencies;
 };
 
+// Read through the same rule as every other ConfigFile. Comparing a header as a
+// whole line read `[ remap ]` as some other section, collected nothing under
+// it, and reported a .import the engine loads without complaint as invalid
+// metadata (#814).
 ImportSections importSections(const std::string& text) {
-    std::istringstream input(text);
     ImportSections sections;
-    enum class ActiveSection { Other, Remap, Dependencies } active{ActiveSection::Other};
-    std::string line;
-    while (std::getline(input, line)) {
-        const auto trimmed = strings::trim(line);
-        if (config_file::isComment(trimmed)) continue;
-        if (trimmed == "[remap]") {
-            active = ActiveSection::Remap;
-            continue;
+    for (const auto& entry : config_file::scan(text).entries) {
+        if (entry.key.empty()) continue;
+        if (entry.section == "remap") sections.remap.push_back({entry.key, entry.value_text});
+        else if (entry.section == "deps") {
+            sections.dependencies.push_back({entry.key, entry.value_text});
         }
-        if (trimmed == "[deps]") {
-            active = ActiveSection::Dependencies;
-            continue;
-        }
-        if (trimmed.size() >= 2 && trimmed.front() == '[' && trimmed.back() == ']') {
-            active = ActiveSection::Other;
-            continue;
-        }
-        if (active == ActiveSection::Remap) sections.remap.push_back(line);
-        if (active == ActiveSection::Dependencies) sections.dependencies.push_back(line);
     }
     return sections;
 }
@@ -80,14 +72,6 @@ std::optional<std::string> readBounded(const fs::path& path) {
     if (bytes_read > kMaxImportMetadataBytes) return std::nullopt;
     contents.resize(bytes_read);
     return contents;
-}
-
-std::optional<std::pair<std::string, std::string>> assignment(const std::string& line) {
-    const auto equals = line.find('=');
-    if (equals == std::string::npos) return std::nullopt;
-    const auto key = strings::trim(line.substr(0, equals));
-    if (key.empty()) return std::nullopt;
-    return std::pair{key, strings::trim(line.substr(equals + 1))};
 }
 
 bool isPathKey(const std::string& key) {
@@ -140,12 +124,10 @@ std::optional<std::vector<std::string>> destinationValues(const std::string& val
 std::optional<ImportMetadata> parseMetadata(const std::string& text) {
     const auto sections = importSections(text);
     ImportMetadata metadata;
-    for (const auto& line : sections.remap) {
-        const auto field = assignment(line);
-        if (!field) continue;
-        if (field->first == "valid" && field->second == "false") return std::nullopt;
-        if (isPathKey(field->first)) {
-            const auto output = quotedValue(field->second, true);
+    for (const auto& field : sections.remap) {
+        if (field.first == "valid" && field.second == "false") return std::nullopt;
+        if (isPathKey(field.first)) {
+            const auto output = quotedValue(field.second, true);
             if (!output) return std::nullopt;
             if (!output->empty()) metadata.outputs.push_back(*output);
         }
@@ -153,17 +135,15 @@ std::optional<ImportMetadata> parseMetadata(const std::string& text) {
 
     size_t source_assignments = 0;
     size_t destination_assignments = 0;
-    for (const auto& line : sections.dependencies) {
-        const auto field = assignment(line);
-        if (!field) continue;
-        if (field->first == "source_file") {
+    for (const auto& field : sections.dependencies) {
+        if (field.first == "source_file") {
             ++source_assignments;
-            const auto source = quotedValue(field->second, false);
+            const auto source = quotedValue(field.second, false);
             if (!source) return std::nullopt;
             metadata.source = *source;
-        } else if (field->first == "dest_files") {
+        } else if (field.first == "dest_files") {
             ++destination_assignments;
-            const auto outputs = destinationValues(field->second);
+            const auto outputs = destinationValues(field.second);
             if (!outputs) return std::nullopt;
             metadata.outputs.insert(metadata.outputs.end(), outputs->begin(), outputs->end());
         }
