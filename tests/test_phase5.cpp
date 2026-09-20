@@ -309,6 +309,20 @@ TEST(Phase5, ExportPresetParserKeepsTheThreeEmptyStatesApart) {
     ASSERT_EQ(complete.presets.size(), 1u);
 }
 
+TEST(Phase5, ExportPresetNameDropsTheCommentOnItsLine) {
+    // Godot's own project.godot banner documents `param=value ; comment`, and
+    // ConfigFile.load gives this preset the name Linux. Carrying the note into
+    // the value left a string that no longer ended in a quote, so the name was
+    // published with the quotes and the note still on it and project_export
+    // could not be given that preset at all (#816).
+    const auto commented =
+        readExportPresets("[preset.0]\nname=\"Linux\" ; a note\nplatform=\"Linux\"\n");
+    ASSERT_TRUE(!commented.malformed);
+    ASSERT_EQ(commented.presets.size(), 1u);
+    ASSERT_EQ(commented.presets[0]["name"], "Linux");
+    ASSERT_EQ(commented.presets[0]["platform"], "Linux");
+}
+
 TEST(Phase5, ExportPresetParserRejectsMalformedAndDuplicateNames) {
     const auto malformed = parseExportPresets("name=\"orphan\"\n");
     ASSERT_TRUE(malformed.empty());

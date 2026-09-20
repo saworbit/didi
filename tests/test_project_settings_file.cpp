@@ -297,6 +297,57 @@ void replaces_a_value_that_spans_lines_without_leaving_its_tail_behind() {
     ASSERT_TRUE(scale.value().existed);
 }
 
+void refuses_a_project_godot_the_engine_will_not_parse() {
+    // Godot answers ERR_PARSE_ERROR for a file that ends inside a value and
+    // the project does not open at all. ConfigFile.load still hands back the
+    // sections it managed to read, which is why both of these used to answer
+    // out of it: the dry run offered to replace a value in a file nothing can
+    // load, and the confirm rewrote one line and left it just as unloadable.
+    ProjectFixture project("unterminated-value",
+                           "[application]\n"
+                           "config/name=\"Broken\"\n"
+                           "\n"
+                           "[shader_globals]\n"
+                           "tint={\n"
+                           "\"type\": \"color\",\n");
+    const auto before = project.read();
+
+    const auto read = readProjectSetting(project.root(), "application/config/name");
+    ASSERT_TRUE(read.isErr());
+    ASSERT_EQ(read.error().code, 409);
+
+    const auto write = writeProjectSetting(project.root(), "application/config/name", "x", false);
+    ASSERT_TRUE(write.isErr());
+    ASSERT_EQ(write.error().code, 409);
+    ASSERT_EQ(project.read(), before);
+
+    // A file that ends part-way through a key is the opposite case: the engine
+    // drops the text and load() returns OK, so an ordinary trailing note is
+    // still readable and writable.
+    ProjectFixture note("trailing-note", "[application]\nconfig/name=\"Fine\"\n# a note\n");
+    const auto still = readProjectSetting(note.root(), "application/config/name");
+    ASSERT_TRUE(still.isOk());
+    ASSERT_TRUE(still.value().existed);
+}
+
+void reports_a_multiline_value_as_the_whole_value() {
+    // previous_literal and the dry run's `literal` both come from this field,
+    // and a dictionary used to report as the single character `{` (#816).
+    ProjectFixture project("multiline-literal",
+                           "[shader_globals]\n"
+                           "tint={\n"
+                           "\"type\": \"color\"\n"
+                           "}\n");
+    const auto read = readProjectSetting(project.root(), "shader_globals/tint");
+    ASSERT_TRUE(read.isOk());
+    ASSERT_TRUE(read.value().existed);
+    ASSERT_EQ(read.value().literal, "{\n\"type\": \"color\"\n}");
+
+    const auto write = writeProjectSetting(project.root(), "shader_globals/tint", 4, false);
+    ASSERT_TRUE(write.isOk());
+    ASSERT_EQ(write.value().previous_literal, "{\n\"type\": \"color\"\n}");
+}
+
 struct Register {
     Register() {
         registerTest("project_settings_file.bootstrap_section",
@@ -317,6 +368,10 @@ struct Register {
                      treats_a_key_a_bare_note_swallowed_as_a_key_that_is_not_there);
         registerTest("project_settings_file.multiline_value",
                      replaces_a_value_that_spans_lines_without_leaving_its_tail_behind);
+        registerTest("project_settings_file.unparseable_project",
+                     refuses_a_project_godot_the_engine_will_not_parse);
+        registerTest("project_settings_file.multiline_literal",
+                     reports_a_multiline_value_as_the_whole_value);
     }
 } registrar;
 

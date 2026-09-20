@@ -10,14 +10,14 @@ Every number here is derived from the suites themselves rather than written down
 
 | Measure | Count |
 | --- | ---: |
-| Automated tests | **1104** |
+| Automated tests | **1114** |
 | Live-harness assertions | 1108 |
 
 The badge in the [README](../README.md) shows the automated test total. Harness assertions are counted separately because they are assertions inside one live scenario, not independently runnable cases; adding them together would flatter the number.
 
 ## Native C++ suite (`didi_tests`)
 
-**721 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
+**731 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
 
 | Suite | Tests |
 | --- | ---: |
@@ -36,12 +36,12 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `Hierarchy` | 9 |
 | `IPC` | 25 |
 | `ImageDiff` | 10 |
-| `ImportHealth` | 16 |
+| `ImportHealth` | 17 |
 | `InvariantWatch` | 4 |
 | `JsonRpc` | 4 |
 | `ManagedProcess` | 6 |
 | `McpServer` | 41 |
-| `Phase5` | 21 |
+| `Phase5` | 22 |
 | `Phase6` | 22 |
 | `Phase7Contract` | 9 |
 | `Phase7Diagnostics` | 1 |
@@ -68,18 +68,18 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `SpeculativeVerify` | 8 |
 | `TestRunner` | 2 |
 | `ToolManifest` | 1 |
-| `Tools` | 115 |
+| `Tools` | 117 |
 | `UiListControls` | 6 |
 | `ViewportIsolation` | 2 |
 | `autoload_diagnostics` | 7 |
-| `config_file_syntax` | 17 |
+| `config_file_syntax` | 21 |
 | `ghost_preview` | 4 |
 | `phase7` | 1 |
 | `phase7b_anim` | 6 |
 | `phase7b_spatial` | 8 |
 | `phase7c_input` | 6 |
 | `phase7c_profiler` | 10 |
-| `project_settings_file` | 11 |
+| `project_settings_file` | 13 |
 | `resource_references` | 15 |
 | `tool_annotations` | 10 |
 | `tool_input_schema` | 6 |

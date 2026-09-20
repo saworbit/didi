@@ -336,6 +336,26 @@ void test_a_spaced_section_header_is_still_remap_and_deps() {
     ASSERT_EQ(report["import_issue_count"].get<size_t>(), 0u);
 }
 
+void test_a_trailing_comment_is_not_part_of_a_dependency_path() {
+    // A `; note` on a line is a comment for Godot, so this .import loads
+    // without complaint. Carrying it into the value left a string that no
+    // longer ended in a quote, quotedValue gave up, and the audit reported
+    // invalid_import_metadata against a healthy file (#816).
+    ImportHealthFixture fixture("trailing-comment");
+    fixture.write("art/icon.png", "source");
+    fixture.write(".godot/imported/icon.ctex", "output");
+    fixture.write("art/icon.png.import",
+                  "[remap]\n"
+                  "importer=\"texture\"\n"
+                  "path=\"res://.godot/imported/icon.ctex\"\n\n"
+                  "[deps]\n"
+                  "source_file=\"res://art/icon.png\" ; keep this\n"
+                  "dest_files=[\"res://.godot/imported/icon.ctex\"]\n");
+    const auto report = didi::offline::inspectImportHealth(fixture.root().string(), 50);
+    ASSERT_EQ(report["scanned_import_metadata"].get<size_t>(), 1u);
+    ASSERT_EQ(report["import_issue_count"].get<size_t>(), 0u);
+}
+
 struct RegisterImportHealthTests {
     RegisterImportHealthTests() {
         registerTest("ImportHealth.Healthy", test_healthy_import_metadata_has_no_issues);
@@ -363,6 +383,8 @@ struct RegisterImportHealthTests {
                      test_multisegment_feature_path_is_checked);
         registerTest("ImportHealth.SpacedSectionHeader",
                      test_a_spaced_section_header_is_still_remap_and_deps);
+        registerTest("ImportHealth.TrailingComment",
+                     test_a_trailing_comment_is_not_part_of_a_dependency_path);
     }
 } g_registerImportHealthTests;
 

@@ -154,6 +154,64 @@ struct Register {
         const auto scanned = scan("[preset.0]\nname=\"a\" ; note\nplatform=\"W\"\n");
         ASSERT_EQ(scanned.entries.size(), 2u);
         ASSERT_EQ(scanned.entries[1].key, "platform");
+        // The banner Godot writes at the top of every project.godot documents
+        // `param=value ; comment`, and ConfigFile.load gives name the string a.
+        // Carrying the note into the value made the preset name unquotable, so
+        // project_list_export_presets published it with the quotes still on.
+        ASSERT_EQ(scanned.entries[0].value_text, "\"a\"");
+    });
+
+    registerTest("config_file_syntax.value_text_spans_every_line_it_covers", [] {
+        // ProjectSettings.save_custom writes a dictionary over four lines. The
+        // first character of it is what project_set_setting's dry run used to
+        // show as the value being replaced (#816).
+        const auto scanned =
+            scan("[shader_globals]\ntint={\n\"type\": \"color\",\n\"value\": Color(1, 1, 1, 1)"
+                 "\n}\nother=1\n");
+        ASSERT_EQ(scanned.entries.size(), 2u);
+        ASSERT_EQ(scanned.entries[0].value_text,
+                  "{\n\"type\": \"color\",\n\"value\": Color(1, 1, 1, 1)\n}");
+        ASSERT_EQ(scanned.entries[0].value_end_line, 5);
+        ASSERT_EQ(scanned.entries[1].value_text, "1");
+    });
+
+    registerTest("config_file_syntax.semicolon_is_a_comment_inside_a_value", [] {
+        // Checked on all three lines: the dictionary loads as {"x": 1}, so the
+        // note is not part of it even though the value has not closed yet.
+        const auto scanned = scan("[s]\nd={\n\"x\": 1 ; note\n}\nb=3\n");
+        ASSERT_EQ(scanned.entries.size(), 2u);
+        ASSERT_EQ(scanned.entries[0].value_text, "{\n\"x\": 1\n}");
+        ASSERT_EQ(scanned.entries[1].key, "b");
+    });
+
+    registerTest("config_file_syntax.value_ending_does_not_end_the_line", [] {
+        // `name="a" # note` registers `#noteplatform` for the line below, the
+        // same forward join a `# note` line of its own makes. A `#` comment is
+        // the habitual way to write one, so this is the likeliest way a project
+        // ends up with a setting nobody can name.
+        const auto joined = scan("[preset.0]\nname=\"a\" # note\nplatform=\"W\"\n");
+        ASSERT_EQ(joined.entries.size(), 2u);
+        ASSERT_EQ(joined.entries[1].key, "#noteplatform");
+        ASSERT_EQ(joined.entries[1].key_on_line, "platform");
+        ASSERT_TRUE(joined.entries[1].joined);
+        ASSERT_EQ(joined.entries[1].key_line, 2);
+
+        // Two settings on one line, and a header opened on one.
+        const auto pair = scan("[s]\na=1 b=2\nc=3\n");
+        ASSERT_EQ(pair.entries.size(), 3u);
+        ASSERT_EQ(pair.entries[1].key, "b");
+        ASSERT_EQ(pair.entries[1].value_text, "2");
+
+        const auto header = scan("[s]\nname=\"a\" [t]\nk=1\n");
+        ASSERT_EQ(header.headers.size(), 2u);
+        ASSERT_EQ(header.entries.size(), 2u);
+        ASSERT_EQ(header.entries[1].section, "t");
+    });
+
+    registerTest("config_file_syntax.a_string_value_keeps_its_own_semicolon", [] {
+        const auto scanned = scan("[s]\nname=\"a;b\"\nb=3\n");
+        ASSERT_EQ(scanned.entries.size(), 2u);
+        ASSERT_EQ(scanned.entries[0].value_text, "\"a;b\"");
     });
     }
 } registrar;

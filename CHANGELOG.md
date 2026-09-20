@@ -175,6 +175,24 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
   that starts a game means to drive that game and the process may well still be
   pointed at the editor it was launched from.
 
+- **`project_audit_assets` reports what is wrong with `project.godot` itself.**
+  Every other finding the audit makes is about a reference from one file to
+  another, so a manifest that registers a setting nobody can name read as a
+  project with nothing wrong with it. A `# disabled for now` above
+  `Good="*res://good.gd"` is the case: the engine registers
+  `autoload/#disabledfornowGood`, the script enters the tree under a name
+  nothing references, and the only place that surfaces is the compiler refusing
+  `Good` in a file three directories away, with nothing connecting the two.
+  `project_settings_issues` now carries that finding as `unusable_setting_name`,
+  with both names and the line the join started on, because the remedy is to
+  move or delete one line and the caller has to be told which. It is reported
+  for any section, not only `[autoload]`: a note above `config/name` registers
+  `application/#noteconfig/name` and the project runs under the engine's default
+  name instead of the one in the file (#818). The second finding is
+  `unparseable_project_settings` (#817). This is not a full parse, and
+  `limitations` says so: an empty list is not a promise that Godot will load the
+  file.
+
 ### Changed
 
 - **Every security alert now has a disposition written down, including the ones
@@ -196,6 +214,42 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
   change moved the `execvp` call, and it will happen again.
 
 ### Fixed
+
+- **A value is what the engine reads, not the rest of one line.** #815 made the
+  writer replace a whole multi-line value. The reader was still handing back the
+  text between the `=` and the end of that one line, and Godot means neither
+  boundary. Its own writer spreads a dictionary over four lines, and the banner
+  it puts at the top of every `project.godot` documents `param=value ; comment`.
+  So `project_set_setting`'s dry run offered `{` as the value it was about to
+  replace, which is #417's failure exactly, and `previous_value` in the
+  confirmed report said the same thing. A `; note` after a value was carried
+  into it: `project_list_export_presets` published a preset named
+  `"Trailing" ; a note`, quotes and all, and `project_export` could not be given
+  that preset at all, while the same note in a `.import` made
+  `project_audit_assets` report `invalid_import_metadata` against a file the
+  engine loads without complaint. The value is now every line it spans, with the
+  comment on each line dropped, and a `;` is a comment at any bracket depth --
+  all asked of 4.5.1, 4.6.2 and 4.7.2, all three identical (#816). Asking
+  settled one more thing while it was being asked: a value ending does not end
+  the line. The engine carries on reading from where the value stopped, so
+  `a=1 b=2` is two settings, `name="a" [t]` opens a section, and
+  `name="a" # note` joins `#note` forward into the key below exactly as a
+  `# note` line of its own would. That last one is the habitual way to write a
+  comment, and it was the one spelling of #813's trap the scan still missed.
+
+- **A `project.godot` Godot refuses to parse is no longer read, previewed and
+  written as though it loaded.** A file that ends part-way through a value is
+  `ERR_PARSE_ERROR` for the engine and the project does not open at all.
+  `ConfigFile.load` returns 43 for the same text and still hands back the
+  sections it managed to read, which is the trap: a partial parse looks like a
+  parse. `project_set_setting` offered to replace a value in a file nothing can
+  load, and the confirmed write rewrote one line and reported success, leaving
+  it exactly as unloadable. The scan already computed the fact and no reader
+  consulted it. Both the write and its dry run now refuse with a 409 naming the
+  engine's own verdict, and `project_audit_assets` reports it (#817). The
+  opposite case is not this: a file that ends part-way through a *key* is
+  dropped by the engine with `OK`, which is an ordinary trailing `# note`, and
+  it is still read and written.
 
 - **A key is the tokens joined, not the text before the first `=`.** Godot does
   not read a ConfigFile key as the text on one line. It reads a run of tokens,
