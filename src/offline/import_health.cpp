@@ -743,15 +743,19 @@ json inspectImportHealth(const std::string& root_dir, size_t max_findings) {
                          "Godot recorded a digest for the outputs of this import and it was not "
                          "compared, because one of them could not be read through."});
                 } else if (*dest_digest != *recorded->destination) {
+                    const auto count = parsed->dest_files.size();
+                    const std::string subject =
+                        count == 1 ? std::string("The file this import wrote no longer hashes")
+                                   : "The " + std::to_string(count) +
+                                         " files this import wrote no longer hash";
                     metadata_issues.insert(
                         {metadata_path, "output_changed_since_import", parsed->source,
                          parsed->source,
-                         "The " + std::to_string(parsed->dest_files.size()) +
-                             " file(s) this import wrote no longer hash to the dest_md5 Godot "
-                             "recorded, so the editor reimports the asset the next time it "
-                             "scans the project without a warm cache. Nothing edits an imported "
-                             "output on purpose, so this is a truncated write, a bad merge or a "
-                             "partial checkout rather than a change to undo."});
+                         subject +
+                             " to the dest_md5 Godot recorded, so the editor reimports the asset "
+                             "the next time it scans the project without a warm cache. Nothing "
+                             "edits an imported output on purpose, so this is a truncated write, "
+                             "a bad merge or a partial checkout rather than a change to undo."});
                 }
             }
         }
