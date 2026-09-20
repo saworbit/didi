@@ -1,5 +1,8 @@
 #include "didi/offline/gdscript_diagnostics.hpp"
 
+#include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <functional>
 #include <stdexcept>
 #include <string>
@@ -14,6 +17,31 @@ namespace {
 
 using didi::offline::GDScriptDiagnostics;
 using didi::offline::ScriptDiagnostic;
+
+// projectAutoloadNames reads the file from the project root, so a test for it
+// needs a project root to be in.
+class ScopedProject final {
+public:
+    explicit ScopedProject(const std::string& contents)
+        : m_original(std::filesystem::current_path()),
+          m_root(m_original / "build" / "test-projects" /
+                 ("didi-autoload-names-" +
+                  std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()))) {
+        std::filesystem::create_directories(m_root);
+        std::ofstream(m_root / "project.godot", std::ios::binary) << contents;
+        std::filesystem::current_path(m_root);
+    }
+
+    ~ScopedProject() {
+        std::error_code error;
+        std::filesystem::current_path(m_original, error);
+        std::filesystem::remove_all(m_root, error);
+    }
+
+private:
+    std::filesystem::path m_original;
+    std::filesystem::path m_root;
+};
 
 ScriptDiagnostic compilerError(int line, const std::string& message) {
     ScriptDiagnostic diagnostic;
@@ -51,6 +79,34 @@ void demotes_an_identifier_that_is_a_registered_autoload() {
     // Nothing is thrown away. An autoload whose own script is broken is still
     // worth seeing.
     ASSERT_TRUE(diags[0].message.find("GameState") != std::string::npos);
+}
+
+// Break caught: the section was matched as the whole line, so `[ autoload ]`
+// registered no names and every singleton in the project came back as an
+// undefined identifier -- the demotion above is the whole reason this list is
+// read. Godot reads a spaced or tab-padded header as the same section, checked
+// on 4.5.1, 4.6.2 and 4.7.2 (#809).
+void reads_the_autoload_names_under_a_header_that_is_spaced() {
+    {
+        ScopedProject project("config_version=5\n"
+                              "\n"
+                              "[ autoload ]\n"
+                              "\n"
+                              "GameState=\"*res://scripts/game_state.gd\"\n");
+        const auto names = GDScriptDiagnostics::projectAutoloadNames();
+        ASSERT_EQ(names.size(), size_t(1));
+        ASSERT_EQ(names[0], std::string("GameState"));
+    }
+    {
+        // A different section is still a different section, or every settings
+        // key in the file would be read as a singleton.
+        ScopedProject project("config_version=5\n"
+                              "\n"
+                              "[ application ]\n"
+                              "\n"
+                              "config/name=\"Probe\"\n");
+        ASSERT_TRUE(GDScriptDiagnostics::projectAutoloadNames().empty());
+    }
 }
 
 // The demotion has to be narrow or it becomes a way to hide real faults.
@@ -119,6 +175,8 @@ struct Register {
     Register() {
         registerTest("autoload_diagnostics.demotes_registered_autoload",
                      demotes_an_identifier_that_is_a_registered_autoload);
+        registerTest("autoload_diagnostics.spaced_section_header",
+                     reads_the_autoload_names_under_a_header_that_is_spaced);
         registerTest("autoload_diagnostics.leaves_other_identifiers",
                      leaves_an_identifier_that_is_not_an_autoload_alone);
         registerTest("autoload_diagnostics.keeps_real_errors",

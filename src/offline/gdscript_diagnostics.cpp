@@ -1,5 +1,6 @@
 #include "didi/offline/gdscript_diagnostics.hpp"
 
+#include "didi/common/config_file_syntax.hpp"
 #include "didi/common/json_bounds.hpp"
 #include "didi/offline/test_runner.hpp"
 #include "didi/common/logger.hpp"
@@ -374,7 +375,12 @@ std::vector<std::string> GDScriptDiagnostics::projectAutoloadNames() {
         if (!line.empty() && line.back() == '\r') line.pop_back();
         const auto text = strings::trim(line);
         if (!text.empty() && text.front() == '[') {
-            in_autoload = text == "[autoload]";
+            // The section name is the bracket text, trimmed. Godot reads
+            // `[ autoload ]` as the autoload section, so comparing the whole
+            // line read a hand-spaced file as one with no singletons, and every
+            // one of them came back as an undefined identifier (#809).
+            const auto header = config_file::sectionName(text);
+            in_autoload = header.has_value() && *header == "autoload";
             continue;
         }
         if (!in_autoload || text.empty() || text.front() == ';') continue;

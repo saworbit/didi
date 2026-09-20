@@ -5,6 +5,7 @@
 #include "didi/gdextension/runtime_bridge.hpp"
 #include "didi/gdextension/viewport_renderer.hpp"
 #include "didi/common/logger.hpp"
+#include "didi/common/config_file_syntax.hpp"
 #include "didi/common/godot_error.hpp"
 #include "didi/common/json_bounds.hpp"
 #include "didi/common/project_path.hpp"
@@ -7092,8 +7093,12 @@ Result<bool> projectFileDefinesInputAction(const std::string& action) {
     while (std::getline(file, line)) {
         const auto trimmed = strings::trim(line);
         if (trimmed.empty() || trimmed[0] == ';') continue;
-        if (trimmed.front() == '[' && trimmed.back() == ']') {
-            in_input_section = trimmed == "[input]";
+        if (const auto header = didi::config_file::sectionName(trimmed)) {
+            // The section name is the bracket text, trimmed. Godot reads
+            // `[ input ]` as the input section, so comparing the whole line
+            // read a hand-spaced file as one that defines no action and the
+            // removal refused a name that is there (#809).
+            in_input_section = *header == "input";
             continue;
         }
         if (!in_input_section) continue;

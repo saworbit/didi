@@ -6043,6 +6043,71 @@ static void test_rename_reports_the_autoload_line_that_defines_the_name() {
     registry.setIpcClient(nullptr);
 }
 
+static void test_a_hash_line_in_project_godot_is_a_setting_not_a_comment() {
+    // `;` starts a comment in a Godot ConfigFile. `#` does not. Asked on 4.5.1,
+    // 4.6.2 and 4.7.2, `# Hash="*res://a.gd"` under [autoload] registers the
+    // setting `autoload/#Hash` and the script it names enters the tree on every
+    // run. The scan skipped both characters, borrowing GDScript's comment rule
+    // for a file that is not GDScript, so a user who disabled a singleton the
+    // habitual way had a singleton that still loads and the one tool that
+    // answers "what depends on this script" agreed with them (#810).
+    ScopedToolProject project("project-godot-hash-line");
+    writeAuditFile("project.godot",
+                   "config_version=5\n"
+                   "\n"
+                   "[application]\n"
+                   "\n"
+                   "; run/main_scene=\"res://commented.tscn\"\n"
+                   "# config/icon=\"res://icon.svg\"\n"
+                   "\n"
+                   "[autoload]\n"
+                   "\n"
+                   "; Semi=\"*res://scripts/semi.gd\"\n"
+                   "# Hash=\"*res://scripts/hash.gd\"\n");
+    writeAuditFile("commented.tscn", "[gd_scene format=3]\n");
+    writeAuditFile("icon.svg", "<svg/>\n");
+    writeAuditFile("scripts/semi.gd", "extends Node\n");
+    writeAuditFile("scripts/hash.gd", "extends Node\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    registry.setIpcClient(nullptr);
+
+    // The autoload the engine loads is reported, with the text of the line, so
+    // the evidence says why the script is still there.
+    const auto hash = registry.callTool("project_analyze_impact",
+                                        didi::json{{"target", "res://scripts/hash.gd"}});
+    ASSERT_TRUE(!hash.isError);
+    const auto hash_payload = didi::json::parse(hash.content[0].text);
+    ASSERT_TRUE(hash_payload["counts_by_kind"].contains("autoload"));
+    ASSERT_EQ(hash_payload["counts_by_kind"]["autoload"].get<size_t>(), 1u);
+    ASSERT_TRUE(hash_payload["impacts"][0]["detail"].get<std::string>().find("# Hash") !=
+                std::string::npos);
+
+    // Outside [autoload] the same line is a setting whose value names a file,
+    // which is the other half of the same scan.
+    const auto icon = registry.callTool("project_analyze_impact",
+                                        didi::json{{"target", "res://icon.svg"}});
+    ASSERT_TRUE(!icon.isError);
+    const auto icon_counts = didi::json::parse(icon.content[0].text)["counts_by_kind"];
+    ASSERT_TRUE(icon_counts.contains("project_setting"));
+    ASSERT_EQ(icon_counts["project_setting"].get<size_t>(), 1u);
+
+    // The control, and the half that must not move: `;` is still a comment, so
+    // neither of these is a site.
+    const auto semi = registry.callTool("project_analyze_impact",
+                                        didi::json{{"target", "res://scripts/semi.gd"}});
+    ASSERT_TRUE(!semi.isError);
+    const auto semi_payload = didi::json::parse(semi.content[0].text);
+    ASSERT_TRUE(semi_payload["target_exists"].get<bool>());
+    ASSERT_EQ(semi_payload["impact_count"].get<size_t>(), 0u);
+
+    const auto commented = registry.callTool("project_analyze_impact",
+                                             didi::json{{"target", "res://commented.tscn"}});
+    ASSERT_TRUE(!commented.isError);
+    ASSERT_EQ(didi::json::parse(commented.content[0].text)["impact_count"].get<size_t>(), 0u);
+}
+
 static void test_a_spaced_autoload_key_is_the_same_key() {
     // `GameState = "*res://..."` is a working autoload. Asked on 4.5.1, 4.6.2
     // and 4.7.2, the engine registers it exactly as it registers the spaceless
@@ -7087,6 +7152,8 @@ struct RegisterToolTests {
                      test_rename_reports_the_autoload_line_that_defines_the_name);
         registerTest("Tools.AutoloadKeySpacing",
                      test_a_spaced_autoload_key_is_the_same_key);
+        registerTest("Tools.ProjectGodotHashLineIsASetting",
+                     test_a_hash_line_in_project_godot_is_a_setting_not_a_comment);
         registerTest("Tools.RenameIsSilentWithoutAnAutoload",
                      test_rename_says_nothing_about_autoloads_when_there_are_none);
         registerTest("Tools.RenameRefusals",

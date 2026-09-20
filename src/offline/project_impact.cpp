@@ -1,5 +1,6 @@
 #include "didi/offline/project_impact.hpp"
 
+#include "didi/common/config_file_syntax.hpp"
 #include "didi/common/project_path.hpp"
 #include "didi/offline/project_text_scan.hpp"
 #include "didi/offline/project_search.hpp"
@@ -206,11 +207,15 @@ void collectProjectSettingImpacts(const std::filesystem::path& root, const std::
             // The section name is the text inside the brackets, trimmed. Godot
             // reads `[ autoload ]` as the autoload section, so a file that uses
             // it has autoloads and this saw none.
-            in_autoload = trimmed.back() == ']' &&
-                          strings::trim(trimmed.substr(1, trimmed.size() - 2)) == "autoload";
+            const auto section = config_file::sectionName(trimmed);
+            in_autoload = section.has_value() && *section == "autoload";
             return;
         }
-        if (trimmed.empty() || trimmed.front() == ';' || trimmed.front() == '#') return;
+        // `;` is the only comment character here. Treating `#` as one skipped a
+        // line Godot registers, so an autoload a user believed they had
+        // commented out loads on every run and the tool that answers "what
+        // depends on this script" said nothing does (#810).
+        if (trimmed.empty() || config_file::isComment(trimmed)) return;
         if (in_autoload) {
             // The key is the text before the first =, trimmed, compared whole.
             // A prefix match on `Name=` read `GameState = "*res://..."` as a
