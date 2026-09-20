@@ -215,6 +215,47 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **A balanced `project.godot` is not a loadable one, and a line can hold two
+  settings.** `Scan::complete` counts brackets, which is what the walk it falls
+  out of can count. Godot parses a value, so `config/broken=)`,
+  `config/name=Pair` without the quotes, `a={1 2}` and `a=[1,,2]` are every one
+  of them `ERR_PARSE_ERROR` with every bracket closed, the project does not open
+  at all, and `project_set_setting` wrote into such a file, reported
+  `persisted: true`, and left it exactly as unloadable (#820). The write and the
+  dry run now refuse it with a 409 that names the line and says what the parser
+  cannot start, and `project_audit_assets` reports it as
+  `unloadable_setting_value` rather than answering `project_settings_issue_count:
+  0` for a project nothing will open. The check is deliberately not a
+  `VariantParser`: a constructor with the wrong arity, one the engine does not
+  know, and a `Resource()` whose file is missing are all `ERR_PARSE_ERROR` and
+  none of them is reported, because deciding those needs the engine's own tables
+  and a reader that guesses at them refuses files that load. An empty answer is
+  not a promise that Godot will load the file; a finding is a promise that it
+  will not.
+- Two settings on one line are two settings. `a=1 b=2` is two keys the engine
+  reads and registers, and `project_set_setting` works in whole lines -- which
+  is right for a value spread over four of them and wrong here, because it
+  rewrote the line with only the key it was asked about and deleted the other,
+  with every field in the response true about the one that survived and nothing
+  anywhere about the one that went (#821). The write and the removal now refuse
+  with a 409 naming the sibling, and splitting the line is the remedy. Refusing
+  rather than rewriting part of a line is the smaller change for a shape Godot's
+  own writer never produces. `project_analyze_impact` had the quieter half of
+  the same bug: its walk took the first key on a line, so a file named only by
+  the second one came back as `impact_count: 0`. It now reads every key on the
+  line.
+- A key the engine built by joining the line above into this one is refused for
+  the same reason: that name lives on more lines than a rewrite of the
+  assignment replaces, so the text above would join forward again and the
+  setting written would not be the setting asked for.
+- An identifier does not end a value. `Vector2 (1, 2)`, the same value with
+  `(1, 2)` on the line below, and `Array[int]([1, 2])` all load on 4.5.1, 4.6.2
+  and 4.7.2, and the reader ended the value at the space or at the `]` and built
+  a key out of what followed -- reporting a setting the engine does not have and,
+  once the check above existed, refusing a file that loads. The seven names that
+  are a value on their own are matched exactly, so `flag=true` followed by a
+  section header is still the boolean and then the section.
+
 - **A value is what the engine reads, not the rest of one line.** #815 made the
   writer replace a whole multi-line value. The reader was still handing back the
   text between the `=` and the end of that one line, and Godot means neither
