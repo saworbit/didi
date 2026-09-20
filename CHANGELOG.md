@@ -197,6 +197,21 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **A second merge no longer cancels the first one's CodeQL run on `main`.**
+  The workflow cancelled any in-progress run for the same ref, which is right
+  for a pull request -- pushing a fixup should not leave the superseded run
+  burning twenty minutes -- and wrong for `main`, where the two runs are two
+  different commits rather than two attempts at one. Four of the last thirty
+  runs on `main` died that way, each time because a merge landed inside the
+  previous merge's C++ analysis. Two costs, neither obvious from the red X:
+  the cancelled commit was never analysed, and this workflow's own header says
+  it exists partly because Scorecard's SAST check scores on whether a tool ran
+  on the commits, which a cancelled run does not. The other is the X itself,
+  on a run that had nothing wrong with it, on the branch where a red mark is
+  supposed to mean something. `cancel-in-progress` is now true only for
+  `pull_request`, so pushes to `main` queue and each merge gets its own
+  analysis.
+
 - **`project_rename_references` reports the `[autoload]` line that defines the
   name.** The rename and the impact analysis are meant to agree about what a
   rename touches, and for a singleton they did not. The analysis reads

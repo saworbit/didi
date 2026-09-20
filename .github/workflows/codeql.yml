@@ -26,9 +26,16 @@ on:
 permissions:
   contents: read
 
+# A superseded pull request run is waste and is cancelled. A superseded push to
+# main is a commit that never got analysed, which is not the same thing: the
+# comment above says this workflow exists partly because Scorecard's SAST check
+# scores on whether a tool ran on the commits, and a cancelled run scores as
+# none. It also leaves a red X on main for a run nothing was wrong with, which
+# is how a branch stops being worth looking at. Pushes to main queue instead,
+# so two merges inside the twenty-minute C++ analysis each get their own.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # Does anything in this change reach the C++ compiler? Twenty minutes of C++
