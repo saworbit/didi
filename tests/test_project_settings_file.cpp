@@ -348,6 +348,119 @@ void reports_a_multiline_value_as_the_whole_value() {
     ASSERT_EQ(write.value().previous_literal, "{\n\"type\": \"color\"\n}");
 }
 
+void refuses_a_balanced_project_godot_the_engine_still_will_not_load() {
+    // Every bracket in this file is closed, so the walk that answers
+    // Scan::complete has nothing to report, and Godot answers err 43 for it
+    // all the same: the project does not open, and a write that landed in it
+    // reported success and left it exactly as unloadable (#820).
+    ProjectFixture project("balanced-broken",
+                           "config_version=5\n"
+                           "\n"
+                           "[application]\n"
+                           "\n"
+                           "config/name=\"Balanced\"\n"
+                           "config/broken=)\n");
+    const auto before = project.read();
+
+    const auto write = writeProjectSetting(project.root(), "application/config/name", "x", false);
+    ASSERT_TRUE(write.isErr());
+    ASSERT_EQ(write.error().code, 409);
+    ASSERT_TRUE(write.error().message.find("line 6") != std::string::npos);
+    ASSERT_TRUE(write.error().message.find("application/config/broken") != std::string::npos);
+    ASSERT_EQ(project.read(), before);
+
+    const auto read = readProjectSetting(project.root(), "application/config/name");
+    ASSERT_TRUE(read.isErr());
+    ASSERT_EQ(read.error().code, 409);
+
+    // A bare word where a value belongs is the likeliest way to get here by
+    // hand, and it is the same refusal.
+    ProjectFixture bare("bare-word", "[application]\nconfig/name=Pair\n");
+    const auto bare_write = writeProjectSetting(bare.root(), "application/config/name", "x", false);
+    ASSERT_TRUE(bare_write.isErr());
+    ASSERT_EQ(bare_write.error().code, 409);
+
+    // And the file Godot's own writer produces is written to as before. The
+    // refusal is only for what the parser provably refuses.
+    ProjectFixture fine("balanced-fine",
+                        "config_version=5\n"
+                        "\n"
+                        "[application]\n"
+                        "\n"
+                        "config/name=\"Fine\"\n"
+                        "config/features=PackedStringArray(\"4.5\", \"Forward Plus\")\n"
+                        "run/main_scene=\"res://main.tscn\"\n"
+                        "\n"
+                        "[input]\n"
+                        "\n"
+                        "jump={\n"
+                        "\"deadzone\": 0.5,\n"
+                        "\"events\": [Object(InputEventKey,\"resource_local_to_scene\":false)]\n"
+                        "}\n");
+    const auto ok = writeProjectSetting(fine.root(), "application/config/name", "Written", false);
+    ASSERT_TRUE(ok.isOk());
+    ASSERT_TRUE(ok.value().existed);
+}
+
+void refuses_to_rewrite_a_line_that_holds_another_setting() {
+    // `config/name="Pair" run/main_scene="res://main.tscn"` is two settings
+    // the engine reads and registers. Rewriting the line to change one of them
+    // deleted the other, and every field in the response stayed true about the
+    // one it was asked for (#821).
+    ProjectFixture project("two-keys-one-line",
+                           "config_version=5\n"
+                           "\n"
+                           "[application]\n"
+                           "\n"
+                           "config/name=\"Pair\" run/main_scene=\"res://main.tscn\"\n");
+    const auto before = project.read();
+
+    const auto write = writeProjectSetting(project.root(), "application/config/name", "Written",
+                                           false);
+    ASSERT_TRUE(write.isErr());
+    ASSERT_EQ(write.error().code, 409);
+    ASSERT_TRUE(write.error().message.find("application/run/main_scene") != std::string::npos);
+    ASSERT_EQ(project.read(), before);
+
+    // Removal takes the whole line out, so it loses the sibling the same way.
+    const auto removed = writeProjectSetting(project.root(), "application/config/name", {}, true);
+    ASSERT_TRUE(removed.isErr());
+    ASSERT_EQ(removed.error().code, 409);
+    ASSERT_EQ(project.read(), before);
+
+    // Split the line and both settings are writable again, with the other one
+    // still in the file afterwards.
+    ProjectFixture split("two-keys-split",
+                         "config_version=5\n"
+                         "\n"
+                         "[application]\n"
+                         "\n"
+                         "config/name=\"Pair\"\n"
+                         "run/main_scene=\"res://main.tscn\"\n");
+    const auto ok = writeProjectSetting(split.root(), "application/config/name", "Written", false);
+    ASSERT_TRUE(ok.isOk());
+    ASSERT_TRUE(split.read().find("run/main_scene=\"res://main.tscn\"") != std::string::npos);
+}
+
+void refuses_to_rewrite_a_key_the_engine_built_from_two_lines() {
+    // The same hazard with the key. Godot registers `#noteconfig/name` here,
+    // and that name lives on two lines while the rewrite replaces one, so the
+    // note would join forward into whatever was written and the setting would
+    // come back under a third name.
+    ProjectFixture project("joined-key",
+                           "[application]\n"
+                           "# note\n"
+                           "config/name=\"Joined\"\n");
+    const auto before = project.read();
+
+    const auto write = writeProjectSetting(project.root(), "application/#noteconfig/name", "x",
+                                           false);
+    ASSERT_TRUE(write.isErr());
+    ASSERT_EQ(write.error().code, 409);
+    ASSERT_TRUE(write.error().message.find("line 2") != std::string::npos);
+    ASSERT_EQ(project.read(), before);
+}
+
 struct Register {
     Register() {
         registerTest("project_settings_file.bootstrap_section",
@@ -372,6 +485,12 @@ struct Register {
                      refuses_a_project_godot_the_engine_will_not_parse);
         registerTest("project_settings_file.multiline_literal",
                      reports_a_multiline_value_as_the_whole_value);
+        registerTest("project_settings_file.balanced_but_unloadable",
+                     refuses_a_balanced_project_godot_the_engine_still_will_not_load);
+        registerTest("project_settings_file.two_keys_one_line",
+                     refuses_to_rewrite_a_line_that_holds_another_setting);
+        registerTest("project_settings_file.joined_key",
+                     refuses_to_rewrite_a_key_the_engine_built_from_two_lines);
     }
 } registrar;
 
