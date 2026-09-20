@@ -35,6 +35,11 @@ std::string trimmed(const std::string& text) {
     return text.substr(first, last - first + 1);
 }
 
+std::string settingName(const config_file::Entry& entry) {
+    if (entry.section.empty()) return entry.key;
+    return entry.section + "/" + entry.key;
+}
+
 // A project.godot that ends part-way through a value is ERR_PARSE_ERROR for
 // Godot and the project does not open at all: `--headless --path` refuses it
 // and ConfigFile.load answers 43. The trap is that load() still hands back the
@@ -44,13 +49,31 @@ std::string trimmed(const std::string& text) {
 // The opposite case is not this. A file that ends part-way through a *key* is
 // dropped by the engine and load() returns OK, which is the ordinary trailing
 // `# note`, so trailing_key is not checked here.
-std::optional<Error> refuseUnparseable(const config_file::Scan& scanned, const char* verb) {
-    if (scanned.complete) return std::nullopt;
-    return Error(409, std::string("project.godot ends part-way through a value, which Godot "
-                                  "answers with ERR_PARSE_ERROR: the project does not open and "
-                                  "none of the settings in the file are what it runs on. Repair "
-                                  "the unterminated value before ") +
-                          verb + ".");
+//
+// A balanced file is not a loadable one either. `config/broken=)` closes every
+// bracket it opens and is still err 43, and the write that landed in it
+// reported success and left it exactly as unloadable (#820). A value the
+// parser cannot start is refused here for the same reason the unterminated one
+// is: the whole file fails to load, so every setting in it, including the one
+// just written, is not what the project runs on.
+std::optional<Error> refuseUnloadable(const config_file::Scan& scanned, const char* verb) {
+    if (!scanned.complete) {
+        return Error(409, std::string("project.godot ends part-way through a value, which Godot "
+                                      "answers with ERR_PARSE_ERROR: the project does not open "
+                                      "and none of the settings in the file are what it runs on. "
+                                      "Repair the unterminated value before ") +
+                              verb + ".");
+    }
+    for (const auto& entry : scanned.entries) {
+        const auto problem = config_file::valueProblem(entry.value_text);
+        if (problem.empty()) continue;
+        return Error(409, "project.godot line " + std::to_string(entry.line) + " sets " +
+                              settingName(entry) + " to a value Godot's parser refuses, because " +
+                              problem + ". The engine answers ERR_PARSE_ERROR for the whole file, "
+                              "so the project does not open and none of the settings in it are "
+                              "what it runs on. Repair the value before " + verb + ".");
+    }
+    return std::nullopt;
 }
 
 Result<std::string> readWholeFile(const std::filesystem::path& path) {
@@ -140,8 +163,8 @@ Result<ProjectSettingRead> readProjectSetting(const std::filesystem::path& proje
     // and a `# note` above it is not (#813). The last spelling in the file
     // wins, which is why this keeps reading to the end.
     const auto scanned = config_file::scan(contents.value());
-    if (auto unparseable = refuseUnparseable(scanned, "reading a setting out of it")) {
-        return *unparseable;
+    if (auto unloadable = refuseUnloadable(scanned, "reading a setting out of it")) {
+        return *unloadable;
     }
     for (const auto& entry : scanned.entries) {
         if (entry.section != section || entry.key != key) continue;
@@ -188,9 +211,10 @@ Result<ProjectSettingWrite> writeProjectSetting(const std::filesystem::path& pro
     // (#813).
     const auto scanned = config_file::scan(contents.value());
     // Rewriting one line of a file the engine refuses to parse leaves it
-    // exactly as unloadable and reports success, so this refuses instead
-    // (#817).
-    if (auto unparseable = refuseUnparseable(scanned, "writing to it")) return *unparseable;
+    // exactly as unloadable and reports success, so this refuses instead --
+    // whether the file ends inside a value (#817) or is balanced and still
+    // ERR_PARSE_ERROR (#820).
+    if (auto unloadable = refuseUnloadable(scanned, "writing to it")) return *unloadable;
 
     // Godot writes LF. A file that arrived with CRLF keeps it, because
     // rewriting every line ending of a file to change one setting is a diff
@@ -217,16 +241,59 @@ Result<ProjectSettingWrite> writeProjectSetting(const std::filesystem::path& pro
         if (section_seen && section_end == lines.size()) section_end = index;
         if (header.name == report.section) section_seen = true;
     }
+    const config_file::Entry* target = nullptr;
     for (const auto& entry : scanned.entries) {
         if (entry.section != report.section || entry.key != report.key) continue;
-        assignment = static_cast<size_t>(entry.line - 1);
+        // The last spelling in the file wins, which is the engine's own rule.
+        target = &entry;
+    }
+    if (target != nullptr) {
+        assignment = static_cast<size_t>(target->line - 1);
         // A value can span lines. Replacing only the line holding the `=` left
         // the rest of an [input]-shaped value behind, and those leftover lines
         // join forward into whatever key comes next. Clamped for safety; a
         // value the file never closes is refused above rather than edited.
-        assignment_end = std::min(static_cast<size_t>(entry.value_end_line), lines.size());
+        assignment_end = std::min(static_cast<size_t>(target->value_end_line), lines.size());
         report.existed = true;
-        report.previous_literal = entry.value_text;
+        report.previous_literal = target->value_text;
+
+        // This works in whole lines, which is right for a value spread over
+        // four of them and wrong when a line holds more than one key. `a=1
+        // b=2` is two settings the engine reads and registers, and rewriting
+        // the line to change one of them deleted the other while the response
+        // stayed accurate about the one it was asked for (#821).
+        //
+        // Refusing is the answer rather than rewriting only the span the value
+        // occupies, because Godot's own writer puts one key per line: no file
+        // the editor produced can be in this state, and the caller who
+        // hand-edited it can split the line in less time than a partial-line
+        // rewrite would take to get right.
+        const int first_line = target->key_line;
+        const int last_line = target->value_end_line;
+        for (const auto& other : scanned.entries) {
+            if (&other == target) continue;
+            if (other.key_line > last_line || other.value_end_line < first_line) continue;
+            return Error(409, "project.godot line " + std::to_string(other.line) + " holds " +
+                                  settingName(other) + " as well as " + setting +
+                                  ", and this writes whole lines, so changing one would delete "
+                                  "the other. A value ending does not end the line for Godot: it "
+                                  "carries on reading, and both keys are settings the project "
+                                  "runs on. Put them on separate lines and write again.");
+        }
+        // The same hazard with the key rather than the value: a key Godot
+        // built by joining a line that has no `=` into this one lives on more
+        // lines than the rewrite replaces, so the leftover tokens would join
+        // forward again and the setting written would not be the setting
+        // asked for (#813 is how a project gets here).
+        if (target->joined) {
+            return Error(409, "Godot registers this setting by joining line " +
+                                  std::to_string(target->key_line) + " into line " +
+                                  std::to_string(target->line) + ", so its name is spread over "
+                                  "more lines than a rewrite of the assignment replaces and the "
+                                  "text above would join forward into whatever is written here. "
+                                  "Move or delete line " + std::to_string(target->key_line) +
+                                  " before writing to " + setting + ".");
+        }
     }
 
     if (remove && !report.existed) {

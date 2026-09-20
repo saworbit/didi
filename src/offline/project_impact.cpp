@@ -232,16 +232,27 @@ void collectProjectSettingImpacts(const std::filesystem::path& root, const std::
                scanned.entries[next_entry].line < number) {
             ++next_entry;
         }
-        const config_file::Entry* entry = nullptr;
-        if (next_entry < scanned.entries.size() && scanned.entries[next_entry].line == number) {
-            entry = &scanned.entries[next_entry];
+        // Every key on this line, not the first one. A value ending does not
+        // end the line, so `a=1 b=2` is two settings both recorded against
+        // this line number, and taking the first left the second unreported
+        // (#821). The impact is the line either way -- detail carries the
+        // whole line -- so a match on any key counts once.
+        size_t past_line = next_entry;
+        while (past_line < scanned.entries.size() &&
+               scanned.entries[past_line].line == number) {
+            ++past_line;
         }
+        const auto anyEntry = [&](const auto& predicate) {
+            for (size_t index = next_entry; index < past_line; ++index) {
+                if (predicate(scanned.entries[index])) return true;
+            }
+            return false;
+        };
         if (section == "autoload") {
             // A path target is matched against the whole line, so a note that
             // carries the path is reported too.
-            const bool names_target = file_target
-                                          ? line.find(target) != std::string::npos
-                                          : entry != nullptr && namesAutoload(*entry);
+            const bool names_target =
+                file_target ? line.find(target) != std::string::npos : anyEntry(namesAutoload);
             if (names_target) {
                 out.push_back({"res://project.godot", "autoload", number, detailFrom(line)});
             }
@@ -250,8 +261,11 @@ void collectProjectSettingImpacts(const std::filesystem::path& root, const std::
         // Only a path target outside [autoload]. A bare identifier would match
         // setting keys that have nothing to do with the symbol, and a false
         // impact is worse here than a missing one is elsewhere.
-        if (!file_target || entry == nullptr) return;
-        if (entry->value_text.find(target) == std::string::npos) return;
+        if (!file_target) return;
+        const auto valueNamesTarget = [&target](const config_file::Entry& entry) {
+            return entry.value_text.find(target) != std::string::npos;
+        };
+        if (!anyEntry(valueNamesTarget)) return;
         out.push_back({"res://project.godot", "project_setting", number, detailFrom(line)});
     });
 }

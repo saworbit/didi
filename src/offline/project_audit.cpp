@@ -55,9 +55,10 @@ bool mayContain(const std::string& text, std::initializer_list<const char*> lite
 // every other answer about the project describes a project that does not run,
 // and neither was reported anywhere until now (#817, #818).
 //
-// The scan computes both facts already. `complete` is false exactly when the
-// file ends inside a value, which is the case Godot answers with
-// ERR_PARSE_ERROR. `key` against `key_on_line` is the name the engine
+// The scan computes all three facts already. `complete` is false exactly when
+// the file ends inside a value, which is one of the cases Godot answers with
+// ERR_PARSE_ERROR. `valueProblem` is the rest of that set that a reader can
+// prove without the engine. `key` against `key_on_line` is the name the engine
 // registers against the name the line looks like it declares, and they differ
 // when a line with no `=` joined forward into this one.
 json projectSettingsIssues(const std::string& text, size_t max_findings) {
@@ -79,6 +80,24 @@ json projectSettingsIssues(const std::string& text, size_t max_findings) {
             finding["line"] = scanned.entries.back().line;
         }
         issues.push_back(std::move(finding));
+    }
+    for (const auto& entry : scanned.entries) {
+        if (issues.size() >= max_findings) break;
+        // Balanced is not loadable. `config/broken=)` closes every bracket it
+        // opens and is still ERR_PARSE_ERROR, so the audit answered
+        // project_settings_issue_count: 0 for a project that does not open
+        // (#820).
+        const auto problem = config_file::valueProblem(entry.value_text);
+        if (problem.empty()) continue;
+        issues.push_back(
+            {{"kind", "unloadable_setting_value"},
+             {"section", entry.section},
+             {"key", entry.key},
+             {"line", entry.line},
+             {"detail", "Godot's parser refuses this value, because " + problem +
+                            ". The engine answers ERR_PARSE_ERROR for the whole file, so the "
+                            "project does not open and none of the settings in it are what it "
+                            "runs on."}});
     }
     for (const auto& entry : scanned.entries) {
         if (!entry.joined || entry.key == entry.key_on_line) continue;
@@ -439,11 +458,14 @@ json auditProject(const std::string& root_dir, const ProjectAuditOptions& option
         "source_newer_than_output compares filesystem modification times. It is "
         "evidence that reimport may be needed, not Godot's checksum, importer-version, "
         "or settings-validity verdict.",
-        "project_settings_issues reports the two states of project.godot that a "
+        "project_settings_issues reports the three states of project.godot that a "
         "reader can see without the engine: a file that ends part-way through a "
-        "value, and a setting registered under a name the join built. It is not a "
-        "full parse, so a value that is malformed in some other way is not reported "
-        "and an empty list is not a promise that Godot will load the file."
+        "value, a value the parser cannot start, and a setting registered under a "
+        "name the join built. It is not a full parse, so a constructor with the "
+        "wrong arity, one the engine does not know, and a Resource() whose file is "
+        "missing are all ERR_PARSE_ERROR and none of them is reported. An empty "
+        "list is not a promise that Godot will load the file; a finding is a "
+        "promise that it will not."
     });
     return result;
 }

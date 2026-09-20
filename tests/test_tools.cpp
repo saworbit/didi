@@ -1611,6 +1611,91 @@ static void test_audit_reports_a_project_godot_godot_refuses_to_parse() {
     ASSERT_EQ(finding["line"], 5);
 }
 
+static void test_impact_reports_the_second_setting_on_a_line() {
+    // Break caught: the walk took the first entry on a line and left the
+    // second unreported, so a rename of a file named only by the second key
+    // answered impact_count: 0 (#821).
+    ScopedToolProject project("impact-two-keys-one-line");
+    writeAuditFile("project.godot",
+        "config_version=5\n"
+        "\n"
+        "[application]\n"
+        "\n"
+        "config/name=\"Pair\" config/icon=\"res://icon.svg\"\n");
+    writeAuditFile("icon.svg", "svg-bytes");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const auto report = didi::json::parse(
+        registry.callTool("project_analyze_impact", didi::json{{"target", "res://icon.svg"}})
+            .content[0].text);
+    size_t manifest_impacts = 0;
+    for (const auto& entry : report["impacts"]) {
+        if (entry["path"] != "res://project.godot") continue;
+        ++manifest_impacts;
+        ASSERT_EQ(entry["kind"], "project_setting");
+        ASSERT_EQ(entry["line"], 5);
+    }
+    ASSERT_EQ(manifest_impacts, 1u);
+
+    // The [autoload] branch is the one that matters most, because the key is
+    // the definition of a global and a rename that does not report it drops the
+    // singleton (#792). The second key on the line has to reach the report too.
+    ScopedToolProject autoloads("impact-two-autoloads-one-line");
+    writeAuditFile("project.godot",
+        "config_version=5\n"
+        "\n"
+        "[autoload]\n"
+        "\n"
+        "First=\"*res://first.gd\" Second=\"*res://second.gd\"\n");
+    writeAuditFile("first.gd", "extends Node\n");
+    writeAuditFile("second.gd", "extends Node\n");
+    registry.registerAllDefaultTools();
+
+    const auto second = didi::json::parse(
+        registry.callTool("project_analyze_impact", didi::json{{"target", "Second"}})
+            .content[0].text);
+    size_t autoload_impacts = 0;
+    for (const auto& entry : second["impacts"]) {
+        if (entry["kind"] != "autoload") continue;
+        ++autoload_impacts;
+        ASSERT_EQ(entry["path"], "res://project.godot");
+        ASSERT_EQ(entry["line"], 5);
+    }
+    ASSERT_EQ(autoload_impacts, 1u);
+}
+
+static void test_audit_reports_a_balanced_project_godot_that_still_will_not_load() {
+    // Break caught: Scan::complete counts brackets and Godot parses a value,
+    // so a project.godot that closes everything it opens and is still
+    // ERR_PARSE_ERROR came back with project_settings_issue_count: 0 (#820).
+    ScopedToolProject project("audit-balanced-broken-project-godot");
+    writeAuditFile("project.godot",
+        "config_version=5\n"
+        "\n"
+        "[application]\n"
+        "\n"
+        "config/name=\"Balanced\"\n"
+        "config/broken=)\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const auto report = didi::json::parse(
+        registry.callTool("project_audit_assets",
+                          didi::json{{"include_dead_signals", false},
+                                     {"include_import_health", false}})
+            .content[0].text);
+
+    ASSERT_TRUE(report.contains("project_settings_issues"));
+    ASSERT_EQ(report["project_settings_issue_count"], 1u);
+    const auto& finding = report["project_settings_issues"][0];
+    ASSERT_EQ(finding["kind"], "unloadable_setting_value");
+    ASSERT_EQ(finding["key"], "config/broken");
+    ASSERT_EQ(finding["line"], 6);
+}
+
 static void test_local_work_is_not_reported_as_a_fallback() {
     // Break caught: 26 tools reported execution_mode offline_fallback with a
     // healthy editor attached. offline_fallback is what this server says when
@@ -7197,6 +7282,10 @@ struct RegisterToolTests {
                      test_audit_reports_what_is_wrong_with_project_godot_itself);
         registerTest("Tools.AuditReportsUnparseableProjectGodot",
                      test_audit_reports_a_project_godot_godot_refuses_to_parse);
+        registerTest("Tools.AuditReportsUnloadableSettingValue",
+                     test_audit_reports_a_balanced_project_godot_that_still_will_not_load);
+        registerTest("Tools.ImpactReportsSecondSettingOnALine",
+                     test_impact_reports_the_second_setting_on_a_line);
         registerTest("Tools.LocalWorkIsNotAFallback",
                      test_local_work_is_not_reported_as_a_fallback);
         registerTest("Tools.DryRunReadsItsTarget",

@@ -98,6 +98,13 @@ struct Scan {
 //     is the one thing that does comment out the rest of a line, at any
 //     bracket depth, which is what the banner Godot writes at the top of every
 //     project.godot documents.
+//   * An identifier does not end a value. It is a value on its own only for
+//     the seven names below; otherwise it names a constructor or a typed
+//     container, and the parser skips whitespace -- including a line break --
+//     to find the `(` or `[` that follows. `Vector2 (1, 2)`, `Vector2` with
+//     `(1, 2)` on the line below, and `Array[int]([1, 2])` all load, so a
+//     reader that ended the value at the space or at the `]` built a key out
+//     of the rest and reported a setting the engine does not have.
 //
 // Section headers come from here too. The name is the text between the
 // brackets, trimmed: Godot reads `[ application ]` and a tab-padded header as
@@ -106,5 +113,40 @@ struct Scan {
 // `[...]` line is only a header where a key could start, which is why this is
 // the only place that decides it.
 Scan scan(std::string_view text);
+
+// Why Godot's parser refuses this value text, or empty when nothing about it
+// proves that it does.
+//
+// `Scan::complete` counts brackets, because that is what the walk it falls out
+// of can count. Godot parses a value, so a file that is bracket-balanced and
+// still ERR_PARSE_ERROR was read, previewed and written as though it loaded
+// (#820). `a=)`, `a=nonsense`, `a={1 2}` and `a=[1,,2]` are all err 43 on
+// 4.5.1, 4.6.2 and 4.7.2, and all four are balanced.
+//
+// This is not a VariantParser and does not try to be one. It reports only what
+// it can prove, and accepts everything else:
+//
+//   * A value that is empty, begins with a closer or a separator, or begins
+//     with `(`. None of those is the start of any Variant.
+//   * A bare identifier that is not `true`, `false`, `null`, `nil`, `nan`,
+//     `inf` or `inf_neg` and is not followed by a `(` or a `[`. The match is
+//     exact: `True`, `NAN` and `Vector2.ZERO` are all err 43.
+//   * `&` or `@` not immediately followed by a quote. `&"a"` is a StringName
+//     and `& "a"` is err 43.
+//   * An array or dictionary whose elements are not separated the way the
+//     parser requires. A trailing comma is allowed, `[1,,2]` and `{1 2}` are
+//     not.
+//
+// A constructor with the wrong arity, one the engine does not know, and a
+// `Resource(...)` whose file is missing are all err 43 and none is reported
+// here, because deciding them needs the engine's own tables and a reader that
+// guesses at those refuses files that load. Everything inside a constructor's
+// argument list is skipped whole for the same reason:
+// `Object(Resource,"resource_local_to_scene":false)` is a bare identifier
+// followed by named arguments, which is a shape no other value has.
+//
+// So an empty answer is not a promise that Godot will load the value. A
+// non-empty one is a promise that it will not.
+std::string valueProblem(std::string_view value_text);
 
 } // namespace didi::config_file
