@@ -30,6 +30,7 @@
 #include <mutex>
 #include <optional>
 #include <set>
+#include <sstream>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -7088,28 +7089,15 @@ Result<bool> projectFileDefinesInputAction(const std::string& action) {
     std::ifstream file(std::filesystem::path(directory.value()) / "project.godot");
     if (!file.is_open()) return false;
 
-    bool in_input_section = false;
-    std::string line;
-    while (std::getline(file, line)) {
-        const auto trimmed = strings::trim(line);
-        if (trimmed.empty() || trimmed[0] == ';') continue;
-        if (const auto header = didi::config_file::sectionName(trimmed)) {
-            // The section name is the bracket text, trimmed. Godot reads
-            // `[ input ]` as the input section, so comparing the whole line
-            // read a hand-spaced file as one that defines no action and the
-            // removal refused a name that is there (#809).
-            in_input_section = *header == "input";
-            continue;
-        }
-        if (!in_input_section) continue;
-        // Godot writes the action name bare, or quoted when it needs escaping.
-        const auto equals = trimmed.find('=');
-        if (equals == std::string::npos) continue;
-        auto key = strings::trim(trimmed.substr(0, equals));
-        if (key.size() >= 2 && key.front() == '"' && key.back() == '"') {
-            key = key.substr(1, key.size() - 2);
-        }
-        if (key == action) return true;
+    std::ostringstream contents;
+    contents << file.rdbuf();
+    // The action names the engine registers. Godot writes the name bare, or
+    // quoted when it needs the spaces, and the value is a dictionary spread
+    // over the four lines below it -- none of which a line-at-a-time reader
+    // gets right on its own (#813).
+    for (const auto& entry : didi::config_file::scan(contents.str()).entries) {
+        if (entry.section != "input") continue;
+        if (entry.key == action) return true;
     }
     return false;
 }

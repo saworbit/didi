@@ -226,6 +226,77 @@ void writes_the_literals_the_live_converter_builds() {
     ASSERT_TRUE(settingLiteral(deep).isErr());
 }
 
+void reads_and_rewrites_a_key_whose_spelling_carries_spaces() {
+    // Godot drops the whitespace inside a key, so `config / name` is
+    // application/config/name and the last spelling in the file wins. Matching
+    // the key as a prefix of the line missed it, previewed exists: false, and
+    // appended a duplicate key Godot's own writer would never produce (#813).
+    ProjectFixture project("spaced-key",
+                           "[application]\n"
+                           "config / name=\"before\"\n");
+    const auto read = readProjectSetting(project.root(), "application/config/name");
+    ASSERT_TRUE(read.isOk());
+    ASSERT_TRUE(read.value().existed);
+    ASSERT_EQ(read.value().literal, "\"before\"");
+
+    const auto write = writeProjectSetting(project.root(), "application/config/name", "after", false);
+    ASSERT_TRUE(write.isOk());
+    ASSERT_TRUE(write.value().existed);
+    const auto text = project.read();
+    ASSERT_TRUE(text.find("config/name=\"after\"") != std::string::npos);
+    ASSERT_TRUE(text.find("config / name") == std::string::npos);
+}
+
+void treats_a_key_a_bare_note_swallowed_as_a_key_that_is_not_there() {
+    // A line with no `=` joins forward, so this file registers
+    // application/#anoteconfig/name and has no config/name of its own. Reading
+    // it as present, and rewriting that line, leaves a setting that still does
+    // not register (#813).
+    ProjectFixture project("swallowed-key",
+                           "[application]\n"
+                           "# a note\n"
+                           "config/name=\"invisible\"\n");
+    const auto read = readProjectSetting(project.root(), "application/config/name");
+    ASSERT_TRUE(read.isOk());
+    ASSERT_TRUE(!read.value().existed);
+
+    // The write lands as a new line at the end of the section, after the key
+    // the note ate, so the engine registers it and the last one wins.
+    const auto write = writeProjectSetting(project.root(), "application/config/name", "landed", false);
+    ASSERT_TRUE(write.isOk());
+    ASSERT_TRUE(!write.value().existed);
+    const auto text = project.read();
+    ASSERT_TRUE(text.find("# a note") != std::string::npos);
+    ASSERT_TRUE(text.find("config/name=\"invisible\"") != std::string::npos);
+    ASSERT_TRUE(text.find("config/name=\"landed\"") != std::string::npos);
+    ASSERT_TRUE(text.find("config/name=\"invisible\"") < text.find("config/name=\"landed\""));
+}
+
+void replaces_a_value_that_spans_lines_without_leaving_its_tail_behind() {
+    // Godot writes a dictionary over several lines. Replacing only the line
+    // holding the `=` left `}` behind, and a line with no `=` joins forward
+    // into the next key, which would have destroyed the setting below it.
+    ProjectFixture project("multiline-value",
+                           "[shader_globals]\n"
+                           "tint={\n"
+                           "\"type\": \"color\",\n"
+                           "\"value\": Color(1, 1, 1, 1)\n"
+                           "}\n"
+                           "scale=2.0\n");
+    const auto write = writeProjectSetting(project.root(), "shader_globals/tint", 4, false);
+    ASSERT_TRUE(write.isOk());
+    ASSERT_TRUE(write.value().existed);
+    const auto text = project.read();
+    ASSERT_TRUE(text.find("tint=4") != std::string::npos);
+    ASSERT_TRUE(text.find("\"type\"") == std::string::npos);
+    ASSERT_TRUE(text.find("}") == std::string::npos);
+    ASSERT_TRUE(text.find("scale=2.0") != std::string::npos);
+
+    const auto scale = readProjectSetting(project.root(), "shader_globals/scale");
+    ASSERT_TRUE(scale.isOk());
+    ASSERT_TRUE(scale.value().existed);
+}
+
 struct Register {
     Register() {
         registerTest("project_settings_file.bootstrap_section",
@@ -240,6 +311,12 @@ struct Register {
         registerTest("project_settings_file.reserved_namespaces", refuses_the_namespaces_the_typed_tools_own);
         registerTest("project_settings_file.line_endings", keeps_the_line_endings_the_file_arrived_with);
         registerTest("project_settings_file.literals", writes_the_literals_the_live_converter_builds);
+        registerTest("project_settings_file.spaced_key",
+                     reads_and_rewrites_a_key_whose_spelling_carries_spaces);
+        registerTest("project_settings_file.key_a_note_swallowed",
+                     treats_a_key_a_bare_note_swallowed_as_a_key_that_is_not_there);
+        registerTest("project_settings_file.multiline_value",
+                     replaces_a_value_that_spans_lines_without_leaving_its_tail_behind);
     }
 } registrar;
 

@@ -197,6 +197,54 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **A key is the tokens joined, not the text before the first `=`.** Godot does
+  not read a ConfigFile key as the text on one line. It reads a run of tokens,
+  joined, with every space between them dropped, and a line that has no `=` does
+  not end the key: it joins forward into the next line that does, swallowing any
+  `[section]` header on the way. Asked on 4.5.1, 4.6.2 and 4.7.2, all three
+  identical. The consequence people actually hit is writing `# disabled for now`
+  above an `[autoload]` entry, which is the natural way to turn a singleton off
+  by hand and is worse than leaving it on: the script loads under the name
+  `#disabledfornowGood`, so every `Good.` reference in the project fails at run
+  time and `autoload/Good` does not exist. `project_analyze_impact` reported an
+  autoload named `Good`, `project_rename_references` would have rewritten for a
+  name nothing registers, and the user's real fault was the one thing nothing
+  said (#813). The same rule made `config / name` a setting `project_get_setting`
+  could not find and `project_set_setting` appended a duplicate key for, and made
+  the GDScript diagnostics suppress an undefined identifier for a singleton that
+  is not there. Every reader of a ConfigFile now computes the key the way the
+  engine computes it, in one place. That includes the part a line-at-a-time
+  reader gets wrong in the other direction: a value can span lines -- every
+  `[input]` action Godot writes is a dictionary across four or more of them --
+  and those lines are value text, not keys. `project_set_setting` replaces the
+  whole of such a value rather than the first line of it, which used to leave a
+  dangling `}` that would join forward into the setting below.
+
+- **`export_presets.cfg` is read by the same rules as every other ConfigFile.**
+  Its reader still treated `#` as a comment, which is the mistake #810 fixed
+  elsewhere, and it could not take the one-token fix because of what sits under
+  it: a `#` line with no `=` is not a comment and not a broken line either, it is
+  a key that eats what follows. So a trailing `# note` had to stay harmless while
+  a note above a key had to stop the presets being reported as though they were
+  intact (#812). They now read as the engine reads them: a trailing note leaves
+  both presets, a note that swallows `platform` leaves a preset with no platform
+  and the file is refused as unparseable, and a file with content but no section
+  the engine honours is refused rather than reported as a project with no
+  presets. An ini whose sections are all something else is still a project with
+  no export presets, not a broken file.
+
+- **A spaced header hides nothing from the last two readers.** #809 fixed the
+  section rule in the four readers of `project.godot` and left two out on
+  purpose, because their fix was not the same one-token change. `[ preset.0 ]`
+  matched neither anchored pattern in `readExportPresets`, so every key under it
+  was skipped and a project with a working export preset reported as a project
+  with none, with nothing attached to say why -- the half that matters, because
+  `export_presets.cfg` is committed, hand-edited and generated for CI exports.
+  `[ remap ]` and `[ deps ]` were compared as whole lines in the `.import`
+  reader, so `project_audit_assets` reported `invalid_import_metadata` against a
+  file the engine loads without complaint (#814). Both now name their sections
+  through the same rule as the rest.
+
 - **A `#` line in `project.godot` is a setting, not a comment.** `;` starts a
   comment in a Godot ConfigFile. `#` does not: asked on 4.5.1, 4.6.2 and 4.7.2,
   `# Hash="*res://a.gd"` under `[autoload]` registers the setting

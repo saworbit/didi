@@ -368,6 +368,56 @@ TEST(Phase5, ListsExportPresetsWithoutOptionSecrets) {
     ASSERT_TRUE(payload.dump().find("secret/token") == std::string::npos);
 }
 
+TEST(Phase5, ReadsExportPresetsTheWayTheEngineReadsThem) {
+    // Asked on 4.5.1, 4.6.2 and 4.7.2. `[ preset.0 ]` is the section preset.0,
+    // so an anchored whole-line pattern skipped every key under it and a
+    // project with a working export preset reported as a project with none,
+    // with nothing attached to say why (#814).
+    {
+        ScopedPhase5Project project("preset-spaced-header");
+        std::ofstream("export_presets.cfg")
+            << "[ preset.0 ]\nname=\"Spaced\"\nplatform=\"Linux/X11\"\n"
+               "[ preset.0.options ]\nsecret/token=\"do-not-return\"\n";
+        auto& registry = didi::mcp::ToolRegistry::instance();
+        registry.registerAllDefaultTools();
+        const auto result = registry.callTool("project_list_export_presets", didi::json::object());
+        ASSERT_TRUE(!result.isError);
+        const auto payload = toolPayload(result);
+        ASSERT_EQ(payload["preset_count"], 1);
+        ASSERT_EQ(payload["presets"][0]["name"], "Spaced");
+        ASSERT_TRUE(payload.dump().find("do-not-return") == std::string::npos);
+    }
+
+    // `#` is not a comment in a ConfigFile, but a `#` line with no `=` after it
+    // is dropped by the engine and load() still returns OK. Calling that file
+    // broken is #651's mistake with the sign flipped (#812).
+    {
+        ScopedPhase5Project project("preset-trailing-note");
+        std::ofstream("export_presets.cfg")
+            << "[preset.0]\nname=\"Kept\"\nplatform=\"Windows Desktop\"\n# a note\n";
+        auto& registry = didi::mcp::ToolRegistry::instance();
+        registry.registerAllDefaultTools();
+        const auto result = registry.callTool("project_list_export_presets", didi::json::object());
+        ASSERT_TRUE(!result.isError);
+        const auto payload = toolPayload(result);
+        ASSERT_EQ(payload["preset_count"], 1);
+        ASSERT_EQ(payload["presets"][0]["name"], "Kept");
+    }
+
+    // The destructive half. A `#` line with a key under it joins forward: the
+    // engine registers `#anoteplatform` and the preset has no platform at all,
+    // so the presets are not what the file appears to say.
+    {
+        ScopedPhase5Project project("preset-note-swallows");
+        std::ofstream("export_presets.cfg")
+            << "[preset.0]\nname=\"Eaten\"\n# a note\nplatform=\"Windows Desktop\"\n";
+        auto& registry = didi::mcp::ToolRegistry::instance();
+        registry.registerAllDefaultTools();
+        const auto result = registry.callTool("project_list_export_presets", didi::json::object());
+        ASSERT_TRUE(result.isError);
+    }
+}
+
 // Godot writes export_presets.cfg the first time a preset is added, so a
 // project that has never configured an export simply has none. That used to be
 // a file error naming a path the user never created (#403).

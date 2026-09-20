@@ -4,7 +4,6 @@
 #include "didi/common/project_path.hpp"
 #include "didi/offline/project_text_scan.hpp"
 #include "didi/offline/project_search.hpp"
-#include "didi/offline/project_settings_file.hpp"
 #include "didi/common/atomic_write.hpp"
 #include <string_view>
 #include <vector>
@@ -200,31 +199,49 @@ void collectProjectSettingImpacts(const std::filesystem::path& root, const std::
     const auto text = readFile(root / "project.godot");
     if (text.empty()) return;
 
-    bool in_autoload = false;
+    // The engine's own reading of the file: the headers it honours and the key
+    // each line registers. A header the line above swallowed is not a header,
+    // and the key is the tokens joined with the whitespace dropped, not the
+    // text before the first `=` (#813).
+    const auto scanned = config_file::scan(text);
+
+    // A singleton whose key the join mangled still has its name written on this
+    // line, and a rename has to update it. `# disabled for now` above
+    // `Good="*res://good.gd"` registers `#disabledfornowGood`, so nothing named
+    // Good is running -- but answering impact_count: 0 is what this tool uses
+    // to mean safe, which is the mistake #802 and #810 both were.
+    const auto namesAutoload = [&target](const config_file::Entry& entry) {
+        return entry.key == target || (entry.joined && entry.key_on_line == target);
+    };
+
+    std::string section;
+    size_t next_header = 0;
+    size_t next_entry = 0;
     forEachLine(text, [&](const std::string& line, int number) {
-        const auto trimmed = strings::trim(line);
-        if (!trimmed.empty() && trimmed.front() == '[') {
-            // The section name is the text inside the brackets, trimmed. Godot
-            // reads `[ autoload ]` as the autoload section, so a file that uses
-            // it has autoloads and this saw none.
-            const auto section = config_file::sectionName(trimmed);
-            in_autoload = section.has_value() && *section == "autoload";
+        if (next_header < scanned.headers.size() && scanned.headers[next_header].line == number) {
+            section = scanned.headers[next_header].name;
+            ++next_header;
             return;
         }
-        // `;` is the only comment character here. Treating `#` as one skipped a
-        // line Godot registers, so an autoload a user believed they had
-        // commented out loads on every run and the tool that answers "what
-        // depends on this script" said nothing does (#810).
+        // `;` is the only comment character here, and it is one wherever a key
+        // could start. `#` is not: the line below it is a setting the engine
+        // registers (#810).
+        const auto trimmed = strings::trim(line);
         if (trimmed.empty() || config_file::isComment(trimmed)) return;
-        if (in_autoload) {
-            // The key is the text before the first =, trimmed, compared whole.
-            // A prefix match on `Name=` read `GameState = "*res://..."` as a
-            // line that names nothing, so a working singleton came back
-            // impact_count: 0 -- the answer this tool uses to mean safe (#802).
-            // Godot registers both spellings identically.
-            const bool names_target =
-                file_target ? trimmed.find(target) != std::string::npos
-                            : assignsKey(trimmed, target);
+        while (next_entry < scanned.entries.size() &&
+               scanned.entries[next_entry].line < number) {
+            ++next_entry;
+        }
+        const config_file::Entry* entry = nullptr;
+        if (next_entry < scanned.entries.size() && scanned.entries[next_entry].line == number) {
+            entry = &scanned.entries[next_entry];
+        }
+        if (section == "autoload") {
+            // A path target is matched against the whole line, so a note that
+            // carries the path is reported too.
+            const bool names_target = file_target
+                                          ? line.find(target) != std::string::npos
+                                          : entry != nullptr && namesAutoload(*entry);
             if (names_target) {
                 out.push_back({"res://project.godot", "autoload", number, detailFrom(line)});
             }
@@ -233,10 +250,8 @@ void collectProjectSettingImpacts(const std::filesystem::path& root, const std::
         // Only a path target outside [autoload]. A bare identifier would match
         // setting keys that have nothing to do with the symbol, and a false
         // impact is worse here than a missing one is elsewhere.
-        if (!file_target) return;
-        const auto equals = trimmed.find('=');
-        if (equals == std::string::npos) return;
-        if (trimmed.find(target, equals + 1) == std::string::npos) return;
+        if (!file_target || entry == nullptr) return;
+        if (entry->value_text.find(target) == std::string::npos) return;
         out.push_back({"res://project.godot", "project_setting", number, detailFrom(line)});
     });
 }

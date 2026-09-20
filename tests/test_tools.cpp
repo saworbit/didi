@@ -6043,6 +6043,51 @@ static void test_rename_reports_the_autoload_line_that_defines_the_name() {
     registry.setIpcClient(nullptr);
 }
 
+static void test_a_bare_note_above_an_autoload_is_not_the_name_it_looks_like() {
+    // Godot builds a project.godot key by joining tokens, and a line with no
+    // `=` does not end the key -- it joins forward into the next line that has
+    // one. So `# disabled for now` above `Good="*res://scripts/good.gd"`
+    // registers the singleton as `#disabledfornowGood`: the script still runs,
+    // every `Good.` reference in the project fails, and `autoload/Good` does not
+    // exist. Confirmed on 4.5.1, 4.6.2 and 4.7.2 (#813).
+    ScopedToolProject project("project-godot-joined-key");
+    writeAuditFile("project.godot",
+                   "config_version=5\n"
+                   "\n"
+                   "[autoload]\n"
+                   "\n"
+                   "# disabled for now\n"
+                   "Good=\"*res://scripts/good.gd\"\n"
+                   "Plain = \"*res://scripts/plain.gd\"\n");
+    writeAuditFile("scripts/good.gd", "extends Node\n");
+    writeAuditFile("scripts/plain.gd", "extends Node\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    registry.setIpcClient(nullptr);
+
+    // The line is still where the name is written, so a rename still has to see
+    // it. Answering impact_count: 0 is what this tool uses to mean safe.
+    const auto joined = registry.callTool("project_analyze_impact",
+                                          didi::json{{"target", "Good"}});
+    ASSERT_TRUE(!joined.isError);
+    const auto joined_payload = didi::json::parse(joined.content[0].text);
+    ASSERT_EQ(joined_payload["counts_by_kind"]["autoload"].get<size_t>(), 1u);
+
+    // The control: a spaced key with nothing above it is the name it looks
+    // like, and a name that is only a suffix of another key is not a site.
+    const auto plain = registry.callTool("project_analyze_impact",
+                                         didi::json{{"target", "Plain"}});
+    ASSERT_TRUE(!plain.isError);
+    ASSERT_EQ(didi::json::parse(plain.content[0].text)["counts_by_kind"]["autoload"].get<size_t>(),
+              1u);
+
+    const auto absent = registry.callTool("project_analyze_impact",
+                                          didi::json{{"target", "ood"}});
+    ASSERT_TRUE(!absent.isError);
+    ASSERT_EQ(didi::json::parse(absent.content[0].text)["impact_count"].get<size_t>(), 0u);
+}
+
 static void test_a_hash_line_in_project_godot_is_a_setting_not_a_comment() {
     // `;` starts a comment in a Godot ConfigFile. `#` does not. Asked on 4.5.1,
     // 4.6.2 and 4.7.2, `# Hash="*res://a.gd"` under [autoload] registers the
@@ -7154,6 +7199,8 @@ struct RegisterToolTests {
                      test_a_spaced_autoload_key_is_the_same_key);
         registerTest("Tools.ProjectGodotHashLineIsASetting",
                      test_a_hash_line_in_project_godot_is_a_setting_not_a_comment);
+        registerTest("Tools.ProjectGodotBareNoteJoinsTheKeyBelowIt",
+                     test_a_bare_note_above_an_autoload_is_not_the_name_it_looks_like);
         registerTest("Tools.RenameIsSilentWithoutAnAutoload",
                      test_rename_says_nothing_about_autoloads_when_there_are_none);
         registerTest("Tools.RenameRefusals",

@@ -4,6 +4,7 @@
 #include "didi/common/config_file_syntax.hpp"
 #include "didi/common/project_path.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <fstream>
 #include <limits>
@@ -33,12 +34,6 @@ std::string trimmed(const std::string& text) {
     return text.substr(first, last - first + 1);
 }
 
-std::string valueTextOf(const std::string& line) {
-    const auto equals = line.find('=');
-    if (equals == std::string::npos) return {};
-    return trimmed(line.substr(equals + 1));
-}
-
 Result<std::string> readWholeFile(const std::filesystem::path& path) {
     std::ifstream input(path, std::ios::binary);
     if (!input.is_open()) return Error::notFound("project.godot cannot be opened for reading");
@@ -49,17 +44,6 @@ Result<std::string> readWholeFile(const std::filesystem::path& path) {
 }
 
 } // namespace
-
-// Declared in the header so project_analyze_impact reads an [autoload] key the
-// same way this writer does. Written twice they would drift, and the drift was
-// #802: the same line read as an assignment here and as nothing there.
-bool assignsKey(const std::string& line, const std::string& key) {
-    if (key.empty()) return false;
-    const auto text = trimmed(line);
-    if (text.size() <= key.size() || text.compare(0, key.size(), key) != 0) return false;
-    const auto rest = trimmed(text.substr(key.size()));
-    return !rest.empty() && rest.front() == '=';
-}
 
 Result<std::string> settingLiteral(const json& value, int depth) {
     if (depth > 16) {
@@ -131,19 +115,15 @@ Result<ProjectSettingRead> readProjectSetting(const std::filesystem::path& proje
 
     ProjectSettingRead report;
     report.setting = setting;
-    std::string current_section;
-    std::istringstream stream(contents.value());
-    std::string line;
-    while (std::getline(stream, line)) {
-        if (!line.empty() && line.back() == '\r') line.pop_back();
-        if (const auto header = config_file::sectionName(line)) {
-            current_section = *header;
-            continue;
-        }
-        if (current_section != section) continue;
-        if (!assignsKey(line, key)) continue;
+    // The key the engine registers, not the text before the first `=`. Godot
+    // drops the whitespace inside a key and joins a line that has no `=`
+    // forward into the next line that does, so `config / name` is this setting
+    // and a `# note` above it is not (#813). The last spelling in the file
+    // wins, which is why this keeps reading to the end.
+    for (const auto& entry : config_file::scan(contents.value()).entries) {
+        if (entry.section != section || entry.key != key) continue;
         report.existed = true;
-        report.literal = valueTextOf(line);
+        report.literal = entry.value_text;
     }
     return report;
 }
@@ -195,23 +175,31 @@ Result<ProjectSettingWrite> writeProjectSetting(const std::filesystem::path& pro
         }
     }
 
-    std::string current_section;
+    // Both the headers and the keys come from the engine's own rule. A header
+    // swallowed by the line above it is not a header, and a key built by
+    // joining lines is not this setting, so neither is somewhere to write
+    // (#813).
+    const auto scanned = config_file::scan(contents.value());
     size_t assignment = lines.size();
+    size_t assignment_end = lines.size();
     size_t section_end = lines.size();
     bool section_seen = false;
-    for (size_t index = 0; index < lines.size(); ++index) {
-        if (const auto header = config_file::sectionName(lines[index])) {
-            if (section_seen && section_end == lines.size()) section_end = index;
-            current_section = *header;
-            if (current_section == report.section) section_seen = true;
-            continue;
-        }
-        if (current_section != report.section) continue;
-        if (assignsKey(lines[index], report.key)) {
-            assignment = index;
-            report.existed = true;
-            report.previous_literal = valueTextOf(lines[index]);
-        }
+    for (const auto& header : scanned.headers) {
+        const auto index = static_cast<size_t>(header.line - 1);
+        if (section_seen && section_end == lines.size()) section_end = index;
+        if (header.name == report.section) section_seen = true;
+    }
+    for (const auto& entry : scanned.entries) {
+        if (entry.section != report.section || entry.key != report.key) continue;
+        assignment = static_cast<size_t>(entry.line - 1);
+        // A value can span lines. Replacing only the line holding the `=` left
+        // the rest of an [input]-shaped value behind, and those leftover lines
+        // join forward into whatever key comes next.
+        // Clamped: a value the file never closes runs past the last line, and
+        // that is a file Godot refuses outright rather than one to edit.
+        assignment_end = std::min(static_cast<size_t>(entry.value_end_line), lines.size());
+        report.existed = true;
+        report.previous_literal = entry.value_text;
     }
 
     if (remove && !report.existed) {
@@ -219,9 +207,12 @@ Result<ProjectSettingWrite> writeProjectSetting(const std::filesystem::path& pro
     }
 
     if (remove) {
-        lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(assignment));
+        lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(assignment),
+                    lines.begin() + static_cast<std::ptrdiff_t>(assignment_end));
     } else if (report.existed) {
         lines[assignment] = report.key + "=" + report.literal;
+        lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(assignment + 1),
+                    lines.begin() + static_cast<std::ptrdiff_t>(assignment_end));
     } else if (section_seen) {
         // Land the new key at the end of its section, not at the end of the
         // file, so the section stays one block the way Godot writes it. Any

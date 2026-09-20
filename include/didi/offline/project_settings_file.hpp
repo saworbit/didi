@@ -8,17 +8,6 @@
 
 namespace didi::offline {
 
-// Whether one project.godot line assigns the named key, whatever spacing it
-// uses. Godot's ConfigFile writer emits `key=value`, but `key = value` and a
-// tabbed form register exactly the same setting -- checked on 4.5.1, 4.6.2 and
-// 4.7.2 -- so a hand-edited file is still a file Didi has to read and update
-// rather than treat as a file with no such key (#802).
-//
-// Shared rather than copied. project_analyze_impact had its own prefix match
-// and answered impact_count: 0 for a spaced [autoload] entry, which is the
-// answer that tool uses to mean safe.
-bool assignsKey(const std::string& line, const std::string& key);
-
 // What one offline write did to project.godot.
 //
 // The caller reports these rather than only "persisted", because an offline
