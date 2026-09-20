@@ -25,7 +25,22 @@ namespace fs = std::filesystem;
 
 struct ImportMetadata {
     std::string source;
+    // Every path the sidecar names, for the existence checks. `[remap] path`
+    // and `dest_files` overlap on an ordinary texture, so the same output
+    // appears twice and the order means nothing.
     std::vector<std::string> outputs;
+    // The `dest_files` values alone, in the order the sidecar declares them.
+    // `dest_md5` is one digest over that vector concatenated, so neither the
+    // set above nor any other order reproduces it.
+    std::vector<std::string> dest_files;
+};
+
+// What the record beside the output says about the last import. Either half
+// can be absent: a sidecar that declares no outputs is written with no
+// `dest_md5`, and a record from an older engine may carry only the source.
+struct RecordedDigests {
+    std::optional<std::string> source;
+    std::optional<std::string> destination;
 };
 
 struct ImportIssue {
@@ -290,6 +305,36 @@ std::optional<std::string> md5FileHex(const fs::path& path, size_t max_bytes) {
     return digest.hex();
 }
 
+// One digest over several files concatenated, which is what `dest_md5` is.
+//
+// `FileAccess::get_multiple_md5` opens each path in turn and feeds the bytes
+// into a single MD5 context, so the answer depends on the order of the vector
+// and there is no per-file digest to compare instead. Nothing is claimed
+// unless every file is read whole inside the budget, because a partial
+// concatenation hashes to something that is neither a match nor a real
+// mismatch.
+std::optional<std::string> md5FilesHex(const std::vector<fs::path>& paths, size_t max_bytes) {
+    size_t remaining = max_bytes;
+    Md5Digest digest;
+    for (const auto& path : paths) {
+        std::error_code size_error;
+        const auto size = fs::file_size(path, size_error);
+        if (size_error || size > remaining) return std::nullopt;
+        remaining -= static_cast<size_t>(size);
+        std::ifstream input(path, std::ios::binary);
+        if (!input) return std::nullopt;
+        std::vector<char> chunk(64 * 1024);
+        while (input.read(chunk.data(), static_cast<std::streamsize>(chunk.size())) ||
+               input.gcount() > 0) {
+            digest.update(reinterpret_cast<const unsigned char*>(chunk.data()),
+                          static_cast<size_t>(input.gcount()));
+            if (!input) break;
+        }
+        if (input.bad()) return std::nullopt;
+    }
+    return digest.hex();
+}
+
 bool isPathKey(const std::string& key) {
     if (key == "path") return true;
     if (!strings::startsWith(key, "path.") || key.size() == 5) return false;
@@ -362,6 +407,7 @@ std::optional<ImportMetadata> parseMetadata(const config_file::Scan& scanned) {
             const auto outputs = destinationValues(field.second);
             if (!outputs) return std::nullopt;
             metadata.outputs.insert(metadata.outputs.end(), outputs->begin(), outputs->end());
+            metadata.dest_files = *outputs;
         }
     }
     if (source_assignments != 1 || destination_assignments > 1) return std::nullopt;
@@ -400,20 +446,23 @@ std::optional<fs::path> resolveResourcePath(const fs::path& root, const std::str
     return candidate;
 }
 
-// The digest of the source Godot recorded when it last imported this asset, or
-// nothing where it left no record to read.
+// What Godot recorded when it last imported this asset, or nothing where it
+// left no record to read.
 //
 // `ResourceFormatImporter::get_import_base_path` names the record
-// `<imported dir>/<file name>-<md5 of the res:// path>.md5` and
-// `EditorFileSystem::_test_for_reimport` reads `source_md5` out of it, so this
-// is the file the engine consults and the name it consults it under. The
-// imported directory is taken from an output this sidecar declares rather than
-// assumed to be `res://.godot/imported/`, because the project setting that
-// names it can move it. A symlink is refused here for the reason the scan
-// refuses one anywhere else.
-std::optional<std::string> recordedSourceDigest(const fs::path& root,
-                                                const std::string& source,
-                                                const std::vector<std::string>& outputs) {
+// `<imported dir>/<file name>-<md5 of the res:// path>.md5`, and
+// `EditorFileSystem::_test_for_reimport` reads both `source_md5` and
+// `dest_md5` out of it, so this is the file the engine consults and the name
+// it consults it under. The imported directory is taken from an output this
+// sidecar declares rather than assumed to be `res://.godot/imported/`, because
+// the project setting that names it can move it. A symlink is refused here for
+// the reason the scan refuses one anywhere else.
+//
+// Both halves come back from one read, because they are two keys in one file
+// and the file is opened once per sidecar.
+std::optional<RecordedDigests> recordedDigests(const fs::path& root,
+                                               const std::string& source,
+                                               const std::vector<std::string>& outputs) {
     const auto separator = source.find_last_of('/');
     if (separator == std::string::npos || separator + 1 == source.size()) return std::nullopt;
     const auto record_name = source.substr(separator + 1) + "-" + md5Hex(source) + ".md5";
@@ -433,10 +482,21 @@ std::optional<std::string> recordedSourceDigest(const fs::path& root,
         if (!contents) continue;
         const auto record = config_file::scan(*contents);
         if (!record.complete) continue;
+        RecordedDigests digests;
         for (const auto& entry : record.entries) {
-            if (entry.key != "source_md5") continue;
-            if (const auto recorded = quotedValue(entry.value_text, false)) return recorded;
+            if (entry.key == "source_md5") {
+                if (auto recorded = quotedValue(entry.value_text, false)) {
+                    digests.source = std::move(recorded);
+                }
+            } else if (entry.key == "dest_md5") {
+                if (auto recorded = quotedValue(entry.value_text, false)) {
+                    digests.destination = std::move(recorded);
+                }
+            }
         }
+        // A record with neither key is not a record. Keep walking the declared
+        // outputs rather than stopping on a file that answers nothing.
+        if (digests.source || digests.destination) return digests;
     }
     return std::nullopt;
 }
@@ -561,12 +621,37 @@ json inspectImportHealth(const std::string& root_dir, size_t max_findings) {
         //
         // Read once per sidecar, because the record is about the source and
         // every output of one asset shares it.
-        std::optional<std::string> recorded_digest;
+        std::optional<RecordedDigests> recorded;
         std::optional<std::string> source_digest;
         if (source_exists) {
-            recorded_digest = recordedSourceDigest(root, parsed->source, parsed->outputs);
-            if (recorded_digest) {
-                source_digest = md5FileHex(*source_path, kMaxImportSourceDigestBytes);
+            recorded = recordedDigests(root, parsed->source, parsed->outputs);
+            if (recorded && recorded->source) {
+                // Asked before the file is opened, so that "too large to hash"
+                // and "could not be read" stay apart. They arrived as the same
+                // empty digest before, and the timestamp finding that followed
+                // named a remedy that does nothing for the first of them
+                // (#831).
+                std::error_code size_error;
+                const auto source_bytes = fs::file_size(*source_path, size_error);
+                if (!size_error && source_bytes > kMaxImportSourceDigestBytes) {
+                    metadata_issues.insert(
+                        {metadata_path, "import_freshness_unchecked", parsed->source,
+                         parsed->source,
+                         "Godot recorded a digest for this source and it was not compared, "
+                         "because the source is larger than the " +
+                             std::to_string(kMaxImportSourceDigestBytes / (1024 * 1024)) +
+                             " MiB this audit hashes. Nothing here says whether the asset is "
+                             "current, and reimporting it will not change that."});
+                } else {
+                    source_digest = md5FileHex(*source_path, kMaxImportSourceDigestBytes);
+                    if (!source_digest) {
+                        metadata_issues.insert(
+                            {metadata_path, "import_freshness_unchecked", parsed->source,
+                             parsed->source,
+                             "Godot recorded a digest for this source and it was not compared, "
+                             "because the source could not be read through."});
+                    }
+                }
             }
         }
 
@@ -585,18 +670,22 @@ json inspectImportHealth(const std::string& root_dir, size_t max_findings) {
                 continue;
             }
             if (!source_exists) continue;
-            if (source_digest) {
+            if (recorded && recorded->source) {
                 // The engine's own comparison. A match is not a finding, and no
-                // timestamp is read either way.
-                if (*source_digest != *recorded_digest) {
+                // timestamp is read either way. Where the digest could not be
+                // taken the asset is already reported as unchecked above, and a
+                // timestamp answer is not offered instead: the record proves
+                // the engine will compare digests, so the weaker signal would
+                // be wrong for the same reason it was wrong in #827.
+                if (source_digest && *source_digest != *recorded->source) {
                     metadata_issues.insert({metadata_path, "source_changed_since_import",
                                             parsed->source, output});
                 }
                 continue;
             }
-            // No record to read, or a source too large to hash inside the
-            // budget. Timestamps are what is left, and they are reported under
-            // the name that says so.
+            // No record to read. Timestamps are what is left, they are reported
+            // under the name that says so, and the remedy is to open the
+            // project in the editor once so a record exists.
             std::error_code source_time_error;
             std::error_code output_time_error;
             const auto source_time = fs::last_write_time(*source_path, source_time_error);
@@ -604,6 +693,66 @@ json inspectImportHealth(const std::string& root_dir, size_t max_findings) {
             if (!source_time_error && !output_time_error && source_time > output_time) {
                 metadata_issues.insert({metadata_path, "source_newer_than_output", parsed->source,
                                         output});
+            }
+        }
+
+        // The other half of the same record (#830). A changed source is usually
+        // deliberate and a changed output never is, so it is a finding of its
+        // own rather than another source_changed_since_import.
+        //
+        // `dest_md5` is one digest over the `dest_files` values concatenated in
+        // the order the sidecar declares them, so `outputs` cannot stand in for
+        // them: it merges the `[remap] path` values in as well, and on an
+        // ordinary texture that lists the same file twice.
+        if (recorded && recorded->destination && !parsed->dest_files.empty()) {
+            std::vector<fs::path> dest_paths;
+            size_t dest_bytes = 0;
+            bool readable = true;
+            for (const auto& dest : parsed->dest_files) {
+                const auto dest_path = resolveResourcePath(root, dest);
+                std::error_code dest_error;
+                if (!dest_path || !fs::is_regular_file(*dest_path, dest_error) || dest_error) {
+                    // Already reported as a missing output or invalid metadata
+                    // by the loop above. A digest over a set with a hole in it
+                    // is neither a match nor a real mismatch.
+                    readable = false;
+                    break;
+                }
+                std::error_code size_error;
+                const auto size = fs::file_size(*dest_path, size_error);
+                if (size_error) {
+                    readable = false;
+                    break;
+                }
+                dest_bytes += static_cast<size_t>(size);
+                dest_paths.push_back(*dest_path);
+            }
+            if (readable && dest_bytes > kMaxImportOutputDigestBytes) {
+                metadata_issues.insert(
+                    {metadata_path, "import_freshness_unchecked", parsed->source, parsed->source,
+                     "Godot recorded a digest for the outputs of this import and it was not "
+                     "compared, because they come to more than the " +
+                         std::to_string(kMaxImportOutputDigestBytes / (1024 * 1024)) +
+                         " MiB this audit hashes."});
+            } else if (readable) {
+                const auto dest_digest = md5FilesHex(dest_paths, kMaxImportOutputDigestBytes);
+                if (!dest_digest) {
+                    metadata_issues.insert(
+                        {metadata_path, "import_freshness_unchecked", parsed->source,
+                         parsed->source,
+                         "Godot recorded a digest for the outputs of this import and it was not "
+                         "compared, because one of them could not be read through."});
+                } else if (*dest_digest != *recorded->destination) {
+                    metadata_issues.insert(
+                        {metadata_path, "output_changed_since_import", parsed->source,
+                         parsed->source,
+                         "The " + std::to_string(parsed->dest_files.size()) +
+                             " file(s) this import wrote no longer hash to the dest_md5 Godot "
+                             "recorded, so the editor reimports the asset the next time it "
+                             "scans the project without a warm cache. Nothing edits an imported "
+                             "output on purpose, so this is a truncated write, a bad merge or a "
+                             "partial checkout rather than a change to undo."});
+                }
             }
         }
         retainMetadataIssues();
@@ -618,12 +767,12 @@ json inspectImportHealth(const std::string& root_dir, size_t max_findings) {
             {"source", issue.source},
             {"target", issue.target}
         };
-        // Only the parse refusal carries these, so every other finding keeps
-        // the shape it has always published.
-        if (!issue.detail.empty()) {
-            finding["detail"] = issue.detail;
-            finding["line"] = issue.line;
-        }
+        // A finding says what it knows. The parse refusal knows the line it
+        // refuses; a freshness finding is about the whole file and has none,
+        // so the two were published together until a second kind needed a
+        // detail without one. `line: 0` would have been a line nobody can open.
+        if (!issue.detail.empty()) finding["detail"] = issue.detail;
+        if (issue.line > 0) finding["line"] = issue.line;
         result["import_issues"].push_back(std::move(finding));
     }
     if (truncated) result["import_scan_truncated"] = true;
