@@ -455,9 +455,15 @@ json auditProject(const std::string& root_dir, const ProjectAuditOptions& option
         "it, or wires it in a scene. A connection made through a variable name "
         "cannot be seen, and neither can a member call written with the name "
         "and the .connect on different lines.",
-        "source_newer_than_output compares filesystem modification times. It is "
-        "evidence that reimport may be needed, not Godot's checksum, importer-version, "
-        "or settings-validity verdict.",
+        "source_changed_since_import compares the source against the source_md5 "
+        "Godot recorded in the .md5 it wrote beside the output. That is the "
+        "engine's own question about the source and nothing else: the engine also "
+        "compares dest_md5 and the importer's version, and neither is checked "
+        "here, so no finding is not a promise that Godot will leave the asset "
+        "alone. source_newer_than_output is the fallback where there is no record "
+        "to read, or the source is larger than 64 MiB: it compares modification "
+        "times, which a clone, a checkout or a worktree does not preserve, so it "
+        "is evidence rather than a verdict.",
         "project_settings_issues reports the three states of project.godot that a "
         "reader can see without the engine: a file that ends part-way through a "
         "value, a value the parser cannot start, and a setting registered under a "

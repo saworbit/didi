@@ -466,6 +466,150 @@ void test_a_healthy_sidecar_still_publishes_no_detail() {
     ASSERT_EQ(report["import_issue_count"], 0u);
 }
 
+// The record Godot writes beside an imported output, for a source at
+// res://art/icon.png. The stem is the engine's own:
+// `<file name>-<md5 of the res:// path>`, and md5("res://art/icon.png") is
+// c3d958876317c5b9ff9d73fef1b6123f. Both digests below are written out rather
+// than computed here, so the test disagrees with the implementation if the
+// implementation's MD5 is wrong.
+const char* const kIconRecordPath =
+    ".godot/imported/icon.png-c3d958876317c5b9ff9d73fef1b6123f.md5";
+// md5("source"), which is what the fixtures write into art/icon.png.
+const char* const kSourceDigest = "36cd38f49b9afa08222c0dc9ebfe35eb";
+
+std::string record(const std::string& source_md5) {
+    return "source_md5=\"" + source_md5 + "\"\ndest_md5=\"" +
+           std::string(32, 'a') + "\"\n";
+}
+
+void test_the_recorded_digest_answers_before_the_timestamps() {
+    // #827: git does not carry mtimes, so after a clone the source is often
+    // written after the output and every committed import reports as stale.
+    // Godot's own record says the asset is current, and it is read first.
+    ImportHealthFixture fixture("digest-match");
+    const auto source = fixture.write("art/icon.png", "source");
+    const auto output = fixture.write(".godot/imported/icon.ctex", "output");
+    fixture.write(kIconRecordPath, record(kSourceDigest));
+    fixture.write("art/icon.png.import",
+                  metadata("res://art/icon.png", "res://.godot/imported/icon.ctex"));
+    const auto now = std::filesystem::file_time_type::clock::now();
+    std::filesystem::last_write_time(output, now - std::chrono::hours(2));
+    std::filesystem::last_write_time(source, now - std::chrono::hours(1));
+
+    const auto report = didi::offline::inspectImportHealth(fixture.root().string(), 500);
+
+    ASSERT_EQ(report["scanned_import_metadata"], 1u);
+    ASSERT_EQ(report["import_issue_count"], 0u);
+    ASSERT_TRUE(report["import_issues"].empty());
+}
+
+void test_a_source_that_does_not_match_the_record_is_reported() {
+    // The mirror image, and the one the timestamps get wrong in the other
+    // direction: the source was edited and written back with an older
+    // modification time than the output, so only the digest catches it.
+    ImportHealthFixture fixture("digest-mismatch");
+    const auto source = fixture.write("art/icon.png", "changed source");
+    const auto output = fixture.write(".godot/imported/icon.ctex", "output");
+    fixture.write(kIconRecordPath, record(kSourceDigest));
+    fixture.write("art/icon.png.import",
+                  metadata("res://art/icon.png", "res://.godot/imported/icon.ctex"));
+    const auto now = std::filesystem::file_time_type::clock::now();
+    std::filesystem::last_write_time(source, now - std::chrono::hours(2));
+    std::filesystem::last_write_time(output, now - std::chrono::hours(1));
+
+    const auto report = didi::offline::inspectImportHealth(fixture.root().string(), 500);
+
+    ASSERT_EQ(report["import_issue_count"], 1u);
+    ASSERT_EQ(report["import_issues"][0]["kind"], "source_changed_since_import");
+    ASSERT_EQ(report["import_issues"][0]["source"], "res://art/icon.png");
+    ASSERT_EQ(report["import_issues"][0]["target"], "res://.godot/imported/icon.ctex");
+    // The engine's comparison is not a parse refusal, so it carries neither.
+    ASSERT_TRUE(!report["import_issues"][0].contains("detail"));
+    ASSERT_TRUE(!report["import_issues"][0].contains("line"));
+}
+
+void test_a_record_under_the_wrong_name_is_not_read() {
+    // The stem is md5 of the res:// path, not of the file name, and a record
+    // that does not match the name the engine looks under is not the record
+    // for this asset. Falling through to the timestamps is the honest answer.
+    ImportHealthFixture fixture("digest-wrong-name");
+    const auto source = fixture.write("art/icon.png", "source");
+    const auto output = fixture.write(".godot/imported/icon.ctex", "output");
+    fixture.write(".godot/imported/icon.png-" + std::string(32, '0') + ".md5",
+                  record(kSourceDigest));
+    fixture.write("art/icon.png.import",
+                  metadata("res://art/icon.png", "res://.godot/imported/icon.ctex"));
+    const auto now = std::filesystem::file_time_type::clock::now();
+    std::filesystem::last_write_time(output, now - std::chrono::hours(2));
+    std::filesystem::last_write_time(source, now - std::chrono::hours(1));
+
+    const auto report = didi::offline::inspectImportHealth(fixture.root().string(), 500);
+
+    ASSERT_EQ(report["import_issue_count"], 1u);
+    ASSERT_EQ(report["import_issues"][0]["kind"], "source_newer_than_output");
+}
+
+void test_the_digest_holds_across_block_boundaries() {
+    // The digest is computed here rather than taken from a library, so the
+    // lengths that exercise its padding are worth pinning: 56 bytes fills the
+    // block to exactly the point where the length no longer fits and a second
+    // block is needed, 64 fills one block exactly, and 200 spans four. Every
+    // digest below was produced outside this program.
+    ImportHealthFixture fixture("digest-boundaries");
+    struct Asset {
+        const char* name;
+        size_t length;
+        const char* path_digest;
+        const char* body_digest;
+    };
+    const Asset assets[] = {
+        {"a", 56, "0180b64844aadf81c6b18dd2c9268d2e", "3b0c8ac703f828b04c6c197006d17218"},
+        {"b", 64, "3838221894d6aec06988724fc3ad7b07", "0b649bcb5a82868817fec9a6e709d233"},
+        {"c", 200, "0ae7871a778bb5ac004e5dfadd30f18a", "0e90e342b5a27b934ec465dfa46d1ad2"},
+    };
+    const auto now = std::filesystem::file_time_type::clock::now();
+    for (const auto& asset : assets) {
+        const std::string name = asset.name;
+        const auto source =
+            fixture.write("art/" + name + ".png", std::string(asset.length, asset.name[0]));
+        const auto output = fixture.write(".godot/imported/" + name + ".ctex", "output");
+        fixture.write(".godot/imported/" + name + ".png-" + asset.path_digest + ".md5",
+                      record(asset.body_digest));
+        fixture.write("art/" + name + ".png.import",
+                      metadata("res://art/" + name + ".png",
+                               "res://.godot/imported/" + name + ".ctex"));
+        // Every source is newer than its output, so a digest that comes out
+        // wrong falls back to the timestamps and reports all three.
+        std::filesystem::last_write_time(output, now - std::chrono::hours(2));
+        std::filesystem::last_write_time(source, now - std::chrono::hours(1));
+    }
+
+    const auto report = didi::offline::inspectImportHealth(fixture.root().string(), 500);
+
+    ASSERT_EQ(report["scanned_import_metadata"], 3u);
+    ASSERT_EQ(report["import_issue_count"], 0u);
+}
+
+void test_a_symlinked_record_is_not_read() {
+    ImportHealthFixture fixture("digest-symlink");
+    const auto source = fixture.write("art/icon.png", "source");
+    const auto output = fixture.write(".godot/imported/icon.ctex", "output");
+    const auto real = fixture.write(".godot/imported/real.md5", record(kSourceDigest));
+    std::error_code link_error;
+    std::filesystem::create_symlink(real, fixture.root() / kIconRecordPath, link_error);
+    if (link_error) return; // No symlink privilege on this machine.
+    fixture.write("art/icon.png.import",
+                  metadata("res://art/icon.png", "res://.godot/imported/icon.ctex"));
+    const auto now = std::filesystem::file_time_type::clock::now();
+    std::filesystem::last_write_time(output, now - std::chrono::hours(2));
+    std::filesystem::last_write_time(source, now - std::chrono::hours(1));
+
+    const auto report = didi::offline::inspectImportHealth(fixture.root().string(), 500);
+
+    ASSERT_EQ(report["import_issue_count"], 1u);
+    ASSERT_EQ(report["import_issues"][0]["kind"], "source_newer_than_output");
+}
+
 struct RegisterImportHealthTests {
     RegisterImportHealthTests() {
         registerTest("ImportHealth.Healthy", test_healthy_import_metadata_has_no_issues);
@@ -501,6 +645,15 @@ struct RegisterImportHealthTests {
                      test_a_sidecar_that_ends_inside_a_value_is_unparseable);
         registerTest("ImportHealth.RealSidecarShapes",
                      test_a_healthy_sidecar_still_publishes_no_detail);
+        registerTest("ImportHealth.RecordedDigestMatch",
+                     test_the_recorded_digest_answers_before_the_timestamps);
+        registerTest("ImportHealth.RecordedDigestMismatch",
+                     test_a_source_that_does_not_match_the_record_is_reported);
+        registerTest("ImportHealth.RecordUnderWrongName",
+                     test_a_record_under_the_wrong_name_is_not_read);
+        registerTest("ImportHealth.DigestBlockBoundaries",
+                     test_the_digest_holds_across_block_boundaries);
+        registerTest("ImportHealth.SymlinkedRecord", test_a_symlinked_record_is_not_read);
     }
 } g_registerImportHealthTests;
 

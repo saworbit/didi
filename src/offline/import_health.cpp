@@ -5,11 +5,14 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <optional>
 #include <set>
+#include <string_view>
 #include <utility>
 #include <tuple>
 #include <system_error>
@@ -131,6 +134,162 @@ std::optional<std::string> readBounded(const fs::path& path) {
     return contents;
 }
 
+// MD5 (RFC 1321), for one purpose and no other.
+//
+// Godot records the digest of the source it imported in a `.md5` beside the
+// output it wrote, and answering "does this asset need reimporting" the way the
+// engine answers it means computing the same digest and comparing. The
+// algorithm is the file format's, not a choice made here, and nothing about
+// this is security: it reads a record the project already contains.
+constexpr uint32_t kMd5Sine[64] = {
+    0xd76aa478u, 0xe8c7b756u, 0x242070dbu, 0xc1bdceeeu,
+    0xf57c0fafu, 0x4787c62au, 0xa8304613u, 0xfd469501u,
+    0x698098d8u, 0x8b44f7afu, 0xffff5bb1u, 0x895cd7beu,
+    0x6b901122u, 0xfd987193u, 0xa679438eu, 0x49b40821u,
+    0xf61e2562u, 0xc040b340u, 0x265e5a51u, 0xe9b6c7aau,
+    0xd62f105du, 0x02441453u, 0xd8a1e681u, 0xe7d3fbc8u,
+    0x21e1cde6u, 0xc33707d6u, 0xf4d50d87u, 0x455a14edu,
+    0xa9e3e905u, 0xfcefa3f8u, 0x676f02d9u, 0x8d2a4c8au,
+    0xfffa3942u, 0x8771f681u, 0x6d9d6122u, 0xfde5380cu,
+    0xa4beea44u, 0x4bdecfa9u, 0xf6bb4b60u, 0xbebfbc70u,
+    0x289b7ec6u, 0xeaa127fau, 0xd4ef3085u, 0x04881d05u,
+    0xd9d4d039u, 0xe6db99e5u, 0x1fa27cf8u, 0xc4ac5665u,
+    0xf4292244u, 0x432aff97u, 0xab9423a7u, 0xfc93a039u,
+    0x655b59c3u, 0x8f0ccc92u, 0xffeff47du, 0x85845dd1u,
+    0x6fa87e4fu, 0xfe2ce6e0u, 0xa3014314u, 0x4e0811a1u,
+    0xf7537e82u, 0xbd3af235u, 0x2ad7d2bbu, 0xeb86d391u};
+
+constexpr int kMd5Shift[64] = {
+    7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22,
+    5,  9, 14, 20, 5,  9, 14, 20, 5,  9, 14, 20, 5,  9, 14, 20,
+    4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23,
+    6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21};
+
+class Md5Digest {
+public:
+    void update(const unsigned char* data, size_t length) {
+        m_bits += static_cast<uint64_t>(length) * 8;
+        absorb(data, length);
+    }
+
+    // Finishes the digest and returns it the way Godot writes it: lower-case
+    // hex, little-endian within each state word.
+    std::string hex() {
+        const uint64_t bit_count = m_bits;
+        // absorb() drains a full block, so m_pending is always below 64 and the
+        // padding always fits. Taken modulo the block size so that is true by
+        // construction rather than by argument.
+        const size_t pending = m_pending % sizeof(m_block);
+        unsigned char padding[sizeof(m_block)] = {0x80};
+        absorb(padding, pending < 56 ? 56 - pending : sizeof(m_block) + 56 - pending);
+        unsigned char length_bytes[8];
+        for (int index = 0; index < 8; ++index) {
+            length_bytes[index] = static_cast<unsigned char>((bit_count >> (8 * index)) & 0xffu);
+        }
+        absorb(length_bytes, sizeof(length_bytes));
+
+        static constexpr char kHexDigits[] = "0123456789abcdef";
+        std::string text;
+        text.reserve(32);
+        for (const uint32_t word : m_state) {
+            for (int byte = 0; byte < 4; ++byte) {
+                const auto value = static_cast<unsigned char>((word >> (8 * byte)) & 0xffu);
+                text.push_back(kHexDigits[value >> 4]);
+                text.push_back(kHexDigits[value & 0x0fu]);
+            }
+        }
+        return text;
+    }
+
+private:
+    // Feeds bytes through without counting them, so the padding the digest
+    // appends does not change the length it encodes.
+    void absorb(const unsigned char* data, size_t length) {
+        while (length > 0) {
+            const size_t taken = std::min(length, sizeof(m_block) - m_pending);
+            std::memcpy(m_block + m_pending, data, taken);
+            m_pending += taken;
+            data += taken;
+            length -= taken;
+            if (m_pending == sizeof(m_block)) {
+                transform();
+                m_pending = 0;
+            }
+        }
+    }
+
+    void transform() {
+        uint32_t words[16];
+        for (int index = 0; index < 16; ++index) {
+            words[index] = static_cast<uint32_t>(m_block[index * 4]) |
+                           (static_cast<uint32_t>(m_block[index * 4 + 1]) << 8) |
+                           (static_cast<uint32_t>(m_block[index * 4 + 2]) << 16) |
+                           (static_cast<uint32_t>(m_block[index * 4 + 3]) << 24);
+        }
+        uint32_t a = m_state[0];
+        uint32_t b = m_state[1];
+        uint32_t c = m_state[2];
+        uint32_t d = m_state[3];
+        for (int round = 0; round < 64; ++round) {
+            uint32_t mixed = 0;
+            int word = 0;
+            if (round < 16) {
+                mixed = (b & c) | (~b & d);
+                word = round;
+            } else if (round < 32) {
+                mixed = (d & b) | (~d & c);
+                word = (5 * round + 1) % 16;
+            } else if (round < 48) {
+                mixed = b ^ c ^ d;
+                word = (3 * round + 5) % 16;
+            } else {
+                mixed = c ^ (b | ~d);
+                word = (7 * round) % 16;
+            }
+            const uint32_t sum = a + mixed + kMd5Sine[round] + words[word];
+            const int shift = kMd5Shift[round];
+            a = d;
+            d = c;
+            c = b;
+            b += (sum << shift) | (sum >> (32 - shift));
+        }
+        m_state[0] += a;
+        m_state[1] += b;
+        m_state[2] += c;
+        m_state[3] += d;
+    }
+
+    uint32_t m_state[4] = {0x67452301u, 0xefcdab89u, 0x98badcfeu, 0x10325476u};
+    uint64_t m_bits = 0;
+    unsigned char m_block[64] = {};
+    size_t m_pending = 0;
+};
+
+std::string md5Hex(std::string_view text) {
+    Md5Digest digest;
+    digest.update(reinterpret_cast<const unsigned char*>(text.data()), text.size());
+    return digest.hex();
+}
+
+// The digest of a file's bytes, or nothing when it cannot be read whole inside
+// the budget.
+std::optional<std::string> md5FileHex(const fs::path& path, size_t max_bytes) {
+    std::error_code size_error;
+    const auto size = fs::file_size(path, size_error);
+    if (size_error || size > max_bytes) return std::nullopt;
+    std::ifstream input(path, std::ios::binary);
+    if (!input) return std::nullopt;
+    Md5Digest digest;
+    std::vector<char> chunk(64 * 1024);
+    while (input.read(chunk.data(), static_cast<std::streamsize>(chunk.size())) || input.gcount() > 0) {
+        digest.update(reinterpret_cast<const unsigned char*>(chunk.data()),
+                      static_cast<size_t>(input.gcount()));
+        if (!input) break;
+    }
+    if (input.bad()) return std::nullopt;
+    return digest.hex();
+}
+
 bool isPathKey(const std::string& key) {
     if (key == "path") return true;
     if (!strings::startsWith(key, "path.") || key.size() == 5) return false;
@@ -239,6 +398,47 @@ std::optional<fs::path> resolveResourcePath(const fs::path& root, const std::str
         if (!fs::exists(status)) break;
     }
     return candidate;
+}
+
+// The digest of the source Godot recorded when it last imported this asset, or
+// nothing where it left no record to read.
+//
+// `ResourceFormatImporter::get_import_base_path` names the record
+// `<imported dir>/<file name>-<md5 of the res:// path>.md5` and
+// `EditorFileSystem::_test_for_reimport` reads `source_md5` out of it, so this
+// is the file the engine consults and the name it consults it under. The
+// imported directory is taken from an output this sidecar declares rather than
+// assumed to be `res://.godot/imported/`, because the project setting that
+// names it can move it. A symlink is refused here for the reason the scan
+// refuses one anywhere else.
+std::optional<std::string> recordedSourceDigest(const fs::path& root,
+                                                const std::string& source,
+                                                const std::vector<std::string>& outputs) {
+    const auto separator = source.find_last_of('/');
+    if (separator == std::string::npos || separator + 1 == source.size()) return std::nullopt;
+    const auto record_name = source.substr(separator + 1) + "-" + md5Hex(source) + ".md5";
+    for (const auto& output : outputs) {
+        const auto output_path = resolveResourcePath(root, output);
+        if (!output_path) continue;
+        fs::path record_path;
+        try {
+            record_path = output_path->parent_path() / paths::projectPathFromUtf8(record_name);
+        } catch (const fs::filesystem_error&) {
+            continue;
+        }
+        std::error_code status_error;
+        const auto status = fs::symlink_status(record_path, status_error);
+        if (status_error || fs::is_symlink(status) || !fs::is_regular_file(status)) continue;
+        const auto contents = readBounded(record_path);
+        if (!contents) continue;
+        const auto record = config_file::scan(*contents);
+        if (!record.complete) continue;
+        for (const auto& entry : record.entries) {
+            if (entry.key != "source_md5") continue;
+            if (const auto recorded = quotedValue(entry.value_text, false)) return recorded;
+        }
+    }
+    return std::nullopt;
 }
 
 std::string metadataResourcePath(const fs::path& root, const fs::path& metadata) {
@@ -350,6 +550,26 @@ json inspectImportHealth(const std::string& root_dir, size_t max_findings) {
                                     parsed->source});
         }
 
+        // Godot writes its own answer to "does this need reimporting" beside the
+        // output it wrote: a `.md5` holding the digest of the source it
+        // imported. Modification times are not that answer. Git does not record
+        // them, so after any clone, checkout or worktree the ordering of a
+        // committed source and a committed output is whichever order the
+        // checkout happened to write the two files in, and every imported asset
+        // in the project reports as stale -- which is what this repository's own
+        // demo did, three findings out of three, all false (#827).
+        //
+        // Read once per sidecar, because the record is about the source and
+        // every output of one asset shares it.
+        std::optional<std::string> recorded_digest;
+        std::optional<std::string> source_digest;
+        if (source_exists) {
+            recorded_digest = recordedSourceDigest(root, parsed->source, parsed->outputs);
+            if (recorded_digest) {
+                source_digest = md5FileHex(*source_path, kMaxImportSourceDigestBytes);
+            }
+        }
+
         for (const auto& output : parsed->outputs) {
             const auto output_path = resolveResourcePath(root, output);
             if (!output_path) {
@@ -365,6 +585,18 @@ json inspectImportHealth(const std::string& root_dir, size_t max_findings) {
                 continue;
             }
             if (!source_exists) continue;
+            if (source_digest) {
+                // The engine's own comparison. A match is not a finding, and no
+                // timestamp is read either way.
+                if (*source_digest != *recorded_digest) {
+                    metadata_issues.insert({metadata_path, "source_changed_since_import",
+                                            parsed->source, output});
+                }
+                continue;
+            }
+            // No record to read, or a source too large to hash inside the
+            // budget. Timestamps are what is left, and they are reported under
+            // the name that says so.
             std::error_code source_time_error;
             std::error_code output_time_error;
             const auto source_time = fs::last_write_time(*source_path, source_time_error);
