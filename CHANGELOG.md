@@ -215,6 +215,29 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **A `.import` and an `export_presets.cfg` the engine refuses were both read as
+  though they had loaded.** #817 and #820 taught `project.godot` that a file can
+  end inside a value and that a balanced file is not a loadable one. Both
+  sentences are about a ConfigFile rather than about that one file, and the two
+  readers one file along consulted neither: `project_audit_assets` walked a
+  `.import` Godot answers `ERR_PARSE_ERROR` for, counted it as scanned and
+  reported `import_issue_count: 0`, and `project_list_export_presets` published a
+  preset out of a file with `export_path=)` in it, runnable, with `)` as the path
+  an export would write to (#823). Both now ask the scan what it already knows.
+  A sidecar is reported as `unparseable_import_metadata`, a finding of its own
+  rather than another `invalid_import_metadata`, and it carries the line and what
+  the parser could not start: the remedy is to repair one line, and the cost of
+  not repairing it is particular. The engine recovers from a broken sidecar
+  destructively -- on the next reimport it prints the parse error, imports the
+  asset with the importer's defaults and writes a new uid -- so what is lost is
+  every import setting in the file and every `uid://` reference to that asset,
+  while the asset itself comes back looking fine. An `export_presets.cfg` is
+  malformed as a whole instead, because that is what Godot does with it: asked to
+  export from a file with one refused value, 4.5.1, 4.6.2 and 4.7.2 all answer
+  `Invalid export preset name` and list no presets at all, even though the keys
+  ahead of that value parse. `project_export` reads through the same code, so it
+  refuses the same file rather than running against a preset the editor has never
+  had.
 - **A balanced `project.godot` is not a loadable one, and a line can hold two
   settings.** `Scan::complete` counts brackets, which is what the walk it falls
   out of can count. Godot parses a value, so `config/broken=)`,

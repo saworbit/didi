@@ -30,8 +30,13 @@ struct ImportIssue {
     std::string kind;
     std::string source;
     std::string target;
+    // Why the engine refuses the file, and the line it refuses. Empty on every
+    // finding that is about what the sidecar says rather than about whether it
+    // parses, which is every other kind.
+    std::string detail;
+    int line{0};
 
-    auto key() const { return std::tie(metadata, kind, target, source); }
+    auto key() const { return std::tie(metadata, kind, target, source, detail, line); }
 };
 
 struct IssueLess {
@@ -47,13 +52,65 @@ struct ImportSections {
     std::vector<ImportField> dependencies;
 };
 
+// What the engine refuses about this sidecar, or nothing when the scan proves
+// nothing against it.
+//
+// A .import is a ConfigFile, so it is the two failures #817 and #820 named for
+// project.godot, one file along. Neither was tested here: a file ending inside
+// a value and a file whose value the parser will not start were both walked as
+// though they had loaded, and the asset they describe was reported healthy.
+//
+// Measured on 4.5.1, 4.6.2 and 4.7.2. `compress/mode=)`, `path=res://a.ctex`
+// unquoted and `metadata={` with no `}` are all `ERR_PARSE_ERROR`, and the
+// editor's answer to one is worth stating: it prints the parse error, reimports
+// the asset with the importer's defaults and rewrites the file. So the asset
+// survives and everything the sidecar chose about it does not, including the
+// uid every `uid://` reference in the project resolves through.
+struct MetadataRefusal {
+    std::string detail;
+    int line{0};
+};
+
+std::optional<MetadataRefusal> parseRefusal(const config_file::Scan& scanned) {
+    // Ends inside a value. The engine reads nothing from that value on, which
+    // on a sidecar is usually [params] and always the tail of it.
+    if (!scanned.complete) {
+        MetadataRefusal refusal;
+        refusal.detail =
+            "This .import ends part-way through a value, so Godot answers ERR_PARSE_ERROR for "
+            "it. The next reimport discards every setting the file holds, imports the asset "
+            "with the importer's defaults and writes a new uid, so any uid:// reference to "
+            "this asset stops resolving.";
+        // The last key read is the one whose value never closed, which is the
+        // line to repair.
+        if (!scanned.entries.empty()) refusal.line = scanned.entries.back().line;
+        return refusal;
+    }
+    // Balanced is not loadable. `compress/mode=)` closes every bracket it opens
+    // and is still ERR_PARSE_ERROR, so counting brackets called it healthy.
+    for (const auto& entry : scanned.entries) {
+        const auto problem = config_file::valueProblem(entry.value_text);
+        if (problem.empty()) continue;
+        MetadataRefusal refusal;
+        refusal.line = entry.line;
+        refusal.detail = "Godot's parser refuses the value of \"" + entry.key +
+                         "\" on line " + std::to_string(entry.line) + ", because " + problem +
+                         ". It answers ERR_PARSE_ERROR for the file, so the next reimport "
+                         "discards every setting the file holds, imports the asset with the "
+                         "importer's defaults and writes a new uid, and any uid:// reference "
+                         "to this asset stops resolving.";
+        return refusal;
+    }
+    return std::nullopt;
+}
+
 // Read through the same rule as every other ConfigFile. Comparing a header as a
 // whole line read `[ remap ]` as some other section, collected nothing under
 // it, and reported a .import the engine loads without complaint as invalid
 // metadata (#814).
-ImportSections importSections(const std::string& text) {
+ImportSections importSections(const config_file::Scan& scanned) {
     ImportSections sections;
-    for (const auto& entry : config_file::scan(text).entries) {
+    for (const auto& entry : scanned.entries) {
         if (entry.key.empty()) continue;
         if (entry.section == "remap") sections.remap.push_back({entry.key, entry.value_text});
         else if (entry.section == "deps") {
@@ -121,8 +178,8 @@ std::optional<std::vector<std::string>> destinationValues(const std::string& val
     return outputs;
 }
 
-std::optional<ImportMetadata> parseMetadata(const std::string& text) {
-    const auto sections = importSections(text);
+std::optional<ImportMetadata> parseMetadata(const config_file::Scan& scanned) {
+    const auto sections = importSections(scanned);
     ImportMetadata metadata;
     for (const auto& field : sections.remap) {
         if (field.first == "valid" && field.second == "false") return std::nullopt;
@@ -247,7 +304,24 @@ json inspectImportHealth(const std::string& root_dir, size_t max_findings) {
             }
         };
         const auto contents = readBounded(entry.path());
-        const auto parsed = contents ? parseMetadata(*contents) : std::nullopt;
+        if (!contents) {
+            metadata_issues.insert({metadata_path, "invalid_import_metadata", "", metadata_path});
+            retainMetadataIssues();
+            continue;
+        }
+        // Named for the file rather than `scanned`, which is the counter above.
+        const auto sidecar = config_file::scan(*contents);
+        // Asked before anything is read out of the scan, because a file the
+        // engine will not parse describes nothing: its source, its outputs and
+        // its uid are values the engine never got to. Reporting a missing
+        // output for one of them is a finding about a file that does not load.
+        if (const auto refused = parseRefusal(sidecar)) {
+            metadata_issues.insert({metadata_path, "unparseable_import_metadata", "",
+                                    metadata_path, refused->detail, refused->line});
+            retainMetadataIssues();
+            continue;
+        }
+        const auto parsed = parseMetadata(sidecar);
         if (!parsed) {
             metadata_issues.insert({metadata_path, "invalid_import_metadata", "", metadata_path});
             retainMetadataIssues();
@@ -306,12 +380,19 @@ json inspectImportHealth(const std::string& root_dir, size_t max_findings) {
     result["scanned_import_metadata"] = scanned;
     result["import_issue_count"] = issue_count;
     for (const auto& issue : retained_issues) {
-        result["import_issues"].push_back({
+        json finding = {
             {"metadata", issue.metadata},
             {"kind", issue.kind},
             {"source", issue.source},
             {"target", issue.target}
-        });
+        };
+        // Only the parse refusal carries these, so every other finding keeps
+        // the shape it has always published.
+        if (!issue.detail.empty()) {
+            finding["detail"] = issue.detail;
+            finding["line"] = issue.line;
+        }
+        result["import_issues"].push_back(std::move(finding));
     }
     if (truncated) result["import_scan_truncated"] = true;
     return result;

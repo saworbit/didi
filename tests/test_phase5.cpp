@@ -323,6 +323,41 @@ TEST(Phase5, ExportPresetNameDropsTheCommentOnItsLine) {
     ASSERT_EQ(commented.presets[0]["platform"], "Linux");
 }
 
+TEST(Phase5, ExportPresetValueTheParserRefusesMakesTheWholeFileMalformed) {
+    // `export_path=)` closes every bracket it opens, so the completeness check
+    // let it through and the list published a runnable preset with `)` as the
+    // path an export would write to (#823). Godot's own answer to this file is
+    // `Invalid export preset name: Windows` with an empty list of detected
+    // presets, on 4.5.1, 4.6.2 and 4.7.2: the four keys ahead of the bad value
+    // parse and the editor still has no preset. So this is the whole file.
+    const auto refused = readExportPresets(
+        "[preset.0]\nname=\"Windows\"\nplatform=\"Windows Desktop\"\nrunnable=true\n"
+        "export_path=)\n");
+    ASSERT_TRUE(refused.malformed);
+    ASSERT_EQ(refused.section_count, 1u);
+    ASSERT_TRUE(refused.presets.empty());
+
+    // A bare identifier is the same refusal one shape along: `nonsense` is not
+    // a value Godot has, and a reader that took the rest of the line published
+    // a preset the engine cannot load.
+    const auto bare = readExportPresets(
+        "[preset.0]\nname=\"Windows\"\nplatform=\"Windows Desktop\"\nexport_filter=nonsense\n");
+    ASSERT_TRUE(bare.malformed);
+
+    // And the control: every value a real export_presets.cfg carries, including
+    // the empty strings and the numeric option keys, still parses.
+    const auto real = readExportPresets(
+        "[preset.0]\n\nname=\"Phase5 Pack\"\nplatform=\"Windows Desktop\"\nrunnable=true\n"
+        "advanced_options=false\ndedicated_server=false\ncustom_features=\"\"\n"
+        "export_filter=\"all_resources\"\ninclude_filter=\"\"\nexclude_filter=\"\"\n"
+        "export_path=\"phase5-default.exe\"\nscript_export_mode=2\n\n"
+        "[preset.0.options]\n\ncustom_template/debug=\"\"\nbinary_format/embed_pck=false\n"
+        "application/icon_interpolation=4\n");
+    ASSERT_TRUE(!real.malformed);
+    ASSERT_EQ(real.presets.size(), 1u);
+    ASSERT_EQ(real.presets[0]["export_path"], "phase5-default.exe");
+}
+
 TEST(Phase5, ExportPresetParserRejectsMalformedAndDuplicateNames) {
     const auto malformed = parseExportPresets("name=\"orphan\"\n");
     ASSERT_TRUE(malformed.empty());
