@@ -41,6 +41,15 @@ private:
     std::filesystem::path m_root;
 };
 
+// The kind reported against one sidecar. Findings are ordered by their whole
+// key, so looking one up by the file it is about says what is being asserted.
+std::string kindFor(const didi::json& report, const std::string& metadata_path) {
+    for (const auto& issue : report["import_issues"]) {
+        if (issue["metadata"] == metadata_path) return issue["kind"].get<std::string>();
+    }
+    return {};
+}
+
 std::string metadata(const std::string& source, const std::string& output) {
     return "[remap]\n"
            "importer=\"texture\"\n"
@@ -129,9 +138,17 @@ void test_malformed_and_oversized_metadata_fail_closed() {
 
     ASSERT_EQ(report["scanned_import_metadata"], 3u);
     ASSERT_EQ(report["import_issue_count"], 3u);
-    for (const auto& issue : report["import_issues"]) {
-        ASSERT_EQ(issue["kind"], "invalid_import_metadata");
-    }
+    // A sidecar with no source_file and one too large to read are both files
+    // that say the wrong thing about an asset.
+    ASSERT_EQ(kindFor(report, "res://art/missing-source.png.import"), "invalid_import_metadata");
+    ASSERT_EQ(kindFor(report, "res://art/oversized.png.import"), "invalid_import_metadata");
+    // An unquoted res:// path inside dest_files is the separate state: `res` is
+    // not a value Godot has, so ConfigFile.load answers ERR_PARSE_ERROR for the
+    // whole file on 4.5.1, 4.6.2 and 4.7.2 rather than for that one field
+    // (#823). The remedy differs too -- the next reimport throws this file away
+    // and writes a new uid, which no other finding here implies.
+    ASSERT_EQ(kindFor(report, "res://art/malformed-output.png.import"),
+              "unparseable_import_metadata");
 }
 
 void test_unsafe_resource_paths_fail_closed() {
@@ -214,9 +231,12 @@ void test_invalid_flag_malformed_path_and_source_mismatch_fail_closed() {
     const auto report = didi::offline::inspectImportHealth(fixture.root().string(), 500);
 
     ASSERT_EQ(report["import_issue_count"], 3u);
-    for (const auto& issue : report["import_issues"]) {
-        ASSERT_EQ(issue["kind"], "invalid_import_metadata");
-    }
+    ASSERT_EQ(kindFor(report, "res://art/invalid.png.import"), "invalid_import_metadata");
+    ASSERT_EQ(kindFor(report, "res://art/icon.png.import"), "invalid_import_metadata");
+    // `path=res://...` with no quotes is the same ERR_PARSE_ERROR as an
+    // unquoted path inside an array, so the file does not load at all (#823).
+    ASSERT_EQ(kindFor(report, "res://art/malformed-path.png.import"),
+              "unparseable_import_metadata");
 }
 
 void test_comment_decoys_are_ignored() {
@@ -356,6 +376,96 @@ void test_a_trailing_comment_is_not_part_of_a_dependency_path() {
     ASSERT_EQ(report["import_issue_count"].get<size_t>(), 0u);
 }
 
+void test_a_value_the_parser_refuses_makes_the_sidecar_unparseable() {
+    // `compress/mode=)` closes every bracket it opens, so counting brackets
+    // called this file complete and the audit answered import_issue_count: 0
+    // for a sidecar Godot answers ERR_PARSE_ERROR for (#823). Everything else
+    // about the file is healthy -- the source is there, the output is there and
+    // the output is newer -- so the finding can only come from the value.
+    ImportHealthFixture fixture("unloadable-value");
+    const auto source = fixture.write("art/icon.png", "source");
+    const auto output = fixture.write(".godot/imported/icon.ctex", "output");
+    fixture.write("art/icon.png.import",
+                  metadata("res://art/icon.png", "res://.godot/imported/icon.ctex") +
+                      "\n[params]\n"
+                      "compress/mode=)\n");
+    const auto now = std::filesystem::file_time_type::clock::now();
+    std::filesystem::last_write_time(source, now - std::chrono::hours(2));
+    std::filesystem::last_write_time(output, now - std::chrono::hours(1));
+
+    const auto report = didi::offline::inspectImportHealth(fixture.root().string(), 500);
+
+    ASSERT_EQ(report["scanned_import_metadata"], 1u);
+    ASSERT_EQ(report["import_issue_count"], 1u);
+    ASSERT_EQ(report["import_issues"][0]["kind"], "unparseable_import_metadata");
+    ASSERT_EQ(report["import_issues"][0]["metadata"], "res://art/icon.png.import");
+    // The line and the reason, because the remedy is to repair one line and
+    // nothing else in the report says which.
+    ASSERT_EQ(report["import_issues"][0]["line"], 11);
+    ASSERT_TRUE(report["import_issues"][0]["detail"].get<std::string>().find("compress/mode") !=
+                std::string::npos);
+}
+
+void test_a_sidecar_that_ends_inside_a_value_is_unparseable() {
+    // #817's failure in a reader #817 did not reach. The file ends part-way
+    // through the metadata dictionary every texture sidecar carries, which is
+    // ERR_PARSE_ERROR on 4.5.1, 4.6.2 and 4.7.2, and it was walked as though it
+    // had loaded.
+    ImportHealthFixture fixture("truncated-value");
+    const auto source = fixture.write("art/icon.png", "source");
+    const auto output = fixture.write(".godot/imported/icon.ctex", "output");
+    fixture.write("art/icon.png.import",
+                  metadata("res://art/icon.png", "res://.godot/imported/icon.ctex") +
+                      "metadata={\n\"vram_texture\": false\n");
+    const auto now = std::filesystem::file_time_type::clock::now();
+    std::filesystem::last_write_time(source, now - std::chrono::hours(2));
+    std::filesystem::last_write_time(output, now - std::chrono::hours(1));
+
+    const auto report = didi::offline::inspectImportHealth(fixture.root().string(), 500);
+
+    ASSERT_EQ(report["import_issue_count"], 1u);
+    ASSERT_EQ(report["import_issues"][0]["kind"], "unparseable_import_metadata");
+    ASSERT_TRUE(report["import_issues"][0]["detail"].get<std::string>().find(
+                    "ends part-way through a value") != std::string::npos);
+}
+
+void test_a_healthy_sidecar_still_publishes_no_detail() {
+    // The parse check has to be provable-only, or it refuses files Godot loads.
+    // Every value a real editor-written texture sidecar carries is here,
+    // including the multi-line metadata dictionary and the empty containers,
+    // and all of them load on 4.5.1, 4.6.2 and 4.7.2.
+    ImportHealthFixture fixture("real-shapes");
+    const auto source = fixture.write("art/icon.svg", "source");
+    const auto output = fixture.write(".godot/imported/icon.ctex", "output");
+    fixture.write("art/icon.svg.import",
+                  "[remap]\n\n"
+                  "importer=\"texture\"\n"
+                  "type=\"CompressedTexture2D\"\n"
+                  "uid=\"uid://bd2j02c8rf0m8\"\n"
+                  "path=\"res://.godot/imported/icon.ctex\"\n"
+                  "metadata={\n\"vram_texture\": false\n}\n\n"
+                  "[deps]\n\n"
+                  "source_file=\"res://art/icon.svg\"\n"
+                  "dest_files=[\"res://.godot/imported/icon.ctex\"]\n\n"
+                  "[params]\n\n"
+                  "compress/mode=0\n"
+                  "compress/lossy_quality=0.7\n"
+                  "mipmaps/limit=-1\n"
+                  "roughness/src_normal=\"\"\n"
+                  "process/fix_alpha_border=true\n"
+                  "svg/scale=1.0\n"
+                  "_subresources={}\n"
+                  "nodes/root_type=\"\"\n");
+    const auto now = std::filesystem::file_time_type::clock::now();
+    std::filesystem::last_write_time(source, now - std::chrono::hours(2));
+    std::filesystem::last_write_time(output, now - std::chrono::hours(1));
+
+    const auto report = didi::offline::inspectImportHealth(fixture.root().string(), 500);
+
+    ASSERT_EQ(report["scanned_import_metadata"], 1u);
+    ASSERT_EQ(report["import_issue_count"], 0u);
+}
+
 struct RegisterImportHealthTests {
     RegisterImportHealthTests() {
         registerTest("ImportHealth.Healthy", test_healthy_import_metadata_has_no_issues);
@@ -385,6 +495,12 @@ struct RegisterImportHealthTests {
                      test_a_spaced_section_header_is_still_remap_and_deps);
         registerTest("ImportHealth.TrailingComment",
                      test_a_trailing_comment_is_not_part_of_a_dependency_path);
+        registerTest("ImportHealth.UnloadableValue",
+                     test_a_value_the_parser_refuses_makes_the_sidecar_unparseable);
+        registerTest("ImportHealth.TruncatedValue",
+                     test_a_sidecar_that_ends_inside_a_value_is_unparseable);
+        registerTest("ImportHealth.RealSidecarShapes",
+                     test_a_healthy_sidecar_still_publishes_no_detail);
     }
 } g_registerImportHealthTests;
 

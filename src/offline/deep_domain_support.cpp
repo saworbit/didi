@@ -171,6 +171,18 @@ ExportPresetsFile readExportPresets(const std::string& contents) {
     // A file that ends inside a value is ERR_PARSE_ERROR for the engine and
     // none of it loads, so nothing read above it describes an export.
     if (!scanned.complete) malformed = true;
+    // Balanced is not loadable either. `export_path=)` closes every bracket it
+    // opens, so counting brackets let it through and the list published a
+    // preset with `)` as the path an export would write to (#823). Godot's own
+    // answer to that file is `Invalid export preset name: Windows` with an
+    // empty list of detected presets, on 4.5.1, 4.6.2 and 4.7.2 -- the keys
+    // ahead of the bad value parse and the editor still has no preset. So a
+    // value this cannot start is the whole file, not one field.
+    for (const auto& entry : scanned.entries) {
+        if (config_file::valueProblem(entry.value_text).empty()) continue;
+        malformed = true;
+        break;
+    }
     // A file with content but no section the engine honours is not an ini. A
     // trailing `# note` under a preset is not that, which is the difference a
     // one-token fix could not draw (#812), and an ini whose sections are all
