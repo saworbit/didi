@@ -254,7 +254,12 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
   a key out of what followed -- reporting a setting the engine does not have and,
   once the check above existed, refusing a file that loads. The seven names that
   are a value on their own are matched exactly, so `flag=true` followed by a
-  section header is still the boolean and then the section.
+  section header is still the boolean and then the section. This is not a
+  hypothetical shape: Godot's own editor writes `$selected_nodes=Array[NodePath]([])`
+  into the editor-state files under `.godot/editor/`, and the reader was
+  building the key `([])2D` out of the tail of it. Running the old walk and the
+  new one over 2036 ConfigFiles from three real games, the only lines that
+  differ are those, read correctly now.
 
 - **A value is what the engine reads, not the rest of one line.** #815 made the
   writer replace a whole multi-line value. The reader was still handing back the
