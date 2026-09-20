@@ -32,16 +32,6 @@ std::string trimmed(const std::string& text) {
     return text.substr(first, last - first + 1);
 }
 
-// Whether this line assigns the named key, whatever spacing it uses. Godot
-// writes `key=value` with no spaces, but a hand-edited file is still a file
-// Didi has to update rather than duplicate a key in.
-bool assignsKey(const std::string& line, const std::string& key) {
-    const auto text = trimmed(line);
-    if (text.size() <= key.size() || text.compare(0, key.size(), key) != 0) return false;
-    const auto rest = trimmed(text.substr(key.size()));
-    return !rest.empty() && rest.front() == '=';
-}
-
 std::string valueTextOf(const std::string& line) {
     const auto equals = line.find('=');
     if (equals == std::string::npos) return {};
@@ -68,6 +58,17 @@ Result<std::string> readWholeFile(const std::filesystem::path& path) {
 }
 
 } // namespace
+
+// Declared in the header so project_analyze_impact reads an [autoload] key the
+// same way this writer does. Written twice they would drift, and the drift was
+// #802: the same line read as an assignment here and as nothing there.
+bool assignsKey(const std::string& line, const std::string& key) {
+    if (key.empty()) return false;
+    const auto text = trimmed(line);
+    if (text.size() <= key.size() || text.compare(0, key.size(), key) != 0) return false;
+    const auto rest = trimmed(text.substr(key.size()));
+    return !rest.empty() && rest.front() == '=';
+}
 
 Result<std::string> settingLiteral(const json& value, int depth) {
     if (depth > 16) {

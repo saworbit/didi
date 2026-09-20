@@ -6043,6 +6043,122 @@ static void test_rename_reports_the_autoload_line_that_defines_the_name() {
     registry.setIpcClient(nullptr);
 }
 
+static void test_a_spaced_autoload_key_is_the_same_key() {
+    // `GameState = "*res://..."` is a working autoload. Asked on 4.5.1, 4.6.2
+    // and 4.7.2, the engine registers it exactly as it registers the spaceless
+    // form, and a tab either side too. The impact scan matched the key by the
+    // prefix `Name=`, so it read the spaced line as a line that names nothing
+    // and answered impact_count: 0 -- the answer this tool uses to mean safe
+    // (#802). project_rename_references collects from the same function, so it
+    // said nothing either, and the caller renamed a global on an empty report.
+    ScopedToolProject project("autoload-key-spacing");
+    writeAuditFile("project.godot",
+                   "config_version=5\n"
+                   "\n"
+                   "[autoload]\n"
+                   "\n"
+                   "GameState = \"*res://scripts/game_state.gd\"\n");
+    writeAuditFile("scripts/game_state.gd", "extends Node\n");
+    writeAuditFile("scripts/player.gd",
+                   "extends Node\n"
+                   "\n"
+                   "func hit() -> void:\n"
+                   "\tGameState.score += 1\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    registry.setIpcClient(nullptr);
+
+    const auto impact = registry.callTool("project_analyze_impact",
+                                          didi::json{{"target", "GameState"}});
+    ASSERT_TRUE(!impact.isError);
+    const auto impact_payload = didi::json::parse(impact.content[0].text);
+    // Asked for first, so a regression reads as the site going missing rather
+    // than as a type error on a key that is not there.
+    ASSERT_TRUE(impact_payload["counts_by_kind"].contains("autoload"));
+    ASSERT_EQ(impact_payload["counts_by_kind"]["autoload"].get<size_t>(), 1u);
+    // The defining key and the one caller, which is what the spaceless project
+    // in the test above reports for the same two files.
+    ASSERT_EQ(impact_payload["impact_count"].get<size_t>(), 2u);
+
+    // The rename inherits it, and the site lands in the list a caller works
+    // through rather than in a field nobody reads.
+    const auto preview = registry.callTool("project_rename_references", didi::json{
+        {"target", "GameState"}, {"new_name", "RunState"}, {"dry_run", true}});
+    ASSERT_TRUE(!preview.isError);
+    const auto preview_payload = didi::json::parse(preview.content[0].text);
+    bool previewed_autoload = false;
+    for (const auto& reference :
+         preview_payload["mutation_preview"]["changes"][0]["before"]["code_references_not_updated"]) {
+        if (reference["path"] == "res://project.godot" && reference["kind"] == "autoload") {
+            previewed_autoload = true;
+        }
+    }
+    ASSERT_TRUE(previewed_autoload);
+
+    // A tab either side is the same setting to the engine, so it is the same
+    // site here.
+    writeAuditFile("project.godot",
+                   "config_version=5\n"
+                   "\n"
+                   "[autoload]\n"
+                   "\n"
+                   "GameState\t=\t\"*res://scripts/game_state.gd\"\n");
+    const auto tabbed = registry.callTool("project_analyze_impact",
+                                          didi::json{{"target", "GameState"}});
+    ASSERT_TRUE(!tabbed.isError);
+    const auto tabbed_counts = didi::json::parse(tabbed.content[0].text)["counts_by_kind"];
+    ASSERT_TRUE(tabbed_counts.contains("autoload"));
+    ASSERT_EQ(tabbed_counts["autoload"].get<size_t>(), 1u);
+
+    // Godot reads `[ autoload ]` as the autoload section too, so a file that
+    // spaces the header has autoloads and this used to see none.
+    writeAuditFile("project.godot",
+                   "config_version=5\n"
+                   "\n"
+                   "[ autoload ]\n"
+                   "\n"
+                   "GameState=\"*res://scripts/game_state.gd\"\n");
+    const auto spaced_header = registry.callTool("project_analyze_impact",
+                                                 didi::json{{"target", "GameState"}});
+    ASSERT_TRUE(!spaced_header.isError);
+    const auto header_counts =
+        didi::json::parse(spaced_header.content[0].text)["counts_by_kind"];
+    ASSERT_TRUE(header_counts.contains("autoload"));
+    ASSERT_EQ(header_counts["autoload"].get<size_t>(), 1u);
+
+    // A different section is still a different section. Without this the header
+    // fix would report every settings key that shares the name.
+    writeAuditFile("project.godot",
+                   "config_version=5\n"
+                   "\n"
+                   "[application]\n"
+                   "\n"
+                   "GameState=\"*res://scripts/game_state.gd\"\n");
+    const auto other_section = registry.callTool("project_analyze_impact",
+                                                 didi::json{{"target", "GameState"}});
+    ASSERT_TRUE(!other_section.isError);
+    ASSERT_TRUE(!didi::json::parse(other_section.content[0].text)["counts_by_kind"]
+                     .contains("autoload"));
+
+    // The matcher compares the key whole, so a longer name that starts with the
+    // target is still a different autoload. Without this the spacing fix would
+    // trade a missing site for an invented one.
+    writeAuditFile("project.godot",
+                   "config_version=5\n"
+                   "\n"
+                   "[autoload]\n"
+                   "\n"
+                   "GameStateMachine = \"*res://scripts/game_state.gd\"\n");
+    const auto longer = registry.callTool("project_analyze_impact",
+                                          didi::json{{"target", "GameState"}});
+    ASSERT_TRUE(!longer.isError);
+    const auto longer_payload = didi::json::parse(longer.content[0].text);
+    ASSERT_TRUE(!longer_payload["counts_by_kind"].contains("autoload"));
+
+    registry.setIpcClient(nullptr);
+}
+
 static void test_rename_says_nothing_about_autoloads_when_there_are_none() {
     // The other half of #792, and the one that keeps the fix honest: a project
     // with no autoload must not grow a project.godot entry it has no site for,
@@ -6969,6 +7085,8 @@ struct RegisterToolTests {
                      test_rename_keeps_everything_it_is_not_renaming);
         registerTest("Tools.RenameReportsTheAutoloadKey",
                      test_rename_reports_the_autoload_line_that_defines_the_name);
+        registerTest("Tools.AutoloadKeySpacing",
+                     test_a_spaced_autoload_key_is_the_same_key);
         registerTest("Tools.RenameIsSilentWithoutAnAutoload",
                      test_rename_says_nothing_about_autoloads_when_there_are_none);
         registerTest("Tools.RenameRefusals",
