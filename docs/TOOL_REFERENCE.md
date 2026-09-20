@@ -825,7 +825,7 @@ Reported kinds are the forms Godot writes:
 
 `scene_connection` and `animation_track` are the two a text search finds but cannot explain, and they are the ones people miss.
 
-A name target also returns `declared_in`, so a caller knows what they are about to rename and not only what would break. Name matching is whole word, so tracing `health` does not report every `max_health`.
+A name target also returns `declared_in`, so a caller knows what they are about to rename and not only what would break. Name matching is whole word, so tracing `health` does not report every `max_health`. An `[autoload]` key is read as the text before the first `=`, trimmed and compared whole, so `GameState=` and `GameState = ` are the same entry -- Godot registers both -- and `GameStateMachine` is not. The section header is read the same way, so `[ autoload ]` is the autoload section.
 
 Node-path targets match complete captured paths: `Player/Sprite` does not match `Player/Sprite2`. Animation property suffixes are ignored when the node portion matches, so `NodePath("Player/Sprite:position:x")` is an impact of `Player/Sprite`. Static scene connection endpoints, serialized `NodePath` values, GDScript `$...`/`%...` shorthands, standalone `^"..."` node-path literals, and literal `get_node(...)`/`get_node_or_null(...)` calls are covered. Shorthand references remain matches when followed by ordinary member access such as `$Player/Sprite.position`. GDScript strings and comments, C# strings and comments, and `.tscn`/`.tres` semicolon comments are excluded from shorthand and constructor evidence.
 

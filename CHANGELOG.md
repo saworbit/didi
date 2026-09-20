@@ -197,6 +197,23 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **A spaced `[autoload]` key is the same key.**
+  `GameState = "*res://scripts/game_state.gd"` is a working autoload. Godot
+  registers it exactly as it registers the spaceless form, and a tabbed one too
+  -- asked on 4.5.1, 4.6.2 and 4.7.2. `project_analyze_impact` matched the key
+  by the prefix `Name=`, so it read the spaced line as a line that names
+  nothing and answered `impact_count: 0` (#802), which is the answer this tool
+  uses to mean safe. `project_rename_references` collects from the same place
+  since #792, so it said nothing either, and a caller renaming or deleting on
+  an empty report broke every script that named the global. The key is now read
+  as the text before the first `=`, trimmed and compared whole, through the
+  same matcher `project_set_setting` already used on this file. The section
+  header was read the same strict way two lines up, so `[ autoload ]` was not
+  the autoload section either; it is now the text inside the brackets, trimmed.
+  A longer name that starts with the target is still a different autoload, a
+  key under another section is still under another section, and the spaceless
+  form reports exactly what it reported before.
+
 - **A second merge no longer cancels the first one's CodeQL run on `main`.**
   The workflow cancelled any in-progress run for the same ref, which is right
   for a pull request -- pushing a fixup should not leave the superseded run

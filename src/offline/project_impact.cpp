@@ -3,6 +3,7 @@
 #include "didi/common/project_path.hpp"
 #include "didi/offline/project_text_scan.hpp"
 #include "didi/offline/project_search.hpp"
+#include "didi/offline/project_settings_file.hpp"
 #include "didi/common/atomic_write.hpp"
 #include <string_view>
 #include <vector>
@@ -202,14 +203,23 @@ void collectProjectSettingImpacts(const std::filesystem::path& root, const std::
     forEachLine(text, [&](const std::string& line, int number) {
         const auto trimmed = strings::trim(line);
         if (!trimmed.empty() && trimmed.front() == '[') {
-            in_autoload = trimmed == "[autoload]";
+            // The section name is the text inside the brackets, trimmed. Godot
+            // reads `[ autoload ]` as the autoload section, so a file that uses
+            // it has autoloads and this saw none.
+            in_autoload = trimmed.back() == ']' &&
+                          strings::trim(trimmed.substr(1, trimmed.size() - 2)) == "autoload";
             return;
         }
         if (trimmed.empty() || trimmed.front() == ';' || trimmed.front() == '#') return;
         if (in_autoload) {
+            // The key is the text before the first =, trimmed, compared whole.
+            // A prefix match on `Name=` read `GameState = "*res://..."` as a
+            // line that names nothing, so a working singleton came back
+            // impact_count: 0 -- the answer this tool uses to mean safe (#802).
+            // Godot registers both spellings identically.
             const bool names_target =
                 file_target ? trimmed.find(target) != std::string::npos
-                            : trimmed.find(target + "=") == 0;
+                            : assignsKey(trimmed, target);
             if (names_target) {
                 out.push_back({"res://project.godot", "autoload", number, detailFrom(line)});
             }
