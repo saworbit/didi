@@ -215,6 +215,27 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **Import freshness is read from the record Godot wrote, not from
+  modification times.** `project_audit_assets` reported
+  `source_newer_than_output` for all three assets in this repository's own
+  `demo/`, and all three were false: the engine's own record said every one of
+  them was up to date (#827). The cause is that git does not carry mtimes, so
+  after a clone, a checkout or a new worktree the ordering of a committed
+  source and a committed output is whichever order the checkout happened to
+  write the two files in. That is not a corner case, it is every CI run, and a
+  finding that is always wrong teaches a caller to skim past findings. Godot
+  writes a `.md5` beside every imported output holding the digest of the source
+  it imported, named the way `ResourceFormatImporter::get_import_base_path`
+  names it, and that file is what the editor reads to decide a reimport. The
+  audit now reads it. A source whose digest disagrees is reported as
+  `source_changed_since_import`; a source whose digest agrees is not reported
+  at all, and no timestamp is consulted either way. `source_newer_than_output`
+  survives as the fallback and only as the fallback, for an asset with no
+  record and for a source above 64 MiB that is not hashed, so the weaker claim
+  is never presented as the engine's. The `limitations` say which is which, and
+  say what is still not checked: the engine also compares the digest of the
+  outputs and the importer's version, so no finding is not a promise that Godot
+  will leave the asset alone.
 - **A `.import` and an `export_presets.cfg` the engine refuses were both read as
   though they had loaded.** #817 and #820 taught `project.godot` that a file can
   end inside a value and that a balanced file is not a loadable one. Both
