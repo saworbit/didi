@@ -197,6 +197,37 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **A `#` line in `project.godot` is a setting, not a comment.** `;` starts a
+  comment in a Godot ConfigFile. `#` does not: asked on 4.5.1, 4.6.2 and 4.7.2,
+  `# Hash="*res://a.gd"` under `[autoload]` registers the setting
+  `autoload/#Hash`, and the script it names enters the tree on every run. The
+  impact scan skipped both characters, borrowing GDScript's comment rule for a
+  file that is not GDScript, so a user who disabled a singleton the habitual way
+  had a singleton that still loads and `project_analyze_impact` answered
+  `impact_count: 0` for the script it loads (#810) -- the answer that tool uses
+  to mean safe, beside `target_exists: true`. `project_rename_references`
+  collects from the same place, so it dropped the entry too. Such a line is now
+  read as the setting Godot reads, and reported with the text of the line, which
+  is the evidence that says why the autoload is still there. `;` is unchanged.
+  The same rule was wrong in the `.import` reader behind
+  `project_audit_assets`'s import findings, and is corrected with it.
+
+- **A spaced section header is the same section.** `[ application ]` is the
+  application section, and Godot merges a second spelling of a header into the
+  first -- asked on 4.5.1, 4.6.2 and 4.7.2, with a tab-padded header too. Three
+  readers compared the header as a whole line instead of the text inside the
+  brackets. `project_set_setting`'s dry run reported a setting that is in the
+  file as absent, with an empty `previous_literal`, so a caller could not see
+  what they were replacing, and the write appended a second `[application]`
+  section rather than updating the line above it -- a `project.godot` Godot's own
+  writer would never produce, from the one tool on the surface that edits that
+  file offline (#809). The GDScript diagnostics read no singletons out of such a
+  file, so every autoload a script named came back as an undefined identifier,
+  which is the whole reason that list is read. And `project_remove_input_action`
+  refused to remove an action that is there, because the file it checks did not
+  appear to define one. A header is now the bracket text, trimmed, everywhere it
+  is read. A different section is still a different section.
+
 - **A spaced `[autoload]` key is the same key.**
   `GameState = "*res://scripts/game_state.gd"` is a working autoload. Godot
   registers it exactly as it registers the spaceless form, and a tabbed one too

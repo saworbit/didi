@@ -1,6 +1,7 @@
 #include "didi/offline/project_settings_file.hpp"
 
 #include "didi/common/atomic_write.hpp"
+#include "didi/common/config_file_syntax.hpp"
 #include "didi/common/project_path.hpp"
 
 #include <cmath>
@@ -36,16 +37,6 @@ std::string valueTextOf(const std::string& line) {
     const auto equals = line.find('=');
     if (equals == std::string::npos) return {};
     return trimmed(line.substr(equals + 1));
-}
-
-bool isSectionHeader(const std::string& line) {
-    const auto text = trimmed(line);
-    return text.size() >= 2 && text.front() == '[' && text.back() == ']';
-}
-
-std::string sectionNameOf(const std::string& line) {
-    const auto text = trimmed(line);
-    return text.substr(1, text.size() - 2);
 }
 
 Result<std::string> readWholeFile(const std::filesystem::path& path) {
@@ -145,8 +136,8 @@ Result<ProjectSettingRead> readProjectSetting(const std::filesystem::path& proje
     std::string line;
     while (std::getline(stream, line)) {
         if (!line.empty() && line.back() == '\r') line.pop_back();
-        if (isSectionHeader(line)) {
-            current_section = sectionNameOf(line);
+        if (const auto header = config_file::sectionName(line)) {
+            current_section = *header;
             continue;
         }
         if (current_section != section) continue;
@@ -209,9 +200,9 @@ Result<ProjectSettingWrite> writeProjectSetting(const std::filesystem::path& pro
     size_t section_end = lines.size();
     bool section_seen = false;
     for (size_t index = 0; index < lines.size(); ++index) {
-        if (isSectionHeader(lines[index])) {
+        if (const auto header = config_file::sectionName(lines[index])) {
             if (section_seen && section_end == lines.size()) section_end = index;
-            current_section = sectionNameOf(lines[index]);
+            current_section = *header;
             if (current_section == report.section) section_seen = true;
             continue;
         }

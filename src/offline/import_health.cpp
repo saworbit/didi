@@ -1,5 +1,6 @@
 #include "didi/offline/import_health.hpp"
 
+#include "didi/common/config_file_syntax.hpp"
 #include "didi/common/project_path.hpp"
 
 #include <algorithm>
@@ -51,7 +52,7 @@ ImportSections importSections(const std::string& text) {
     std::string line;
     while (std::getline(input, line)) {
         const auto trimmed = strings::trim(line);
-        if (!trimmed.empty() && (trimmed.front() == ';' || trimmed.front() == '#')) continue;
+        if (config_file::isComment(trimmed)) continue;
         if (trimmed == "[remap]") {
             active = ActiveSection::Remap;
             continue;

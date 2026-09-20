@@ -16,6 +16,7 @@ void registerTest(const std::string& name, std::function<void()> fn);
 
 namespace {
 
+using didi::offline::readProjectSetting;
 using didi::offline::settingLiteral;
 using didi::offline::writeProjectSetting;
 
@@ -88,6 +89,63 @@ void puts_a_new_key_inside_its_existing_section() {
     ASSERT_TRUE(rendering != std::string::npos);
     ASSERT_TRUE(key != std::string::npos);
     ASSERT_TRUE(key > application && key < rendering);
+}
+
+// Break caught: the section name was the bracket text untrimmed, so
+// `[ application ]` matched no section any caller names. The dry run reported a
+// setting that is in the file as absent, with an empty previous_literal, and the
+// write appended a second [application] section rather than updating the line
+// that was already there (#809). Godot reads `[ application ]`, `[application ]`
+// and a tab-padded header as the same section -- checked on 4.5.1, 4.6.2 and
+// 4.7.2 -- and merges a second spelling into it.
+void reads_and_updates_a_section_whose_header_is_spaced() {
+    ProjectFixture project("spaced-header",
+                           "config_version=5\n\n[ application ]\n\nconfig/name=\"Probe\"\n");
+
+    // The preview reader first. exists: false is what a caller decides on, and
+    // it is what this said about a setting that is right there.
+    auto preview = readProjectSetting(project.root(), "application/config/name");
+    ASSERT_TRUE(preview.isOk());
+    ASSERT_TRUE(preview.value().existed);
+    ASSERT_EQ(preview.value().literal, std::string("\"Probe\""));
+
+    // A new key lands under the header that is there rather than under a second
+    // copy of it, which is a file Godot's own writer would never produce.
+    auto added = writeProjectSetting(project.root(), "application/config/description",
+                                     didi::json("vibe"), false);
+    ASSERT_TRUE(added.isOk());
+    ASSERT_TRUE(!added.value().section_created);
+    auto contents = project.read();
+    ASSERT_TRUE(contents.find("[application]") == std::string::npos);
+    ASSERT_TRUE(contents.find("[ application ]") != std::string::npos);
+    ASSERT_TRUE(contents.find("config/description=\"vibe\"") != std::string::npos);
+
+    // And an existing key is replaced in place, with what it replaced reported.
+    auto replaced = writeProjectSetting(project.root(), "application/config/name",
+                                        didi::json("Renamed"), false);
+    ASSERT_TRUE(replaced.isOk());
+    ASSERT_TRUE(replaced.value().existed);
+    ASSERT_EQ(replaced.value().previous_literal, std::string("\"Probe\""));
+    contents = project.read();
+    ASSERT_TRUE(contents.find("config/name=\"Renamed\"") != std::string::npos);
+    ASSERT_TRUE(contents.find("\"Probe\"") == std::string::npos);
+
+    // A tab-padded header is the same section to the engine, so it is the same
+    // section here.
+    ProjectFixture tabbed("tabbed-header",
+                          "config_version=5\n\n[\tapplication\t]\n\nconfig/name=\"Probe\"\n");
+    auto tabbed_write = writeProjectSetting(tabbed.root(), "application/config/name",
+                                            didi::json("Renamed"), false);
+    ASSERT_TRUE(tabbed_write.isOk());
+    ASSERT_TRUE(tabbed_write.value().existed);
+
+    // A different section is still a different section: trimming the name must
+    // not make every header match.
+    ProjectFixture other("other-header",
+                         "config_version=5\n\n[ rendering ]\n\nconfig/name=\"Probe\"\n");
+    auto absent = readProjectSetting(other.root(), "application/config/name");
+    ASSERT_TRUE(absent.isOk());
+    ASSERT_TRUE(!absent.value().existed);
 }
 
 void replaces_a_value_in_place_and_reports_what_it_replaced() {
@@ -174,6 +232,8 @@ struct Register {
                      enables_an_addon_in_a_project_that_has_no_section_for_it);
         registerTest("project_settings_file.new_key_stays_in_section",
                      puts_a_new_key_inside_its_existing_section);
+        registerTest("project_settings_file.spaced_section_header",
+                     reads_and_updates_a_section_whose_header_is_spaced);
         registerTest("project_settings_file.replace_in_place",
                      replaces_a_value_in_place_and_reports_what_it_replaced);
         registerTest("project_settings_file.remove", removes_a_setting_and_refuses_to_remove_one_that_is_not_there);
