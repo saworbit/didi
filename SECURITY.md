@@ -78,6 +78,30 @@ header the code under analysis includes. The configuration file has been
 removed rather than left in the tree describing a control that was not in
 force.
 
+A dismissal is bound to the code it was made against, not to the finding. When
+the lines around an alert move, CodeQL closes that alert and raises the same
+finding again under a new number, with the dismissal gone. Both process
+operations came back that way on 2026-09-18: the commits that killed the whole
+process tree on timeout and stopped handing children the server's standard
+input shifted the `execvp` call, and `test_runner` and `process_runner` each
+reappeared as a new high-severity alert. Neither commit changed what reaches
+`execvp` -- the executable still resolves from `GODOT_BIN`, `GODOT_PATH` or
+`DOTNET_BIN`, from a known install location, or from a literal, and no argument
+arriving on the wire can reach that slot -- so both were dismissed again for
+the reason above. Re-read the taint path before re-dismissing rather than
+matching on the rule name. The point of a re-raise is that the code moved.
+
+Scorecard reports against the repository rather than against the code, and
+those findings have dispositions of their own.
+
+| Finding | Disposition |
+| --- | --- |
+| Branch-Protection, score 3 | Dismissed. Required approvers, CODEOWNERS review and last-push approval are not controls one maintainer can operate, and stale-review dismissal is moot where there are no reviews to go stale. The `main protection` ruleset enforces what a single maintainer can: every change arrives as a pull request, `main` cannot be deleted or force-pushed, and CI Gate, Validate Docs and Lint Workflows must pass before merge. |
+| Code-Review, 0/9 approved changesets | Dismissed. GitHub does not let an author approve their own pull request, so this score is structurally zero for as long as there is one maintainer. It measures a control this project cannot operate, not one it has declined to. |
+| Maintained, score 0 | Dismissed as transient. The only warning is that the repository was created inside the last 90 days, on 2026-08-26. It stops being reported around 2026-11-24, and nothing in the tree moves it either way. |
+| CII-Best-Practices, score 0 | Dismissed. The badge is earned by self-certifying the project on bestpractices.dev, which is a registration rather than a change to anything here. Not undertaken. |
+| Pinned-Dependencies, `tools/localci/Dockerfile` | Dismissed. `requirements-dev.txt` already pins `jsonschema` exactly and Dependabot watches it. Hashes would cost more than the gap they close: pip switches to hash-checking mode for every install of a file that carries one, so the Windows, macOS and Linux installs in `ci.yml` and `release.yml` would each need the full transitive set for their own wheels -- or the image needs a second copy of the pin this repository deliberately keeps in one place. |
+
 ---
 
 ## Verifying a Release
