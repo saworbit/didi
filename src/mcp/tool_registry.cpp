@@ -2180,7 +2180,15 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
             subject = {{"setting", call_arguments["setting"]}};
             auto read = offline::readProjectSetting(
                 std::filesystem::current_path(), call_arguments["setting"].get<std::string>());
-            if (read.isErr()) return std::nullopt;
+            // A project.godot the engine refuses to parse is the one failure
+            // the confirmed write also refuses, so the preview says so rather
+            // than offering to replace a value in a file nothing can load
+            // (#817). Everything else -- no project.godot yet, one that cannot
+            // be opened -- leaves the preview as it was.
+            if (read.isErr()) {
+                if (read.error().code == 409) return read.error();
+                return std::nullopt;
+            }
             before = {{"setting", read.value().setting},
                       {"exists", read.value().existed},
                       {"literal", read.value().literal}};

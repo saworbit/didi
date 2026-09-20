@@ -1542,6 +1542,75 @@ static void test_audit_follows_the_resources_project_godot_names() {
     ASSERT_EQ(manifest_impacts, 1u);
 }
 
+static void test_audit_reports_what_is_wrong_with_project_godot_itself() {
+    // Break caught: every other finding here is about a reference from one
+    // file to another, so a manifest that registers a setting nobody can name
+    // was reported as a project with nothing wrong with it. The only place the
+    // truth surfaced was the compiler, three files away (#818).
+    ScopedToolProject project("audit-project-godot-itself");
+    writeAuditFile("project.godot",
+        "config_version=5\n"
+        "\n"
+        "[autoload]\n"
+        "\n"
+        "# disabled for now\n"
+        "Good=\"*res://good.gd\"\n");
+    writeAuditFile("good.gd", "extends Node\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const auto report = didi::json::parse(
+        registry.callTool("project_audit_assets",
+                          didi::json{{"include_dead_signals", false},
+                                     {"include_import_health", false}})
+            .content[0].text);
+
+    ASSERT_TRUE(report.contains("project_settings_issues"));
+    ASSERT_EQ(report["project_settings_issue_count"], 1u);
+    const auto& finding = report["project_settings_issues"][0];
+    ASSERT_EQ(finding["kind"], "unusable_setting_name");
+    // Both names, because the remedy is to move or delete one line and the
+    // user has to be told which.
+    ASSERT_EQ(finding["registered_key"], "#disabledfornowGood");
+    ASSERT_EQ(finding["key_on_line"], "Good");
+    ASSERT_EQ(finding["joined_from_line"], 5);
+    ASSERT_EQ(finding["line"], 6);
+}
+
+static void test_audit_reports_a_project_godot_godot_refuses_to_parse() {
+    // Break caught: a project.godot that ends inside a value is
+    // ERR_PARSE_ERROR and the project does not open, and ConfigFile.load still
+    // hands back the sections it managed to read. The audit answered out of
+    // those and described a working project (#817).
+    ScopedToolProject project("audit-unparseable-project-godot");
+    writeAuditFile("project.godot",
+        "config_version=5\n"
+        "\n"
+        "[shader_globals]\n"
+        "\n"
+        "tint={\n"
+        "\"type\": \"color\",\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const auto report = didi::json::parse(
+        registry.callTool("project_audit_assets",
+                          didi::json{{"include_dead_signals", false},
+                                     {"include_import_health", false}})
+            .content[0].text);
+
+    ASSERT_TRUE(report.contains("project_settings_issues"));
+    ASSERT_EQ(report["project_settings_issue_count"], 1u);
+    const auto& finding = report["project_settings_issues"][0];
+    ASSERT_EQ(finding["kind"], "unparseable_project_settings");
+    // The last key read is the one whose value never closed, so the finding
+    // names the line to repair rather than only the verdict.
+    ASSERT_EQ(finding["key"], "tint");
+    ASSERT_EQ(finding["line"], 5);
+}
+
 static void test_local_work_is_not_reported_as_a_fallback() {
     // Break caught: 26 tools reported execution_mode offline_fallback with a
     // healthy editor attached. offline_fallback is what this server says when
@@ -7124,6 +7193,10 @@ struct RegisterToolTests {
                      test_audit_does_not_call_third_party_addon_files_orphans);
         registerTest("Tools.AuditFollowsProjectGodotReferences",
                      test_audit_follows_the_resources_project_godot_names);
+        registerTest("Tools.AuditReportsUnusableSettingName",
+                     test_audit_reports_what_is_wrong_with_project_godot_itself);
+        registerTest("Tools.AuditReportsUnparseableProjectGodot",
+                     test_audit_reports_a_project_godot_godot_refuses_to_parse);
         registerTest("Tools.LocalWorkIsNotAFallback",
                      test_local_work_is_not_reported_as_a_fallback);
         registerTest("Tools.DryRunReadsItsTarget",

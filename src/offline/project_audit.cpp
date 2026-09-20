@@ -1,5 +1,6 @@
 #include "didi/offline/project_audit.hpp"
 
+#include "didi/common/config_file_syntax.hpp"
 #include "didi/common/project_path.hpp"
 #include "didi/offline/import_health.hpp"
 #include "didi/offline/project_text_scan.hpp"
@@ -44,6 +45,63 @@ bool mayContain(const std::string& text, std::initializer_list<const char*> lite
         if (text.find(literal) != std::string::npos) return true;
     }
     return false;
+}
+
+// What is wrong with project.godot itself, as opposed to the files it names.
+//
+// Every other finding here is about a reference from one file to another. This
+// one is about the manifest: a file the engine will not parse, and a setting
+// the engine registers under a name nobody can use. Both are states in which
+// every other answer about the project describes a project that does not run,
+// and neither was reported anywhere until now (#817, #818).
+//
+// The scan computes both facts already. `complete` is false exactly when the
+// file ends inside a value, which is the case Godot answers with
+// ERR_PARSE_ERROR. `key` against `key_on_line` is the name the engine
+// registers against the name the line looks like it declares, and they differ
+// when a line with no `=` joined forward into this one.
+json projectSettingsIssues(const std::string& text, size_t max_findings) {
+    json issues = json::array();
+    const auto scanned = config_file::scan(text);
+    if (!scanned.complete) {
+        json finding = {
+            {"kind", "unparseable_project_settings"},
+            {"detail",
+             "project.godot ends part-way through a value. Godot answers ERR_PARSE_ERROR "
+             "for it, the project does not open, and none of the settings in the file are "
+             "what it runs on."}};
+        // The last key read is the one whose value never closed, which is the
+        // line to repair. Naming it is the difference between a verdict and a
+        // remedy.
+        if (!scanned.entries.empty()) {
+            finding["section"] = scanned.entries.back().section;
+            finding["key"] = scanned.entries.back().key;
+            finding["line"] = scanned.entries.back().line;
+        }
+        issues.push_back(std::move(finding));
+    }
+    for (const auto& entry : scanned.entries) {
+        if (!entry.joined || entry.key == entry.key_on_line) continue;
+        if (issues.size() >= max_findings) break;
+        // Both names, because the remedy is to move or delete one line and the
+        // user has to be told which. The line the join started on is the line
+        // to move.
+        issues.push_back({{"kind", "unusable_setting_name"},
+                          {"section", entry.section},
+                          {"registered_key", entry.key},
+                          {"key_on_line", entry.key_on_line},
+                          {"line", entry.line},
+                          {"joined_from_line", entry.key_line},
+                          {"detail",
+                           "Godot registers this setting as \"" + entry.section + "/" +
+                               entry.key + "\", not \"" + entry.section + "/" +
+                               entry.key_on_line + "\". A line with no = does not end a key: "
+                               "it joins forward into the next line that has one, so the text "
+                               "on line " + std::to_string(entry.key_line) +
+                               " became part of this name. Nothing in the project can refer to "
+                               "the setting under the name it appears to have."}});
+    }
+    return issues;
 }
 
 void collectMatches(const std::string& text, const std::regex& pattern, bool is_uid,
@@ -329,6 +387,12 @@ json auditProject(const std::string& root_dir, const ProjectAuditOptions& option
         import_health = inspectImportHealth(root_dir, options.max_findings);
     }
 
+    json project_settings_issues = json::array();
+    if (scan.project_settings.has_value()) {
+        project_settings_issues =
+            projectSettingsIssues(scan.project_settings->contents, options.max_findings);
+    }
+
     json result = {
         {"scanned_resources", resources.size()},
         {"scanned_text_files", sources.size() + (scan.project_settings.has_value() ? 1u : 0u)},
@@ -342,7 +406,9 @@ json auditProject(const std::string& root_dir, const ProjectAuditOptions& option
         {"max_findings", options.max_findings},
         {"scanned_import_metadata", import_health["scanned_import_metadata"]},
         {"import_issues", import_health["import_issues"]},
-        {"import_issue_count", import_health["import_issue_count"]}
+        {"import_issue_count", import_health["import_issue_count"]},
+        {"project_settings_issues", project_settings_issues},
+        {"project_settings_issue_count", project_settings_issues.size()}
     };
     if (scan.truncated) result["truncated"] = true;
     // Same reason as the scan bounds above: a file this cannot name is a file
@@ -372,7 +438,12 @@ json auditProject(const std::string& root_dir, const ProjectAuditOptions& option
         "and the .connect on different lines.",
         "source_newer_than_output compares filesystem modification times. It is "
         "evidence that reimport may be needed, not Godot's checksum, importer-version, "
-        "or settings-validity verdict."
+        "or settings-validity verdict.",
+        "project_settings_issues reports the two states of project.godot that a "
+        "reader can see without the engine: a file that ends part-way through a "
+        "value, and a setting registered under a name the join built. It is not a "
+        "full parse, so a value that is malformed in some other way is not reported "
+        "and an empty list is not a promise that Godot will load the file."
     });
     return result;
 }

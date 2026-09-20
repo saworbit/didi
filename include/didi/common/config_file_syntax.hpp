@@ -36,7 +36,11 @@ inline bool isComment(std::string_view line) {
 struct Entry {
     std::string section;      // the section in force; empty before the first header
     std::string key;          // the name the engine registers, not the text on the line
-    std::string value_text;   // the text after the `=` on the line holding it, trimmed
+    // The value the engine reads, as text: every line it spans, trimmed and
+    // joined with a newline, with the `;` comment on each line dropped. Not
+    // the rest of the line after the `=`, which is one character for a
+    // dictionary and carries the note in `name="a" ; note`.
+    std::string value_text;
     // What the line holding the `=` contributed to the key on its own, which is
     // the whole key unless an earlier line joined into it. It is the name the
     // file looks like it declares where `key` is the one the engine registers.
@@ -87,6 +91,13 @@ struct Scan {
 //     across four or more of them, and the lines inside it are value text, not
 //     keys. A reader that joins those would build a key out of `"deadzone": 0.5`
 //     and lose the action below it.
+//   * A value ending does not end the line. The engine carries on reading from
+//     where the value stopped, so `a=1 b=2` is two settings, `name="a" [t]`
+//     opens the section `t`, and `name="a" # note` joins `#note` forward into
+//     the key below exactly as a `# note` line of its own would (#816). A `;`
+//     is the one thing that does comment out the rest of a line, at any
+//     bracket depth, which is what the banner Godot writes at the top of every
+//     project.godot documents.
 //
 // Section headers come from here too. The name is the text between the
 // brackets, trimmed: Godot reads `[ application ]` and a tab-padded header as

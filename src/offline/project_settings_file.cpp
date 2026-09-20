@@ -8,6 +8,7 @@
 #include <cmath>
 #include <fstream>
 #include <limits>
+#include <optional>
 #include <sstream>
 #include <vector>
 
@@ -32,6 +33,24 @@ std::string trimmed(const std::string& text) {
     if (first == std::string::npos) return {};
     const auto last = text.find_last_not_of(" \t");
     return text.substr(first, last - first + 1);
+}
+
+// A project.godot that ends part-way through a value is ERR_PARSE_ERROR for
+// Godot and the project does not open at all: `--headless --path` refuses it
+// and ConfigFile.load answers 43. The trap is that load() still hands back the
+// sections it managed to read, so a partial parse looks like a parse, and a
+// reader that answered out of it described a project that does not run (#817).
+//
+// The opposite case is not this. A file that ends part-way through a *key* is
+// dropped by the engine and load() returns OK, which is the ordinary trailing
+// `# note`, so trailing_key is not checked here.
+std::optional<Error> refuseUnparseable(const config_file::Scan& scanned, const char* verb) {
+    if (scanned.complete) return std::nullopt;
+    return Error(409, std::string("project.godot ends part-way through a value, which Godot "
+                                  "answers with ERR_PARSE_ERROR: the project does not open and "
+                                  "none of the settings in the file are what it runs on. Repair "
+                                  "the unterminated value before ") +
+                          verb + ".");
 }
 
 Result<std::string> readWholeFile(const std::filesystem::path& path) {
@@ -120,7 +139,11 @@ Result<ProjectSettingRead> readProjectSetting(const std::filesystem::path& proje
     // forward into the next line that does, so `config / name` is this setting
     // and a `# note` above it is not (#813). The last spelling in the file
     // wins, which is why this keeps reading to the end.
-    for (const auto& entry : config_file::scan(contents.value()).entries) {
+    const auto scanned = config_file::scan(contents.value());
+    if (auto unparseable = refuseUnparseable(scanned, "reading a setting out of it")) {
+        return *unparseable;
+    }
+    for (const auto& entry : scanned.entries) {
         if (entry.section != section || entry.key != key) continue;
         report.existed = true;
         report.literal = entry.value_text;
@@ -159,6 +182,16 @@ Result<ProjectSettingWrite> writeProjectSetting(const std::filesystem::path& pro
     auto contents = readWholeFile(path);
     if (contents.isErr()) return contents.error();
 
+    // Both the headers and the keys come from the engine's own rule. A header
+    // swallowed by the line above it is not a header, and a key built by
+    // joining lines is not this setting, so neither is somewhere to write
+    // (#813).
+    const auto scanned = config_file::scan(contents.value());
+    // Rewriting one line of a file the engine refuses to parse leaves it
+    // exactly as unloadable and reports success, so this refuses instead
+    // (#817).
+    if (auto unparseable = refuseUnparseable(scanned, "writing to it")) return *unparseable;
+
     // Godot writes LF. A file that arrived with CRLF keeps it, because
     // rewriting every line ending of a file to change one setting is a diff
     // nobody asked for.
@@ -175,11 +208,6 @@ Result<ProjectSettingWrite> writeProjectSetting(const std::filesystem::path& pro
         }
     }
 
-    // Both the headers and the keys come from the engine's own rule. A header
-    // swallowed by the line above it is not a header, and a key built by
-    // joining lines is not this setting, so neither is somewhere to write
-    // (#813).
-    const auto scanned = config_file::scan(contents.value());
     size_t assignment = lines.size();
     size_t assignment_end = lines.size();
     size_t section_end = lines.size();
@@ -194,9 +222,8 @@ Result<ProjectSettingWrite> writeProjectSetting(const std::filesystem::path& pro
         assignment = static_cast<size_t>(entry.line - 1);
         // A value can span lines. Replacing only the line holding the `=` left
         // the rest of an [input]-shaped value behind, and those leftover lines
-        // join forward into whatever key comes next.
-        // Clamped: a value the file never closes runs past the last line, and
-        // that is a file Godot refuses outright rather than one to edit.
+        // join forward into whatever key comes next. Clamped for safety; a
+        // value the file never closes is refused above rather than edited.
         assignment_end = std::min(static_cast<size_t>(entry.value_end_line), lines.size());
         report.existed = true;
         report.previous_literal = entry.value_text;
