@@ -215,6 +215,35 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **The audit reads both halves of the record, and says so when it reads
+  neither.** #827 taught `project_audit_assets` to answer the freshness
+  question out of the `.md5` Godot writes beside an imported output. It read
+  one of the two digests in that file. The other one is the output side, so an
+  imported output that no longer matched what was imported reported clean
+  (#830). `dest_md5` is one digest over every `dest_files` value concatenated
+  in the order the sidecar declares them, which is why the merged output list
+  could not stand in for it: on an ordinary texture that list names the same
+  file twice. Outputs that disagree are now reported as
+  `output_changed_since_import`, a finding of its own rather than another
+  `source_changed_since_import`, because a changed source is usually
+  deliberate and a changed output never is. Measured on 4.6.2: corrupting one
+  output and rescanning reimports the asset whenever the editor's filesystem
+  cache is cold, which is every fresh clone and every new worktree.
+- **`source_newer_than_output` meant two things, and the documented remedy
+  fixed one of them.** It was reported both for an asset Godot has never
+  imported in this checkout and for a source above the 64 MiB the audit
+  hashes, and the two have different remedies (#831). Opening the project in
+  the editor once makes the first go away and does nothing at all for the
+  second, so a caller who followed the advice on a 200 MB source got the same
+  finding back with nothing explaining why. The two are now separate.
+  `source_newer_than_output` means there is no record, and its remedy is the
+  one that works. A record that is there and was not compared -- either half,
+  for size or for a read that did not complete -- is
+  `import_freshness_unchecked`, and its `detail` says which half and why. No
+  timestamp comparison is offered in its place, because the record proves the
+  engine will compare digests and the weaker signal is wrong for the reason
+  #827 was filed about. A finding may now carry a `detail` with no `line`,
+  which only the parse refusal published before.
 - **Import freshness is read from the record Godot wrote, not from
   modification times.** `project_audit_assets` reported
   `source_newer_than_output` for all three assets in this repository's own

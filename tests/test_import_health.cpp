@@ -476,10 +476,15 @@ const char* const kIconRecordPath =
     ".godot/imported/icon.png-c3d958876317c5b9ff9d73fef1b6123f.md5";
 // md5("source"), which is what the fixtures write into art/icon.png.
 const char* const kSourceDigest = "36cd38f49b9afa08222c0dc9ebfe35eb";
+// md5("output"), which is what the fixtures write into every single-output
+// .ctex. `dest_md5` is one digest over the dest_files concatenated, so for one
+// output it is the digest of that file's bytes. Measured against Godot on this
+// repository's own demo/: the record beside didi_mark.svg's .ctex carries the
+// md5 of that .ctex and nothing else.
+const char* const kOutputDigest = "78e6221f6393d1356681db398f14ce6d";
 
-std::string record(const std::string& source_md5) {
-    return "source_md5=\"" + source_md5 + "\"\ndest_md5=\"" +
-           std::string(32, 'a') + "\"\n";
+std::string record(const std::string& source_md5, const std::string& dest_md5) {
+    return "source_md5=\"" + source_md5 + "\"\ndest_md5=\"" + dest_md5 + "\"\n";
 }
 
 void test_the_recorded_digest_answers_before_the_timestamps() {
@@ -489,7 +494,7 @@ void test_the_recorded_digest_answers_before_the_timestamps() {
     ImportHealthFixture fixture("digest-match");
     const auto source = fixture.write("art/icon.png", "source");
     const auto output = fixture.write(".godot/imported/icon.ctex", "output");
-    fixture.write(kIconRecordPath, record(kSourceDigest));
+    fixture.write(kIconRecordPath, record(kSourceDigest, kOutputDigest));
     fixture.write("art/icon.png.import",
                   metadata("res://art/icon.png", "res://.godot/imported/icon.ctex"));
     const auto now = std::filesystem::file_time_type::clock::now();
@@ -510,7 +515,7 @@ void test_a_source_that_does_not_match_the_record_is_reported() {
     ImportHealthFixture fixture("digest-mismatch");
     const auto source = fixture.write("art/icon.png", "changed source");
     const auto output = fixture.write(".godot/imported/icon.ctex", "output");
-    fixture.write(kIconRecordPath, record(kSourceDigest));
+    fixture.write(kIconRecordPath, record(kSourceDigest, kOutputDigest));
     fixture.write("art/icon.png.import",
                   metadata("res://art/icon.png", "res://.godot/imported/icon.ctex"));
     const auto now = std::filesystem::file_time_type::clock::now();
@@ -536,7 +541,7 @@ void test_a_record_under_the_wrong_name_is_not_read() {
     const auto source = fixture.write("art/icon.png", "source");
     const auto output = fixture.write(".godot/imported/icon.ctex", "output");
     fixture.write(".godot/imported/icon.png-" + std::string(32, '0') + ".md5",
-                  record(kSourceDigest));
+                  record(kSourceDigest, kOutputDigest));
     fixture.write("art/icon.png.import",
                   metadata("res://art/icon.png", "res://.godot/imported/icon.ctex"));
     const auto now = std::filesystem::file_time_type::clock::now();
@@ -574,7 +579,7 @@ void test_the_digest_holds_across_block_boundaries() {
             fixture.write("art/" + name + ".png", std::string(asset.length, asset.name[0]));
         const auto output = fixture.write(".godot/imported/" + name + ".ctex", "output");
         fixture.write(".godot/imported/" + name + ".png-" + asset.path_digest + ".md5",
-                      record(asset.body_digest));
+                      record(asset.body_digest, kOutputDigest));
         fixture.write("art/" + name + ".png.import",
                       metadata("res://art/" + name + ".png",
                                "res://.godot/imported/" + name + ".ctex"));
@@ -594,7 +599,7 @@ void test_a_symlinked_record_is_not_read() {
     ImportHealthFixture fixture("digest-symlink");
     const auto source = fixture.write("art/icon.png", "source");
     const auto output = fixture.write(".godot/imported/icon.ctex", "output");
-    const auto real = fixture.write(".godot/imported/real.md5", record(kSourceDigest));
+    const auto real = fixture.write(".godot/imported/real.md5", record(kSourceDigest, kOutputDigest));
     std::error_code link_error;
     std::filesystem::create_symlink(real, fixture.root() / kIconRecordPath, link_error);
     if (link_error) return; // No symlink privilege on this machine.
@@ -608,6 +613,142 @@ void test_a_symlinked_record_is_not_read() {
 
     ASSERT_EQ(report["import_issue_count"], 1u);
     ASSERT_EQ(report["import_issues"][0]["kind"], "source_newer_than_output");
+}
+
+// A sidecar shaped the way an importer with several outputs writes one. Godot's
+// csv_translation importer produces exactly this on a three-locale CSV: no
+// `[remap] path`, and a `dest_files` list with an order that matters.
+std::string multiOutputMetadata(const std::string& source,
+                                const std::string& first,
+                                const std::string& second) {
+    return "[remap]\n"
+           "importer=\"csv_translation\"\n"
+           "type=\"Translation\"\n\n"
+           "[deps]\n"
+           "source_file=\"" + source + "\"\n"
+           "dest_files=[\"" + first + "\", \"" + second + "\"]\n";
+}
+
+// The record for res://art/one.png. md5("res://art/one.png") is the stem.
+const char* const kOneRecordPath =
+    ".godot/imported/one.png-9a01884b0d623b8e0ece0eb1b76ab7fc.md5";
+// md5("output" + "second") and md5("second" + "output"). One digest over the
+// two files concatenated, which is what FileAccess::get_multiple_md5 computes,
+// so the two orders are different answers. Both produced outside this program,
+// and the declared-order value was confirmed against a real three-locale
+// .translation set Godot imported: the dest_md5 it wrote is the md5 of the
+// three files concatenated in the order dest_files lists them.
+const char* const kDeclaredOrderDigest = "c8b828ab4e5513ed3d344831736b1c6a";
+const char* const kReversedOrderDigest = "4e4c6a0b02374c56d2320e17b261380d";
+
+void test_a_changed_output_is_reported() {
+    // #830: the record holds both halves and only the source half was read, so
+    // an imported output that no longer matches what was imported reported
+    // clean. The engine compares dest_md5 too -- measured on 4.6.2, where
+    // corrupting one .translation and scanning with a cold filesystem cache
+    // reimports the asset.
+    ImportHealthFixture fixture("dest-mismatch");
+    const auto source = fixture.write("art/icon.png", "source");
+    const auto output = fixture.write(".godot/imported/icon.ctex", "corrupted output");
+    fixture.write(kIconRecordPath, record(kSourceDigest, kOutputDigest));
+    fixture.write("art/icon.png.import",
+                  metadata("res://art/icon.png", "res://.godot/imported/icon.ctex"));
+    // Both files older than the other way round, so a timestamp answer would
+    // report nothing here and the finding can only come from the digest.
+    const auto now = std::filesystem::file_time_type::clock::now();
+    std::filesystem::last_write_time(source, now - std::chrono::hours(2));
+    std::filesystem::last_write_time(output, now - std::chrono::hours(1));
+
+    const auto report = didi::offline::inspectImportHealth(fixture.root().string(), 500);
+
+    ASSERT_EQ(report["import_issue_count"], 1u);
+    ASSERT_EQ(report["import_issues"][0]["kind"], "output_changed_since_import");
+    ASSERT_EQ(report["import_issues"][0]["source"], "res://art/icon.png");
+    // A detail with no line, which the two were not allowed to be before.
+    ASSERT_TRUE(report["import_issues"][0].contains("detail"));
+    ASSERT_TRUE(!report["import_issues"][0].contains("line"));
+}
+
+void test_several_outputs_hash_in_the_order_dest_files_declares() {
+    ImportHealthFixture fixture("dest-order-match");
+    fixture.write("art/one.png", "source");
+    fixture.write(".godot/imported/one.a", "output");
+    fixture.write(".godot/imported/one.b", "second");
+    fixture.write(kOneRecordPath, record(kSourceDigest, kDeclaredOrderDigest));
+    fixture.write("art/one.png.import",
+                  multiOutputMetadata("res://art/one.png", "res://.godot/imported/one.a",
+                                      "res://.godot/imported/one.b"));
+
+    const auto report = didi::offline::inspectImportHealth(fixture.root().string(), 500);
+
+    ASSERT_EQ(report["scanned_import_metadata"], 1u);
+    ASSERT_EQ(report["import_issue_count"], 0u);
+}
+
+void test_several_outputs_hashed_in_the_wrong_order_do_not_match() {
+    // The control for the test above. If the outputs were hashed as a set, or
+    // in any order but the declared one, the test above would pass for the
+    // wrong reason and this one would pass too.
+    ImportHealthFixture fixture("dest-order-reversed");
+    fixture.write("art/one.png", "source");
+    fixture.write(".godot/imported/one.a", "output");
+    fixture.write(".godot/imported/one.b", "second");
+    fixture.write(kOneRecordPath, record(kSourceDigest, kReversedOrderDigest));
+    fixture.write("art/one.png.import",
+                  multiOutputMetadata("res://art/one.png", "res://.godot/imported/one.a",
+                                      "res://.godot/imported/one.b"));
+
+    const auto report = didi::offline::inspectImportHealth(fixture.root().string(), 500);
+
+    ASSERT_EQ(report["import_issue_count"], 1u);
+    ASSERT_EQ(report["import_issues"][0]["kind"], "output_changed_since_import");
+}
+
+void test_a_missing_output_makes_no_digest_claim() {
+    // A digest over a set with a hole in it is neither a match nor a real
+    // mismatch, so the missing output is the only finding.
+    ImportHealthFixture fixture("dest-incomplete");
+    fixture.write("art/one.png", "source");
+    fixture.write(".godot/imported/one.a", "output");
+    fixture.write(kOneRecordPath, record(kSourceDigest, kDeclaredOrderDigest));
+    fixture.write("art/one.png.import",
+                  multiOutputMetadata("res://art/one.png", "res://.godot/imported/one.a",
+                                      "res://.godot/imported/one.b"));
+
+    const auto report = didi::offline::inspectImportHealth(fixture.root().string(), 500);
+
+    ASSERT_EQ(report["import_issue_count"], 1u);
+    ASSERT_EQ(report["import_issues"][0]["kind"], "missing_import_output");
+}
+
+void test_a_source_above_the_budget_is_unchecked_rather_than_timestamped() {
+    // #831: an empty source digest meant either "no record" or "too large to
+    // hash", and both arrived as source_newer_than_output. The documented
+    // remedy for that finding is to open the project in the editor once, which
+    // does nothing here: the record is already there and is deliberately not
+    // compared. Resized rather than written, so the budget is exceeded without
+    // moving 64 MiB through the disk.
+    ImportHealthFixture fixture("source-over-budget");
+    const auto source = fixture.write("art/icon.png", "source");
+    const auto output = fixture.write(".godot/imported/icon.ctex", "output");
+    std::error_code resize_error;
+    std::filesystem::resize_file(source, didi::offline::kMaxImportSourceDigestBytes + 1,
+                                 resize_error);
+    if (resize_error) return; // No room for the file on this machine.
+    fixture.write(kIconRecordPath, record(kSourceDigest, kOutputDigest));
+    fixture.write("art/icon.png.import",
+                  metadata("res://art/icon.png", "res://.godot/imported/icon.ctex"));
+    const auto now = std::filesystem::file_time_type::clock::now();
+    std::filesystem::last_write_time(output, now - std::chrono::hours(2));
+    std::filesystem::last_write_time(source, now - std::chrono::hours(1));
+
+    const auto report = didi::offline::inspectImportHealth(fixture.root().string(), 500);
+
+    ASSERT_EQ(report["import_issue_count"], 1u);
+    ASSERT_EQ(report["import_issues"][0]["kind"], "import_freshness_unchecked");
+    ASSERT_TRUE(report["import_issues"][0]["detail"].get<std::string>().find("64 MiB") !=
+                std::string::npos);
+    ASSERT_TRUE(!report["import_issues"][0].contains("line"));
 }
 
 struct RegisterImportHealthTests {
@@ -654,6 +795,15 @@ struct RegisterImportHealthTests {
         registerTest("ImportHealth.DigestBlockBoundaries",
                      test_the_digest_holds_across_block_boundaries);
         registerTest("ImportHealth.SymlinkedRecord", test_a_symlinked_record_is_not_read);
+        registerTest("ImportHealth.OutputChanged", test_a_changed_output_is_reported);
+        registerTest("ImportHealth.OutputDigestOrder",
+                     test_several_outputs_hash_in_the_order_dest_files_declares);
+        registerTest("ImportHealth.OutputDigestWrongOrder",
+                     test_several_outputs_hashed_in_the_wrong_order_do_not_match);
+        registerTest("ImportHealth.OutputDigestIncomplete",
+                     test_a_missing_output_makes_no_digest_claim);
+        registerTest("ImportHealth.SourceOverBudget",
+                     test_a_source_above_the_budget_is_unchecked_rather_than_timestamped);
     }
 } g_registerImportHealthTests;
 
