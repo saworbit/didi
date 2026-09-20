@@ -175,6 +175,26 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
   that starts a game means to drive that game and the process may well still be
   pointed at the editor it was launched from.
 
+### Changed
+
+- **Every security alert now has a disposition written down, including the ones
+  Scorecard raises.** `SECURITY.md` explained the ten CodeQL findings it
+  dismissed and said why a Security tab full of permanent alerts is one nobody
+  opens, but five Scorecard alerts had been sitting open underneath that
+  sentence since 2026-09-09 with nothing recorded about them anywhere. Four
+  measure controls a single maintainer cannot operate -- an approving reviewer,
+  CODEOWNERS review, last-push approval, a repository older than 90 days -- and
+  the fifth asks the local CI image to hash-pin a `pip install` whose version is
+  already pinned exactly and watched by Dependabot. Each one now carries its
+  reasoning in the same table as the CodeQL dismissals, so the next person to
+  open the tab reads a decision rather than re-deriving one. The section also
+  records something that cost an investigation to learn: a CodeQL dismissal is
+  bound to the code it was made against, not to the finding, so an edit near an
+  alert closes it and raises the same finding again under a new number with the
+  dismissal gone. That is what happened to the `test_runner` and
+  `process_runner` process operations when the process-tree kill and the stdin
+  change moved the `execvp` call, and it will happen again.
+
 ### Fixed
 
 - **`project_rename_references` reports the `[autoload]` line that defines the
