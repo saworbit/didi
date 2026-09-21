@@ -8,6 +8,7 @@
 #include <cmath>
 #include <fstream>
 #include <limits>
+#include <map>
 #include <optional>
 #include <sstream>
 #include <vector>
@@ -141,6 +142,42 @@ Result<std::string> settingLiteral(const json& value, int depth) {
         return out.str();
     }
     return Error::invalidArgument("JSON value cannot be converted to a supported Godot Variant");
+}
+
+Result<std::vector<ProjectAutoload>> readProjectAutoloads(
+    const std::filesystem::path& project_root) {
+    auto contents = readWholeFile(project_root / "project.godot");
+    if (contents.isErr()) return contents.error();
+
+    const auto scanned = config_file::scan(contents.value());
+    if (auto unloadable = refuseUnloadable(scanned, "listing the autoloads in it")) {
+        return *unloadable;
+    }
+
+    // The last spelling of a key wins, which is the engine's rule for a
+    // duplicated setting, so this collects rather than pushes and keeps reading
+    // to the end.
+    std::map<std::string, ProjectAutoload> found;
+    for (const auto& entry : scanned.entries) {
+        if (entry.section != "autoload" || entry.key.empty()) continue;
+        ProjectAutoload autoload;
+        autoload.name = entry.key;
+        auto value = strings::trim(entry.value_text);
+        if (value.size() >= 2 && value.front() == '"' && value.back() == '"') {
+            value = value.substr(1, value.size() - 2);
+        }
+        // A leading `*` is how the engine spells "enters the tree as a
+        // singleton", and it is part of the stored value rather than part of
+        // the path.
+        autoload.singleton = !value.empty() && value.front() == '*';
+        autoload.path = autoload.singleton ? value.substr(1) : value;
+        found[autoload.name] = std::move(autoload);
+    }
+
+    std::vector<ProjectAutoload> autoloads;
+    autoloads.reserve(found.size());
+    for (auto& [name, autoload] : found) autoloads.push_back(std::move(autoload));
+    return autoloads;
 }
 
 Result<ProjectSettingRead> readProjectSetting(const std::filesystem::path& project_root,

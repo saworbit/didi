@@ -71,8 +71,50 @@ CallToolResult searchError(const Error& error) {
 
 } // namespace
 
+// Lists the autoloads, using the editor when one is attached and project.godot
+// directly when none is.
+//
+// Offline is the ordinary state of a machine, and five readers of project files
+// already answer there. This one refused, while project_analyze_impact resolved
+// autoloads out of the same file with no editor and reported the line each one
+// is on, so the [autoload] section was parsed offline by one tool and
+// unreadable to the tool named after it (#780).
 CallToolResult handleProjectListAutoloads(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
-    return forwardLiveProject(args, ipc, "project.listAutoloads", "list project autoloads");
+    if (ipc && ipc->isConnected()) {
+        return forwardLiveProject(args, ipc, "project.listAutoloads", "list project autoloads");
+    }
+    if (!args.is_object() || !args.empty()) {
+        return CallToolResult::error("Invalid autoload list request: this tool takes no arguments");
+    }
+    std::error_code root_error;
+    const auto root = std::filesystem::current_path(root_error);
+    if (root_error) {
+        return CallToolResult::error("The project root cannot be resolved for an offline autoload read");
+    }
+    auto read = offline::readProjectAutoloads(root);
+    if (read.isErr()) {
+        return CallToolResult::fromError(read.error(), "Failed to read the project autoloads: ");
+    }
+    json entries = json::array();
+    for (const auto& autoload : read.value()) {
+        entries.push_back({{"name", autoload.name},
+                           {"path", autoload.path},
+                           {"singleton", autoload.singleton}});
+    }
+    return CallToolResult::successJson(
+        {{"status", "success"},
+         {"autoloads", std::move(entries)},
+         {"execution_mode", "offline_fallback"},
+         {"is_live_engine", false},
+         {"read_from", "res://project.godot"},
+         // An autoload is a project setting and the engine adds no defaults to
+         // this section, so the file is the whole answer. What the file cannot
+         // show is an editor holding an unsaved change to it.
+         {"limitation",
+          "project.godot was read directly because no editor session is attached. An editor "
+          "with unsaved changes to the autoload list would answer differently, and nothing "
+          "here has loaded any of these scripts, so a path that no longer exists is reported "
+          "exactly as a working one is. Attach an editor to have the engine answer."}});
 }
 CallToolResult handleProjectSetAutoload(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     return forwardLiveProject(args, ipc, "project.setAutoload", "persist a project autoload");
@@ -89,8 +131,69 @@ CallToolResult handleProjectSetInputAction(const json& args, std::shared_ptr<ipc
 CallToolResult handleProjectRemoveInputAction(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     return forwardLiveProject(args, ipc, "project.removeInputAction", "remove a project input action");
 }
+// Reads a project setting, using the editor when one is attached and
+// project.godot directly when none is.
+//
+// The offline route exists because its own writer has one. project_set_setting
+// writes the file with no editor and explains itself, and then the tool whose
+// job is to read the value back answered 503, so a caller could not verify the
+// write, read before overwriting, or diff either side of it. The workaround was
+// to parse project.godot in the client, which is the thing the tool exists to
+// avoid (#780).
 CallToolResult handleProjectGetSetting(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
-    return forwardLiveProject(args, ipc, "project.getSetting", "read a project setting");
+    if (ipc && ipc->isConnected()) {
+        return forwardLiveProject(args, ipc, "project.getSetting", "read a project setting");
+    }
+    if (!args.is_object()) {
+        return CallToolResult::error("Invalid project setting request: arguments must be an object");
+    }
+    const std::string setting = args.value("setting", "");
+    std::error_code root_error;
+    const auto root = std::filesystem::current_path(root_error);
+    if (root_error) {
+        return CallToolResult::error("The project root cannot be resolved for an offline setting read");
+    }
+    auto read = offline::readProjectSetting(root, setting);
+    if (read.isErr()) {
+        return CallToolResult::fromError(read.error(), "Failed to read a project setting: ");
+    }
+    if (!read.value().existed) {
+        // Weaker than the live 404 and it says so. The engine answers this
+        // question from its own defaults as well as from the file, and Godot
+        // writes a default into project.godot only once something changes it,
+        // so a built-in this file does not mention is a setting the engine
+        // still has a value for.
+        return CallToolResult::errorJson(
+            404,
+            "project.godot does not set " + setting +
+                ". That is not the same answer an engine gives: Godot holds a default for "
+                "every built-in setting and only writes one into this file once it is "
+                "changed, so an attached editor may still have a value for this name. "
+                "Attach an editor to ask it.",
+            json{{"code", "not_found"},
+                 {"setting", setting},
+                 {"execution_mode", "offline_fallback"},
+                 {"is_live_engine", false},
+                 {"read_from", "res://project.godot"}});
+    }
+    return CallToolResult::successJson(
+        {{"status", "success"},
+         {"setting", read.value().setting},
+         // The literal, not a parsed value. Turning `PackedStringArray("4.5")`
+         // into JSON offline means writing a Variant parser, and the writer
+         // beside this one already publishes what it put in the file for the
+         // same reason: the literal is the evidence, where a value that looks
+         // right is a guess. A caller that wants the value parsed attaches an
+         // editor and gets `value` instead.
+         {"value_literal", read.value().literal},
+         {"execution_mode", "offline_fallback"},
+         {"is_live_engine", false},
+         {"read_from", "res://project.godot"},
+         {"limitation",
+          "project.godot was read directly because no editor session is attached, so this is "
+          "the literal text the file holds rather than the value an engine would load it as, "
+          "and it is published as value_literal rather than value for that reason. A running "
+          "editor holding an unsaved change would answer differently."}});
 }
 // Persists a project setting, using the editor when one is attached and
 // project.godot directly when none is.

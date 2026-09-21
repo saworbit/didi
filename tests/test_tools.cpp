@@ -2397,6 +2397,116 @@ static void test_a_file_that_parses_carries_no_cause() {
     ASSERT_EQ(file.presets.size(), 1u);
 }
 
+// The pair #780 is about: a writer that works offline and a reader that refused.
+static void test_a_setting_written_offline_can_be_read_back_offline() {
+    // The reproduction from the issue, end to end in one process. The write
+    // succeeded and explained itself, the file changed, and the tool whose job
+    // is to read the value back answered 503, so a caller could not verify the
+    // write, read before overwriting, or diff either side of it.
+    ScopedToolProject project("offline-setting-roundtrip");
+    writeAuditFile("project.godot", "config_version=5\n\n[application]\n\nconfig/name=\"p\"\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const auto written = registry.callTool(
+        "project_set_setting",
+        didi::json{{"setting", "application/config/description"}, {"value", "vibe"}});
+    ASSERT_TRUE(!written.isError);
+
+    const auto read = registry.callTool(
+        "project_get_setting", didi::json{{"setting", "application/config/description"}});
+    ASSERT_TRUE(!read.isError);
+    const auto answer = didi::json::parse(read.content[0].text);
+    ASSERT_EQ(answer["execution_mode"], "offline_fallback");
+    ASSERT_EQ(answer["is_live_engine"], false);
+    ASSERT_EQ(answer["setting"], "application/config/description");
+    // The literal the file holds, named as a literal. A parsed `value` is what
+    // an attached engine answers with, and inventing one here would mean
+    // writing a Variant parser.
+    ASSERT_EQ(answer["value_literal"], "\"vibe\"");
+    ASSERT_TRUE(!answer.contains("value"));
+    ASSERT_TRUE(answer.contains("limitation"));
+}
+
+static void test_an_offline_setting_read_says_what_its_404_is_not_claiming() {
+    // Weaker than the live 404 and it has to say so. Godot holds a default for
+    // every built-in and writes one into the file only once it is changed, so
+    // "the file does not set this" is not "the engine has no value for this".
+    ScopedToolProject project("offline-setting-absent");
+    writeAuditFile("project.godot", "config_version=5\n\n[application]\n\nconfig/name=\"p\"\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    const auto read = registry.callTool(
+        "project_get_setting", didi::json{{"setting", "rendering/limits/time/time_rollover_secs"}});
+
+    ASSERT_TRUE(read.isError);
+    const auto payload = didi::json::parse(read.content[0].text);
+    ASSERT_EQ(payload["error"]["code"], 404);
+    ASSERT_EQ(payload["error"]["data"]["code"], "not_found");
+    ASSERT_EQ(payload["error"]["data"]["execution_mode"], "offline_fallback");
+    const auto message = payload["error"]["message"].get<std::string>();
+    ASSERT_TRUE(message.find("default") != std::string::npos);
+}
+
+static void test_autoloads_are_listed_offline_the_way_the_engine_registers_them() {
+    // project_analyze_impact already resolved autoloads out of this file with
+    // no editor and reported the line each one sits on, so the section was
+    // parsed offline by one tool and unreadable to the tool named after it.
+    //
+    // The spaced key is the #813 rule: whitespace inside a key is not part of
+    // it, so `Spaced Name` is the autoload `SpacedName` to the engine and has
+    // to be here too.
+    ScopedToolProject project("offline-autoloads");
+    writeAuditFile("project.godot",
+                   "config_version=5\n"
+                   "\n"
+                   "[autoload]\n"
+                   "\n"
+                   "Good=\"*res://good.gd\"\n"
+                   "Plain=\"res://plain.gd\"\n"
+                   "Spaced Name=\"*res://spaced.gd\"\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    const auto listed = registry.callTool("project_list_autoloads", didi::json::object());
+    ASSERT_TRUE(!listed.isError);
+    const auto answer = didi::json::parse(listed.content[0].text);
+
+    ASSERT_EQ(answer["execution_mode"], "offline_fallback");
+    ASSERT_EQ(answer["autoloads"].size(), 3u);
+    // Sorted by name, which is what the live tool does.
+    ASSERT_EQ(answer["autoloads"][0]["name"], "Good");
+    ASSERT_EQ(answer["autoloads"][0]["path"], "res://good.gd");
+    // The `*` is how the engine spells singleton; it is not part of the path.
+    ASSERT_EQ(answer["autoloads"][0]["singleton"], true);
+    ASSERT_EQ(answer["autoloads"][1]["name"], "Plain");
+    ASSERT_EQ(answer["autoloads"][1]["singleton"], false);
+    ASSERT_EQ(answer["autoloads"][2]["name"], "SpacedName");
+}
+
+static void test_an_unloadable_manifest_is_refused_rather_than_read_offline() {
+    // The same refusal the writer gives. A file the engine answers
+    // ERR_PARSE_ERROR for describes no project, so reading settings out of it
+    // would report values nothing runs on.
+    ScopedToolProject project("offline-setting-unloadable");
+    writeAuditFile("project.godot",
+                   "config_version=5\n\n[application]\n\nconfig/name=\"p\"\nconfig/broken=)\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const auto read = registry.callTool(
+        "project_get_setting", didi::json{{"setting", "application/config/name"}});
+    ASSERT_TRUE(read.isError);
+    ASSERT_EQ(didi::json::parse(read.content[0].text)["error"]["code"], 409);
+
+    const auto listed = registry.callTool("project_list_autoloads", didi::json::object());
+    ASSERT_TRUE(listed.isError);
+    ASSERT_EQ(didi::json::parse(listed.content[0].text)["error"]["code"], 409);
+}
+
 static void test_the_export_family_answers_with_an_envelope_and_previews_what_it_will_do() {
     // Every failure in this family was a bare prose string with no code and
     // nothing to branch on, which the error-envelope census could not reach
@@ -7629,6 +7739,14 @@ struct RegisterToolTests {
                      test_audio_list_buses_reads_a_spaced_key);
         registerTest("Tools.AudioListBusesWrongSection",
                      test_audio_list_buses_ignores_a_bus_layout_key_outside_the_audio_section);
+        registerTest("Tools.OfflineSettingRoundTrip",
+                     test_a_setting_written_offline_can_be_read_back_offline);
+        registerTest("Tools.OfflineSettingAbsent",
+                     test_an_offline_setting_read_says_what_its_404_is_not_claiming);
+        registerTest("Tools.OfflineAutoloadList",
+                     test_autoloads_are_listed_offline_the_way_the_engine_registers_them);
+        registerTest("Tools.OfflineSettingUnloadableManifest",
+                     test_an_unloadable_manifest_is_refused_rather_than_read_offline);
         registerTest("Tools.ExportPresetRefusalCauses",
                      test_an_unparseable_presets_file_says_which_of_the_six_causes_it_is);
         registerTest("Tools.ExportPresetRunnableBooleanizes",

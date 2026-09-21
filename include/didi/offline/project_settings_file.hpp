@@ -5,6 +5,7 @@
 
 #include <filesystem>
 #include <string>
+#include <vector>
 
 namespace didi::offline {
 
@@ -49,6 +50,27 @@ struct ProjectSettingRead {
 
 Result<ProjectSettingRead> readProjectSetting(const std::filesystem::path& project_root,
                                               const std::string& setting);
+
+// One entry under [autoload], in the shape the live tool publishes.
+//
+// Godot registers `autoload/<name>` and stores the script path, with a leading
+// `*` meaning the script enters the tree as a singleton. The name is the key the
+// engine registers rather than the text before the `=`, because whitespace
+// inside a key is not part of it and a line with no `=` joins forward into the
+// next one that has one (#813).
+struct ProjectAutoload {
+    std::string name;
+    std::string path;
+    bool singleton{false};
+};
+
+// Every autoload project.godot declares, sorted by name, with no engine running.
+//
+// The file is the whole answer here: an autoload is a project setting and the
+// engine has no defaults to add. An unparseable manifest is refused rather than
+// read, for the reason every other reader in this file refuses one.
+Result<std::vector<ProjectAutoload>> readProjectAutoloads(
+    const std::filesystem::path& project_root);
 
 // Persists or removes one setting in project.godot with no engine running.
 //

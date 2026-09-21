@@ -215,6 +215,30 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **The two readers of `project.godot` answer offline, like its writer does.**
+  `project_set_setting` writes the file with no editor attached and explains
+  itself, and then `project_get_setting`, the tool whose job is to read that
+  value back, answered `503`. So a caller could write a setting, watch the file
+  change, and have no way to verify it, read it before overwriting, or diff
+  either side of it; the workaround was to parse `project.godot` in the client,
+  which is the thing these tools exist to avoid (#780).
+  `project_list_autoloads` was the second half of the same gap, and the odder
+  one: `project_analyze_impact` already resolves autoloads out of that file with
+  no editor and reports the line each one sits on, so the section was parsed
+  offline by one tool and unreadable to the tool named after it. Both now fall
+  back to the file and report `execution_mode: "offline_fallback"` with
+  `read_from`, the way five other readers on this surface already did.
+  Two things the offline answer says about itself rather than pretending
+  otherwise. A setting comes back as `value_literal`, the text the file holds,
+  and not as `value`: turning `PackedStringArray("4.5")` into JSON with no
+  engine means writing a Variant parser, and the writer beside it publishes what
+  it put in the file for exactly that reason. And a name the file does not set
+  is a `404` that states what it is not claiming, because Godot holds a default
+  for every built-in setting and writes one into the file only once it is
+  changed, so an attached editor may still have a value for it. An unloadable
+  manifest is refused by both, with the `409` the writer already gives, since a
+  file the engine answers `ERR_PARSE_ERROR` for describes no project.
+
 - **`runnable` is read the way the engine reads it, and one rule now covers
   both readers.** A preset whose `runnable` was anything but the literal `true`
   or `false` made the whole `export_presets.cfg` unparseable, so a project with
