@@ -2,6 +2,7 @@
 
 #include "didi/common/types.hpp"
 
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -148,6 +149,41 @@ Scan scan(std::string_view text);
 // So an empty answer is not a promise that Godot will load the value. A
 // non-empty one is a promise that it will not.
 std::string valueProblem(std::string_view value_text);
+
+// Why Godot refuses to load this whole file, or nothing when the scan proves
+// no such thing.
+//
+// `complete` and `valueProblem` are the two halves of one question -- will the
+// engine load this file -- and every reader of one has to ask the other. Four
+// of them grew their own copy of the pair and three of those asked neither, so
+// project_analyze_impact reported an [autoload] as a live dependency out of a
+// manifest the audit in the same session called unloadable (#826). The question
+// is asked once here.
+//
+// Measured on 4.5.1 and 4.7.2 with `Good="*res://good.gd"` above a broken
+// value and below it: the project does not open either way. `--headless
+// --path` falls through to the project manager, nothing runs, and the
+// singleton never enters the tree. `ProjectSettings.has_setting` answers true
+// for an entry above the break under `--script`, which is a session with no
+// project open rather than a project that registered it.
+//
+// The first failure, not all of them. A caller that means to list every one --
+// project_audit_assets is the only one -- walks the scan itself, because the
+// remedy is per line and the audit is where a user goes for the list.
+struct LoadFailure {
+    // The file ends part-way through a value. `section`, `key` and `line` name
+    // the last key read, which is the one whose value never closed, and are
+    // empty when the file holds no key at all.
+    bool unterminated{false};
+    std::string section;
+    std::string key;
+    int line{0};
+    // valueProblem's sentence for the value on `line`. Empty when the file is
+    // unterminated, which is the other way a file fails to load.
+    std::string value_reason;
+};
+
+std::optional<LoadFailure> loadFailure(const Scan& scanned);
 
 // What a value means where the engine wants a bool.
 //

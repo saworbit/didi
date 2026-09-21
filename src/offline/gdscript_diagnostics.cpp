@@ -371,15 +371,46 @@ std::vector<std::string> GDScriptDiagnostics::projectAutoloadNames() {
     if (!input.is_open()) return names;
     std::ostringstream contents;
     contents << input.rdbuf();
+    const auto scanned = config_file::scan(contents.str());
+    // A manifest Godot will not load registers nothing. The project does not
+    // open, so no autoload is ever added to the tree, and demoting an
+    // "Identifier not found" on the strength of a key in that file suppresses
+    // the one diagnostic the user needs -- the same suppression #813 was about,
+    // arrived at from the other side (#826).
+    //
+    // Measured on 4.5.1 and 4.7.2 with the entry above the broken value and
+    // below it. Neither runs: `--headless --path` falls through to the project
+    // manager and the singleton never enters the tree. `has_setting` answers
+    // true for an entry above the break under `--script`, which is a session
+    // with no project open rather than a project that registered it.
+    if (config_file::loadFailure(scanned)) return names;
     // The names the engine registers, not the text before each `=`. A
     // `# disabled for now` note above an entry joins forward and the singleton
     // loads as `#disabledfornowGood`, so treating `Good` as defined would
     // suppress the one diagnostic the user needs (#813).
-    for (const auto& entry : config_file::scan(contents.str()).entries) {
+    for (const auto& entry : scanned.entries) {
         if (entry.section != "autoload" || entry.key.empty()) continue;
         names.push_back(entry.key);
     }
     return names;
+}
+
+std::string GDScriptDiagnostics::projectManifestLoadProblem() {
+    std::ifstream input(paths::projectPathFromUtf8("project.godot"), std::ios::binary);
+    if (!input.is_open()) return {};
+    std::ostringstream contents;
+    contents << input.rdbuf();
+    const auto failure = config_file::loadFailure(config_file::scan(contents.str()));
+    if (!failure) return {};
+    if (failure->unterminated) {
+        std::string sentence = "project.godot ends part-way through a value";
+        if (failure->line > 0) sentence += " on line " + std::to_string(failure->line);
+        return sentence;
+    }
+    const std::string name =
+        failure->section.empty() ? failure->key : failure->section + "/" + failure->key;
+    return "project.godot line " + std::to_string(failure->line) + " sets " + name +
+           " to a value Godot's parser refuses, because " + failure->value_reason;
 }
 
 // The identifier a "Identifier not found" diagnostic names, or nothing.
@@ -444,6 +475,28 @@ void GDScriptDiagnostics::demoteAutoloadDiagnostics(
             diagnostic.note = "The only compile errors named autoloads this check cannot see, so "
                               "the failure it reports is not one the engine has.";
         }
+    }
+}
+
+// The error is real and stays an error. What it is missing is the cause: the
+// identifier is unresolved because the project does not open, which is one file
+// away from the script the caller is looking at (#826).
+void GDScriptDiagnostics::noteUnloadableManifest(std::vector<ScriptDiagnostic>& diags,
+                                                 const std::string& manifest_problem) {
+    if (diags.empty() || manifest_problem.empty()) return;
+    for (auto& diagnostic : diags) {
+        if (diagnostic.severity != "error") continue;
+        if (!unresolvedIdentifierIn(diagnostic.message)) continue;
+        // Never over a note that is already there. Nothing else writes one on
+        // an unresolved identifier today, and a cause that overwrites a cause
+        // is worse than no cause.
+        if (!diagnostic.note.empty()) continue;
+        diagnostic.note =
+            manifest_problem +
+            ". The engine answers ERR_PARSE_ERROR for the whole file, so the project does not "
+            "open and none of its autoloads are registered. An autoload this script names is "
+            "unresolved for that reason rather than because of anything in the script. Repair "
+            "project.godot before rewriting this.";
     }
 }
 
@@ -724,7 +777,15 @@ std::vector<ScriptDiagnostic> GDScriptDiagnostics::runGodotCompilerCheck(
         }
     }
 
-    demoteAutoloadDiagnostics(diags, projectAutoloadNames());
+    // One or the other. A manifest that loads is read for the names the
+    // demotion needs; one that does not registers nothing, so there is nothing
+    // to demote against and the reason goes on the diagnostics instead (#826).
+    const auto manifest_problem = projectManifestLoadProblem();
+    if (manifest_problem.empty()) {
+        demoteAutoloadDiagnostics(diags, projectAutoloadNames());
+    } else {
+        noteUnloadableManifest(diags, manifest_problem);
+    }
     return diags;
 }
 

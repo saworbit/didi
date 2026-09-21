@@ -3031,6 +3031,88 @@ static void test_project_impact_answers_on_a_packed_array_line() {
     ASSERT_TRUE(std::chrono::duration_cast<std::chrono::seconds>(elapsed).count() < 20);
 }
 
+static void test_project_impact_says_when_the_manifest_does_not_load() {
+    // project_audit_assets knew this file was ERR_PARSE_ERROR and, in the same
+    // session, project_analyze_impact reported the [autoload] line as a live
+    // dependency of a singleton that is not registered and cannot be, with
+    // nothing in limitations about it. impact_count is what a caller reads as
+    // "here is what a rename will touch" (#826).
+    ScopedToolProject project("project-impact-unloadable-manifest");
+    writeAuditFile("project.godot",
+                   "config_version=5\n"
+                   "\n"
+                   "[application]\n"
+                   "\n"
+                   "config/broken=)\n"
+                   "\n"
+                   "[autoload]\n"
+                   "\n"
+                   "Good=\"*res://good.gd\"\n");
+    writeAuditFile("good.gd", "extends Node\nfunc hello():\n    pass\n");
+    writeAuditFile("user.gd", "extends Node\nfunc _ready():\n    Good.hello()\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const auto audit = registry.callTool("project_audit_assets", didi::json::object());
+    ASSERT_TRUE(!audit.isError);
+    const auto audited = didi::json::parse(audit.content[0].text);
+    // The control. One surface already says the project does not open, which is
+    // what made the other one's silence a contradiction rather than a gap.
+    ASSERT_TRUE(audited["project_settings_issue_count"].get<size_t>() >= 1u);
+
+    const auto impact =
+        registry.callTool("project_analyze_impact", didi::json{{"target", "Good"}});
+    ASSERT_TRUE(!impact.isError);
+    const auto report = didi::json::parse(impact.content[0].text);
+    // The line is still reported: a rename has to edit it whether or not the
+    // file loads, and dropping it would be the silent breakage this tool
+    // exists to avoid.
+    ASSERT_EQ(report["counts_by_kind"]["autoload"], 1u);
+
+    const auto says_so = [](const didi::json& limitations) {
+        for (const auto& line : limitations) {
+            const auto text = line.get<std::string>();
+            if (text.find("ERR_PARSE_ERROR") != std::string::npos &&
+                text.find("does not open") != std::string::npos) {
+                return true;
+            }
+        }
+        return false;
+    };
+    ASSERT_TRUE(says_so(report["limitations"]));
+    // Named, not just announced: the remedy is to repair one line.
+    bool names_the_setting = false;
+    for (const auto& line : report["limitations"]) {
+        if (line.get<std::string>().find("application/config/broken") != std::string::npos) {
+            names_the_setting = true;
+        }
+    }
+    ASSERT_TRUE(names_the_setting);
+
+    // The rename planner reads the same file and is the tool the rename is
+    // planned from, so it carries the same sentence.
+    didi::offline::ProjectRenameOptions rename_options;
+    rename_options.target = "Good";
+    rename_options.new_name = "Better";
+    const auto plan = didi::offline::planRenameReferences(
+        std::filesystem::current_path().string(), rename_options);
+    ASSERT_TRUE(!plan.isErr());
+    ASSERT_TRUE(says_so(plan.value()["limitations"]));
+
+    // The control: a manifest that loads carries neither sentence.
+    writeAuditFile("project.godot",
+                   "config_version=5\n"
+                   "\n"
+                   "[autoload]\n"
+                   "\n"
+                   "Good=\"*res://good.gd\"\n");
+    const auto clean =
+        registry.callTool("project_analyze_impact", didi::json{{"target", "Good"}});
+    ASSERT_TRUE(!clean.isError);
+    ASSERT_TRUE(!says_so(didi::json::parse(clean.content[0].text)["limitations"]));
+}
+
 static void test_a_file_over_the_scan_bound_is_skipped_and_said_so() {
     // The whole-project readers held every file in memory at once with none of
     // the bounds the search tools apply (#664). A file over the per-file cap is
@@ -7825,6 +7907,8 @@ struct RegisterToolTests {
                      test_project_impact_answers_on_a_packed_array_line);
         registerTest("Tools.ProjectScanBoundSkipsAndSaysSo",
                      test_a_file_over_the_scan_bound_is_skipped_and_said_so);
+        registerTest("Tools.ProjectImpactUnloadableManifest",
+                     test_project_impact_says_when_the_manifest_does_not_load);
         registerTest("Tools.ProjectImpactFindings",
                      test_project_impact_finds_scene_and_animation_references_a_search_cannot_explain);
         registerTest("Tools.ProjectImpactFileTarget",

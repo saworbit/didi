@@ -564,6 +564,39 @@ std::string valueProblem(std::string_view value_text) {
     return walk.problem;
 }
 
+std::optional<LoadFailure> loadFailure(const Scan& scanned) {
+    // A file that ends part-way through a *key* is not this. The engine drops
+    // that text and load() returns OK, which is the ordinary trailing note, so
+    // trailing_key is not consulted.
+    if (!scanned.complete) {
+        LoadFailure failure;
+        failure.unterminated = true;
+        // The last key read is the one whose value never closed, which is the
+        // line to repair. Naming it is the difference between a verdict and a
+        // remedy.
+        if (!scanned.entries.empty()) {
+            failure.section = scanned.entries.back().section;
+            failure.key = scanned.entries.back().key;
+            failure.line = scanned.entries.back().line;
+        }
+        return failure;
+    }
+    // Balanced is not loadable. `config/broken=)` closes every bracket it opens
+    // and is still err 43, so a reader that stopped at `complete` answered out
+    // of a file that does not load (#820).
+    for (const auto& entry : scanned.entries) {
+        auto problem = valueProblem(entry.value_text);
+        if (problem.empty()) continue;
+        LoadFailure failure;
+        failure.section = entry.section;
+        failure.key = entry.key;
+        failure.line = entry.line;
+        failure.value_reason = std::move(problem);
+        return failure;
+    }
+    return std::nullopt;
+}
+
 bool booleanize(std::string_view value_text) {
     const auto text = strings::trim(value_text);
     if (text == "false" || text == "null" || text == "nil") return false;

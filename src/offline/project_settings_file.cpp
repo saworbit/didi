@@ -36,45 +36,39 @@ std::string trimmed(const std::string& text) {
     return text.substr(first, last - first + 1);
 }
 
-std::string settingName(const config_file::Entry& entry) {
-    if (entry.section.empty()) return entry.key;
-    return entry.section + "/" + entry.key;
+std::string settingName(const std::string& section, const std::string& key) {
+    if (section.empty()) return key;
+    return section + "/" + key;
 }
 
-// A project.godot that ends part-way through a value is ERR_PARSE_ERROR for
-// Godot and the project does not open at all: `--headless --path` refuses it
-// and ConfigFile.load answers 43. The trap is that load() still hands back the
+std::string settingName(const config_file::Entry& entry) {
+    return settingName(entry.section, entry.key);
+}
+
+// A project.godot Godot will not load is ERR_PARSE_ERROR and the project does
+// not open at all: `--headless --path` falls through to the project manager and
+// ConfigFile.load answers 43. The trap is that load() still hands back the
 // sections it managed to read, so a partial parse looks like a parse, and a
-// reader that answered out of it described a project that does not run (#817).
-//
-// The opposite case is not this. A file that ends part-way through a *key* is
-// dropped by the engine and load() returns OK, which is the ordinary trailing
-// `# note`, so trailing_key is not checked here.
-//
-// A balanced file is not a loadable one either. `config/broken=)` closes every
-// bracket it opens and is still err 43, and the write that landed in it
-// reported success and left it exactly as unloadable (#820). A value the
-// parser cannot start is refused here for the same reason the unterminated one
-// is: the whole file fails to load, so every setting in it, including the one
-// just written, is not what the project runs on.
+// reader that answered out of it described a project that does not run (#817,
+// #820). `config_file::loadFailure` is where that decision lives; this is the
+// wording for the three calls below, which all end in a write or a read that
+// would be about a project nobody can open.
 std::optional<Error> refuseUnloadable(const config_file::Scan& scanned, const char* verb) {
-    if (!scanned.complete) {
+    const auto failure = config_file::loadFailure(scanned);
+    if (!failure) return std::nullopt;
+    if (failure->unterminated) {
         return Error(409, std::string("project.godot ends part-way through a value, which Godot "
                                       "answers with ERR_PARSE_ERROR: the project does not open "
                                       "and none of the settings in the file are what it runs on. "
                                       "Repair the unterminated value before ") +
                               verb + ".");
     }
-    for (const auto& entry : scanned.entries) {
-        const auto problem = config_file::valueProblem(entry.value_text);
-        if (problem.empty()) continue;
-        return Error(409, "project.godot line " + std::to_string(entry.line) + " sets " +
-                              settingName(entry) + " to a value Godot's parser refuses, because " +
-                              problem + ". The engine answers ERR_PARSE_ERROR for the whole file, "
-                              "so the project does not open and none of the settings in it are "
-                              "what it runs on. Repair the value before " + verb + ".");
-    }
-    return std::nullopt;
+    return Error(409, "project.godot line " + std::to_string(failure->line) + " sets " +
+                          settingName(failure->section, failure->key) +
+                          " to a value Godot's parser refuses, because " + failure->value_reason +
+                          ". The engine answers ERR_PARSE_ERROR for the whole file, "
+                          "so the project does not open and none of the settings in it are "
+                          "what it runs on. Repair the value before " + verb + ".");
 }
 
 Result<std::string> readWholeFile(const std::filesystem::path& path) {
