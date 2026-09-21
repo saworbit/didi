@@ -464,7 +464,7 @@ jobs:
               pathlib.Path('docs/ARCHITECTURE.md'): (
                   'No live path waits forever', '.didi-retired-<session-id>-<32hex>'),
               pathlib.Path('docs/TOOL_REFERENCE.md'): (
-                  'POSIX normally retains', '<OS temp>/didi-sessions-<euid>'),
+                  'swept up by a later discovery scan', '<OS temp>/didi-sessions-<euid>'),
           }
           forbidden_claims = {
               pathlib.Path('README.md'): (
@@ -479,7 +479,8 @@ jobs:
                   "A command already running on Godot's main thread is allowed to return its definitive result",),
               pathlib.Path('docs/ARCHITECTURE.md'): (
                   'wait for the definitive result instead of returning an ambiguous timeout',),
-              pathlib.Path('docs/TOOL_REFERENCE.md'): ('re-verify it, and normally delete it',),
+              pathlib.Path('docs/TOOL_REFERENCE.md'): (
+                  're-verify it, and normally delete it', 'POSIX normally retains that metadata file'),
           }
 
           def heading_anchors(path):

@@ -215,6 +215,22 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **A session lock file is swept up once nobody holds it.** The route takes a
+  lock beside the descriptor and releases it when the route closes. Releasing a
+  lock does not remove the file it was taken on, so every session that ever ran
+  left one behind in a directory every project on the machine shares, while the
+  descriptor beside it was retired correctly. Two weeks of ordinary use came to
+  205 files, none of them naming a live session (#787). The scan that
+  `runtime_list_sessions` already runs now sweeps them on the same opportunistic
+  pass that reaps a descriptor tombstone, which covers a crash as well as a
+  tidy exit: removing the file in the destructor would only have covered the
+  second. Two things have to be true before one goes. The descriptor beside it
+  has to be gone, so a live session is never a candidate, and the lock has to be
+  free, which is proved by taking it rather than by the file looking unused. A
+  lock another client holds answers 423 to the sweep exactly as it does to an
+  attach. Reproduced through the built server: thirty orphaned locks in a
+  session directory, one `runtime_list_sessions`, none left.
+
 - **The offline bus reader follows the manifest, and answers with the bus the
   project actually has.** `audio_list_buses` read `project.godot` with its own
   line reader and its own regex, comparing a section header as a whole line and
