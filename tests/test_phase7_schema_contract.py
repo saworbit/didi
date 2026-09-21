@@ -110,19 +110,36 @@ class Phase7SchemaContractTests(unittest.TestCase):
             self.assertEqual(actual, original_schema(name).strip())
 
     def test_two_superseding_source_contracts_are_exact(self):
+        # CONNECT_PERSIST alone or with CONNECT_DEFERRED and CONNECT_ONE_SHOT,
+        # which is what the editor's Connect dialog writes, and each of those
+        # plus CONNECT_INHERITED, which is how signal_list_connections reports
+        # a connection inside an instanced scene (#852). Every one of them
+        # round-trips a pack, a save and a load on 4.5.1, 4.6.2 and 4.7.2.
         connect = json.loads((SCHEMA_DIR / "signal_connect.schema.json").read_text())
-        self.assertEqual(connect["$defs"]["request"]["properties"]["flags"]["enum"], [2])
+        self.assertEqual(connect["$defs"]["request"]["properties"]["flags"]["enum"],
+                         [2, 3, 6, 7, 34, 35, 38, 39])
         self.assertEqual(connect["$defs"]["request"]["properties"]["flags"]["default"], 2)
-        for name, success_key in (("signal_connect", "connected"),
-                                  ("signal_disconnect", "disconnected")):
+        # A connect reports the flags it wrote, with the engine's provenance bit
+        # masked off. A disconnect reports the flags the removed connection had,
+        # verbatim, because that is what signal_connect needs to put it back.
+        for name, success_key, accepted in (
+                ("signal_connect", "connected", [2, 3, 6, 7]),
+                ("signal_disconnect", "disconnected", [2, 3, 6, 7, 34, 35, 38, 39])):
             document = json.loads((SCHEMA_DIR / f"{name}.schema.json").read_text())
             success = document["$defs"]["success"]
-            self.assertEqual(success["properties"]["flags"], {"const": 2})
+            self.assertEqual(success["properties"]["flags"],
+                             {"type": "integer", "enum": accepted})
             validator = Draft202012Validator(success)
+            for flags in accepted:
+                validator.validate({success_key: True, "flags": flags,
+                                    "undo_redo_registered": True,
+                                    "outcome": "completed", "rollback": "undo_redo"})
             valid = {success_key: True, "flags": 2, "undo_redo_registered": True,
                      "outcome": "completed", "rollback": "undo_redo"}
-            validator.validate(valid)
-            for rejected in (0, 1, 3, 4, 8, 10):
+            # Nothing without CONNECT_PERSIST, and neither of the two persistent
+            # flags this surface refuses to write.
+            for rejected in (0, 1, 4, 5, 8, 10, 16, 18, 32, 33):
+                self.assertNotIn(rejected, accepted)
                 invalid = dict(valid, flags=rejected)
                 with self.assertRaises(ValidationError):
                     validator.validate(invalid)

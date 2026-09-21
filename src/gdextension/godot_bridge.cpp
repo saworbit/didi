@@ -6,6 +6,7 @@
 #include "didi/gdextension/viewport_renderer.hpp"
 #include "didi/common/logger.hpp"
 #include "didi/common/config_file_syntax.hpp"
+#include "didi/common/connection_flags.hpp"
 #include "didi/common/godot_error.hpp"
 #include "didi/common/json_bounds.hpp"
 #include "didi/common/project_path.hpp"
@@ -120,6 +121,8 @@ const std::map<std::string, std::string>& bridgeErrorSentences() {
      "That is not a seam this build admits."},
     {"invalid_gridmap_set_cells_request",
      "The arguments do not match the published shape for this tool."},
+    {"invalid_signal_connect_request",
+     "The arguments do not match the published shape for this tool."},
     {"invalid_signal_emit_argument_encoding",
      "An argument is not encoded the way this method expects."},
     {"invalid_signal_emit_request",
@@ -189,7 +192,7 @@ const std::map<std::string, std::string>& bridgeErrorSentences() {
     {"tilemap_undo_registration_failed",
      "The change could not be registered with the editor's undo history, so it was not made."},
     {"unsupported_existing_connection_flags",
-     "The existing connection carries connect flags this method will not change."},
+     "The existing connection is not one the scene file stores."},
     {"unsupported_signal_emit_argument",
      "An argument is of a type this method has no way to send."},
     };
@@ -8493,9 +8496,27 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 !bounded_string(params["target_method"], 1, 128) ||
                 (is_connect && params.contains("flags") &&
                  (!(params["flags"].is_number_integer() ||
-                    params["flags"].is_number_unsigned()) || params["flags"] != 2))) {
+                    params["flags"].is_number_unsigned()) ||
+                  // Read as int64 below, so a value that does not fit is a
+                  // shape problem rather than a flag this tool will not write.
+                  (params["flags"].is_number_unsigned() &&
+                   params["flags"].get<uint64_t>() >
+                       static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))))) {
                 return errorJson(400, is_connect ? "invalid_signal_connect_request"
                                                  : "invalid_signal_disconnect_request");
+            }
+            // The flags this call will write. The server refuses an
+            // unacceptable value first and with the same rule, so reaching
+            // this means a client spoke to the bridge directly.
+            const int64_t requested_flags =
+                is_connect && params.contains("flags")
+                    ? connection_flags::authored(params["flags"].get<int64_t>())
+                    : connection_flags::kPersist;
+            if (is_connect && !connection_flags::isConnectable(requested_flags)) {
+                return bridgeError(
+                    400, "invalid_signal_connect_request",
+                    {{"flags", params["flags"]}},
+                    *connection_flags::refuseConnectFlags(params["flags"].get<int64_t>()));
             }
             if (!preflight_object_binds({
                     {"get_signal_list", 3995934104LL},
@@ -8695,13 +8716,36 @@ json GodotBridge::execute(const std::string& method, const json& params,
             if (is_disconnect && matches.value().size() != 1) {
                 return bridgeError(409, "missing_or_ambiguous_signal_connection");
             }
-            if (is_disconnect && matches.value().front().flags != 2) {
-                return bridgeError(409, "unsupported_existing_connection_flags");
+            // Only a connection the scene file stores is the caller's to
+            // remove. This used to demand exactly 2, which refused every
+            // deferred or one-shot connection the editor's Connect dialog
+            // writes, and every connection at all inside an instanced scene,
+            // where the engine adds CONNECT_INHERITED to the value it reports
+            // (#852). An engine or editor connection is still refused: it is
+            // not in the .tscn, the engine makes it again, and removing one
+            // breaks the layout it was keeping in order.
+            if (is_disconnect &&
+                !connection_flags::isPersistent(matches.value().front().flags)) {
+                return bridgeError(
+                    409, "unsupported_existing_connection_flags",
+                    {{"flags", matches.value().front().flags}},
+                    "The connection's flags are " +
+                        std::to_string(matches.value().front().flags) +
+                        ", which does not include 2, CONNECT_PERSIST, so it is not stored in "
+                        "the scene file. signal_list_connections reports it as origin 'engine' "
+                        "or 'editor': the engine or the editor made it and will make it again, "
+                        "and removing one breaks what it was keeping in order.");
             }
 
             auto manager = undoManager(editor);
             if (manager.isErr()) return errorJson(manager.error().code, manager.error().message);
-            auto flags_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, int64_t{2});
+            // A connect writes what the caller asked for. A disconnect's undo
+            // restores what was there, verbatim, including CONNECT_INHERITED:
+            // undo that put a deferred connection back as a plain one would be
+            // its own silent behaviour change (#852).
+            const int64_t applied_flags =
+                is_connect ? requested_flags : matches.value().front().flags;
+            auto flags_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, applied_flags);
             if (flags_value.isErr()) return errorJson(500, flags_value.error().message);
             auto action = createAction(manager.value(),
                                        is_connect ? "Connect signal" : "Disconnect signal",
@@ -8760,7 +8804,8 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 if (observed_connected.isOk()) {
                     postcondition_ok = is_connect
                         ? observed_connected.value() && observed_matches.value().size() == 1 &&
-                              observed_matches.value().front().flags == 2
+                              connection_flags::authored(
+                                  observed_matches.value().front().flags) == requested_flags
                         : !observed_connected.value() && observed_matches.value().empty();
                 }
             }
@@ -8822,7 +8867,8 @@ json GodotBridge::execute(const std::string& method, const json& params,
                                 ? !restored_connected.value() && restored_matches.value().empty()
                                 : restored_connected.value() &&
                                       restored_matches.value().size() == 1 &&
-                                      restored_matches.value().front().flags == 2;
+                                      restored_matches.value().front().flags ==
+                                          matches.value().front().flags;
                         }
                     }
                 }
@@ -8834,12 +8880,15 @@ json GodotBridge::execute(const std::string& method, const json& params,
                      {"outcome", restored ? "rolled_back" : "unknown"},
                      {"restoration_observed", restored}});
             }
+            // The flags the connection now has, not the flags this tool used to
+            // be able to write. A caller that asked for a deferred connection
+            // and was told `flags: 2` could not tell whether it got one.
             if (is_connect) {
-                return liveSceneMutation({{"connected", true}, {"flags", 2},
+                return liveSceneMutation({{"connected", true}, {"flags", applied_flags},
                                           {"undo_redo_registered", true},
                                           {"outcome", "completed"}, {"rollback", "undo_redo"}});
             }
-            return liveSceneMutation({{"disconnected", true}, {"flags", 2},
+            return liveSceneMutation({{"disconnected", true}, {"flags", applied_flags},
                                       {"undo_redo_registered", true},
                                       {"outcome", "completed"}, {"rollback", "undo_redo"}});
         }

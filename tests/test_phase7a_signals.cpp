@@ -1,6 +1,9 @@
 #include "didi/mcp/tool_registry.hpp"
 #include <functional>
 #include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
 #define ASSERT_TRUE(cond) if (!(cond)) throw std::runtime_error("Assertion failed: " #cond);
 #define TEST_CASE(name, tags) static void phase7_contract_test()
 void registerTest(const std::string& name, std::function<void()> fn);
@@ -213,8 +216,14 @@ void test_phase7_signal_handlers_reject_non_exact_requests_without_dispatch() {
     {
         auto client = std::make_shared<SignalRecordingClient>();
         const auto binding = resolveAliasBinding("signal_connect");
+        // Everything outside the accepted set is still refused without
+        // dispatching. The set itself is spelled out here rather than read from
+        // the rule the handler uses, so this stays a second opinion: 2 is
+        // CONNECT_PERSIST, and 3, 6 and 7 add CONNECT_DEFERRED and
+        // CONNECT_ONE_SHOT, which is what the editor's Connect dialog writes
+        // (#852). What those four do is measured in FlagsTheEditorWrites.
         for (int flag = -16; flag <= 16; ++flag) {
-            if (flag == 2) continue;
+            if (flag == 2 || flag == 3 || flag == 6 || flag == 7) continue;
             auto invalid = connect_request;
             invalid["flags"] = flag;
             assertSignalRequestRejected(handleSignalConnect(binding, invalid, client), client);
@@ -374,6 +383,78 @@ void test_phase7_signal_handlers_forward_exact_normalized_requests_once() {
     }
 }
 
+void test_phase7_signal_connect_writes_the_flags_the_editor_writes() {
+    // Break caught: signal_connect refuses the flag combinations the editor's
+    // own Connect dialog writes, so a connection a user authored with Deferred
+    // or One Shot ticked can be read through the surface and removed through
+    // the surface and not put back, and the one that is put back has quietly
+    // stopped being deferred (#852).
+    //
+    // Measured on 4.5.1, 4.6.2 and 4.7.2: connecting with 2, 3, 6 or 7, packing,
+    // saving and loading with CACHE_MODE_IGNORE round-trips the value exactly,
+    // and nothing without CONNECT_PERSIST is written to the file at all.
+    using namespace didi::mcp;
+    const didi::json connect_request = {
+        {"emitter_node", "/root/Emitter"}, {"signal_name", "observed"},
+        {"target_node", "/root/Receiver"}, {"target_method", "receive"}};
+    const auto binding = resolveAliasBinding("signal_connect");
+
+    // What the editor writes, and what reaches the engine.
+    for (const auto [asked, forwarded] : std::vector<std::pair<int64_t, int64_t>>{
+             {2, 2}, {3, 3}, {6, 6}, {7, 7},
+             // CONNECT_INHERITED is the engine's note that a connection came
+             // from an instanced scene. signal_list_connections reports it, so
+             // a caller reconciling connections hands it straight back; it is
+             // provenance rather than a setting, and connect() gets the part
+             // the caller chose.
+             {34, 2}, {35, 3}, {38, 6}, {39, 7}}) {
+        auto client = std::make_shared<SignalRecordingClient>();
+        auto request = connect_request;
+        request["flags"] = asked;
+        const auto result = handleSignalConnect(binding, request, client);
+        ASSERT_TRUE(!result.isError);
+        ASSERT_TRUE(client->requests == 1);
+        ASSERT_TRUE(client->last_params["flags"] == forwarded);
+    }
+
+    // Absent still means CONNECT_PERSIST. Every caller written against the old
+    // surface keeps working.
+    {
+        auto client = std::make_shared<SignalRecordingClient>();
+        const auto result = handleSignalConnect(binding, connect_request, client);
+        ASSERT_TRUE(!result.isError);
+        ASSERT_TRUE(client->last_params["flags"] == 2);
+    }
+
+    // The refusal names the argument and says what is on offer. It used to be
+    // the bare identifier invalid_signal_connect_request, with flags named
+    // nowhere, so a caller who passed 3 could not tell whether the problem was
+    // the flag, the method, the node or the signal.
+    struct RefusalCase {
+        int64_t flags;
+        const char* names;
+    };
+    for (const auto& refusal : std::vector<RefusalCase>{
+             {0, "CONNECT_PERSIST"},
+             {1, "CONNECT_PERSIST"},
+             {4, "CONNECT_PERSIST"},
+             {10, "CONNECT_REFERENCE_COUNTED"},
+             {18, "CONNECT_APPEND_SOURCE_OBJECT"}}) {
+        auto client = std::make_shared<SignalRecordingClient>();
+        auto request = connect_request;
+        request["flags"] = refusal.flags;
+        const auto result = handleSignalConnect(binding, request, client);
+        ASSERT_TRUE(result.isError);
+        ASSERT_TRUE(client->requests == 0);
+        const auto message =
+            signalResultPayload(result)["error"]["message"].get<std::string>();
+        ASSERT_TRUE(message.find("'flags'") != std::string::npos);
+        ASSERT_TRUE(message.find(refusal.names) != std::string::npos);
+        // Every refusal says what would have been accepted.
+        ASSERT_TRUE(message.find("Accepted: 2") != std::string::npos);
+    }
+}
+
 void test_phase7_signal_emit_confirmation_replay_and_public_gate_do_not_dispatch() {
     // Break caught: signal.emit bypasses central confirmation, reuses a token,
     // or becomes publicly callable before the atomic Phase 7 activation task.
@@ -440,6 +521,8 @@ struct RegisterPhase7SignalBehavior {
                      test_phase7_signal_handlers_reject_non_exact_requests_without_dispatch);
         registerTest("Phase7Signals.ExactForwarding",
                      test_phase7_signal_handlers_forward_exact_normalized_requests_once);
+        registerTest("Phase7Signals.FlagsTheEditorWrites",
+                     test_phase7_signal_connect_writes_the_flags_the_editor_writes);
         registerTest("Phase7Signals.EmitPreviewReportsWhatItRead",
                      test_a_signal_emit_preview_reports_what_it_actually_read);
         registerTest("Phase7Signals.ConfirmationAndPublicGate",

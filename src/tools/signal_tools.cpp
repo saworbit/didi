@@ -1,5 +1,6 @@
 #include "didi/mcp/mcp_protocol.hpp"
 #include "didi/tools/phase7_live_forward.hpp"
+#include "didi/common/connection_flags.hpp"
 #include "didi/common/ipc_channel.hpp"
 #include "didi/common/logger.hpp"
 
@@ -74,13 +75,34 @@ bool validateRelationshipRequest(const json& args, bool allow_flags) {
         !isBoundedUtf8String(args["target_method"], 1, 128)) {
         return false;
     }
-    if (allow_flags && args.contains("flags")) {
-        if (!(args["flags"].is_number_integer() || args["flags"].is_number_unsigned()) ||
-            args["flags"] != 2) {
-            return false;
-        }
-    }
+    (void)allow_flags;
     return true;
+}
+
+// The value rule for `flags`, kept apart from the shape checks above so the
+// refusal can name the argument.
+//
+// Everything `validateRelationshipRequest` rejects is a missing or misshapen
+// string, and one identifier covers them because the schema already spells the
+// shape out. A well-formed integer this tool will not write is a different
+// finding: the caller got the argument right and the value wrong, and
+// `invalid_signal_connect_request` told them neither which argument nor which
+// values are on offer (#852).
+std::optional<std::string> refuseSignalConnectFlags(const json& args) {
+    if (!args.contains("flags")) return std::nullopt;
+    const auto& flags = args["flags"];
+    if (flags.is_number_unsigned()) {
+        if (flags.get<uint64_t>() >
+            static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
+            return std::string("Argument 'flags' is larger than a Godot integer holds.");
+        }
+    } else if (!flags.is_number_integer()) {
+        return std::string(
+            "Argument 'flags' must be a whole number of Godot connection flags. Accepted: 2 "
+            "(CONNECT_PERSIST), 3 (with CONNECT_DEFERRED), 6 (with CONNECT_ONE_SHOT), 7 (with "
+            "both), and each of those plus 32 (CONNECT_INHERITED).");
+    }
+    return connection_flags::refuseConnectFlags(flags.get<int64_t>());
 }
 
 // The rules a signal argument has to satisfy, and the sentence for the first
@@ -208,8 +230,16 @@ CallToolResult handleSignalConnect(const ResolvedToolBinding& binding, const jso
     if (!validateRelationshipRequest(args, true)) {
         return invalidSignalRequest(binding, "invalid_signal_connect_request");
     }
+    if (auto refused = refuseSignalConnectFlags(args)) {
+        return invalidSignalRequest(binding, *refused);
+    }
     auto normalized = args;
-    normalized["flags"] = 2;
+    // CONNECT_INHERITED is the engine's note that a connection came from an
+    // instanced scene, so it is not the caller's to set. A caller round-tripping
+    // a listing hands it back; connect() gets the part they chose.
+    normalized["flags"] = args.contains("flags")
+                              ? connection_flags::authored(args["flags"].get<int64_t>())
+                              : connection_flags::kPersist;
     return sendPhase7LiveRequest(binding, normalized, ipc);
 }
 
