@@ -215,6 +215,28 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **The offline bus reader follows the manifest, and answers with the bus the
+  project actually has.** `audio_list_buses` read `project.godot` with its own
+  line reader and its own regex, comparing a section header as a whole line and
+  matching a key with its whitespace in place. Both are spellings the engine
+  honours, so a project that moved its layout file and wrote
+  `[ audio ]` or `buses / default_bus_layout` was told it has no buses at all,
+  with a note saying it ships no layout file while the file sat where the
+  manifest said (#836). Measured on 4.5.1, 4.6.2 and 4.7.2: each spelling on its
+  own turned a three bus project into `bus_count: 0`, and the ordinary spelling
+  read all three correctly. The manifest now goes through `config_file::scan`
+  like every other settings reader, which is what #809, #811 and #814 taught the
+  rest of them.
+  The second half is the answer for a project with no layout file. It was
+  `bus_count: 0` and an empty list, with a note in the same payload saying Godot
+  uses a single Master bus, so the two halves disagreed and the machine readable
+  one was wrong (#837). Every Godot project has a Master bus. Measured on all
+  three lines, with no layout file and again with the manifest naming one that
+  is not there: `AudioServer` reports one bus, Master, at 0 dB, no send, no
+  mute, no solo, no bypass. That is now the answer, with the same fields every
+  other bus carries. `layout_present: false` is unchanged and is still how a
+  caller tells a project that ships a layout from one that does not.
+
 - **The import record is looked for where Godot writes it.** The record was
   found by taking the parent directory of a declared output, which is the right
   answer for a texture and for nothing else. Godot builds that path from the
