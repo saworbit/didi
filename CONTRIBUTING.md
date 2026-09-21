@@ -80,14 +80,43 @@ add noise to the log and change nothing about who is responsible.
 
    On Windows, changes to the live bridge must also pass `tests/run_godot_integration.ps1` against a supported Godot 4.5+ editor build.
 
-4. **Validate Documentation**:
+   To run one test on its own, which is how you tell a genuine failure from a
+   leak an earlier test left behind:
+   ```bash
+   ./build/didi_tests --filter=Tools.Rename
+   ```
+   The value goes after an `=` with no space. The space form is refused by
+   name rather than running the whole suite and reporting its exit code.
+
+4. **Run the Python Suite**:
+   ```bash
+   # From the repository root, on any platform
+   DIDI_TEST_BINARY=/absolute/path/to/build/didi python -m unittest discover -s tests -t tests
+   ```
+   Expect `Ran 388 tests ... OK (skipped=6)` in about 40 seconds.
+
+   Two things are worth stating, because both cost time and neither is
+   guessable. `-t tests` is what makes discovery work: `tests/` has no
+   `__init__.py`, so `discover -s tests -t .` refuses the directory, and
+   pointing the top level at `tests/` also puts it on `sys.path`, which is what
+   the one bare sibling import in the suite needs. And `DIDI_TEST_BINARY` must
+   be an **absolute** path, because it is handed straight to `subprocess.run`;
+   a relative `build/didi` fails `CreateProcess` on Windows with a traceback
+   that names neither the path nor the variable.
+
+   That variable means two different binaries depending on who reads it. The
+   Python suites want the **server**, `didi`. `tools/test_inventory.py` wants
+   the **test** binary, `didi_tests`. Pointing either at the other hangs or
+   reports nothing.
+
+5. **Validate Documentation**:
    ```bash
    python -m unittest tests.test_documentation_validator -v
    python tools/validate_documentation.py
    ```
    Run these checks for documentation, version, tool-surface, capability, or release changes.
 
-5. **Regenerate the Test Inventory** (only if you added or removed tests):
+6. **Regenerate the Test Inventory** (only if you added or removed tests):
    ```bash
    python tools/test_inventory.py
    ```

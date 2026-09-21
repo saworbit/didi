@@ -215,6 +215,33 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **The test runner refuses an argument it does not understand.** `didi_tests
+  --filter=Tools.Rename` runs one test. `didi_tests --filter Tools.Rename` ran
+  all 694 and printed no warning, no usage line and no `Filter:` header, and
+  the exit code was the whole suite's (#803). The argv loop was an if/else chain
+  with no final else, so the flag matched neither branch, the filter stayed
+  empty and everything ran. That is the same shape the server's own parser was
+  corrected for, and the loss here is the thing the flag exists to prevent: the
+  comment above it says a single test is run alone because the suite shares
+  process-global state, and the space form silently handed back the shared-state
+  run that reasoning avoids while looking like it had done what was asked. An
+  argument the runner does not know is now refused by name, with both accepted
+  forms printed and a non-zero exit. `--list` and `--filter=X` are unchanged.
+- **CONTRIBUTING says how to run the Python suite.** It documented one module
+  and the documentation tool, and never gave a command for the whole suite. The
+  two a contributor would reach for first both failed, neither because anything
+  was wrong: `discover -s tests -t .` refuses the directory because `tests/` has
+  no `__init__.py`, and a module list fails on the one bare sibling import that
+  only resolves with `tests/` on `sys.path` (#798). Both failures are
+  indistinguishable from real breakage, which is time spent for nothing or a
+  contributor deciding the suite is flaky. The working invocation is
+  `python -m unittest discover -s tests -t tests`: pointing the top level at
+  `tests/` is what makes discovery work and what puts the directory on the path,
+  so no `PYTHONPATH` is needed. Written down beside it: `DIDI_TEST_BINARY` must
+  be an absolute path, because it is handed straight to `subprocess.run`, and it
+  means the server binary for the Python suites and the test binary for
+  `tools/test_inventory.py`.
+
 - **The Markdown link check is one implementation, and it runs before you
   push.** CI carried its own copy inside `ci.yml` as a heredoc. That copy
   stripped fenced code blocks and not inline code spans, so any sample where a

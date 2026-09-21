@@ -260,7 +260,10 @@ still easier to read unpiped. CI uses pwsh 7, where the redirection was always
 harmless.
 
 The native runner accepts `--list` to print every registered case and
-`--filter=<substring>` to run a subset:
+`--filter=<substring>` to run a subset. The value goes after an `=` with no
+space, and any other argument is refused by name with a non-zero exit: the space
+form used to match nothing, leave the filter empty and run all of them, which
+reads as one isolated test passing (#803):
 
 ```powershell
 .\build\Release\didi_tests.exe --list
