@@ -161,6 +161,21 @@ ExportPresetsFile readExportPresets(const std::string& contents) {
     std::map<std::string, size_t> preset_of_section;
     bool malformed = false;
 
+    // The first cause wins and the rest are not collected. A file with two
+    // faults is repaired one at a time, and the first one is the one the reader
+    // reaches: everything after a value the parser will not start is behind an
+    // ERR_PARSE_ERROR anyway.
+    std::string reason;
+    std::string detail;
+    int line = 0;
+    const auto note = [&](const char* cause, std::string sentence, int at) {
+        malformed = true;
+        if (!reason.empty()) return;
+        reason = cause;
+        detail = std::move(sentence);
+        line = at;
+    };
+
     // `#` is not a comment in a ConfigFile. A `#` line with an `=` is a key
     // whose name carries the hash, and a `#` line without one joins forward
     // into the next line that has one, taking any section header in between
@@ -170,7 +185,18 @@ ExportPresetsFile readExportPresets(const std::string& contents) {
     const auto scanned = config_file::scan(contents);
     // A file that ends inside a value is ERR_PARSE_ERROR for the engine and
     // none of it loads, so nothing read above it describes an export.
-    if (!scanned.complete) malformed = true;
+    if (!scanned.complete) {
+        // The last key read is the one whose value never closed.
+        const int at = scanned.entries.empty() ? 0 : scanned.entries.back().line;
+        note("truncated_value",
+             std::string("export_presets.cfg ends part-way through a value") +
+                 (at > 0 ? ", starting on line " + std::to_string(at) : "") +
+                 ", so Godot answers ERR_PARSE_ERROR for the whole file and the editor "
+                 "detects no presets at all. That is a truncated write rather than a preset "
+                 "to correct, so repair the line or delete the file and export once from the "
+                 "editor to write a new one.",
+             at);
+    }
     // Balanced is not loadable either. `export_path=)` closes every bracket it
     // opens, so counting brackets let it through and the list published a
     // preset with `)` as the path an export would write to (#823). Godot's own
@@ -179,8 +205,17 @@ ExportPresetsFile readExportPresets(const std::string& contents) {
     // ahead of the bad value parse and the editor still has no preset. So a
     // value this cannot start is the whole file, not one field.
     for (const auto& entry : scanned.entries) {
-        if (config_file::valueProblem(entry.value_text).empty()) continue;
-        malformed = true;
+        const auto problem = config_file::valueProblem(entry.value_text);
+        if (problem.empty()) continue;
+        // The sentence and the line were both already in hand here and both
+        // were dropped. project_audit_assets publishes the pair for the same
+        // failure in project.godot and in a .import.
+        note("unloadable_value",
+             "Godot's parser refuses the value of \"" + entry.key + "\" on line " +
+                 std::to_string(entry.line) + ", because " + problem +
+                 ". It answers ERR_PARSE_ERROR for the whole file, so the editor detects no "
+                 "presets even though the keys ahead of this one are fine.",
+             entry.line);
         break;
     }
     // A file with content but no section the engine honours is not an ini. A
@@ -189,7 +224,11 @@ ExportPresetsFile readExportPresets(const std::string& contents) {
     // something else is a project with no export presets rather than a broken
     // file (#651).
     if (scanned.headers.empty() && (!scanned.entries.empty() || scanned.trailing_key)) {
-        malformed = true;
+        note("no_section_header",
+             "export_presets.cfg has content and no section header the engine honours, so it "
+             "is not the file Godot writes. Delete it and export once from the editor to "
+             "write a new one.",
+             0);
     }
 
     for (const auto& header : scanned.headers) {
@@ -212,7 +251,11 @@ ExportPresetsFile readExportPresets(const std::string& contents) {
         // That is also where a swallowed `[preset.N]` header leaves the keys
         // that were meant to be under it.
         if (entry.section.empty()) {
-            malformed = true;
+            note("key_before_section",
+                 "Line " + std::to_string(entry.line) + " carries the key \"" + entry.key +
+                     "\" before any section header, so nothing owns it. That is also where "
+                     "a [preset.N] header swallowed by the line above it leaves its keys.",
+                 entry.line);
             continue;
         }
         const auto at = preset_of_section.find(entry.section);
@@ -227,8 +270,16 @@ ExportPresetsFile readExportPresets(const std::string& contents) {
         if (key == "name" || key == "platform" || key == "export_filter" || key == "export_path") {
             presets[at->second][key] = value;
         } else if (key == "runnable") {
-            if (value != "true" && value != "false") malformed = true;
-            else presets[at->second][key] = value == "true";
+            if (value != "true" && value != "false") {
+                note("invalid_runnable",
+                     "[" + entry.section + "] sets runnable to \"" + value + "\" on line " +
+                         std::to_string(entry.line) +
+                         ", and Godot writes only true or false there. Fix it in the editor's "
+                         "Export dialog, which writes the value it means.",
+                     entry.line);
+            } else {
+                presets[at->second][key] = value == "true";
+            }
         }
     }
 
@@ -236,11 +287,31 @@ ExportPresetsFile readExportPresets(const std::string& contents) {
     for (const auto& preset : presets) {
         const std::string name = preset.value("name", "");
         const std::string platform = preset.value("platform", "");
-        if (name.empty() || platform.empty() || !names.insert(name).second) malformed = true;
+        const auto index = std::to_string(preset.value("index", 0));
+        if (name.empty() || platform.empty()) {
+            note("incomplete_preset",
+                 "[preset." + index + "] declares no " +
+                     (name.empty() ? std::string("name") : std::string("platform")) +
+                     ", and Godot needs both to detect a preset. Add it in the editor's "
+                     "Export dialog.",
+                 0);
+            continue;
+        }
+        if (!names.insert(name).second) {
+            note("duplicate_preset_name",
+                 "[preset." + index + "] is named \"" + name +
+                     "\", and so is an earlier preset. Godot addresses a preset by name, so "
+                     "the second one cannot be reached. Rename one in the editor's Export "
+                     "dialog.",
+                 0);
+        }
     }
     ExportPresetsFile file;
     file.section_count = presets.size();
     file.malformed = malformed;
+    file.reason = std::move(reason);
+    file.detail = std::move(detail);
+    file.line = line;
     if (!malformed) file.presets = std::move(presets);
     return file;
 }
@@ -249,6 +320,32 @@ std::vector<json> parseExportPresets(const std::string& contents) {
     return readExportPresets(contents).presets;
 }
 
+
+// One code, one opening, and the cause carried with it.
+//
+// The remedy is not the same for all six. A file that ends inside a value or
+// holds a value the parser will not start is a broken write, and "fix it in the
+// Export dialog" is not a remedy for it: the dialog will not open a file that
+// does not parse. A duplicate name is two presets somebody made in the editor,
+// and the dialog is exactly where that one is fixed. So each cause carries its
+// own sentence and its own next step (#828).
+std::string malformedPresetsMessage(const ExportPresetsFile& file) {
+    std::string message = "export_presets.cfg is there and could not be parsed.";
+    if (!file.detail.empty()) message += " " + file.detail;
+    else message += " Fix it in the editor's Export dialog, or delete it to start again.";
+    return message;
+}
+
+json malformedPresetsData(const ExportPresetsFile& file) {
+    json data = {{"presets_file_exists", true},
+                 {"declared_preset_sections", file.section_count}};
+    // `reason` is the stable token a caller branches on; the sentence is for
+    // the reader. A finding with no line does not publish `line: 0`, which
+    // would be a line nobody can open.
+    if (!file.reason.empty()) data["reason"] = file.reason;
+    if (file.line > 0) data["line"] = file.line;
+    return data;
+}
 
 std::optional<Error> checkExportPreset(const std::string& preset) {
     std::error_code error;
@@ -275,13 +372,7 @@ std::optional<Error> checkExportPreset(const std::string& preset) {
     std::ostringstream buffer;
     buffer << input.rdbuf();
     const auto file = readExportPresets(buffer.str());
-    if (file.malformed) {
-        return Error(422,
-                     "export_presets.cfg is there and could not be parsed. Fix it in the "
-                     "editor's Export dialog, or delete it to start again.",
-                     {{"presets_file_exists", true},
-                      {"declared_preset_sections", file.section_count}});
-    }
+    if (file.malformed) return Error(422, malformedPresetsMessage(file), malformedPresetsData(file));
     json available = json::array();
     for (const auto& item : file.presets) available.push_back(item.value("name", ""));
     const bool found = std::any_of(file.presets.begin(), file.presets.end(),
