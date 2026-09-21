@@ -3658,13 +3658,17 @@ void ToolRegistry::registerAllDefaultTools() {
                 {"overwrite", {{"type", "boolean"}, {"default", false}}},
                 {"allow_unknown_type", {{"type", "boolean"}, {"default", false},
                                         {"description",
-                                         "Write a resource_type the shipped class reference does not "
-                                         "list. Off by default, because Godot cannot load a resource "
-                                         "whose type it does not know and a misspelling is the "
-                                         "common case. Turn it on for a type that comes from a "
-                                         "GDExtension or a class_name script, which the reference "
-                                         "cannot see. The result then reports property_check as "
-                                         "unchecked, because there is nothing to check against."}}}
+                                         "Write a resource_type neither the attached engine nor the "
+                                         "shipped class reference lists. Off by default, because "
+                                         "Godot cannot load a resource whose type it does not know "
+                                         "and a misspelling is the common case. Turn it on for a "
+                                         "type that comes from a class_name script, which neither "
+                                         "list can see. A GDExtension type is in the attached "
+                                         "engine's ClassDB and needs no flag while a session is "
+                                         "attached. The result then reports property_check as "
+                                         "unchecked, because there is nothing to check against, or "
+                                         "type_unknown_to_attached_engine when the engine answered "
+                                         "and does not have the type."}}}
             }},
             {"required", {"save_path"}}
         };

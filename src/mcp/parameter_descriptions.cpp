@@ -260,9 +260,11 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
         // -- Resources ----------------------------------------------------
         {"resource_create.resource_type",
          "The Godot class to write into the [gd_resource] header, such as CanvasItemMaterial. "
-         "A name the pinned class reference does not list is refused, because Godot cannot "
-         "load a resource whose type it does not know; pass allow_unknown_type for a "
-         "class_name script or a GDExtension type."},
+         "A name the engine does not have is refused, because Godot cannot load a resource "
+         "whose type it does not know. With a session attached that is the attached engine's "
+         "own ClassDB, which is not the pinned reference: the reference is 4.7 and a 4.5.1 "
+         "engine has 65 fewer classes. Pass allow_unknown_type for a class_name script or a "
+         "GDExtension type."},
         {"resource_inspect.resource_path",
          "The res:// resource to inspect. Matched exactly, so res://player.gd never answers "
          "with res://player.gd.uid."},

@@ -715,7 +715,11 @@ Every property name is checked against what the pinned API dump declares for `re
 
 Two things are not refused. `script`, which is how a resource gets properties of its own and is the case where undeclared names are expected. And a name beginning with `_` or containing `/`, because the API dump lists only the inspector-visible set and Godot stores more than that: `_data` on a Curve, `sources/0` on a TileSet, `tracks/0/type` on an Animation.
 
-A `resource_type` the reference does not carry is refused, not skipped. Godot does not drop one property for a type it does not know; it fails to instantiate the resource at all, so the file would not load. A script class or a type from another extension is not in the dump either, so `allow_unknown_type: true` writes it anyway and the result reports `property_check.checked: false` with `allowed_by: "allow_unknown_type"`, because there is nothing to check the names against.
+A `resource_type` the engine does not have is refused, not skipped. Godot does not drop one property for a type it does not know; it fails to instantiate the resource at all, so the file would not load. A script class or a type from another extension is not in the dump either, so `allow_unknown_type: true` writes it anyway and the result reports `property_check.checked: false` with `allowed_by: "allow_unknown_type"`, because there is nothing to check the names against.
+
+**Which engine decides.** With a session attached, the type is checked against that engine's own `ClassDB` rather than against the pinned dump, and `property_check.type_checked_against` reads `attached_engine`. The two lists are not the same list: the dump is pinned at 4.7 and a 4.5.1 engine has 65 fewer classes, so `DrawableTexture2D` and `BlitMaterial` passed the old check and then made a file that engine refused to load outright. A type the attached engine does not have is refused naming that engine's version, and `allow_unknown_type: true` still writes it, adding `type_unknown_to_attached_engine: true` beside `checked: true` so the report does not read as agreement. An attached engine that *does* have a type the dump lacks settles it the other way: the file is written with `allowed_by: "attached_engine"` and the property names still unchecked.
+
+With no session attached, or with an extension older than the route, the pinned dump is the only list there is and decides as before; `type_checked_against` then reads `api_reference` when a session is attached, and is absent when none is.
 
 The result carries `property_check` with `checked` (whether the check ran at all), `api_version`, `not_declared_but_written` listing the storage-only names that were written unverified, and `written_as_declared_type` naming each property whose literal came from its declaration rather than from the shape of the JSON, so a correction is visible rather than silent. The last two are absent when there is nothing to report. With an editor attached it also carries `attached_engine_version` and `api_version_matches_attached_engine`: the dump is pinned to one engine line and CI covers three, so `checked: true` means verified against the dump rather than against the engine in front of you. `sub_resource_property_checks` carries the same per sub-resource id. Use `script_reflect_class` to see what a type declares.
 
@@ -739,7 +743,7 @@ The result adds `external_references` (path, resource type, id and uid for each 
 }
 ```
 
-Didi does not instantiate the requested Resource class in Godot. It does check the class name against the pinned class reference, and refuses one that is not there unless `allow_unknown_type: true` says so.
+Didi does not instantiate the requested Resource class in Godot. It does check the class name against the attached engine's `ClassDB`, or against the pinned class reference when no session is attached, and refuses one that is not there unless `allow_unknown_type: true` says so.
 
 `save_path` must end in `.tres` or `.res`. The body is Godot text-resource markup and nothing else, so any other target is refused rather than written; use `script_create` for a `.gd` file.
 
@@ -747,7 +751,7 @@ Didi does not instantiate the requested Resource class in Godot. It does check t
 - `save_path` (`string`, required).
 - `properties` (`object` or `array` of `{name, value}`, optional). The array form is written in the order given.
 - `overwrite` (`boolean`, default `false`); an existing target is preserved unless explicitly set to `true`.
-- `allow_unknown_type` (`boolean`, default `false`); write a `resource_type` the pinned class reference does not list.
+- `allow_unknown_type` (`boolean`, default `false`); write a `resource_type` neither the attached engine nor the pinned class reference lists.
 
 ### `resource_inspect` — Offline
 

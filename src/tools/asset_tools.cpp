@@ -787,6 +787,19 @@ const char* shapeDerivedComponentName(const json& value) {
     return nullptr;
 }
 
+// What the attached engine said about a resource type, and which engine said
+// it. Absent when no session is attached, or when the attached bridge is older
+// than the engine.classExists route: the pinned reference is the only list
+// available then, and the report says so rather than implying an engine agreed.
+struct EngineTypeVerdict {
+    // Whether the attached engine was asked and replied. An older bridge has no
+    // engine.classExists route, and a bridge that could not answer is not a
+    // bridge that said yes.
+    bool answered = false;
+    bool known = false;
+    std::string engine_version;
+};
+
 // Refuses property names the type does not have. Godot drops them silently on
 // load, so the file was well formed, the caller was told they were written, and
 // nothing in the surface would ever show the loss.
@@ -794,7 +807,36 @@ Result<json> checkPropertiesAgainstType(
     const std::string& resource_type,
     const std::vector<std::pair<std::string, json>>& properties,
     const std::string& where,
-    bool allow_unknown_type) {
+    bool allow_unknown_type,
+    const std::optional<EngineTypeVerdict>& engine_verdict) {
+    // The engine that will load the file is the one whose class list it has to
+    // satisfy. The pinned dump is 4.7 and a 4.5.1 engine has 65 fewer classes,
+    // so a type in the dump and absent from that engine wrote a file the engine
+    // refused outright -- "Can't create sub resource of type", the whole
+    // resource rather than one dropped property -- while the same response
+    // carried api_version_matches_attached_engine: false (#766). Measured:
+    // DrawableTexture2D and BlitMaterial exist only on 4.7, JointLimitation3D
+    // arrived in 4.6.
+    if (engine_verdict.has_value() && engine_verdict->answered && !engine_verdict->known &&
+        !allow_unknown_type) {
+        return Error::invalidArgument(
+            where + ": " + resource_type + " is not a class in " +
+            engine_verdict->engine_version +
+            ", which is the engine this session is attached to. Godot cannot load a "
+            "resource whose type it does not know, so the file would fail to load rather "
+            "than lose a property. Check the spelling with script_reflect_class. If the "
+            "type comes from a GDExtension or a class_name script, which neither the "
+            "shipped class reference nor ClassDB lists, pass allow_unknown_type: true.");
+    }
+    // Which list decided the type, so `checked: true` says what it was checked
+    // against. Only when a session is attached: with none there is no second
+    // list to have preferred, and every offline answer keeps the shape it had.
+    const auto noteOracle = [&](json report) {
+        if (!engine_verdict.has_value()) return report;
+        report["type_checked_against"] =
+            engine_verdict->answered ? "attached_engine" : "api_reference";
+        return report;
+    };
     std::set<std::string> declared;
     std::map<std::string, std::string> declared_types;
     if (!declaredPropertyNames(resource_type, declared, &declared_types)) {
@@ -804,7 +846,12 @@ Result<json> checkPropertiesAgainstType(
         // check already applies, applied to the type (#465). The escape hatch
         // is real -- a class_name script or a GDExtension type is not in the
         // dump either -- so it is named rather than removed.
-        if (!allow_unknown_type) {
+        // A GDExtension type is in the attached engine's ClassDB and in no
+        // dump, so an engine that has the class settles the question the
+        // reference could not. Its properties still cannot be checked.
+        const bool engine_has_type =
+            engine_verdict.has_value() && engine_verdict->answered && engine_verdict->known;
+        if (!allow_unknown_type && !engine_has_type) {
             return Error::invalidArgument(
                 where + ": " + resource_type +
                 " is not a class in " + offline::ClassReference::instance().apiVersion() +
@@ -814,8 +861,10 @@ Result<json> checkPropertiesAgainstType(
                 "class_name script, which the shipped class reference cannot see, pass "
                 "allow_unknown_type: true.");
         }
-        return json{{"checked", false}, {"reason", "type_not_in_api_reference"},
-                    {"allowed_by", "allow_unknown_type"}};
+        return noteOracle(json{{"checked", false},
+                               {"reason", "type_not_in_api_reference"},
+                               {"allowed_by", engine_has_type ? "attached_engine"
+                                                              : "allow_unknown_type"}});
     }
     std::vector<std::string> unknown;
     json unverified = json::array();
@@ -862,7 +911,43 @@ Result<json> checkPropertiesAgainstType(
                    {"api_version", offline::ClassReference::instance().apiVersion()}};
     if (!unverified.empty()) report["not_declared_but_written"] = std::move(unverified);
     if (!retyped.empty()) report["written_as_declared_type"] = std::move(retyped);
-    return report;
+    // The one way past the guard above with a type the attached engine does not
+    // have. The property names were still checked against the pinned reference,
+    // so `checked: true` is true and would read as agreement without this.
+    if (engine_verdict.has_value() && engine_verdict->answered && !engine_verdict->known) {
+        report["type_unknown_to_attached_engine"] = true;
+    }
+    return noteOracle(std::move(report));
+}
+
+// What the attached engine has in its ClassDB, for the types this call is about.
+// Empty when nothing is attached or the bridge could not answer, which the
+// caller reads as "no engine spoke" rather than as "the engine said no".
+//
+// One round trip for every type in the call. project_audit_assets set the
+// precedent for an offline answer the live engine gets to correct; this is the
+// same move applied before the file is written rather than after.
+std::map<std::string, bool> askAttachedEngineForTypes(
+    const std::shared_ptr<ipc::IIpcClient>& ipc, const std::vector<std::string>& type_names) {
+    std::map<std::string, bool> known;
+    if (!ipc || !ipc->isConnected() || type_names.empty()) return known;
+    // The bridge's own cap, and it is the largest shape resource_create can
+    // produce: one root type and the 64 sub_resources entries already allow,
+    // with duplicates folded out. Falling back here would be the silent
+    // reference check this route exists to replace.
+    if (type_names.size() > 65) return known;
+    auto response = ipc->sendRequest("engine.classExists", json{{"class_names", type_names}},
+                                     ipc::kWaitForDefinitiveResponse);
+    if (response.isErr() || !response.value().is_object()) return known;
+    const auto& body = response.value();
+    if (!body.contains("classes") || !body["classes"].is_array()) return known;
+    for (const auto& entry : body["classes"]) {
+        if (!entry.is_object()) continue;
+        const auto name = entry.value("name", std::string{});
+        if (name.empty() || !entry.contains("exists") || !entry["exists"].is_boolean()) continue;
+        known[name] = entry["exists"].get<bool>();
+    }
+    return known;
 }
 
 struct SubResourceSpec {
@@ -948,6 +1033,36 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
     if (sub_parsed.isErr()) return CallToolResult::fromError(sub_parsed.error());
     const auto& sub_resources = sub_parsed.value();
 
+    // Which engine will load this file, asked before the type guard runs. The
+    // guard's own description says a type the engine does not know makes a
+    // resource that cannot be loaded, and it was checking that against the
+    // pinned 4.7 dump rather than against the attached engine (#766).
+    const auto sessions = std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(ipc);
+    const auto attached = sessions ? sessions->observableSession()
+                                   : std::optional<runtime::SessionDescriptor>{};
+    std::map<std::string, bool> engine_classes;
+    if (attached.has_value()) {
+        std::vector<std::string> wanted{resource_type};
+        for (const auto& sub : sub_resources) {
+            if (sub.resource_type.empty()) continue;
+            if (std::find(wanted.begin(), wanted.end(), sub.resource_type) == wanted.end()) {
+                wanted.push_back(sub.resource_type);
+            }
+        }
+        engine_classes = askAttachedEngineForTypes(ipc, wanted);
+    }
+    const auto verdictFor = [&](const std::string& type_name) {
+        std::optional<EngineTypeVerdict> verdict;
+        if (!attached.has_value()) return verdict;
+        EngineTypeVerdict answer;
+        answer.engine_version = attached->engine_version;
+        const auto found = engine_classes.find(type_name);
+        answer.answered = found != engine_classes.end();
+        answer.known = answer.answered && found->second;
+        verdict = answer;
+        return verdict;
+    };
+
     // Before anything is rendered or written. A property the type does not
     // declare used to be written into [resource], reported in
     // properties_written, and then dropped by Godot on load with nothing in the
@@ -955,7 +1070,8 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
     // and dependencies, and no properties.
     auto property_check = checkPropertiesAgainstType(resource_type, ordered.value(),
                                                      "Argument 'properties'",
-                                                     allow_unknown_type);
+                                                     allow_unknown_type,
+                                                     verdictFor(resource_type));
     if (property_check.isErr()) return CallToolResult::fromError(property_check.error());
 
     // `checked: true` reads as "verified against your engine", and it was
@@ -964,9 +1080,6 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
     // engine, which is the exact failure the check exists to prevent. The
     // caller gets what script_reflect_class already gives them, so they can
     // weigh the verdict (#466).
-    const auto sessions = std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(ipc);
-    const auto attached = sessions ? sessions->observableSession()
-                                   : std::optional<runtime::SessionDescriptor>{};
     const auto note_engine = [&](json& check) {
         if (!attached.has_value() || !check.value("checked", false)) return;
         versions::annotateApiVersion(check, check.value("api_version", std::string()),
@@ -978,7 +1091,8 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
     for (const auto& sub : sub_resources) {
         auto sub_check = checkPropertiesAgainstType(
             sub.resource_type, sub.properties,
-            "Sub-resource '" + sub.id + "' properties", allow_unknown_type);
+            "Sub-resource '" + sub.id + "' properties", allow_unknown_type,
+            verdictFor(sub.resource_type));
         if (sub_check.isErr()) return CallToolResult::fromError(sub_check.error());
         note_engine(sub_check.value());
         sub_property_checks[sub.id] = sub_check.value();
