@@ -215,6 +215,31 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **A project.godot the engine will not open no longer reads as one it will.**
+  `config_file::scan` hands back the settings it managed to read out of a
+  manifest that is `ERR_PARSE_ERROR`, so a partial parse looks like a parse.
+  Four readers had to know that and three of them did not ask, which put two
+  surfaces in disagreement inside one session: `project_audit_assets` reported
+  the file as unloadable while `project_analyze_impact` reported its
+  `[autoload]` line as a live dependency of a singleton that is not registered
+  and cannot be, with nothing in `limitations` about it (#826). The question is
+  asked once now, by `config_file::loadFailure`, and each reader answers it in
+  the way its own job needs. `project_analyze_impact` and
+  `project_rename_references` still report the line, because a rename has to
+  edit it whether or not the file loads, and both now carry a limitation naming
+  the setting and the reason -- `impact_count` is what a caller reads as "here
+  is what a rename will touch", and a rename planned on a manifest the next
+  editor run will refuse is worth saying out loud. `script_check_syntax` stops
+  demoting an `Identifier not found` on the strength of an `[autoload]` key in
+  a file that registers nothing: measured on 4.5.1 and 4.7.2 with the entry
+  above the broken value and below it, the project does not open either way,
+  `--headless --path` falls through to the project manager and the singleton
+  never enters the tree. Those errors are real, so they stay errors, and they
+  now carry a note naming `project.godot` rather than sending a reader off to
+  rewrite a script that is fine. `project_remove_input_action` refuses instead
+  of deciding "the project does not define this" out of a file whose parse
+  stopped before the action -- and its removal would have written the editor's
+  whole settings map over the hand edit that broke the file.
 - **Every live route now gives the same account of a failed engine.** Five
   places in this codebase turn a live failure into an answer, and they did not
   carry the same facts. `annotateEngineState` is what attaches the account of

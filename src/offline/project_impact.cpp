@@ -194,10 +194,19 @@ std::string readFile(const std::filesystem::path& path) {
 // target counts: boot_splash/image, config/icon, mouse_cursor/custom_image,
 // default_environment and the res:// entries under [editor_plugins] are all
 // covered by the same rule.
-void collectProjectSettingImpacts(const std::filesystem::path& root, const std::string& target,
-                                  bool file_target, std::vector<Impact>& out) {
+//
+// The answer is what the file says, and what the file says is only what the
+// project runs on when Godot can load it. An [autoload] line in a manifest that
+// is ERR_PARSE_ERROR is still a line a rename has to edit, so it is still
+// reported -- but it is not a live dependency of a registered singleton, which
+// is what the kind reads as, and impact_count is what this tool uses to mean
+// "here is what a rename will touch". The failure is handed back so the caller
+// can say so (#826).
+std::optional<config_file::LoadFailure> collectProjectSettingImpacts(
+    const std::filesystem::path& root, const std::string& target, bool file_target,
+    std::vector<Impact>& out) {
     const auto text = readFile(root / "project.godot");
-    if (text.empty()) return;
+    if (text.empty()) return std::nullopt;
 
     // The engine's own reading of the file: the headers it honours and the key
     // each line registers. A header the line above swallowed is not a header,
@@ -268,6 +277,30 @@ void collectProjectSettingImpacts(const std::filesystem::path& root, const std::
         if (!anyEntry(valueNamesTarget)) return;
         out.push_back({"res://project.godot", "project_setting", number, detailFrom(line)});
     });
+    return config_file::loadFailure(scanned);
+}
+
+// The sentence a caller needs beside an impact list read out of a manifest the
+// engine will not load. Named lines, because the remedy is to repair one.
+std::string unloadableManifestLimitation(const config_file::LoadFailure& failure) {
+    if (failure.unterminated) {
+        std::string sentence =
+            "project.godot ends part-way through a value, so Godot answers ERR_PARSE_ERROR for "
+            "the whole file and the project does not open";
+        if (failure.line > 0) {
+            sentence += "; the value on line " + std::to_string(failure.line) + " is the one to "
+                        "repair";
+        }
+        return sentence +
+               ". Lines in it are still reported, because a rename has to edit them, but nothing "
+               "in that file is registered while it stays unloadable.";
+    }
+    std::string name = failure.section.empty() ? failure.key : failure.section + "/" + failure.key;
+    return "project.godot line " + std::to_string(failure.line) + " sets " + name +
+           " to a value Godot's parser refuses, because " + failure.value_reason +
+           ". The engine answers ERR_PARSE_ERROR for the whole file, so the project does not "
+           "open. Lines in it are still reported, because a rename has to edit them, but nothing "
+           "in that file is registered while it stays unloadable.";
 }
 
 void collectFileTargetImpacts(const ProjectTextScan& scan, const std::string& target,
@@ -817,8 +850,9 @@ Result<RenamePlan> planRename(const std::string& root_dir, const ProjectRenameOp
     //
     // First, so that the entry the rest of the project depends on is the one
     // site max_impacts cannot cut. Everything below it is a use of the name.
-    collectProjectSettingImpacts(paths::projectPathFromUtf8(root_dir), target,
-                                 /*file_target=*/false, impacts);
+    const auto manifest_failure =
+        collectProjectSettingImpacts(paths::projectPathFromUtf8(root_dir), target,
+                                     /*file_target=*/false, impacts);
     collectNameTargetImpacts(scan, target, impacts);
 
     std::map<std::string, size_t> serialized_sites;
@@ -923,6 +957,12 @@ Result<RenamePlan> planRename(const std::string& root_dir, const ProjectRenameOp
             "references. It is reported rather than rewritten because an autoload key and a "
             "symbol that shares its spelling can be different things.");
     }
+    // A rename planned against a manifest the engine refuses is a rename
+    // planned against a project the next editor run will not open, and the
+    // [autoload] line above reads as a live global either way (#826).
+    if (manifest_failure) {
+        result["limitations"].push_back(unloadableManifestLimitation(*manifest_failure));
+    }
 
     return RenamePlan{std::move(result), std::move(planned)};
 }
@@ -1019,7 +1059,10 @@ Result<json> analyzeImpact(const std::string& root_dir, const ProjectImpactOptio
     } else {
         collectNameTargetImpacts(scan, target, impacts);
     }
-    if (!node_path_target) collectProjectSettingImpacts(root, target, file_target, impacts);
+    std::optional<config_file::LoadFailure> manifest_failure;
+    if (!node_path_target) {
+        manifest_failure = collectProjectSettingImpacts(root, target, file_target, impacts);
+    }
 
     std::sort(impacts.begin(), impacts.end(), [](const Impact& left, const Impact& right) {
         return std::tie(left.path, left.line, left.kind, left.detail) <
@@ -1085,6 +1128,13 @@ Result<json> analyzeImpact(const std::string& root_dir, const ProjectImpactOptio
         result["limitations"].push_back(
             "A uid:// target is resolved by the engine's own table, which a file "
             "scan cannot read, so whether the target exists is unknown here.");
+    }
+    // impact_count is what a caller reads as "here is what a rename will
+    // touch", and an [autoload] out of a manifest that does not load is not a
+    // dependency of anything that runs. project_audit_assets already reports
+    // the file; this is the same fact said where the decision is made (#826).
+    if (manifest_failure) {
+        result["limitations"].push_back(unloadableManifestLimitation(*manifest_failure));
     }
     return result;
 }

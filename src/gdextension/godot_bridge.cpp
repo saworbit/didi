@@ -7091,11 +7091,31 @@ Result<bool> projectFileDefinesInputAction(const std::string& action) {
 
     std::ostringstream contents;
     contents << file.rdbuf();
+    const auto scanned = didi::config_file::scan(contents.str());
+    // A manifest Godot will not load cannot answer this. The parse stops where
+    // it breaks, so an action below that point is absent from the scan and
+    // "the project does not define it" is a claim with nothing behind it --
+    // and the removal it gates rewrites the whole file from the editor's own
+    // ProjectSettings, which would take the hand edit that broke the file with
+    // it (#826).
+    if (const auto failure = didi::config_file::loadFailure(scanned)) {
+        std::string where = failure->unterminated
+            ? std::string("project.godot ends part-way through a value")
+            : "project.godot line " + std::to_string(failure->line) + " sets " +
+                  (failure->section.empty() ? failure->key
+                                            : failure->section + "/" + failure->key) +
+                  " to a value Godot's parser refuses, because " + failure->value_reason;
+        return Error(409, where +
+                              ". The engine answers ERR_PARSE_ERROR for the whole file, so the "
+                              "project does not open and what it declares cannot be read. Repair "
+                              "the file before removing an input action from it: saving the "
+                              "settings would write this editor's whole map over it.");
+    }
     // The action names the engine registers. Godot writes the name bare, or
     // quoted when it needs the spaces, and the value is a dictionary spread
     // over the four lines below it -- none of which a line-at-a-time reader
     // gets right on its own (#813).
-    for (const auto& entry : didi::config_file::scan(contents.str()).entries) {
+    for (const auto& entry : scanned.entries) {
         if (entry.section != "input") continue;
         if (entry.key == action) return true;
     }

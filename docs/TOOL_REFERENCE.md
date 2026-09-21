@@ -352,6 +352,8 @@ Godot's `--headless --check-only` runs in a process with no `SceneTree`, and a p
 
 Didi therefore reads the `[autoload]` section of `project.godot` and demotes those diagnostics to `severity: "warning"`, adding a `note` saying why. When they were the only errors, the `Compilation failed` line the compiler prints after them is demoted too, so `has_errors` is a verdict about the script rather than about the checker. Nothing is dropped, so an autoload whose own script is broken is still visible. An `Identifier not found` naming anything that is not a registered autoload stays an error, and a real parse error beside an autoload one keeps `has_errors: true`.
 
+The demotion needs a `project.godot` Godot can load. A manifest that is `ERR_PARSE_ERROR` registers nothing -- measured on 4.5.1 and 4.7.2 with the entry above the broken value and below it, the project does not open either way and the singleton never enters the tree -- so an `Identifier not found` naming a key in that file is a real error and stays one. It carries a `note` naming the setting and the line in `project.godot` instead, because the script is fine and the cause is one file away.
+
 `script_create` and `script_patch_method` surface the same check and get the same treatment.
 
 ### `script_reflect_class` — Offline
@@ -849,6 +851,8 @@ Node-path targets match complete captured paths: `Player/Sprite` does not match 
 
 The results are evidence, not verdicts. A name or node path built at runtime cannot be followed, so an empty impact list is not proof that nothing depends on the target, and a local variable that happens to share a name is reported as a `code_reference`. These limits ship in a `limitations` array in the response.
 
+A `project.godot` Godot will not load gets a `limitations` sentence of its own, naming the setting and the line. Godot's parser hands back the settings it read before it stopped, so a partial parse looks like a parse: `project_audit_assets` reported such a file as unloadable while this tool reported its `[autoload]` line as a live dependency of a singleton that is not registered and cannot be. The line is still reported, because a rename has to edit it whether or not the file loads, but `impact_count` is what a caller reads as "here is what a rename will touch" and a project that does not open has nothing registered to touch. `project_rename_references` reads the same file and carries the same sentence.
+
 The project read behind this is bounded the way `project_search_text` is: 4 MiB per file, 64 MiB in total, 10000 files. A file a bound keeps out sets `truncated: true`, so a partial answer says it is partial rather than reading as a complete one.
 
 ### `project_rename_references` — Offline
@@ -1220,7 +1224,7 @@ Mutations use Godot's `autoload/<name>` representation, call `ProjectSettings.sa
 
 - `project_list_input_actions`: returns sorted `{action, deadzone, events}` entries, including editor defaults exposed by Godot.
 - `project_set_input_action`: requires `action`; `deadzone` defaults to `0.2`, `events` to an empty array, and existing actions require `replace: true`. Up to 64 events.
-- `project_remove_input_action`: requires `action` and rejects missing entries. It also refuses an action the project does not define. `ProjectSettings.has_setting` answers true for an engine default such as `ui_accept`, because the engine registers the built-in map as settings, so removing one used to leave the running editor's InputMap without the action, write nothing to `project.godot`, and report `persisted: true`. The refusal is a `409` carrying `engine_default: true`. Give the project its own events for that name with `project_set_input_action` instead. A removal that goes ahead reports the deadzone and event count the action actually had.
+- `project_remove_input_action`: requires `action` and rejects missing entries. It also refuses an action the project does not define. `ProjectSettings.has_setting` answers true for an engine default such as `ui_accept`, because the engine registers the built-in map as settings, so removing one used to leave the running editor's InputMap without the action, write nothing to `project.godot`, and report `persisted: true`. The refusal is a `409` carrying `engine_default: true`. Give the project its own events for that name with `project_set_input_action` instead. A removal that goes ahead reports the deadzone and event count the action actually had. A `project.godot` Godot will not load is refused with a `409` naming the line, rather than answered: the parse stops where the file breaks, so an action below that point is absent and "the project does not define it" would be a claim with nothing behind it -- and the removal writes this editor's whole settings map over the file, which would take the hand edit that broke it as well.
 
 Supported event descriptors are closed objects, and the published schema says so: `events.items` is a `oneOf` over these four shapes with `additionalProperties: false`, per-field bounds and `required` on each branch, the same way `runtime_inject_input` publishes its own vocabulary. The two lists differ on purpose -- an InputMap binding has no pressed state and no mouse motion, an injected event has no persistence -- but a descriptor that works in one works in the other.
 

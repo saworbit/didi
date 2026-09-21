@@ -171,6 +171,93 @@ void does_not_touch_diagnostics_that_are_already_warnings() {
     ASSERT_TRUE(diags[0].note.empty());
 }
 
+// A manifest Godot will not load registers nothing, so the demotion has
+// nothing to stand on and the diagnostic the user needs has to survive.
+//
+// Measured on 4.5.1 and 4.7.2 with the entry above the broken value and below
+// it. Neither runs: the project does not open, `--headless --path` falls
+// through to the project manager, and the singleton never enters the tree
+// (#826).
+void reads_no_autoloads_out_of_a_manifest_that_does_not_load() {
+    {
+        // Balanced and still ERR_PARSE_ERROR. The entry sits above the break,
+        // which is the case where ProjectSettings.has_setting says true in a
+        // session with no project open.
+        ScopedProject project("config_version=5\n"
+                              "\n"
+                              "[autoload]\n"
+                              "\n"
+                              "GameState=\"*res://scripts/game_state.gd\"\n"
+                              "\n"
+                              "[application]\n"
+                              "\n"
+                              "config/broken=)\n");
+        ASSERT_TRUE(GDScriptDiagnostics::projectAutoloadNames().empty());
+    }
+    {
+        // A file that ends part-way through a value, which is the other half.
+        ScopedProject project("config_version=5\n"
+                              "\n"
+                              "[autoload]\n"
+                              "\n"
+                              "GameState=\"*res://scripts/game_state.gd\"\n"
+                              "\n"
+                              "[input]\n"
+                              "\n"
+                              "jump={\"deadzone\": 0.5\n");
+        ASSERT_TRUE(GDScriptDiagnostics::projectAutoloadNames().empty());
+    }
+    {
+        // The control: the same entry in a file that loads is still read, or
+        // this would be a way to lose every demotion rather than the wrong
+        // ones.
+        ScopedProject project("config_version=5\n"
+                              "\n"
+                              "[autoload]\n"
+                              "\n"
+                              "GameState=\"*res://scripts/game_state.gd\"\n"
+                              "\n"
+                              "[application]\n"
+                              "\n"
+                              "config/name=\"Probe\"\n");
+        const auto names = GDScriptDiagnostics::projectAutoloadNames();
+        ASSERT_EQ(names.size(), size_t(1));
+        ASSERT_EQ(names[0], std::string("GameState"));
+        ASSERT_TRUE(GDScriptDiagnostics::projectManifestLoadProblem().empty());
+    }
+}
+
+// The error is right and it lands badly on its own: the script is fine and the
+// identifier is unresolved because the project one file away does not open.
+void names_the_manifest_beside_an_identifier_it_could_not_register() {
+    ScopedProject project("config_version=5\n"
+                          "\n"
+                          "[autoload]\n"
+                          "\n"
+                          "GameState=\"*res://scripts/game_state.gd\"\n"
+                          "\n"
+                          "[application]\n"
+                          "\n"
+                          "config/broken=)\n");
+    const auto problem = GDScriptDiagnostics::projectManifestLoadProblem();
+    ASSERT_TRUE(!problem.empty());
+    ASSERT_TRUE(problem.find("application/config/broken") != std::string::npos);
+
+    std::vector<ScriptDiagnostic> diags{
+        compilerError(10, "Compile Error: Identifier not found: GameState"),
+        compilerError(12, "Compile Error: Some other fault")};
+    GDScriptDiagnostics::noteUnloadableManifest(diags, problem);
+
+    // Still an error, because it is one: nothing resolves that name at run time
+    // while the project refuses to open.
+    ASSERT_EQ(diags[0].severity, std::string("error"));
+    ASSERT_TRUE(diags[0].note.find("application/config/broken") != std::string::npos);
+    ASSERT_TRUE(diags[0].note.find("does not open") != std::string::npos);
+    // Only the unresolved identifiers. A fault that has nothing to do with a
+    // singleton does not get a note about project.godot.
+    ASSERT_TRUE(diags[1].note.empty());
+}
+
 struct Register {
     Register() {
         registerTest("autoload_diagnostics.demotes_registered_autoload",
@@ -187,6 +274,10 @@ struct Register {
                      demotes_every_autoload_the_script_names);
         registerTest("autoload_diagnostics.leaves_warnings",
                      does_not_touch_diagnostics_that_are_already_warnings);
+        registerTest("autoload_diagnostics.unloadable_manifest_registers_nothing",
+                     reads_no_autoloads_out_of_a_manifest_that_does_not_load);
+        registerTest("autoload_diagnostics.unloadable_manifest_is_named",
+                     names_the_manifest_beside_an_identifier_it_could_not_register);
     }
 } registrar;
 

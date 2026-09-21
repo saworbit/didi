@@ -121,8 +121,16 @@ public:
                                                                EngineCheck* engine = nullptr);
 
     // The autoload singleton names project.godot registers, read from the
-    // project root this process is running in.
+    // project root this process is running in. Empty when the manifest is one
+    // Godot will not load, because a project that does not open registers
+    // nothing.
     static std::vector<std::string> projectAutoloadNames();
+
+    // Why Godot will not load this project's manifest, or empty when it will.
+    // The other half of the answer above: an empty name list means "no
+    // autoloads" or "no project", and the caller has to tell them apart before
+    // it can say anything useful about an unresolved identifier.
+    static std::string projectManifestLoadProblem();
 
     // Demotes the diagnostics the Godot compiler check raises only because it
     // runs in a process with no SceneTree, so `has_errors` is a verdict about
@@ -130,6 +138,13 @@ public:
     // without a Godot binary.
     static void demoteAutoloadDiagnostics(std::vector<ScriptDiagnostic>& diagnostics,
                                           const std::vector<std::string>& autoload_names);
+
+    // Names the manifest beside every unresolved identifier, without demoting
+    // one. The errors are real -- the project does not open, so no singleton is
+    // registered -- and a caller reading "Identifier not found: GameState" with
+    // no cause named would go and rewrite a script that is fine.
+    static void noteUnloadableManifest(std::vector<ScriptDiagnostic>& diagnostics,
+                                       const std::string& manifest_problem);
 
     static json reflectClass(const std::string& class_name);
     // `max_symbols` bounds how many declarations come back, counted across all

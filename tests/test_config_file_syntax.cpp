@@ -381,6 +381,58 @@ struct Register {
             throw std::runtime_error("booleanize started deciding values the parser refuses");
         }
     });
+
+    registerTest("config_file_syntax.load_failure_names_the_line_to_repair", [] {
+        // The pair every reader of a manifest has to ask about, asked once.
+        // Three readers asked neither half and described a project the engine
+        // will not open (#826).
+        const auto clean = didi::config_file::scan(
+            "config_version=5\n\n[application]\n\nconfig/name=\"Fine\"\n");
+        if (didi::config_file::loadFailure(clean)) {
+            throw std::runtime_error("a loadable manifest was called a failure");
+        }
+
+        // Balanced and still err 43. This is the half a reader that stops at
+        // `complete` misses.
+        const auto refused = didi::config_file::scan(
+            "config_version=5\n\n[application]\n\nconfig/name=\"Fine\"\nconfig/broken=)\n");
+        const auto value_failure = didi::config_file::loadFailure(refused);
+        if (!value_failure) throw std::runtime_error("config/broken=) read as loadable");
+        if (value_failure->unterminated) {
+            throw std::runtime_error("a refused value was reported as an unterminated file");
+        }
+        if (value_failure->section != "application" || value_failure->key != "config/broken") {
+            throw std::runtime_error("the failure named the wrong setting");
+        }
+        if (value_failure->line != 6) throw std::runtime_error("the failure named the wrong line");
+        if (value_failure->value_reason.empty()) {
+            throw std::runtime_error("the failure carried no reason");
+        }
+
+        // A file that ends part-way through a value, which is the other half.
+        const auto unterminated =
+            didi::config_file::scan("config_version=5\n\n[input]\n\njump={\"deadzone\": 0.5\n");
+        const auto open_failure = didi::config_file::loadFailure(unterminated);
+        if (!open_failure) throw std::runtime_error("an unterminated value read as loadable");
+        if (!open_failure->unterminated) {
+            throw std::runtime_error("an unterminated file was reported as a refused value");
+        }
+        if (open_failure->key != "jump" || open_failure->line != 5) {
+            throw std::runtime_error("the unterminated failure named the wrong line");
+        }
+
+        // A file ending part-way through a *key* is the ordinary trailing note.
+        // The engine drops the text and load() returns OK, so this is not a
+        // failure and reporting it would refuse files that load.
+        const auto trailing = didi::config_file::scan(
+            "config_version=5\n\n[application]\n\nconfig/name=\"Fine\"\n# a note\n");
+        if (!trailing.trailing_key) {
+            throw std::runtime_error("the fixture stopped exercising a trailing key");
+        }
+        if (didi::config_file::loadFailure(trailing)) {
+            throw std::runtime_error("a trailing note was called a load failure");
+        }
+    });
     }
 } registrar;
 
