@@ -1,5 +1,7 @@
 #include "didi/common/config_file_syntax.hpp"
 
+#include <cstdlib>
+
 #include <cctype>
 
 namespace didi::config_file {
@@ -560,6 +562,19 @@ std::string valueProblem(std::string_view value_text) {
     // entry only the span its own value covers, and reads whatever follows as
     // the next key (#816).
     return walk.problem;
+}
+
+bool booleanize(std::string_view value_text) {
+    const auto text = strings::trim(value_text);
+    if (text == "false" || text == "null" || text == "nil") return false;
+    if (text.empty()) return false;
+    // A number decides on being zero. strtod is safe here: the locale is never
+    // changed, so the decimal point is always `.`.
+    char* end = nullptr;
+    const std::string owned(text);
+    const double number = std::strtod(owned.c_str(), &end);
+    if (end != owned.c_str() && *end == '\0') return number != 0.0;
+    return true;
 }
 
 } // namespace didi::config_file

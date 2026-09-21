@@ -334,6 +334,53 @@ struct Register {
             }
         }
     });
+
+    registerTest("config_file_syntax.booleanize_reads_a_value_the_way_the_engine_does", [] {
+        // Two readers had to reproduce this rule and only one of them had it
+        // right. The engine parses the value and lets the Variant convert,
+        // which is !is_zero(): a number decides on being zero, null is false,
+        // and everything else the parser accepts is true.
+        //
+        // Measured on 4.5.1, 4.6.2 and 4.7.2, twice. Against
+        // use_hidden_project_data_directory, where false, 0 and null move the
+        // project data directory and 1 and "false" do not. Against runnable in
+        // an export_presets.cfg loaded through ConfigFile, where true and 1
+        // come back true and false, 0 and 0.0 come back false.
+        struct Case { const char* value; bool expected; };
+        const Case cases[] = {
+            {"true", true},   {"false", false},
+            {"1", true},      {"0", false},
+            {"2", true},      {"0.0", false},
+            {"-0.0", false},  {"-1", true},
+            {"null", false},  {"nil", false},
+            // A string is not zero, which is why the word false in quotes is
+            // true. This is the case that catches a reader comparing text.
+            {"\"false\"", true}, {"\"\"", true},
+            // Whitespace around the value is not part of it.
+            {"  false  ", false}, {"  1  ", true},
+            // Containers and constructors are not zero either.
+            {"[]", true}, {"{}", true}, {"Vector2(0, 0)", true},
+        };
+        for (const auto& item : cases) {
+            if (didi::config_file::booleanize(item.value) != item.expected) {
+                throw std::runtime_error(std::string("booleanize disagreed on: ") + item.value);
+            }
+        }
+    });
+
+    registerTest("config_file_syntax.booleanize_expects_the_parser_to_have_spoken_first", [] {
+        // A value the parser will not start never reaches the engine's
+        // conversion, because the whole file is ERR_PARSE_ERROR. So this does
+        // not try to decide one, and the caller checks valueProblem first.
+        // Asserted so the order stays deliberate: `maybe` is refused there, not
+        // read as true here.
+        if (didi::config_file::valueProblem("maybe").empty()) {
+            throw std::runtime_error("a bare identifier stopped being a parse problem");
+        }
+        if (!didi::config_file::booleanize("maybe")) {
+            throw std::runtime_error("booleanize started deciding values the parser refuses");
+        }
+    });
     }
 } registrar;
 

@@ -215,6 +215,25 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **`runnable` is read the way the engine reads it, and one rule now covers
+  both readers.** A preset whose `runnable` was anything but the literal `true`
+  or `false` made the whole `export_presets.cfg` unparseable, so a project with
+  three working presets listed none of them. Godot loads that file without
+  complaint: measured through `ConfigFile` on 4.5.1 and 4.7.2, `runnable=1`
+  comes back as int 1 and converts to true, and `true`, `false`, `0` and `0.0`
+  all load (#842). The comparison was against the two words Godot's own writer
+  emits, which is the right guess about what the file usually holds and the
+  wrong rule for what the engine accepts, and it left the branch with no true
+  positives at all: a value the parser will not start, such as `runnable=maybe`,
+  is already `ERR_PARSE_ERROR` for the whole file and is reported as that. The
+  engine parses the value and lets the Variant convert, which is `!is_zero()`,
+  so a number decides on being zero, `null` is false, and anything else the
+  parser accepts is true. That rule now lives once, in `config_file`, beside
+  the header and key rules every ConfigFile reader shares. It was already
+  written twice: the import record reader needed it for
+  `use_hidden_project_data_directory` in #833, and only that copy had it right.
+  `invalid_runnable` is no longer one of the causes a presets refusal can name.
+
 - **The bus layout is read the way Godot writes it.** #836 fixed the reader that
   finds `default_bus_layout.tres`. This is the reader of the file, and it had
   never been run against one the engine saved: every fixture was hand written

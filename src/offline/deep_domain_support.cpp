@@ -270,16 +270,16 @@ ExportPresetsFile readExportPresets(const std::string& contents) {
         if (key == "name" || key == "platform" || key == "export_filter" || key == "export_path") {
             presets[at->second][key] = value;
         } else if (key == "runnable") {
-            if (value != "true" && value != "false") {
-                note("invalid_runnable",
-                     "[" + entry.section + "] sets runnable to \"" + value + "\" on line " +
-                         std::to_string(entry.line) +
-                         ", and Godot writes only true or false there. Fix it in the editor's "
-                         "Export dialog, which writes the value it means.",
-                     entry.line);
-            } else {
-                presets[at->second][key] = value == "true";
-            }
+            // Anything the parser accepts here, read the way the engine reads
+            // it. Comparing against the two words Godot's own writer emits was
+            // the right guess about what the file usually holds and the wrong
+            // rule for what the engine accepts, and it refused the whole file
+            // for a value the engine loads: `runnable=1` reads back as int 1
+            // through ConfigFile on 4.5.1 and 4.7.2 and converts to true, and
+            // there is nothing left for this branch to refuse, because a value
+            // the parser will not start is already ERR_PARSE_ERROR for the
+            // whole file and is caught above (#842).
+            presets[at->second][key] = config_file::booleanize(entry.value_text);
         }
     }
 

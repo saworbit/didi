@@ -6,7 +6,6 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
-#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -448,22 +447,6 @@ std::optional<fs::path> resolveResourcePath(const fs::path& root, const std::str
     return candidate;
 }
 
-// Whether Godot reads this setting value as off.
-//
-// The engine does not require the word `false`: it parses the value into a
-// Variant and calls `booleanize()`, which is `!is_zero()`. Measured on 4.5.1,
-// 4.6.2 and 4.7.2 against `application/config/use_hidden_project_data_directory`:
-// `false`, `0` and `null` all move the data directory, and `"false"` and `1`
-// leave it alone, because a string is not zero.
-bool godotReadsAsFalse(const std::string& value_text) {
-    const auto text = strings::trim(value_text);
-    if (text == "false" || text == "null") return true;
-    if (text.empty()) return false;
-    char* end = nullptr;
-    const double number = std::strtod(text.c_str(), &end);
-    return end != text.c_str() && *end == '\0' && number == 0.0;
-}
-
 // The one directory Godot writes every import record into.
 //
 // `ResourceFormatImporter::get_import_base_path` joins
@@ -506,7 +489,10 @@ fs::path importedDirectory(const fs::path& root) {
             }
             // No break: a key the file declares twice is the last one to the
             // engine, so it is the last one here.
-            data_directory = godotReadsAsFalse(entry.value_text) ? "godot" : ".godot";
+            // The rule lives in config_file, because the engine applies it to
+            // every value it wants a bool from and this is one of two places
+            // that has to reproduce it.
+            data_directory = config_file::booleanize(entry.value_text) ? ".godot" : "godot";
         }
     }
     return root / data_directory / "imported";
