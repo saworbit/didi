@@ -835,6 +835,99 @@ def markdown_anchors(text: str) -> set[str]:
     return anchors
 
 
+# Sentences a document has to carry, and sentences it must not carry any more.
+#
+# These pin the wording of a contract where the wording is the contract: a
+# deadline, a cleanup rule, a directory name. A rewrite that quietly drops one
+# is the failure they exist to catch, and the stale half catches the opposite,
+# where a corrected page keeps the sentence it corrected somewhere else in the
+# file.
+#
+# They lived inside ci.yml as a heredoc, beside a second copy of the link check
+# below. That copy did not strip inline code spans, so `Array[int]([1, 2])` in
+# prose was read as a link to `[1,`, and a correct sentence about Godot's own
+# type syntax failed the build on a job named for a compiler (#824). One
+# implementation is the fix: this file already strips them, already resolves
+# anchors, and already runs locally, which the heredoc could not.
+REQUIRED_CONTRACT_CLAIMS: dict[str, tuple[str, ...]] = {
+    "README.md": (
+        "sessionKind",
+        "$XDG_RUNTIME_DIR/didi-sessions",
+        "17-second outer transport deadline",
+    ),
+    "CHANGELOG.md": (
+        "session-kind-aware",
+        "15-second extension deadline",
+        "$XDG_RUNTIME_DIR/didi-sessions",
+    ),
+    "docs/DEVELOPER_GUIDE.md": (
+        "runner's reported total is authoritative",
+        "Coverage is organized by contract",
+    ),
+    "docs/CAPABILITIES.md": (
+        "sessionKind",
+        "connected wrong-kind route",
+        "$XDG_RUNTIME_DIR/didi-sessions",
+    ),
+    "docs/API_SPECIFICATION.md": (
+        "17-second outer transport deadline",
+        'outcome: "unknown_outcome"',
+        "POSIX intentionally retains",
+    ),
+    "docs/ARCHITECTURE.md": (
+        "No live path waits forever",
+        ".didi-retired-<session-id>-<32hex>",
+    ),
+    "docs/TOOL_REFERENCE.md": (
+        "swept up by a later discovery scan",
+        "<OS temp>/didi-sessions-<euid>",
+    ),
+}
+
+FORBIDDEN_CONTRACT_CLAIMS: dict[str, tuple[str, ...]] = {
+    "README.md": ("under the OS temporary directory's `didi-sessions` child",),
+    "CHANGELOG.md": (
+        "already-running main-thread work returns a definitive result",
+        "same definitive-response contract",
+    ),
+    "docs/DEVELOPER_GUIDE.md": ("Didi currently includes 23 native tests",),
+    "docs/CAPABILITIES.md": (
+        "liveAvailable means the tool has a live implementation and the Godot editor IPC connection is active",
+    ),
+    "docs/API_SPECIFICATION.md": (
+        "A command already running on Godot's main thread is allowed to return its definitive result",
+    ),
+    "docs/ARCHITECTURE.md": (
+        "wait for the definitive result instead of returning an ambiguous timeout",
+    ),
+    "docs/TOOL_REFERENCE.md": (
+        "re-verify it, and normally delete it",
+        "POSIX normally retains that metadata file",
+    ),
+}
+
+
+def validate_contract_claims(root: Path) -> list[str]:
+    errors: list[str] = []
+    for relative_path, phrases in REQUIRED_CONTRACT_CLAIMS.items():
+        text = _read_required(root, relative_path, errors)
+        if text is None:
+            continue
+        for phrase in phrases:
+            if phrase not in text:
+                errors.append(
+                    f"{relative_path}: missing required contract text: {phrase}"
+                )
+    for relative_path, phrases in FORBIDDEN_CONTRACT_CLAIMS.items():
+        text = _read_required(root, relative_path, errors)
+        if text is None:
+            continue
+        for phrase in phrases:
+            if phrase in text:
+                errors.append(f"{relative_path}: stale contract text remains: {phrase}")
+    return errors
+
+
 def validate_markdown_links(root: Path, markdown: list[Path]) -> list[str]:
     errors: list[str] = []
     anchor_cache: dict[Path, set[str]] = {}
@@ -1915,6 +2008,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     arguments = parser.parse_args(argv)
     errors = validate_repository(arguments.root, arguments.tool_manifest)
+    # Not part of validate_repository, because everything there is a rule any
+    # repository could satisfy and is run against synthetic fixtures in the
+    # tests. These name this repository's own files and its own sentences.
+    errors.extend(validate_contract_claims(arguments.root))
     if errors:
         print("\n".join(errors), file=sys.stderr)
         return 1
