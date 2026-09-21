@@ -215,6 +215,28 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **The bus layout is read the way Godot writes it.** #836 fixed the reader that
+  finds `default_bus_layout.tres`. This is the reader of the file, and it had
+  never been run against one the engine saved: every fixture was hand written
+  with plain quotes and an explicit `bus/0`, which is the one shape it got
+  right, so the reader and its tests agreed with each other and not with the
+  engine (#844). Two faults, both measured on 4.5.1 and 4.7.2 against layouts
+  `ResourceSaver` produced. Names and sends are StringName literals, written
+  `&"Music"` and `&""`, and stripping the quotes alone left the `&` and the
+  quotes attached, so every name published was one no tool accepts:
+  `audio_configure_bus` resolves a name through `AudioServer.get_bus_index` and
+  answers 404 for it, and `AudioStreamPlayer.bus` silently keeps Master when the
+  name is unknown. And bus 0 is usually not in the file at all, because the
+  writer skips each property already at its default and Master's defaults are
+  the whole of it, so a three bus project listed two and started at index 1.
+  Mute Master and the file carries `bus/0/mute = true` and still no name, so the
+  bus arrived with an empty one; Master cannot be renamed, so index 0 is Master
+  whatever the file says. A project whose only bus is Master writes an empty
+  `[resource]` block, and the engine loads that back as one Master bus, which is
+  now the answer rather than none. Checked against all five layouts the engine
+  wrote during this: every name, volume, mute and send now matches what
+  `AudioServer` reported for the project that produced the file.
+
 - **The export presets refusal says which of the six causes it is.**
   `readExportPresets` set one boolean from six unrelated causes, and
   `project_list_export_presets` and `project_export` both answered with the same

@@ -21,11 +21,22 @@ std::string readFile(const std::filesystem::path& path) {
     return contents.str();
 }
 
+// A quoted string, or the StringName literal Godot writes beside it.
+//
+// `default_bus_layout.tres` carries `bus/1/name = &"Music"` rather than
+// `"Music"`, and an empty send is `&""`. Stripping the quotes alone left the
+// `&` and the quotes attached, so every name this published was one no tool
+// accepts: `audio_configure_bus` resolves a name through
+// `AudioServer.get_bus_index` and answers 404 for it, and
+// `AudioStreamPlayer.bus` silently keeps Master when the name is unknown
+// (#844). Measured on 4.5.1 and 4.7.2, against layouts the engine saved.
 std::string unquote(const std::string& value) {
-    if (value.size() >= 2 && value.front() == '"' && value.back() == '"') {
-        return value.substr(1, value.size() - 2);
+    std::string text = value;
+    if (!text.empty() && text.front() == '&') text.erase(0, 1);
+    if (text.size() >= 2 && text.front() == '"' && text.back() == '"') {
+        return text.substr(1, text.size() - 2);
     }
-    return value;
+    return text;
 }
 
 // Where Godot is told to find the bus layout, or the default it uses when the
@@ -135,6 +146,29 @@ Result<json> readAudioBusLayout(const std::string& root_dir) {
         else if (key == "mute") bus.mute = value == "true";
         else if (key == "solo") bus.solo = value == "true";
         else if (key == "bypass_fx") bus.bypass = value == "true";
+    }
+
+    // Bus 0 is Master, and the file is usually silent about it.
+    //
+    // The writer compares each `bus/0/<key>` against Master's default and skips
+    // what matches, and Master's defaults are the whole of it: named Master,
+    // no send, 0 dB, nothing muted, soloed or bypassed. So a layout whose
+    // Master has never been touched starts at `bus/1`, and reading only what
+    // the file declares reported two buses for a three bus project. Mute
+    // Master and the file carries `bus/0/mute = true` and still no name, so
+    // the bus arrived with an empty one. A project whose only bus is Master
+    // writes an empty `[resource]` block, and loading that back gives one bus
+    // named Master, so the answer there is one rather than none.
+    //
+    // Master cannot be renamed: `AudioServer.set_bus_name(0, "x")` is ignored
+    // and the name stays Master. All of it measured on 4.5.1 and 4.7.2 (#844).
+    //
+    // Only index 0 needs this. Every other bus in every layout the engine wrote
+    // carried all six of its keys, including one added and left untouched.
+    {
+        auto& master = buses[0];
+        master.seen = true;
+        if (master.name.empty()) master.name = "Master";
     }
 
     json array = json::array();
