@@ -59,16 +59,31 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         // only live made the bootstrap impossible -- the addon is enabled by
         // writing editor_plugins/enabled, and until it is enabled there is no
         // session to write it through (#382).
-        "project_set_setting"
+        "project_set_setting",
+        // The two readers of that same file. project_get_setting is the direct
+        // counterpart of the writer above, and refusing offline meant a caller
+        // could write a setting, see the file change, and not read it back, so
+        // the workaround was to parse project.godot in the client -- the thing
+        // these tools exist to avoid. project_list_autoloads was the second
+        // half of the same gap: project_analyze_impact already resolves
+        // autoloads out of this file with no editor and reports the line each
+        // one sits on, so the section was parsed offline by one tool and
+        // unreadable to the tool named after it (#780).
+        //
+        // Live is still better and is still preferred when a session is there.
+        // An editor holds unsaved changes the file cannot show, and it answers
+        // a built-in setting out of its own defaults where the file only ever
+        // carries what has been changed.
+        "project_get_setting", "project_list_autoloads"
     };
     static const std::unordered_set<std::string> live = {
         "scene_instantiate_node", "scene_remove_node", "scene_reparent_node",
         "scene_set_property", "scene_get_property", "scene_duplicate_node",
         "editor_undo", "editor_redo", "editor_save_scene",
         "editor_reload_project", "script_attach_to_node", "script_detach_from_node",
-        "project_list_autoloads", "project_set_autoload", "project_remove_autoload",
+        "project_set_autoload", "project_remove_autoload",
         "project_list_input_actions", "project_set_input_action", "project_remove_input_action",
-        "project_get_setting", "scene_list_groups",
+        "scene_list_groups",
         "scene_add_to_group", "scene_remove_from_group", "scene_get_group_members",
         "scene_create", "scene_open", "scene_close", "scene_pack_branch",
         "runtime_read_logs", "runtime_read_output", "runtime_set_paused", "runtime_step", "runtime_stop",
