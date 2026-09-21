@@ -119,30 +119,34 @@ class Phase7SchemaContractTests(unittest.TestCase):
         self.assertEqual(connect["$defs"]["request"]["properties"]["flags"]["enum"],
                          [2, 3, 6, 7, 34, 35, 38, 39])
         self.assertEqual(connect["$defs"]["request"]["properties"]["flags"]["default"], 2)
-        # A connect reports the flags it wrote, with the engine's provenance bit
-        # masked off. A disconnect reports the flags the removed connection had,
-        # verbatim, because that is what signal_connect needs to put it back.
-        for name, success_key, accepted in (
-                ("signal_connect", "connected", [2, 3, 6, 7]),
-                ("signal_disconnect", "disconnected", [2, 3, 6, 7, 34, 35, 38, 39])):
-            document = json.loads((SCHEMA_DIR / f"{name}.schema.json").read_text())
-            success = document["$defs"]["success"]
-            self.assertEqual(success["properties"]["flags"],
-                             {"type": "integer", "enum": accepted})
+        # A connect reports the flags it wrote, so the set is exact: the request
+        # was validated and CONNECT_INHERITED was masked off.
+        #
+        # A disconnect reports the flags the removed connection had, verbatim,
+        # because that is what signal_connect needs to put it back. That set is
+        # not exact and must not pretend to be: the gate requires
+        # CONNECT_PERSIST, so the value is always at least 2, but a .tscn
+        # written by hand can carry any combination above that and the engine
+        # round-trips it.
+        connect_success = json.loads(
+            (SCHEMA_DIR / "signal_connect.schema.json").read_text())["$defs"]["success"]
+        self.assertEqual(connect_success["properties"]["flags"],
+                         {"type": "integer", "enum": [2, 3, 6, 7]})
+        disconnect_success = json.loads(
+            (SCHEMA_DIR / "signal_disconnect.schema.json").read_text())["$defs"]["success"]
+        self.assertEqual(disconnect_success["properties"]["flags"],
+                         {"type": "integer", "minimum": 2})
+        for success_key, success, accepted, rejected in (
+                ("connected", connect_success, (2, 3, 6, 7), (0, 1, 4, 5, 8, 10, 16, 18, 34)),
+                ("disconnected", disconnect_success, (2, 3, 6, 7, 10, 34, 39), (0, 1))):
             validator = Draft202012Validator(success)
+            base = {success_key: True, "undo_redo_registered": True,
+                    "outcome": "completed", "rollback": "undo_redo"}
             for flags in accepted:
-                validator.validate({success_key: True, "flags": flags,
-                                    "undo_redo_registered": True,
-                                    "outcome": "completed", "rollback": "undo_redo"})
-            valid = {success_key: True, "flags": 2, "undo_redo_registered": True,
-                     "outcome": "completed", "rollback": "undo_redo"}
-            # Nothing without CONNECT_PERSIST, and neither of the two persistent
-            # flags this surface refuses to write.
-            for rejected in (0, 1, 4, 5, 8, 10, 16, 18, 32, 33):
-                self.assertNotIn(rejected, accepted)
-                invalid = dict(valid, flags=rejected)
+                validator.validate(dict(base, flags=flags))
+            for flags in rejected:
                 with self.assertRaises(ValidationError):
-                    validator.validate(invalid)
+                    validator.validate(dict(base, flags=flags))
         input_schema = json.loads((SCHEMA_DIR / "runtime_inject_input.schema.json").read_text())
         variants = input_schema["$defs"]["request"]["properties"]["events"]["items"]["oneOf"]
         key = next(item for item in variants if item["properties"]["type"].get("const") == "key")
