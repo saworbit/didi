@@ -1,5 +1,6 @@
 #include "didi/offline/audio_bus_layout.hpp"
 
+#include "didi/common/config_file_syntax.hpp"
 #include "didi/common/project_path.hpp"
 
 #include <fstream>
@@ -27,33 +28,52 @@ std::string unquote(const std::string& value) {
     return value;
 }
 
-// project.godot names the layout when the project has moved it. Godot falls
-// back to res://default_bus_layout.tres, so this does the same rather than
-// reporting no layout for a project that has one.
+// Where Godot is told to find the bus layout, or the default it uses when the
+// project says nothing.
 //
-// The setting is audio/buses/default_bus_layout, but project.godot is an ini
-// file: the first segment is the section header and only the rest is the key.
-// Matching the full name against the file finds nothing, which reads as a
-// project with no buses rather than as a lookup that missed.
-std::string layoutPathFrom(const std::filesystem::path& root) {
-    const auto settings = readFile(root / "project.godot");
-    static const std::regex sectioned(R"re(^\s*buses/default_bus_layout\s*=\s*"(res://[^"]+)")re");
+// The setting is audio/buses/default_bus_layout. project.godot is a ConfigFile,
+// so the first segment is the section and only the rest is the key.
+//
+// Read through the shared scan, because a header and a key are not the text on
+// the line. `[ audio ]` is the audio section to the engine and
+// `buses / default_bus_layout` is the same key, and a reader that compared
+// whole lines saw neither: measured on 4.5.1, 4.6.2 and 4.7.2, each spelling on
+// its own turned a project with a three bus layout into bus_count 0 with a note
+// saying it ships no layout file (#836). That is the rule #809, #811 and #814
+// taught the other readers, and this was the settings reader they never
+// reached.
+constexpr const char* kDefaultLayoutPath = "res://default_bus_layout.tres";
 
-    std::istringstream lines(settings);
-    std::string line;
-    bool in_audio = false;
-    while (std::getline(lines, line)) {
-        if (!line.empty() && line.back() == '\r') line.pop_back();
-        const auto trimmed = strings::trim(line);
-        if (!trimmed.empty() && trimmed.front() == '[') {
-            in_audio = trimmed == "[audio]";
-            continue;
-        }
-        if (!in_audio) continue;
-        std::smatch match;
-        if (std::regex_search(trimmed, match, sectioned)) return match[1].str();
+std::string layoutPathFrom(const std::filesystem::path& root) {
+    const auto scanned = config_file::scan(readFile(root / "project.godot"));
+    std::string path = kDefaultLayoutPath;
+    for (const auto& entry : scanned.entries) {
+        if (entry.section != "audio" || entry.key != "buses/default_bus_layout") continue;
+        const auto value = unquote(std::string(strings::trim(entry.value_text)));
+        // A value that is not a project path is left to the default, which is
+        // what the engine falls back to when it cannot load what it was given.
+        // No break: a key the file declares twice is the last one to the
+        // engine, so it is the last one here.
+        if (strings::startsWith(value, "res://")) path = value;
     }
-    return "res://default_bus_layout.tres";
+    return path;
+}
+
+// The bus every Godot project has before anyone adds one.
+//
+// Measured on 4.5.1, 4.6.2 and 4.7.2, in a project with no layout file and
+// again in a project naming a layout that is not there: AudioServer reports one
+// bus, Master, at 0 dB, with no send, no mute, no solo, no bypass and no
+// effects. Both cases run on this, which is why the absence of the file is not
+// reported as the absence of audio (#837).
+json defaultMasterBus() {
+    return json{{"index", 0},
+                {"name", "Master"},
+                {"volume_db", 0.0},
+                {"mute", false},
+                {"solo", false},
+                {"bypass_effects", false},
+                {"send", ""}};
 }
 
 struct Bus {
@@ -77,13 +97,18 @@ Result<json> readAudioBusLayout(const std::string& root_dir) {
     const auto text = readFile(root / paths::projectPathFromUtf8(relative));
     if (text.empty()) {
         // Godot writes this file only once a project has more than the default
-        // Master bus, so its absence is an answer rather than a failure.
+        // Master bus, so its absence is an answer rather than a failure. The
+        // answer is the bus the engine gives that project, not no buses at all.
+        // `bus_count: 0` said the project has no audio, and the note beside it
+        // said in prose that it has one, so the two halves of one payload
+        // disagreed and the machine readable half was the wrong one (#837).
         return json{{"layout_path", layout_path},
                     {"layout_present", false},
-                    {"buses", json::array()},
-                    {"bus_count", 0},
-                    {"note", "The project ships no bus layout file, so Godot uses a single "
-                             "Master bus at 0 dB."}};
+                    {"buses", json::array({defaultMasterBus()})},
+                    {"bus_count", 1},
+                    {"note", "No bus layout file is at layout_path, so this is the default "
+                             "Godot runs the project with: one Master bus at 0 dB. Nothing "
+                             "here was chosen by the project."}};
     }
 
     // bus/0/name = "Master", bus/0/mute = false, and so on. Indices are not

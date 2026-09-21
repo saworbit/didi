@@ -794,6 +794,12 @@ static void test_audio_list_buses_reports_a_project_with_no_layout_file() {
     // Godot writes the layout only once a project has more than the default
     // Master bus. Reporting that as a failure would send an agent looking for a
     // missing file instead of telling it what the project actually does.
+    //
+    // What the project actually does is run one Master bus. This asserted
+    // bus_count 0 while the note in the same payload said one, so a caller
+    // branching on the number was told the project has no audio at all (#837).
+    // Measured on 4.5.1, 4.6.2 and 4.7.2: AudioServer reports Master at 0 dB
+    // with no send and no effects.
     ScopedToolProject project("audio-buses-default");
     writeAuditFile("project.godot", "config_version=5\n");
 
@@ -803,8 +809,132 @@ static void test_audio_list_buses_reports_a_project_with_no_layout_file() {
     ASSERT_TRUE(!result.isError);
     const auto report = didi::json::parse(result.content[0].text);
     ASSERT_TRUE(!report["layout_present"].get<bool>());
-    ASSERT_EQ(report["buses"].size(), 0u);
     ASSERT_EQ(report["layout_path"], "res://default_bus_layout.tres");
+    ASSERT_EQ(report["bus_count"], 1u);
+    ASSERT_EQ(report["buses"].size(), 1u);
+    ASSERT_EQ(report["buses"][0]["name"], "Master");
+    ASSERT_EQ(report["buses"][0]["index"], 0);
+    ASSERT_EQ(report["buses"][0]["volume_db"].get<double>(), 0.0);
+    ASSERT_EQ(report["buses"][0]["send"], "");
+    ASSERT_TRUE(!report["buses"][0]["mute"].get<bool>());
+    ASSERT_TRUE(!report["buses"][0]["solo"].get<bool>());
+    ASSERT_TRUE(!report["buses"][0]["bypass_effects"].get<bool>());
+}
+
+static void test_audio_list_buses_reports_the_default_when_the_named_layout_is_gone() {
+    // The same answer for the other way of having no layout file. The engine
+    // does not fail here either: a project naming a layout that is not there
+    // runs on the same single Master bus, measured on all three lines. The
+    // layout_path still names what the project asked for, which is the
+    // difference between this and the case above.
+    ScopedToolProject project("audio-buses-gone");
+    writeAuditFile("project.godot",
+        "config_version=5\n"
+        "\n"
+        "[audio]\n"
+        "\n"
+        "buses/default_bus_layout=\"res://config/gone.tres\"\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    const auto result = registry.callTool("audio_list_buses", didi::json::object());
+    ASSERT_TRUE(!result.isError);
+    const auto report = didi::json::parse(result.content[0].text);
+    ASSERT_TRUE(!report["layout_present"].get<bool>());
+    ASSERT_EQ(report["layout_path"], "res://config/gone.tres");
+    ASSERT_EQ(report["bus_count"], 1u);
+    ASSERT_EQ(report["buses"][0]["name"], "Master");
+}
+
+static void test_audio_list_buses_reads_a_spaced_section_header() {
+    // `[ audio ]` is the audio section to the engine, and a reader that
+    // compares the header as a whole line collects nothing under it. Measured
+    // on 4.5.1, 4.6.2 and 4.7.2: this project runs three buses and the answer
+    // was bus_count 0 with a note saying it ships no layout file (#836).
+    ScopedToolProject project("audio-buses-spaced-header");
+    writeAuditFile("project.godot",
+        "config_version=5\n"
+        "\n"
+        "[ audio ]\n"
+        "\n"
+        "buses/default_bus_layout=\"res://config/buses.tres\"\n");
+    writeAuditFile("config/buses.tres",
+        "[gd_resource type=\"AudioBusLayout\" format=3]\n"
+        "[resource]\n"
+        "bus/0/name = \"Master\"\n"
+        "bus/0/volume_db = 0.0\n"
+        "bus/0/send = \"\"\n"
+        "bus/1/name = \"Music\"\n"
+        "bus/1/volume_db = -6.0\n"
+        "bus/1/send = \"Master\"\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    const auto result = registry.callTool("audio_list_buses", didi::json::object());
+    ASSERT_TRUE(!result.isError);
+    const auto report = didi::json::parse(result.content[0].text);
+    ASSERT_EQ(report["layout_path"], "res://config/buses.tres");
+    ASSERT_TRUE(report["layout_present"].get<bool>());
+    ASSERT_EQ(report["bus_count"], 2u);
+    ASSERT_EQ(report["buses"][1]["name"], "Music");
+}
+
+static void test_audio_list_buses_reads_a_spaced_key() {
+    // The other half of the same rule, and it breaks the reader on its own:
+    // whitespace inside a key is not part of the key, so
+    // `buses / default_bus_layout` is the setting the engine honours (#836).
+    ScopedToolProject project("audio-buses-spaced-key");
+    writeAuditFile("project.godot",
+        "config_version=5\n"
+        "\n"
+        "[audio]\n"
+        "\n"
+        "buses / default_bus_layout = \"res://config/buses.tres\"\n");
+    writeAuditFile("config/buses.tres",
+        "[gd_resource type=\"AudioBusLayout\" format=3]\n"
+        "[resource]\n"
+        "bus/0/name = \"Master\"\n"
+        "bus/0/volume_db = 0.0\n"
+        "bus/0/send = \"\"\n"
+        "bus/1/name = \"Music\"\n"
+        "bus/1/volume_db = -6.0\n"
+        "bus/1/send = \"Master\"\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    const auto result = registry.callTool("audio_list_buses", didi::json::object());
+    ASSERT_TRUE(!result.isError);
+    const auto report = didi::json::parse(result.content[0].text);
+    ASSERT_EQ(report["layout_path"], "res://config/buses.tres");
+    ASSERT_EQ(report["bus_count"], 2u);
+    ASSERT_EQ(report["buses"][1]["name"], "Music");
+}
+
+static void test_audio_list_buses_ignores_a_bus_layout_key_outside_the_audio_section() {
+    // The control for the two above. The setting is audio/buses/..., so the
+    // same key under [application] is a different setting and naming a file
+    // there moves nothing. Matching the key alone would follow it.
+    ScopedToolProject project("audio-buses-wrong-section");
+    writeAuditFile("project.godot",
+        "config_version=5\n"
+        "\n"
+        "[application]\n"
+        "\n"
+        "buses/default_bus_layout=\"res://config/buses.tres\"\n");
+    writeAuditFile("config/buses.tres",
+        "[gd_resource type=\"AudioBusLayout\" format=3]\n"
+        "[resource]\n"
+        "bus/0/name = \"Master\"\n"
+        "bus/0/volume_db = 0.0\n"
+        "bus/0/send = \"\"\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    const auto result = registry.callTool("audio_list_buses", didi::json::object());
+    ASSERT_TRUE(!result.isError);
+    const auto report = didi::json::parse(result.content[0].text);
+    ASSERT_EQ(report["layout_path"], "res://default_bus_layout.tres");
+    ASSERT_TRUE(!report["layout_present"].get<bool>());
 }
 
 static void test_audio_list_buses_follows_a_relocated_layout_setting() {
@@ -7246,6 +7376,14 @@ struct RegisterToolTests {
                      test_audio_list_buses_reports_a_project_with_no_layout_file);
         registerTest("Tools.AudioListBusesRelocatedLayout",
                      test_audio_list_buses_follows_a_relocated_layout_setting);
+        registerTest("Tools.AudioListBusesMissingLayout",
+                     test_audio_list_buses_reports_the_default_when_the_named_layout_is_gone);
+        registerTest("Tools.AudioListBusesSpacedHeader",
+                     test_audio_list_buses_reads_a_spaced_section_header);
+        registerTest("Tools.AudioListBusesSpacedKey",
+                     test_audio_list_buses_reads_a_spaced_key);
+        registerTest("Tools.AudioListBusesWrongSection",
+                     test_audio_list_buses_ignores_a_bus_layout_key_outside_the_audio_section);
         registerTest("Tools.ProjectAuditSignalScale",
                      test_project_audit_dead_signal_cost_does_not_follow_signal_count);
         registerTest("Tools.OverwriteGateArmsOnTarget",
