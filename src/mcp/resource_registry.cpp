@@ -118,18 +118,7 @@ Error liveResourceError(const Error& error,
 bool conditionallyQuarantineLease(Error& error,
                                   const std::shared_ptr<ipc::IIpcClient>& router,
                                   const runtime::RuntimeRouteLease& lease) {
-    const auto transport = ipc::transportFailureState(error);
-    const bool explicit_quarantine = error.data.is_object() &&
-                                     error.data.value("route_quarantine", false);
-    if (!transport.has_value() && !explicit_quarantine) return false;
-    if (!error.data.is_object()) error.data = json::object();
-    if (transport.has_value()) {
-        error.data["outcome"] = transport->outcome_unknown ? "unknown_outcome" : "not_started";
-    } else if (!error.data.contains("outcome")) {
-        error.data["outcome"] = "unknown_outcome";
-    }
-    runtime::annotateEngineState(error, lease.descriptor);
-    error.data["route_quarantine"] = true;
+    if (!runtime::annotateLiveRouteFailure(error, lease.descriptor, true)) return false;
     (void)runtime::quarantineRuntimeRoute(router, lease);
     return true;
 }
@@ -464,27 +453,23 @@ void ResourceRegistry::registerAllDefaultResources() {
             }
             auto error = res.error();
             ipc::markTransportRepeated(error, sent.repeat_attempted);
-            const bool explicit_quarantine = error.data.is_object() &&
-                error.data.value("route_quarantine", false);
             const auto transport = ipc::transportFailureState(error);
+            // This reader's own rule, the same one runtime_read_logs keeps: a
+            // deadline that arrived without transport state is still a
+            // transport failure, and saying so hands the funnel below the
+            // failure every other route would have handed it.
             const bool known_transport_timeout = error.code == 500 &&
                 (error.message.rfind("Timeout waiting for response", 0) == 0 ||
                  error.message.rfind("Failed or timed out writing to", 0) == 0);
             const bool transport_deadline =
                 (error.code == 504 || known_transport_timeout) &&
                 (!error.data.is_object() || !error.data.contains("outcome"));
-            if (explicit_quarantine || transport.has_value() || transport_deadline) {
-                if (transport_deadline && !transport.has_value()) error.code = 504;
+            if (transport_deadline && !transport.has_value()) {
+                error.code = 504;
                 if (!error.data.is_object()) error.data = json::object();
-                if (transport.has_value()) {
-                    error.data["outcome"] = transport->outcome_unknown
-                                                  ? "unknown_outcome"
-                                                  : "not_started";
-                } else {
-                    error.data["outcome"] = "unknown_outcome";
-                }
-                runtime::annotateEngineState(error, session);
                 error.data["route_quarantine"] = true;
+            }
+            if (runtime::annotateLiveRouteFailure(error, session, true)) {
                 const auto wrapped = liveResourceError(
                     error, session, "Failed to retrieve live runtime logs: ");
                 (void)runtime::quarantineRuntimeRoute(m_ipcClient, *lease);

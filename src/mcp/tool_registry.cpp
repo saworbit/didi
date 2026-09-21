@@ -321,23 +321,10 @@ namespace {
 
 Error normalizeLiveRouteError(Error error,
                               const std::optional<runtime::SessionDescriptor>& session = {}) {
-    const auto transport = ipc::transportFailureState(error);
-    const bool explicit_quarantine = error.data.is_object() &&
-                                     error.data.value("route_quarantine", false);
-    if (!transport.has_value() && !explicit_quarantine) {
-        // The extension refusing because its main loop has stopped, on a game
-        // this caller asked to stop, is the requested exit (#595).
-        if (error.code == 503 || error.code == 504) runtime::annotateRequestedStop(error, session);
-        return error;
-    }
-    if (!error.data.is_object()) error.data = json::object();
-    if (transport.has_value()) {
-        error.data["outcome"] = transport->outcome_unknown ? "unknown_outcome" : "not_started";
-    } else if (!error.data.contains("outcome")) {
-        error.data["outcome"] = "unknown_outcome";
-    }
-    runtime::annotateEngineState(error, session);
-    error.data["route_quarantine"] = true;
+    // The caller below reads route_quarantine back out to decide whether to
+    // retire the route, so this path asks for the quarantine rather than
+    // reporting one it made.
+    runtime::annotateLiveRouteFailure(error, session, true);
     return error;
 }
 

@@ -215,6 +215,40 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **Every live route now gives the same account of a failed engine.** Five
+  places in this codebase turn a live failure into an answer, and they did not
+  carry the same facts. `annotateEngineState` is what attaches the account of
+  what happened to the engine -- whether it is alive, gone or unverifiable, the
+  crash report path and the exception, and then the `incident`, `cause` and
+  `recovery` that are what tell a caller to stop retrying -- and the Phase 7
+  envelope never called it. So the same crashed engine answered differently
+  depending on which tool noticed: `runtime_read_logs` reported the crash, and
+  `runtime_read_profiler` and `spatial_query_raycast_batch` reported
+  `runtime_route_request_failed` with an upstream code, no crash report path
+  and no reason not to call again (#854). That is the failure #595 was filed
+  about, one path along: back then the missing fact was the requested stop, and
+  it was added to one path and not the others. Nothing made the paths share.
+  Each was written where it was needed, each was correct about the thing it was
+  written for, and a fact added to one was invisible to the rest. There is one
+  funnel now, `annotateLiveRouteFailure`, in `didi::runtime` beside the
+  annotations it applies, and the registry dispatch, the runtime tools, the
+  live resource reads and the Phase 7 envelope all pass a failure through it
+  before they answer. Each keeps what is genuinely its own: `upstream_code` and
+  `upstream_message` belong to the Phase 7 envelope, the deadline that arrives
+  without transport state is the runtime reader's own rule, and whether a
+  quarantine actually took is the caller's fact rather than the funnel's. The
+  Phase 7 unknown-outcome branch gained the same account, because why an
+  outcome is unknown is the useful half and a mutation whose engine crashed
+  mid-call is not a mutation whose engine is merely slow. An engine that
+  answered is still not a route failure: a bad node path stays a `404` the
+  caller can fix, with no engine state attached and no route retired. The check
+  that keeps it honest was the harder half and matters more than the fix --
+  every route is driven through the same transport failure and required to
+  produce the same fields, so the sixth path cannot drift the way the fifth
+  did. `rendererError` inside the extension is deliberately not one of them: it
+  runs in the engine process, where there is no session descriptor to consult,
+  so it carries what the `Error` itself holds and says nothing it cannot know.
+
 - **`origin: scene` means the connection is in the scene, not that the receiver
   happens to live there.** #461 gave every connection an `origin` so an agent
   asking what is wired to a node could tell its own work from the scene dock's

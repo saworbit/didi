@@ -166,6 +166,31 @@ std::optional<RequestedStop> requestedStopFor(uint64_t pid, const std::string& s
 // stopped while the process is still tearing down. Returns whether it did.
 bool annotateRequestedStop(Error& error, const std::optional<SessionDescriptor>& session);
 
+// The one funnel a live route passes a failure through before it answers.
+//
+// Five places turned a live failure into an answer and they did not carry the
+// same facts. Each was written where it was needed, each was right about the
+// thing it was written for, and a fact added to one was invisible to the rest:
+// #595 added the requested-stop incident to one path, and a crashed engine
+// reported through a Phase 7 tool still came back as a bare route failure with
+// no crash report and no reason to stop retrying (#854). Add a fact here and
+// every route carries it; add one to a route and only that route has it.
+//
+// Decides first whether the engine answered or the transport failed, because
+// only the second is this function's business. When the engine answered, the
+// failure is the engine's own and the only fact added is the requested stop,
+// since a game this caller asked to exit is not a route to retry. When the
+// transport failed, or the peer asked for a quarantine, the error gains
+// `outcome`, everything annotateEngineState knows, and `route_quarantine`.
+//
+// `quarantined` is what the caller's own quarantine attempt returned, because
+// whether the route was actually retired is the caller's fact and not this
+// one's. Returns whether the failure was a transport failure, so a caller that
+// has to act on that -- by retiring the route, or by reporting an unknown
+// outcome on a mutation -- does not have to work it out a second time.
+bool annotateLiveRouteFailure(Error& error, const std::optional<SessionDescriptor>& session,
+                              bool quarantined);
+
 // Merges the remembered obstruction into an error that is about to say only
 // that nothing is attached. Does nothing when there is none, so a server that
 // has simply never attached still answers exactly as it did.

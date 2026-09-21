@@ -30,8 +30,13 @@ This design adds a layer over machinery that exists. It invents no new facts.
   unverifiable, with a reason.
 - `findEngineCrashReport` reads the report the in-process capture leaves, and
   says whether a frame of ours was on the faulting stack.
-- `normalizeLiveRouteError` is the single funnel every live route already passes
-  through when classifying a transport failure.
+- `annotateLiveRouteFailure` is the single funnel every live route passes
+  through when classifying a transport failure. This line used to name
+  `normalizeLiveRouteError` and to claim the same thing, and it was not true:
+  that funnel was one of five copies, and the Phase 7 envelope was not one of
+  them, so a crashed engine reported through a Phase 7 tool carried none of the
+  facts below (#854). The funnel now lives in `didi::runtime` beside the
+  annotations it applies, and the copies call it.
 - `capabilityForTool` (`src/mcp/tool_registry.cpp:15`) already classifies every
   tool as `live`, `offline_fallback`, or both. That is the ground truth for what
   survives an engine loss, and the docs validator already covers it.
