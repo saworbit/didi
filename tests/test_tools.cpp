@@ -2304,15 +2304,6 @@ static void test_an_unparseable_presets_file_says_which_of_the_six_causes_it_is(
         {"a key before the first section",
          "stray=1\n[preset.0]\nname=\"Windows\"\nplatform=\"Windows Desktop\"\n",
          "key_before_section", 1, "before any section header"},
-        // `maybe` is not a value Godot's parser will start at all, so that
-        // spelling is the unloadable_value case above rather than this one.
-        // This needs a value that parses and is not a bool literal. Whether
-        // refusing the file for it is right is #842, which measured the engine
-        // loading this very file without complaint; this pins only that the
-        // refusal says which cause it is.
-        {"runnable is neither true nor false",
-         "[preset.0]\nname=\"Windows\"\nplatform=\"Windows Desktop\"\nrunnable=1\n",
-         "invalid_runnable", 4, "only true or false"},
         {"a preset with no platform",
          "[preset.0]\nname=\"Windows\"\n",
          "incomplete_preset", 0, "declares no platform"},
@@ -2346,6 +2337,43 @@ static void test_an_unparseable_presets_file_says_which_of_the_six_causes_it_is(
         ASSERT_EQ(data.contains("line"), item.line > 0);
         if (item.line > 0) ASSERT_EQ(data["line"], item.line);
     }
+}
+
+static void test_runnable_is_read_the_way_the_engine_reads_it() {
+    // #842: the check compared against the two words Godot's own writer emits,
+    // which is the right guess about what the file usually holds and the wrong
+    // rule for what the engine accepts. It refused the whole file for a value
+    // the engine loads, so a project with a working preset listed none.
+    //
+    // Measured through ConfigFile on 4.5.1 and 4.7.2: true and 1 come back
+    // true, false, 0 and 0.0 come back false, and the file loads in every case.
+    struct Case {
+        const char* value;
+        bool runnable;
+    };
+    const Case cases[] = {
+        {"true", true}, {"false", false},
+        {"1", true},    {"0", false},
+        {"2", true},    {"0.0", false},
+        {"-1", true},   {"null", false},
+    };
+
+    for (const auto& item : cases) {
+        const std::string contents =
+            "[preset.0]\nname=\"Windows\"\nplatform=\"Windows Desktop\"\nrunnable=" +
+            std::string(item.value) + "\n";
+        const auto file = didi::offline::readExportPresets(contents);
+        ASSERT_TRUE(!file.malformed);
+        ASSERT_EQ(file.presets.size(), 1u);
+        ASSERT_EQ(file.presets[0]["runnable"], item.runnable);
+    }
+
+    // The value that does not parse is still the whole file, and it is the
+    // cause it always was rather than a runnable problem.
+    const auto refused = didi::offline::readExportPresets(
+        "[preset.0]\nname=\"Windows\"\nplatform=\"Windows Desktop\"\nrunnable=maybe\n");
+    ASSERT_TRUE(refused.malformed);
+    ASSERT_EQ(refused.reason, std::string("unloadable_value"));
 }
 
 static void test_the_first_cause_is_the_one_reported() {
@@ -7603,6 +7631,8 @@ struct RegisterToolTests {
                      test_audio_list_buses_ignores_a_bus_layout_key_outside_the_audio_section);
         registerTest("Tools.ExportPresetRefusalCauses",
                      test_an_unparseable_presets_file_says_which_of_the_six_causes_it_is);
+        registerTest("Tools.ExportPresetRunnableBooleanizes",
+                     test_runnable_is_read_the_way_the_engine_reads_it);
         registerTest("Tools.ExportPresetFirstCauseWins",
                      test_the_first_cause_is_the_one_reported);
         registerTest("Tools.ExportPresetParsedCarriesNoCause",

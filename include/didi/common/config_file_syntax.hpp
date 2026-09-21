@@ -149,4 +149,29 @@ Scan scan(std::string_view text);
 // non-empty one is a promise that it will not.
 std::string valueProblem(std::string_view value_text);
 
+// What a value means where the engine wants a bool.
+//
+// Godot does not require the words `true` and `false`. It parses the value into
+// a Variant and lets it convert, and that conversion is `booleanize()`, which is
+// `!is_zero()`. So a number decides on being zero, `null` is false, and
+// everything else the parser accepts is true.
+//
+// Measured on 4.5.1, 4.6.2 and 4.7.2, twice over. Against
+// `application/config/use_hidden_project_data_directory`: `false`, `0` and
+// `null` move the project data directory and `1` and `"false"` do not. Against
+// `runnable` in an `export_presets.cfg` loaded through `ConfigFile`: `true` and
+// `1` come back true, `false`, `0` and `0.0` come back false.
+//
+// A string was not measurable from GDScript, where `bool("true")` is not a call
+// the language allows, so the claim for it rests on `is_zero()` having no case
+// for STRING rather than on a reading. That is the same footing as
+// `valueProblem` above: this reports what it can prove and treats everything
+// else the way the engine's own rule says, rather than refusing a value that
+// loads.
+//
+// The caller is expected to have checked `valueProblem` first. A value the
+// parser will not start never reaches the engine's conversion at all, because
+// the whole file is ERR_PARSE_ERROR.
+bool booleanize(std::string_view value_text);
+
 } // namespace didi::config_file
