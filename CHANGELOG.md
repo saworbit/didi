@@ -215,6 +215,29 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **A headless game is refused as a game, and the renderer stopped dropping the
+  facts a refusal carries.** `viewport_capture_frame` against a headless game
+  answered with the editor's refusal: it called the game an editor, told the
+  caller to run the editor with a display, offered a synthesised preview that
+  detaching from a game does not produce, and said nothing about the request can
+  fix that, which reads as nothing can. `runtime_launch` defaults to
+  `headless: true`, so that is the state a caller who did not think about it is
+  in, and the fix is one argument on the call that started the process (#777).
+  The diagnosis was right and the noun and both remedies were wrong. The refusal
+  now asks the session kind, which is the same fact `editor_save_scene` and
+  `scene_get_hierarchy` already refuse a game with, and says the right sentence
+  for each: an editor keeps its wording and its preview route, a game is told to
+  launch again with `headless: false`, and a process that published no kind gets
+  what is true of both. It also publishes `code: "headless_engine"`,
+  `display_driver`, `session_kind` and `relaunch_argument`, so a caller can
+  branch without reading the prose.
+  Found on the way: `rendererError` built its response from the code and the
+  message alone, so any fact attached to an Error below it was dropped. That was
+  already costing something: an isolation restore that fails sets `isolated`,
+  `node_isolation_path` and `state_restored`, which is the one thing a caller
+  needs when nodes may still be hidden in their scene, and none of it had ever
+  reached a caller. It carries the data now.
+
 - **The two readers of `project.godot` answer offline, like its writer does.**
   `project_set_setting` writes the file with no editor attached and explains
   itself, and then `project_get_setting`, the tool whose job is to read that
