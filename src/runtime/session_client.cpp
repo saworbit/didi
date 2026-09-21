@@ -1113,6 +1113,36 @@ std::optional<std::string> tombstoneSessionIdFromName(const std::string& name) {
 
 }  // namespace
 
+// A lock file nobody holds, for a session that is not there.
+//
+// The lock is taken next to the descriptor and released when the route closes,
+// and releasing a lock does not remove the file it was taken on. So every
+// session left one behind, in a directory every project on this machine shares,
+// while the descriptor beside it was retired correctly. Two weeks of ordinary
+// use came to 205 files and none of them named a live session (#787).
+//
+// Removing it in the destructor would cover the tidy exit and not the crash,
+// which is the case that leaves a file behind whatever the destructor learns to
+// do. This runs from the scan instead, on the same opportunistic pass that
+// reaps a descriptor tombstone, and it covers both.
+//
+// Two things have to be true. The descriptor beside it has to be gone, so a
+// live session's lock is never a candidate. And the lock has to be free, which
+// is proved by taking it: another client holding it answers 423 and this leaves
+// the file alone. Silent either way, because a lock file that outlives its
+// session is not a fault the caller needs reported.
+void reapOrphanedSessionLock(const std::filesystem::path& path) {
+    if (path.extension() != ".lock") return;
+    auto descriptor = path;
+    descriptor.replace_extension(".json");
+    std::error_code exists_error;
+    if (std::filesystem::exists(descriptor, exists_error) || exists_error) return;
+
+    auto held = RuntimeSessionLock::acquire(path, json{{"reaping_orphaned_lock", true}});
+    if (held.isErr()) return;
+    held.value()->releaseAndRemove();
+}
+
 TombstoneReapOutcome reapOrphanedDescriptorTombstone(
     const std::filesystem::path& directory, const std::filesystem::path& path) {
     const auto named_id = tombstoneSessionIdFromName(path.filename().string());
@@ -1206,6 +1236,7 @@ std::vector<DiscoveredSession> discoverSessions(json& diagnostics,
             // will finish removing. Deliberately silent: a retained tombstone is
             // not discoverable and is not a fault the caller needs reported.
             (void)reapOrphanedDescriptorTombstone(directory, path);
+            reapOrphanedSessionLock(path);
             continue;
         }
         auto contents = readDescriptorFromValidatedHandle(directory, path, opened_hook);

@@ -90,6 +90,38 @@ Result<std::shared_ptr<RuntimeSessionLock>> RuntimeSessionLock::acquire(
 #endif
 }
 
+// The two platforms allow opposite orders, and each order is the safe one
+// where it is available.
+void RuntimeSessionLock::releaseAndRemove() {
+    if (m_nativeHandle == -1) return;
+#if defined(_WIN32)
+    // The handle above is opened without FILE_SHARE_DELETE, so the file cannot
+    // be removed while any handle to it is open, this one included. Closing
+    // first is the only order Windows allows, and it is also the one that fails
+    // safely: a process that acquires the lock in the gap has the file open on
+    // the same terms, so the delete below returns a sharing violation rather
+    // than removing a lock somebody now holds.
+    auto handle = reinterpret_cast<HANDLE>(m_nativeHandle);
+    OVERLAPPED lock_range{};
+    UnlockFileEx(handle, 0, 1, 0, &lock_range);
+    CloseHandle(handle);
+    m_nativeHandle = -1;
+    DeleteFileW(m_path.c_str());
+#else
+    // Unlinked while the lock is still held, so anything that opens the path
+    // after this point creates a new file and locks that instead. The narrow
+    // case this does not close is a process that opened the old inode before
+    // the unlink and takes the lock on it after the release below: it then
+    // holds a lock on a file nobody can reach. Closing that needs a lock on the
+    // directory rather than on the file, which is more than this is worth.
+    const int fd = static_cast<int>(m_nativeHandle);
+    ::unlink(m_path.c_str());
+    flock(fd, LOCK_UN);
+    close(fd);
+    m_nativeHandle = -1;
+#endif
+}
+
 RuntimeSessionLock::~RuntimeSessionLock() {
     if (m_nativeHandle == -1) return;
 #if defined(_WIN32)

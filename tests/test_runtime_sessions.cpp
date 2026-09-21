@@ -1,4 +1,5 @@
 #include "didi/runtime/session_client.hpp"
+#include "didi/runtime/session_lock.hpp"
 #include "didi/gdextension/session_host.hpp"
 
 #include <cstdlib>
@@ -1169,6 +1170,103 @@ void test_discovery_reaps_orphaned_tombstones_without_listing_them() {
 }
 
 
+void test_discovery_reaps_a_lock_file_with_no_descriptor() {
+    // #787: the route takes a lock beside the descriptor and releasing it does
+    // not remove the file, so every session that ever ran left one behind in a
+    // directory every project on the machine shares. 205 of them here, none
+    // naming a live session, while every descriptor had been retired correctly.
+    const auto directory = makeSessionDirectory();
+    setSessionDirectory(directory);
+    const auto session_id = std::string("aaaabbbbccccddddeeeeffff00001111");
+    const auto orphan = directory / (session_id + ".lock");
+    std::ofstream(orphan, std::ios::binary) << "{}";
+    ASSERT_TRUE(std::filesystem::exists(orphan));
+
+    auto client = didi::runtime::createRuntimeSessionClient(
+        std::filesystem::current_path().string(), [] { return std::make_unique<FakeIpcClient>(); });
+    const auto listed = client->listSessions(std::nullopt);
+
+    ASSERT_TRUE(listed.isOk());
+    ASSERT_TRUE(listed.value()["sessions"].empty());
+    ASSERT_TRUE(!std::filesystem::exists(orphan));
+
+    clearSessionDirectory();
+    std::filesystem::remove_all(directory);
+}
+
+void test_discovery_keeps_a_lock_file_that_still_has_a_descriptor() {
+    // The control. A lock beside a descriptor belongs to a session that is
+    // there, and taking it away would let a second client attach to a session
+    // this one already holds.
+    const auto directory = makeSessionDirectory();
+    const auto session_id = std::string("11112222333344445555666677778888");
+    writeDescriptor(directory, session_id + ".json",
+                    validDescriptor(session_id, endpointFor(session_id)));
+    setSessionDirectory(directory);
+    const auto lock_path = directory / (session_id + ".lock");
+    std::ofstream(lock_path, std::ios::binary) << "{}";
+
+    auto client = didi::runtime::createRuntimeSessionClient(
+        std::filesystem::current_path().string(), [] { return std::make_unique<FakeIpcClient>(); });
+    const auto listed = client->listSessions(std::nullopt);
+
+    ASSERT_TRUE(listed.isOk());
+    ASSERT_TRUE(std::filesystem::exists(lock_path));
+
+    clearSessionDirectory();
+    std::filesystem::remove_all(directory);
+}
+
+void test_discovery_keeps_a_lock_file_somebody_holds() {
+    // The other control, and the one that makes the sweep safe: the descriptor
+    // is gone, so the file looks orphaned, and it is not. Holding the lock is
+    // what proves it, and a held lock answers 423 rather than being removed.
+    // The descriptor can be absent for a session that is mid-retirement, which
+    // is exactly when removing a live client's lock would hurt.
+    const auto directory = makeSessionDirectory();
+    setSessionDirectory(directory);
+    const auto session_id = std::string("99998888777766665555444433332222");
+    const auto lock_path = directory / (session_id + ".lock");
+    auto held = didi::runtime::RuntimeSessionLock::acquire(lock_path, didi::json{{"held", true}});
+    ASSERT_TRUE(held.isOk());
+
+    auto client = didi::runtime::createRuntimeSessionClient(
+        std::filesystem::current_path().string(), [] { return std::make_unique<FakeIpcClient>(); });
+    const auto listed = client->listSessions(std::nullopt);
+
+    ASSERT_TRUE(listed.isOk());
+    ASSERT_TRUE(std::filesystem::exists(lock_path));
+
+    held.value().reset();
+    clearSessionDirectory();
+    std::filesystem::remove_all(directory);
+}
+
+void test_a_released_lock_leaves_no_file_behind() {
+    // releaseAndRemove at the level below discovery. The destructor releases
+    // and leaves the path, which is correct for a lock that is being handed on
+    // and is what left the pile.
+    const auto directory = makeSessionDirectory();
+    const auto lock_path = directory / std::string("cccc0000cccc0000cccc0000cccc0000.lock");
+    auto held = didi::runtime::RuntimeSessionLock::acquire(lock_path, didi::json{{"held", true}});
+    ASSERT_TRUE(held.isOk());
+    ASSERT_TRUE(std::filesystem::exists(lock_path));
+    held.value()->releaseAndRemove();
+    ASSERT_TRUE(!std::filesystem::exists(lock_path));
+
+    // Released twice is not an error, and the second call has nothing to
+    // remove: a shared_ptr that outlives the call still runs its destructor.
+    held.value()->releaseAndRemove();
+    held.value().reset();
+    ASSERT_TRUE(!std::filesystem::exists(lock_path));
+
+    // And the path is free for the next acquirer.
+    auto again = didi::runtime::RuntimeSessionLock::acquire(lock_path, didi::json{{"held", true}});
+    ASSERT_TRUE(again.isOk());
+    again.value()->releaseAndRemove();
+    std::filesystem::remove_all(directory);
+}
+
 void test_failed_refresh_releases_the_session_lock() {
     // Break caught: quarantineIfCurrent retired the route but kept m_activeLock,
     // unlike quarantineRoute and detachSession. After a failed refresh this
@@ -1224,6 +1322,14 @@ struct RegisterRuntimeSessionTests {
                      test_session_discovery_does_not_treat_reused_pid_metadata_as_live);
         registerTest("RuntimeSessions.StaleRetirementPreservesReplacement",
                      test_session_discovery_preserves_replacement_at_proven_stale_path);
+        registerTest("RuntimeSessions.ReapsOrphanedLockFile",
+                     test_discovery_reaps_a_lock_file_with_no_descriptor);
+        registerTest("RuntimeSessions.KeepsLockFileWithDescriptor",
+                     test_discovery_keeps_a_lock_file_that_still_has_a_descriptor);
+        registerTest("RuntimeSessions.KeepsHeldLockFile",
+                     test_discovery_keeps_a_lock_file_somebody_holds);
+        registerTest("RuntimeSessions.ReleaseAndRemoveLeavesNoFile",
+                     test_a_released_lock_leaves_no_file_behind);
         registerTest("RuntimeSessions.FailedRefreshReleasesLock",
                      test_failed_refresh_releases_the_session_lock);
         registerTest("RuntimeSessions.ReadsValidatedDescriptorObject",
