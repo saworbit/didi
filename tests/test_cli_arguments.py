@@ -8,6 +8,11 @@ started without it and without the warning that says confirmations are off.
 
 Every form below is checked against the real executable, because this is
 behaviour of the process at startup and nothing smaller can prove it.
+
+The test runner had the same shape and it was found later: `didi_tests
+--filter Tools.Rename` matched neither branch, left the filter empty, ran all
+of them and reported the whole suite's exit code, which reads as one isolated
+test passing (#803). Those cases are at the bottom of this file.
 """
 
 import json
@@ -228,6 +233,81 @@ class CommandLineTests(unittest.TestCase):
         result = _run(["--dump-tool-manifest"])
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIsInstance(json.loads(result.stdout), dict)
+
+
+# The test binary, not the server. DIDI_TEST_BINARY deliberately is not read
+# here: it names the server for every Python suite in this directory and the
+# test binary for tools/test_inventory.py, and honouring it here would make a
+# third meaning out of the same variable.
+NATIVE_RUNNER_CANDIDATES = (
+    "build/Release/didi_tests.exe",
+    "build/Debug/didi_tests.exe",
+    "build/didi_tests",
+    "build-ninja/didi_tests.exe",
+    "build-ninja/didi_tests",
+)
+
+
+def _native_runner():
+    built = [
+        path
+        for path in (REPOSITORY_ROOT / name for name in NATIVE_RUNNER_CANDIDATES)
+        if path.is_file()
+    ]
+    if not built:
+        raise unittest.SkipTest("didi_tests not built")
+    built.sort(key=lambda path: path.stat().st_mtime, reverse=True)
+    return built[0]
+
+
+class NativeRunnerArguments(unittest.TestCase):
+    """The same rule, one binary along.
+
+    The runner's own comment says why a single test is run alone: the suite
+    shares process-global state, so running one by itself is how you tell a
+    genuine failure from a leak an earlier test left behind. The space form
+    silently handed back exactly the shared-state run that reasoning avoids,
+    and looked like it had done what was asked.
+    """
+
+    def _run(self, arguments, timeout=180):
+        return subprocess.run(
+            [str(_native_runner()), *arguments],
+            stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=timeout,
+        )
+
+    def test_the_space_form_of_filter_is_refused_by_name(self):
+        result = self._run(["--filter", "Tools.RenameRefusals"])
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unrecognised argument '--filter'", result.stderr)
+        # Both accepted forms, so the refusal is a remedy and not just a no.
+        self.assertIn("--filter=<substring>", result.stderr)
+        self.assertIn("--list", result.stderr)
+        # And it refused instead of running the suite, which is the whole point.
+        self.assertNotIn("Running Didi Native MCP Test Suite", result.stdout)
+
+    def test_a_bare_test_name_is_refused(self):
+        result = self._run(["Tools.RenameRefusals"])
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unrecognised argument 'Tools.RenameRefusals'", result.stderr)
+
+    def test_the_documented_filter_form_runs_one_test(self):
+        result = self._run(["--filter=Tools.RenameRefusals"])
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Filter: Tools.RenameRefusals", result.stdout)
+        # One, not all of them. The count is what told the two runs apart.
+        self.assertIn("1 total", result.stdout)
+
+    def test_list_still_prints_every_name(self):
+        result = self._run(["--list"])
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        names = [line for line in result.stdout.splitlines() if line.strip()]
+        self.assertGreater(len(names), 100)
+        self.assertIn("Tools.RenameRefusals", names)
 
 
 if __name__ == "__main__":

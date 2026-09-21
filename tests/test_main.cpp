@@ -54,6 +54,24 @@ int main(int argc, char* argv[]) {
                 std::cout << test.name << std::endl;
             }
             return 0;
+        } else {
+            // The loop had no else, so `--filter Tools.Rename` matched neither
+            // branch, the filter stayed empty and all of them ran, with no
+            // warning, no usage line and no Filter: header. The exit code was
+            // the whole suite's, so it read as one isolated test passing (#803).
+            //
+            // That is the one thing the flag exists to prevent. The comment
+            // above says why a single test is run alone, and the space form
+            // silently handed back the shared-state run that reasoning is
+            // trying to avoid.
+            std::cerr << "didi_tests: unrecognised argument '" << arg << "'." << std::endl;
+            std::cerr << "  --filter=<substring>  run only the tests whose name contains it"
+                      << std::endl;
+            std::cerr << "  --list                print every registered test name"
+                      << std::endl;
+            std::cerr << "The value goes after an '=' with no space: --filter=Tools.Rename."
+                      << std::endl;
+            return 2;
         }
     }
 
