@@ -2004,6 +2004,79 @@ Phase 7A-7C define the approved contracts for editor authoring. Their implementa
 
         self.assertTrue(any("missing anchor" in error for error in errors), errors)
 
+    def test_a_typed_container_sample_in_backticks_is_not_a_link(self):
+        """#824: `Array[int]([1, 2])` is a `]` followed by a `(`, so a link
+        regex run over unstripped prose reads it as a link to `[1,`.
+
+        That is how Godot writes a typed array, and `Array[NodePath]([])` is a
+        literal string the editor puts in its own `.godot/editor/` state files,
+        so a correct sentence about the engine's own syntax failed the build.
+        The copy of this check that lived in ci.yml stripped fenced blocks and
+        not inline spans; this one strips both, which is why there is now one
+        of them.
+        """
+        root = self.make_valid_repository()
+        readme = (root / "README.md").read_text(encoding="utf-8")
+        self.write(
+            "README.md",
+            readme
+            + "\nA typed array is written `Array[int]([1, 2])`, and an empty "
+            + "typed container is `Array[NodePath]([])`.\n",
+        )
+
+        errors = VALIDATOR.validate_repository(root)
+
+        self.assertEqual([], [error for error in errors if "missing target" in error])
+
+    def test_a_link_outside_backticks_on_the_same_line_is_still_checked(self):
+        """The control. Stripping code spans must not swallow the rest of the
+        line, or the fix would hide every broken link that shares a line with a
+        code sample."""
+        root = self.make_valid_repository()
+        readme = (root / "README.md").read_text(encoding="utf-8")
+        self.write(
+            "README.md",
+            readme + "\nA sample `Array[int]([1, 2])` and a [link](docs/NOPE.md).\n",
+        )
+
+        errors = VALIDATOR.validate_repository(root)
+
+        self.assertTrue(any("missing target" in error for error in errors), errors)
+
+    def test_contract_claims_hold_for_this_repository(self):
+        """The claims themselves, against the real tree.
+
+        They pin wording where the wording is the contract. They used to live
+        in ci.yml as a heredoc, so the only way to run them was to push, and a
+        documentation change that dropped one was found by a red matrix rather
+        than by the gate a contributor is told to run.
+        """
+        self.assertEqual([], VALIDATOR.validate_contract_claims(REPOSITORY_ROOT))
+
+    def test_a_dropped_contract_claim_is_reported(self):
+        """And the check can fail. Every required phrase is absent from a
+        fixture that carries none of them, so the count is the whole set."""
+        root = self.make_valid_repository()
+
+        errors = VALIDATOR.validate_contract_claims(root)
+
+        self.assertTrue(
+            any("missing required contract text: sessionKind" in error for error in errors),
+            errors,
+        )
+
+    def test_a_stale_contract_claim_is_reported(self):
+        root = self.make_valid_repository()
+        stale = next(iter(VALIDATOR.FORBIDDEN_CONTRACT_CLAIMS["README.md"]))
+        readme = (root / "README.md").read_text(encoding="utf-8")
+        self.write("README.md", readme + "\n" + stale + "\n")
+
+        errors = VALIDATOR.validate_contract_claims(root)
+
+        self.assertTrue(
+            any("stale contract text remains" in error for error in errors), errors
+        )
+
     def test_validates_links_when_repository_parent_is_a_hidden_worktree(self):
         self.root = self.root / ".worktrees" / "documentation-branch"
         root = self.make_valid_repository()

@@ -215,6 +215,24 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **The Markdown link check is one implementation, and it runs before you
+  push.** CI carried its own copy inside `ci.yml` as a heredoc. That copy
+  stripped fenced code blocks and not inline code spans, so any sample where a
+  `]` is followed by a `(` was read as a link and resolved as a path. Godot's
+  own type syntax is exactly that shape, so writing down what a typed array
+  looks like failed the build: #822 was green on every compiler, every
+  sanitizer, CodeQL, the fuzzers and all three live engines, and red on
+  `macos-latest (clang)` because of two sentences in the changelog (#824). The
+  job name said compiler and the cause was prose, the step ran on every matrix
+  leg so one sample burned the whole matrix, and the check existed nowhere a
+  contributor could run it. `tools/validate_documentation.py` already had the
+  same check without the bug, so the copy is gone rather than patched. The
+  required and forbidden contract phrases that lived beside it moved into the
+  validator too, which means the gate that pins a deadline or a cleanup rule
+  now runs from the same command as everything else. It caught its first one on
+  the way in: two documents carried the same sentence about session lock files
+  and only one of them had been corrected.
+
 - **A session lock file is swept up once nobody holds it.** The route takes a
   lock beside the descriptor and releases it when the route closes. Releasing a
   lock does not remove the file it was taken on, so every session that ever ran
