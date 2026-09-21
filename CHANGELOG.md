@@ -215,6 +215,24 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **The export presets refusal says which of the six causes it is.**
+  `readExportPresets` set one boolean from six unrelated causes, and
+  `project_list_export_presets` and `project_export` both answered with the same
+  sentence for all of them: the file is there and could not be parsed, fix it in
+  the Export dialog (#828). For two of the six the code already had the exact
+  line and threw it away. A preset file is not small, `[preset.0.options]` alone
+  runs to forty keys on a Windows preset, so "somewhere in this file" was the
+  whole search. The refusal keeps one code and one opening and now carries the
+  cause: `reason` is a stable token to branch on, the message says what was
+  found, and `line` is published where the cause has one rather than as a
+  `line: 0` nobody can open. The first cause found is the one reported, because
+  everything after a value the parser will not start is behind the same
+  ERR_PARSE_ERROR. The remedies were never the same either, which is the other
+  half of why one sentence did not fit: the Export dialog will not open a file
+  that does not parse, so it is the right next step for a duplicate preset name
+  and no help at all for a truncated write, and each cause now names its own.
+  `declared_preset_sections` is unchanged.
+
 - **The test runner refuses an argument it does not understand.** `didi_tests
   --filter=Tools.Rename` runs one test. `didi_tests --filter Tools.Rename` ran
   all 694 and printed no warning, no usage line and no `Filter:` header, and

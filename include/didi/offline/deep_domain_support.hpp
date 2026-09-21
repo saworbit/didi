@@ -106,9 +106,27 @@ struct ExportPresetsFile {
     // parsed. Zero with malformed false is a project with no export presets,
     // which is the same fact as having no file at all.
     size_t section_count{0};
+    // Which of the six causes set `malformed`, as a stable token, and a
+    // sentence saying what was found. One refusal covered all six, and for two
+    // of them the line was computed and thrown away, so "somewhere in this
+    // file" was the whole search on a file where `[preset.0.options]` alone
+    // runs to forty keys (#828). Empty when the file parsed.
+    std::string reason;
+    std::string detail;
+    // The line the cause is on, where the cause has one. Zero for a cause that
+    // is about the file as a whole or about a preset rather than a line.
+    int line{0};
 };
 
 ExportPresetsFile readExportPresets(const std::string& contents);
+
+// The sentence and the payload for a presets file that is there and could not
+// be parsed. Both refusal sites word it the same way, because it is one state
+// with one code: project_list_export_presets and project_export used to give
+// different answers to it, and project_export's sent the reader off to add a
+// preset the file already declares.
+std::string malformedPresetsMessage(const ExportPresetsFile& file);
+json malformedPresetsData(const ExportPresetsFile& file);
 
 // The refusal project_export gives for this preset, or nothing when the file
 // declares it. Reads export_presets.cfg beneath the current project root.

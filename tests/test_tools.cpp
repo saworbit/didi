@@ -12,6 +12,7 @@
 #include "didi/offline/project_search.hpp"
 #include "didi/offline/resource_indexer.hpp"
 #include "didi/offline/project_impact.hpp"
+#include "didi/offline/deep_domain_support.hpp"
 #include <algorithm>
 #include <cctype>
 #include "didi/mcp/tool_registry.hpp"
@@ -2157,6 +2158,104 @@ private:
     std::filesystem::perms m_original{std::filesystem::perms::none};
 #endif
 };
+
+// Each of the six causes, and what the refusal now carries for it.
+//
+// One boolean set from six unrelated causes gave one sentence to all of them,
+// and for two the line was computed and thrown away. A preset file is not
+// small -- [preset.0.options] alone runs to forty keys on a Windows preset --
+// so "somewhere in this file" was the whole search (#828).
+static void test_an_unparseable_presets_file_says_which_of_the_six_causes_it_is() {
+    struct Case {
+        const char* label;
+        const char* contents;
+        const char* reason;
+        int line;
+        const char* fragment;
+    };
+    // Line numbers are counted from the literal above each case, so a test that
+    // disagrees with the reader is a test that read the file differently.
+    const Case cases[] = {
+        {"ends inside a value",
+         "[preset.0]\nname=\"Windows\"\nplatform=\"Windows Desktop\"\nexport_path=\"a\n",
+         "truncated_value", 4, "part-way through a value"},
+        {"a value the parser will not start",
+         "[preset.0]\nname=\"Windows\"\nplatform=\"Windows Desktop\"\nexport_path=)\n",
+         "unloadable_value", 4, "refuses the value of \"export_path\" on line 4"},
+        // Checked before the key loop, so a file with keys and no headers at
+        // all is described as the file it is not, rather than by whichever key
+        // happened to come first. Both are true of it and only one of them
+        // points anywhere useful.
+        {"content with no section the engine honours",
+         "name=\"Windows\"\nplatform=\"Windows Desktop\"\n",
+         "no_section_header", 0, "no section header the engine honours"},
+        {"a key before the first section",
+         "stray=1\n[preset.0]\nname=\"Windows\"\nplatform=\"Windows Desktop\"\n",
+         "key_before_section", 1, "before any section header"},
+        // `maybe` is not a value Godot's parser will start at all, so that
+        // spelling is the unloadable_value case above rather than this one.
+        // This needs a value that parses and is not a bool literal. Whether
+        // refusing the file for it is right is #842, which measured the engine
+        // loading this very file without complaint; this pins only that the
+        // refusal says which cause it is.
+        {"runnable is neither true nor false",
+         "[preset.0]\nname=\"Windows\"\nplatform=\"Windows Desktop\"\nrunnable=1\n",
+         "invalid_runnable", 4, "only true or false"},
+        {"a preset with no platform",
+         "[preset.0]\nname=\"Windows\"\n",
+         "incomplete_preset", 0, "declares no platform"},
+        {"two presets with one name",
+         "[preset.0]\nname=\"Windows\"\nplatform=\"Windows Desktop\"\n"
+         "[preset.1]\nname=\"Windows\"\nplatform=\"Linux\"\n",
+         "duplicate_preset_name", 0, "so is an earlier preset"},
+    };
+
+    for (const auto& item : cases) {
+        const auto file = didi::offline::readExportPresets(item.contents);
+        ASSERT_TRUE(file.malformed);
+        // The presets vector stays empty, because a partly understood export
+        // configuration is not one to act on. That is unchanged.
+        ASSERT_TRUE(file.presets.empty());
+        ASSERT_EQ(file.reason, std::string(item.reason));
+        ASSERT_EQ(file.line, item.line);
+        ASSERT_TRUE(file.detail.find(item.fragment) != std::string::npos);
+
+        const auto message = didi::offline::malformedPresetsMessage(file);
+        // One opening for all six, so a caller matching on it still matches.
+        ASSERT_TRUE(message.find("export_presets.cfg is there and could not be parsed.") == 0);
+        ASSERT_TRUE(message.find(item.fragment) != std::string::npos);
+
+        const auto data = didi::offline::malformedPresetsData(file);
+        ASSERT_EQ(data["presets_file_exists"], true);
+        ASSERT_TRUE(data.contains("declared_preset_sections"));
+        ASSERT_EQ(data["reason"], std::string(item.reason));
+        // A cause about the file or about a preset has no line, and publishing
+        // line: 0 would be a line nobody can open.
+        ASSERT_EQ(data.contains("line"), item.line > 0);
+        if (item.line > 0) ASSERT_EQ(data["line"], item.line);
+    }
+}
+
+static void test_the_first_cause_is_the_one_reported() {
+    // Two faults in one file. The reader stops at the first, because everything
+    // after a value the parser will not start is behind an ERR_PARSE_ERROR and
+    // repairing that line is what comes next either way.
+    const auto file = didi::offline::readExportPresets(
+        "[preset.0]\nname=\"Windows\"\nexport_path=)\nrunnable=maybe\n");
+    ASSERT_TRUE(file.malformed);
+    ASSERT_EQ(file.reason, std::string("unloadable_value"));
+    ASSERT_EQ(file.line, 3);
+}
+
+static void test_a_file_that_parses_carries_no_cause() {
+    const auto file = didi::offline::readExportPresets(
+        "[preset.0]\nname=\"Windows\"\nplatform=\"Windows Desktop\"\nrunnable=true\n");
+    ASSERT_TRUE(!file.malformed);
+    ASSERT_TRUE(file.reason.empty());
+    ASSERT_TRUE(file.detail.empty());
+    ASSERT_EQ(file.line, 0);
+    ASSERT_EQ(file.presets.size(), 1u);
+}
 
 static void test_the_export_family_answers_with_an_envelope_and_previews_what_it_will_do() {
     // Every failure in this family was a bare prose string with no code and
@@ -7384,6 +7483,12 @@ struct RegisterToolTests {
                      test_audio_list_buses_reads_a_spaced_key);
         registerTest("Tools.AudioListBusesWrongSection",
                      test_audio_list_buses_ignores_a_bus_layout_key_outside_the_audio_section);
+        registerTest("Tools.ExportPresetRefusalCauses",
+                     test_an_unparseable_presets_file_says_which_of_the_six_causes_it_is);
+        registerTest("Tools.ExportPresetFirstCauseWins",
+                     test_the_first_cause_is_the_one_reported);
+        registerTest("Tools.ExportPresetParsedCarriesNoCause",
+                     test_a_file_that_parses_carries_no_cause);
         registerTest("Tools.ProjectAuditSignalScale",
                      test_project_audit_dead_signal_cost_does_not_follow_signal_count);
         registerTest("Tools.OverwriteGateArmsOnTarget",
