@@ -30,6 +30,24 @@ namespace godot {
 // apart once stored.
 [[nodiscard]] bool jsonValuesEquivalent(const json& observed, const json& requested);
 
+// What to say about a write that did not land.
+//
+// A property write can fail to take in two ways that look identical under
+// `applied: false`: the property can still hold what it held, or the engine can
+// store a third value of its own. The second used to be invisible, because the
+// only other thing the caller got was `value`, and a substituted value reads as
+// a plausible one.
+//
+// The report names which of those two happened, and relays the engine's own
+// declared range or enum for the property, which is often the remedy: the
+// minimum a Timer's wait_time takes, or the buses that actually exist. It does
+// not name a cause. Three of the four measured failures are indistinguishable
+// in everything the call can observe, and the one explanation the engine
+// writes goes to its error stream, which a GDExtension cannot read. See the
+// definition for the measurements.
+[[nodiscard]] json notAppliedReport(const json& observed, const json& old_value, int hint,
+                                    const std::string& hint_string);
+
 // A shader uniform's declared hint_range, as the engine spells it.
 //
 // Godot puts the range a shader author wrote in the uniform's PropertyInfo as

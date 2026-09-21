@@ -642,6 +642,12 @@ Result<VariantValue> makeColorFromJson(const json& value) {
 struct PropertyDescriptor {
     int declared_type{0};
     std::string class_name;
+    // What the engine declares about the values the property takes. Godot
+    // fills these in on every property it exports, and they are the only
+    // account of a rejected value that does not require knowing the class.
+    // See notAppliedReport.
+    int hint{0};
+    std::string hint_string;
 };
 
 Result<GDExtensionObjectPtr> objectFromVariant(VariantValue& value);
@@ -2562,6 +2568,10 @@ Result<std::optional<PropertyDescriptor>> findPropertyDescriptor(GDExtensionObje
     if (type_key.isErr()) return type_key.error();
     auto class_key = makeString("class_name");
     if (class_key.isErr()) return class_key.error();
+    auto hint_key = makeString("hint");
+    if (hint_key.isErr()) return hint_key.error();
+    auto hint_string_key = makeString("hint_string");
+    if (hint_string_key.isErr()) return hint_string_key.error();
 
     for (int64_t i = 0; i < size.value(); ++i) {
         auto index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, i);
@@ -2592,6 +2602,21 @@ Result<std::optional<PropertyDescriptor>> findPropertyDescriptor(GDExtensionObje
                 class_type == GDEXTENSION_VARIANT_TYPE_STRING_NAME) {
                 auto class_text = stringFromVariant(class_value.value(), class_type);
                 if (class_text.isOk()) found.class_name = class_text.value();
+            }
+        }
+        auto hint_value = callVariant(descriptor.value(), "get", {&hint_key.value()});
+        if (hint_value.isOk()) {
+            auto hint = scalarFromVariant<int64_t>(hint_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+            if (hint.isOk()) found.hint = static_cast<int>(hint.value());
+        }
+        auto hint_string_value = callVariant(descriptor.value(), "get", {&hint_string_key.value()});
+        if (hint_string_value.isOk()) {
+            const auto hint_string_type =
+                GodotApi::instance().variant_get_type(hint_string_value.value().ptr());
+            if (hint_string_type == GDEXTENSION_VARIANT_TYPE_STRING ||
+                hint_string_type == GDEXTENSION_VARIANT_TYPE_STRING_NAME) {
+                auto hint_text = stringFromVariant(hint_string_value.value(), hint_string_type);
+                if (hint_text.isOk()) found.hint_string = hint_text.value();
             }
         }
         return std::optional<PropertyDescriptor>(found);
@@ -3016,6 +3041,89 @@ std::optional<ShaderHintRange> parseShaderHintRangeImpl(const std::string& hint_
 
 bool jsonValuesEquivalent(const json& observed, const json& requested) {
     return jsonValuesEquivalentImpl(observed, requested);
+}
+
+// An account of a write that did not land, built only out of what this call
+// saw.
+//
+// `applied: false` used to be the whole answer, and it covers two different
+// things. Measured on 4.5.1, 4.6.2 and 4.7.2, which agree line for line:
+//
+//   Timer.wait_time      = -3.0   -> still 1.0     the property did not move
+//   AudioStreamPlayer.bus = "Music" -> still "Master"  the property did not move
+//   Control.anchors_preset = 15   -> still 0       the property did not move
+//   ProgressBar.value    = 999.0  -> 100.0         Godot stored a third value
+//
+// The last row is the one the old shape hid. `value` comes back holding 100,
+// which reads as a plausible result, and the caller had nothing saying the
+// engine had substituted it. So the outcome is reported as two cases the server
+// can actually tell apart by looking: unchanged, and replaced.
+//
+// Deliberately not reported: *why*. The first three rows are three different
+// failures with three different remedies, and they are identical in everything
+// this call can observe. The engine printed "Time should be greater than zero"
+// for the first, to its own error stream, and there is no route from a
+// GDExtension to that text. Guessing between them would put a confident wrong
+// reason where there is now an honest short one.
+//
+// What the engine will say is what it declares about the property, which is a
+// fact rather than a diagnosis. Measured through this call against a live
+// 4.5.1 editor, all three of the unchanged rows carry one:
+//
+//   wait_time       range  "0.001,4096,0.001,or_greater,exp,suffix:s"
+//   bus             enum   "Master"
+//   anchors_preset  enum   "Custom:-1,Full Rect:15,Top Left:0,..."
+//
+// The first two are the remedy: 0.001 is the minimum the error stream was
+// talking about, and the bus enum lists the buses that exist, which is how a
+// caller learns there is no Music. The third is the opposite and is relayed
+// anyway -- the enum contains 15, so it says the value was fine and the cause
+// is elsewhere, which is the reason this field is not presented as the reason.
+//
+// The bus enum is filled in by AudioStreamPlayer under is_editor_hint, so it
+// is empty in a bare SceneTree and populated here. Reading a hint outside the
+// editor and concluding the field is useless is a mistake this comment exists
+// to stop someone repeating.
+//
+// Only range and enum hints are relayed. They are the hints whose hint_string
+// is a statement about which values the property takes; the rest are editor
+// affordances (multiline, password, colour-no-alpha) or type declarations this
+// tool already validates against. Their numbers have been 1, 2 and 3 since
+// Godot 4.0 and are unchanged across every supported line, checked against
+// --dump-extension-api on 4.5.1 and 4.7.2.
+json notAppliedReport(const json& observed, const json& old_value, int hint,
+                      const std::string& hint_string) {
+    json report;
+    if (jsonValuesEquivalent(observed, old_value)) {
+        report["outcome"] = "unchanged";
+        report["detail"] =
+            "The commit ran and the property still holds the value it held before. Godot "
+            "did not store the requested value, and reported nothing to this call about "
+            "why. The usual causes are a sibling property that owns the write, a value "
+            "naming something that does not exist, and a value outside what the property "
+            "takes.";
+    } else {
+        report["outcome"] = "replaced";
+        report["detail"] =
+            "The commit ran and Godot stored a value of its own, which is neither the old "
+            "value nor the requested one. value is that substitute, not a write that "
+            "landed.";
+    }
+
+    const char* kind = nullptr;
+    switch (hint) {
+        case 1: kind = "range"; break;
+        case 2: kind = "enum"; break;
+        case 3: kind = "enum_suggestion"; break;
+        default: break;
+    }
+    if (kind != nullptr && !hint_string.empty()) {
+        // What the engine declares, not a verdict on this write. A constraint
+        // the requested value satisfies is still worth handing back: it is the
+        // caller's evidence that the value was not the problem.
+        report["engine_constraint"] = {{"kind", kind}, {"hint_string", hint_string}};
+    }
+    return report;
 }
 
 std::optional<ShaderHintRange> parseShaderHintRange(const std::string& hint_string) {
@@ -11479,21 +11587,29 @@ json GodotBridge::execute(const std::string& method, const json& params,
         if (observed_json.isErr()) return errorJson(observed_json.error().code, observed_json.error().message);
         auto old_json = variantToJson(old_value.value());
         if (old_json.isErr()) return errorJson(old_json.error().code, old_json.error().message);
-        return liveSceneMutation({{"status", "success"}, {"target_node", params.value("target_node", "")},
-                                  {"property_name", property}, {"value", observed_json.value()},
-                                  {"requested_value", params["value"]}, {"old_value", old_json.value()},
-                                  // Against the Variant that was actually sent,
-                                  // not the JSON it was built from. A Color
-                                  // written as {r,g,b} -- the spelling the
-                                  // instructions document -- comes back with
-                                  // four keys, and comparing four observed
-                                  // against three requested reported a write
-                                  // that landed perfectly as one that did not.
-                                  // #638 fixed exactly this for
-                                  // shader_set_uniform and this call site kept
-                                  // the raw argument.
-                                  {"applied", jsonValuesEquivalent(observed_json.value(), requested_payload)},
-                                  {"undo_redo_registered", true}});
+        const bool applied = jsonValuesEquivalent(observed_json.value(), requested_payload);
+        json result = {{"status", "success"}, {"target_node", params.value("target_node", "")},
+                       {"property_name", property}, {"value", observed_json.value()},
+                       {"requested_value", params["value"]}, {"old_value", old_json.value()},
+                       // Against the Variant that was actually sent, not the
+                       // JSON it was built from. A Color written as {r,g,b} --
+                       // the spelling the instructions document -- comes back
+                       // with four keys, and comparing four observed against
+                       // three requested reported a write that landed
+                       // perfectly as one that did not. #638 fixed exactly
+                       // this for shader_set_uniform and this call site kept
+                       // the raw argument.
+                       {"applied", applied},
+                       {"undo_redo_registered", true}};
+        // Only on the path that needs it. A write that landed says so in one
+        // key and costs nothing extra, which is the whole reason this is a
+        // block rather than three more keys on every response (#776).
+        if (!applied) {
+            result["not_applied"] = notAppliedReport(observed_json.value(), old_json.value(),
+                                                     descriptor.value()->hint,
+                                                     descriptor.value()->hint_string);
+        }
+        return liveSceneMutation(std::move(result));
     }
 
     if (method == "scene.instantiateNode") {

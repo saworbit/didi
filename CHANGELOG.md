@@ -215,6 +215,30 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **A `scene_set_property` write that did not land says which of the two it
+  was.** `applied: false` was the whole account, and it covered two outcomes
+  that need different reactions. Measured on 4.5.1, 4.6.2 and 4.7.2, which
+  agree line for line: `Timer.wait_time = -3.0` leaves 1.0, `bus = "Music"`
+  with no such bus leaves `"Master"`, and `anchors_preset = 15` in
+  `layout_mode` 0 leaves 0 -- but `ProgressBar.value = 999` on a bar whose
+  `max_value` is 100 comes back holding **100**. That last row is the one the
+  old shape hid, because `value` is then a number Godot substituted and it
+  reads as a plausible result. A `not_applied` block now reports
+  `outcome: "unchanged"` or `outcome: "replaced"`, and carries
+  `engine_constraint` -- the range or enum the engine declares for that
+  property -- when the engine declares one (#767). Measured through the call
+  against a live 4.5.1 editor, all three of those rows carry one:
+  `wait_time` answers `range 0.001,4096,...`, which is the minimum Godot's own
+  error line was talking about, and `bus` answers `enum Master`, which is how a
+  caller learns there is no `Music` without a second call. The block is absent
+  when the write landed, so the happy path is unchanged on the wire.
+  Deliberately not included: a `reason_code` naming the cause. Three of those
+  four rows are identical in everything the call can observe, and the one
+  explanation Godot writes -- `Time should be greater than zero` -- goes to its
+  error stream, which a GDExtension has no route to. `anchors_preset` declares
+  an enum that contains 15, so the constraint on that row says the value was
+  fine and the cause is elsewhere; that is the reason the field is a fact about
+  the property rather than a verdict on the write.
 - **`signal_connect` writes the flags the editor's own Connect dialog writes.**
   `flags` had to be exactly `2`, on the documented premise that "no other value
   survives a scene save predictably". The engine disagrees: connecting with 2,

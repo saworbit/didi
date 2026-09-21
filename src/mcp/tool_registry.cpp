@@ -2732,7 +2732,7 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "scene_set_property";
-        t.description = "Sets an existing scalar node property through UndoRedo with strict JSON/Godot type compatibility.";
+        t.description = "Sets an existing scalar node property through UndoRedo with strict JSON/Godot type compatibility. The property is read back after the commit, so value is what it now holds. When applied is false a not_applied block says which of the two happened, the property not moving or the engine storing a value of its own, and carries the range or enum the engine declares for that property when it declares one.";
         t.inputSchema = {
             {"type", "object"},
             {"properties", {
