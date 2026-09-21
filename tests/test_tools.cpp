@@ -5132,6 +5132,69 @@ static void test_a_write_is_applied_when_every_member_landed() {
     ASSERT_TRUE(!jsonValuesEquivalent(didi::json("text"), didi::json(1.0)));
 }
 
+static void test_a_write_that_did_not_land_says_which_of_the_two_it_was() {
+    // Break caught: applied: false was the whole account of a failed write, so
+    // a property the engine had quietly substituted a value into looked the
+    // same as one that never moved, and value read as a plausible result
+    // (#767).
+    //
+    // The four rows are the measured ones, identical on 4.5.1, 4.6.2 and
+    // 4.7.2.
+    using didi::godot::notAppliedReport;
+
+    // Timer.wait_time = -3.0 -> still 1.0. The engine printed "Time should be
+    // greater than zero" to its error stream, which is out of reach, and
+    // declared the range that says the same thing.
+    const auto wait_time = notAppliedReport(didi::json(1.0), didi::json(1.0), 1,
+                                            "0.001,4096,0.001,or_greater,exp,suffix:s");
+    ASSERT_EQ(wait_time.at("outcome").get<std::string>(), std::string("unchanged"));
+    ASSERT_EQ(wait_time.at("engine_constraint").at("kind").get<std::string>(), std::string("range"));
+    ASSERT_EQ(wait_time.at("engine_constraint").at("hint_string").get<std::string>(),
+              std::string("0.001,4096,0.001,or_greater,exp,suffix:s"));
+
+    // AudioStreamPlayer.bus = "Music" with no Music bus -> still "Master", and
+    // the enum names the buses that do exist, which is the remedy. Taken
+    // through the live call against a 4.5.1 editor, where the project had only
+    // Master. AudioStreamPlayer fills this in under is_editor_hint, so the
+    // same read in a bare SceneTree is empty; the editor is where this tool
+    // runs.
+    const auto bus = notAppliedReport(didi::json("Master"), didi::json("Master"), 2, "Master");
+    ASSERT_EQ(bus.at("outcome").get<std::string>(), std::string("unchanged"));
+    ASSERT_EQ(bus.at("engine_constraint").at("kind").get<std::string>(), std::string("enum"));
+    ASSERT_EQ(bus.at("engine_constraint").at("hint_string").get<std::string>(), std::string("Master"));
+
+    // ProgressBar.value = 999.0 on a bar whose max_value is 100 -> 100.0. This
+    // is the row the old shape hid: neither the old value nor the requested
+    // one, and no hint declared at all.
+    const auto clamped = notAppliedReport(didi::json(100.0), didi::json(0.0), 0, "");
+    ASSERT_EQ(clamped.at("outcome").get<std::string>(), std::string("replaced"));
+    ASSERT_TRUE(!clamped.contains("engine_constraint"));
+
+    // Control.anchors_preset = 15 in layout_mode 0 -> still 0, and the enum
+    // contains 15. The constraint is relayed anyway: it is the caller's
+    // evidence that the value was not what went wrong. Nothing here claims a
+    // cause.
+    const auto preset = notAppliedReport(didi::json(0), didi::json(0), 2, "Custom:-1,Full Rect:15");
+    ASSERT_EQ(preset.at("outcome").get<std::string>(), std::string("unchanged"));
+    ASSERT_EQ(preset.at("engine_constraint").at("hint_string").get<std::string>(),
+              std::string("Custom:-1,Full Rect:15"));
+    ASSERT_TRUE(!preset.contains("reason_code"));
+
+    // A hint the engine declares but whose string says nothing about which
+    // values are allowed is not dressed up as a constraint. PASSWORD is 36 and
+    // MULTILINE_TEXT is 18; neither bounds a value.
+    ASSERT_TRUE(!notAppliedReport(didi::json(""), didi::json(""), 36, "").contains("engine_constraint"));
+    ASSERT_TRUE(!notAppliedReport(didi::json(""), didi::json(""), 18, "x").contains("engine_constraint"));
+    // A range hint with nothing in the string is not a constraint either.
+    ASSERT_TRUE(!notAppliedReport(didi::json(1.0), didi::json(1.0), 1, "").contains("engine_constraint"));
+
+    // The unchanged test is the same value comparison the applied flag uses,
+    // so a float32 round trip is still the same value and not a replacement.
+    const auto rounded = notAppliedReport(didi::json{{"x", 0.10000000149011612}},
+                                          didi::json{{"x", 0.1}}, 0, "");
+    ASSERT_EQ(rounded.at("outcome").get<std::string>(), std::string("unchanged"));
+}
+
 static void test_a_declared_hint_range_is_read_as_the_engine_spells_it() {
     // Break caught: a shader author's hint_range is not reported and not
     // honoured, so a caller cannot learn a bound without reading the shader
@@ -8011,6 +8074,8 @@ struct RegisterToolTests {
         registerTest("EditorHook.ReimportProgress", test_reimport_progress_requires_two_idle_frames_and_times_out);
         registerTest("Tools.ShaderWriteAppliedComparesMembers",
                      test_a_write_is_applied_when_every_member_landed);
+        registerTest("Tools.WriteThatDidNotLandSaysWhichOfTheTwo",
+                     test_a_write_that_did_not_land_says_which_of_the_two_it_was);
         registerTest("Tools.ShaderHintRangeIsReadAsTheEngineSpellsIt",
                      test_a_declared_hint_range_is_read_as_the_engine_spells_it);
         registerTest("Tools.ResourceTypeHintIsAListOfClasses",
