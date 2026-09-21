@@ -94,9 +94,16 @@ CallToolResult sendPhase7LiveRequest(const ResolvedToolBinding& binding,
                                      : false;
         if (MutationSafety::isMutation(binding) && transport.has_value() &&
             transport->request_started && transport->outcome_unknown) {
-            return phase7Error(binding, 504, "unknown_outcome",
-                               {{"retryable", false}, {"outcome", "unknown_outcome"},
-                                {"route_quarantine", quarantined}});
+            // Why the outcome is unknown is the useful half. A mutation whose
+            // engine crashed mid-call and one whose engine is still running
+            // and merely slow are the same sentence here, and they are not the
+            // same problem (#854).
+            Error unknown(504, failure.message, failure.data);
+            runtime::annotateLiveRouteFailure(unknown, lease->descriptor, quarantined);
+            json data = unknown.data.is_object() ? unknown.data : json::object();
+            data["retryable"] = false;
+            data["outcome"] = "unknown_outcome";
+            return phase7Error(binding, 504, "unknown_outcome", std::move(data));
         }
         // Carry what the engine actually said. Collapsing every live failure
         // into a bare "route request failed" leaves a caller -- human or agent
@@ -139,25 +146,39 @@ CallToolResult sendPhase7LiveRequest(const ResolvedToolBinding& binding,
                 // session and it used to be attached on the 503 path this
                 // class fell through to, so it is asked here before the
                 // per-call classification takes over (#595).
+                //
+                // Through the same funnel as everything else, so an engine
+                // that asked for a quarantine on its way out carries the
+                // engine state here that it carries on every other route
+                // (#854). With no quarantine asked for, this is the requested
+                // stop and nothing more, exactly as before.
                 Error stopped(503, failure.message, data);
-                if (runtime::annotateRequestedStop(stopped, lease->descriptor)) {
+                runtime::annotateLiveRouteFailure(stopped, lease->descriptor, quarantined);
+                data = stopped.data.is_object() ? stopped.data : data;
+                if (data.value("incident", std::string{}) == "game_stopped") {
                     return phase7Error(binding, 503, "runtime_route_request_failed",
-                                       std::move(stopped.data));
+                                       std::move(data));
                 }
                 if (!data.contains("code")) data["code"] = "engine_refused";
                 return phase7Error(binding, 502, failure.message, std::move(data));
             }
             return phase7Error(binding, failure.code, failure.message, std::move(data));
         }
-        json data = {{"retryable", false},
-                     {"route_quarantine", quarantined},
-                     {"upstream_code", failure.code},
-                     {"upstream_message", failure.message}};
-        // A game this caller asked to stop is the requested exit, whether the
-        // transport went or the extension said its main loop has stopped
-        // while the process still answers (#595).
-        Error stopped(503, failure.message, data);
-        if (runtime::annotateRequestedStop(stopped, lease->descriptor)) data = stopped.data;
+        // Everything a live failure carries on every other route, and then
+        // what belongs to this envelope. Until #854 this path annotated only
+        // the requested stop, so a crashed engine came back as
+        // runtime_route_request_failed with no engine state, no crash report
+        // and no incident, and the caller's next move was to call again.
+        Error live(503, failure.message, failure.data);
+        runtime::annotateLiveRouteFailure(live, lease->descriptor, quarantined);
+        json data = live.data.is_object() ? live.data : json::object();
+        // Forced, not inherited. A route that could not deliver is not the
+        // caller's to retry whatever the failure underneath said about itself,
+        // and that has been this envelope's contract since it shipped.
+        data["retryable"] = false;
+        data["route_quarantine"] = quarantined;
+        data["upstream_code"] = failure.code;
+        data["upstream_message"] = failure.message;
         return phase7Error(binding, 503, "runtime_route_request_failed", std::move(data));
     }
 

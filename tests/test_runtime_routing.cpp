@@ -5,6 +5,8 @@
 #include "didi/common/project_path.hpp"
 #include "didi/runtime/session_client.hpp"
 #include "didi/runtime/session_kind_policy.hpp"
+#include "didi/tools/phase7_live_forward.hpp"
+#include "didi/tools/resolved_tool_binding.hpp"
 
 #include <chrono>
 #include <algorithm>
@@ -1585,6 +1587,96 @@ void test_disconnected_old_lease_keeps_exact_failure_provenance() {
     registry.setIpcClient(nullptr);
 }
 
+// Four places turn a live failure into an answer, and they did not carry the
+// same facts. A crashed engine reported through a Phase 7 tool came back as
+// runtime_route_request_failed with no engine state, no crash report and no
+// incident, so the caller had nothing telling it to stop calling (#854). The
+// fix is one funnel; this is the check that keeps the fifth path from drifting
+// the same way, and it is the half that matters more than the fix.
+//
+// Deliberately about the fields rather than their values: which of alive, gone
+// or unknown pid 77 resolves to depends on the machine running this, and the
+// account the caller is owed is that every route gives one.
+void test_every_live_route_reports_the_same_failure() {
+    const std::array<const char*, 6> owed = {"engine",  "incident",  "cause",
+                                             "recovery", "outcome",  "route_quarantine"};
+    const auto assert_owed = [&](const didi::json& data, const std::string& route) {
+        for (const auto* field : owed) {
+            if (!data.contains(field)) {
+                throw std::runtime_error(route + " answered a live failure without " + field);
+            }
+        }
+        const auto engine = data["engine"].get<std::string>();
+        ASSERT_TRUE(engine == "alive" || engine == "gone" || engine == "unknown");
+        ASSERT_TRUE(!data["cause"].get<std::string>().empty());
+        ASSERT_TRUE(!data["recovery"].get<std::string>().empty());
+    };
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    // 1. The registry funnel, which every registry-dispatched live tool takes.
+    auto registry_route = std::make_shared<RoutedFake>("editor");
+    registry_route->error = didi::ipc::transportFailure("route deadline", {true, true, true});
+    registry.setIpcClient(registry_route);
+    const auto captured = registry.callTool("capture_viewport", didi::json::object());
+    ASSERT_TRUE(captured.isError);
+    assert_owed(payload(captured)["error"]["data"], "the registry route");
+    registry.setIpcClient(nullptr);
+
+    // 2. The runtime tools, which classify their own transport failures.
+    auto runtime_route = std::make_shared<RoutedFake>("editor");
+    runtime_route->error = didi::ipc::transportFailure("route deadline", {true, true, true});
+    const auto logs = didi::mcp::handleRuntimeReadLogs(didi::json::object(), runtime_route);
+    ASSERT_TRUE(logs.isError);
+    assert_owed(payload(logs)["error"]["data"], "runtime_read_logs");
+
+    // 3. The Phase 7 envelope. A mutation whose outcome is known is the branch
+    //    that answers runtime_route_request_failed, which is the one that
+    //    carried nothing about the engine.
+    auto phase7_route = std::make_shared<RoutedFake>("editor");
+    phase7_route->error = didi::ipc::transportFailure("route failed", {true, false, false});
+    const auto forwarded = didi::mcp::sendPhase7LiveRequest(
+        didi::mcp::resolveAliasBinding("signal_connect"), didi::json::object(), phase7_route);
+    ASSERT_TRUE(forwarded.isError);
+    ASSERT_EQ(forwarded.content.size(), 1u);
+    const auto phase7_error = didi::json::parse(forwarded.content.front().text)["error"];
+    ASSERT_EQ(phase7_error["code"], 503);
+    ASSERT_EQ(phase7_error["message"], "runtime_route_request_failed");
+    assert_owed(phase7_error["data"], "the Phase 7 route");
+    // And what is genuinely this envelope's own is still there.
+    ASSERT_TRUE(phase7_error["data"].contains("upstream_code"));
+    ASSERT_TRUE(phase7_error["data"].contains("upstream_message"));
+
+    // 4. A Phase 7 mutation whose outcome is unknown. Why it is unknown is the
+    //    useful half, and this branch said only that it was.
+    auto unknown_route = std::make_shared<RoutedFake>("editor");
+    unknown_route->error = didi::ipc::transportFailure("deadline after dispatch",
+                                                      {true, true, true});
+    const auto unknown = didi::mcp::sendPhase7LiveRequest(
+        didi::mcp::resolveAliasBinding("signal_connect"), didi::json::object(), unknown_route);
+    ASSERT_TRUE(unknown.isError);
+    const auto unknown_error = didi::json::parse(unknown.content.front().text)["error"];
+    ASSERT_EQ(unknown_error["code"], 504);
+    ASSERT_EQ(unknown_error["message"], "unknown_outcome");
+    ASSERT_EQ(unknown_error["data"]["outcome"], "unknown_outcome");
+    ASSERT_EQ(unknown_error["data"]["retryable"], false);
+    assert_owed(unknown_error["data"], "the Phase 7 unknown-outcome route");
+
+    // An engine that answered is not a route failure, and the funnel must not
+    // turn one into the other: a bad node path stays the caller's to fix.
+    auto refused = std::make_shared<RoutedFake>("editor");
+    refused->error = didi::Error(404, "No node at that path");
+    const auto rejected = didi::mcp::sendPhase7LiveRequest(
+        didi::mcp::resolveAliasBinding("signal_connect"), didi::json::object(), refused);
+    const auto rejected_error = didi::json::parse(rejected.content.front().text)["error"];
+    ASSERT_EQ(rejected_error["code"], 404);
+    ASSERT_FALSE(rejected_error["data"].contains("engine"));
+    ASSERT_FALSE(rejected_error["data"].contains("incident"));
+    ASSERT_EQ(refused->quarantines, 0);
+    didi::runtime::clearRouteObstruction();
+}
+
 void test_generic_live_transport_failure_is_structured_and_quarantined() {
     // Break caught: editor handlers flattened authoritative unknown outcomes and reused the route.
     auto& registry = didi::mcp::ToolRegistry::instance();
@@ -2906,6 +2998,8 @@ struct RegisterRuntimeRoutingTests {
                      test_releasing_every_route_frees_every_ownership_lock);
         registerTest("RuntimeRouting.DisconnectReleasesEveryRoute",
                      test_disconnect_releases_every_route_not_only_the_selected_one);
+        registerTest("RuntimeRouting.EveryLiveRouteReportsTheSameFailure",
+                     test_every_live_route_reports_the_same_failure);
         registerTest("RuntimeRouting.RequestedStopIsReportedAsAnExit",
                      test_a_requested_stop_is_reported_as_the_exit_it_is);
         registerTest("RuntimeRouting.ShutdownReleasesUnselectedRoute",

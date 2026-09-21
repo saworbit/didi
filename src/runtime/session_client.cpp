@@ -1,5 +1,6 @@
 #include "didi/runtime/session_client.hpp"
 #include "didi/runtime/session_lock.hpp"
+#include "didi/common/ipc_channel.hpp"
 #include "didi/common/secure_random.hpp"
 #include "didi/common/project_path.hpp"
 #include "didi/common/logger.hpp"
@@ -1057,6 +1058,30 @@ void annotateEngineState(Error& error, const std::optional<SessionDescriptor>& s
                                             incident.recovery, session->pid, session->session_id,
                                             0});
     reportCrashOnce(session->pid, incident, crash);
+}
+
+bool annotateLiveRouteFailure(Error& error, const std::optional<SessionDescriptor>& session,
+                              bool quarantined) {
+    const auto transport = ipc::transportFailureState(error);
+    const bool explicit_quarantine =
+        error.data.is_object() && error.data.value("route_quarantine", false);
+    if (!transport.has_value() && !explicit_quarantine) {
+        // The engine answered. The failure is its own, and the only fact this
+        // funnel owns about it is the requested exit: the extension refusing
+        // because its main loop has stopped, on a game this caller asked to
+        // stop, is that exit and not a route to retry (#595).
+        if (error.code == 503 || error.code == 504) annotateRequestedStop(error, session);
+        return false;
+    }
+    if (!error.data.is_object()) error.data = json::object();
+    if (transport.has_value()) {
+        error.data["outcome"] = transport->outcome_unknown ? "unknown_outcome" : "not_started";
+    } else if (!error.data.contains("outcome")) {
+        error.data["outcome"] = "unknown_outcome";
+    }
+    annotateEngineState(error, session);
+    error.data["route_quarantine"] = quarantined;
+    return true;
 }
 
 const char* processInstanceStateName(ProcessInstanceState state) {
