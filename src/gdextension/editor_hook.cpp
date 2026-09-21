@@ -1431,7 +1431,7 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
         "script.detachFromNode", "project.listAutoloads", "project.setAutoload",
         "project.removeAutoload", "project.listInputActions", "project.setInputAction",
         "project.removeInputAction", "project.getSetting", "project.setSetting",
-        "project.resolveUids",
+        "project.resolveUids", "engine.classExists",
         "scene.listGroups", "scene.addToGroup", "scene.removeFromGroup",
         "scene.getGroupMembers", "scene.create", "scene.open", "scene.close",
         "scene.packBranch", "runtime.getTree", "runtime.setPaused", "runtime.stop",
@@ -1464,7 +1464,11 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
                                    // Enumerating Controls and hit-testing a point
                                    // are reads, and the running game is where a
                                    // caller most needs them (#592).
-                                   method == "ui.listControls" || method == "ui.hitTest";
+                                   method == "ui.listControls" || method == "ui.hitTest" ||
+                                   // A ClassDB read. Every session has one, and
+                                   // the answer is about the process rather
+                                   // than about an open scene (#766).
+                                   method == "engine.classExists";
         if (m_sessionKind == runtime::SessionKind::game && !game_admitted) {
             return {{"error", {{"code", 409},
                                 {"message", "Editor-only method is unavailable in a game session: " + method}}}};

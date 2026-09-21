@@ -63,6 +63,11 @@ inline LiveSessionKindPolicy livePolicyForMethod(std::string_view method) {
         method == "anim.listTracks" || method == "runtime.readProfiler" ||
         method == "ui.listControls" || method == "ui.hitTest" ||
         method == "profiler.sample" ||
+        // Which classes the engine has is a fact about the process, and both
+        // kinds of session are a process with a ClassDB. resource_create asks
+        // it about the engine that will load the file it is about to write, and
+        // that engine is whichever one is attached (#766).
+        method == "engine.classExists" ||
         method == "vision.captureViewport" || method == "vision.capturePasses" ||
         method == "vision.diffViewport") {
         return LiveSessionKindPolicy::editor_or_game;

@@ -215,6 +215,27 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **`resource_create`'s type guard asks the engine that will load the file.**
+  The guard's own description says a name the reference does not list is refused
+  "because Godot cannot load a resource whose type it does not know", and it was
+  checking that against the class reference pinned at 4.7 rather than against
+  the attached engine. The two are not the same list: 4.7 carries 1036 classes
+  and 4.5.1 carries 971, so `DrawableTexture2D` and `BlitMaterial` passed the
+  check, were written, and then produced `Can't create sub resource of type` on
+  the engine the file was for -- not one dropped property, the whole resource --
+  while the same response carried `api_version_matches_attached_engine: false`
+  (#766). With a session attached the type is now checked against that engine's
+  own `ClassDB`, and `property_check.type_checked_against` says which list
+  decided. The rule cuts both ways: a type the engine has and the dump does not,
+  which is every GDExtension type, is written with
+  `allowed_by: "attached_engine"` instead of needing `allow_unknown_type`. That
+  flag stays the route for a `class_name` script, which is in the script
+  server's list and in neither of these, and a write it forces through now
+  carries `type_unknown_to_attached_engine: true` beside `checked: true` so the
+  report does not read as agreement. With nothing attached, or with an extension
+  older than the new `engine.classExists` route, the pinned dump decides as
+  before: an engine that could not answer is not an engine that said no.
+
 - **A project.godot the engine will not open no longer reads as one it will.**
   `config_file::scan` hands back the settings it managed to read out of a
   manifest that is `ERR_PARSE_ERROR`, so a partial parse looks like a parse.

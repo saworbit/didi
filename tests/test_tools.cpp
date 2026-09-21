@@ -50,6 +50,10 @@ namespace mcp {
 // Defined in src/tools/asset_tools.cpp. Called directly so the live
 // verification pass can be driven by a stub route rather than an engine.
 CallToolResult handleProjectAuditAssets(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+// Defined in src/tools/asset_tools.cpp. Called directly so the type guard can
+// be asked against a stub engine whose class list differs from the pinned
+// reference, which is the whole of #766.
+CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 // Defined in src/tools/scene_tools.cpp. Called directly so the routing decision
 // between the live bridge and the .tscn parser can be observed with a stub
 // route rather than an editor.
@@ -3799,6 +3803,224 @@ static void test_project_audit_exposes_optional_import_health() {
                                          {"include_dead_signals", false},
                                          {"include_import_health", false}})
                     .isError);
+}
+
+// An attached engine whose ClassDB holds a named set, so the type guard can be
+// asked against an engine that is not the pinned 4.7 reference. Measured on the
+// real engines: DrawableTexture2D and BlitMaterial exist only on 4.7 and
+// JointLimitation3D arrived in 4.6, so a 4.5.1 editor is missing all three
+// while the shipped dump lists them.
+class ClassListClient final : public didi::runtime::IRuntimeSessionClient {
+public:
+    ClassListClient(std::set<std::string> classes, std::string engine_version, bool route_known)
+        : m_classes(std::move(classes)), m_routeKnown(route_known) {
+        m_session.schema_version = 1;
+        m_session.session_id = "0123456789abcdef0123456789abcdef";
+        m_session.pid = 4242;
+        m_session.kind = "editor";
+        m_session.project_path = "C:/project";
+        m_session.protocol_version = "1.3";
+        m_session.engine_version = std::move(engine_version);
+    }
+
+    bool connect(const std::string&, int) override { return true; }
+    void disconnect() override {}
+    bool isConnected() const override { return true; }
+    didi::Result<didi::json> sendRequest(const std::string& method, const didi::json& params,
+                                         int) override {
+        method_seen = method;
+        if (method != "engine.classExists") {
+            return didi::Error(404, "Unknown method: " + method);
+        }
+        // An addon older than the route answers the way an unknown method
+        // answers, which is not the same fact as a class the engine lacks.
+        if (!m_routeKnown) return didi::Error(501, "Unknown method: engine.classExists");
+        names_seen = params.value("class_names", didi::json::array());
+        didi::json classes = didi::json::array();
+        for (const auto& value : names_seen) {
+            const auto name = value.get<std::string>();
+            classes.push_back({{"name", name}, {"exists", m_classes.count(name) > 0}});
+        }
+        return didi::json{{"status", "success"}, {"classes", std::move(classes)}};
+    }
+    didi::Result<didi::json> listSessions(const std::optional<std::string>&) override {
+        return didi::json{{"sessions", didi::json::array()}};
+    }
+    didi::Result<didi::json> attachSession(const std::string&) override {
+        return didi::json::object();
+    }
+    didi::Result<didi::json> detachSession() override { return didi::json::object(); }
+    std::optional<didi::runtime::SessionDescriptor> activeSession() const override {
+        return m_session;
+    }
+
+    std::string method_seen;
+    didi::json names_seen;
+
+private:
+    std::set<std::string> m_classes;
+    didi::runtime::SessionDescriptor m_session;
+    bool m_routeKnown;
+};
+
+static void test_resource_create_type_guard_asks_the_attached_engine() {
+    // Break caught: the guard was checked against the pinned 4.7 class
+    // reference and not against the attached engine, so it wrote resources that
+    // engine cannot load -- the exact failure its own description says it
+    // exists to prevent -- while reporting the version mismatch in the same
+    // payload (#766). Measured on 4.5.1: the file does not lose a property, the
+    // load fails outright with "Can't create sub resource of type".
+    ScopedToolProject project("resource-type-guard-engine");
+
+    const std::set<std::string> engine_4_5 = {"StyleBoxFlat", "AudioBusLayout", "Animation"};
+    const didi::json args = {
+        {"save_path", "res://only_on_4_7.tres"},
+        {"resource_type", "DrawableTexture2D"},
+        {"properties", didi::json::object()}
+    };
+
+    {
+        auto client = std::make_shared<ClassListClient>(
+            engine_4_5, "Godot Engine v4.5.1.stable.official", true);
+        const auto refused = didi::mcp::handleResourceCreate(args, client);
+        ASSERT_TRUE(refused.isError);
+        ASSERT_EQ(client->method_seen, "engine.classExists");
+        ASSERT_EQ(client->names_seen.size(), 1u);
+        ASSERT_EQ(client->names_seen[0], "DrawableTexture2D");
+        // The refusal names the engine the caller is attached to. It named the
+        // pinned 4.7 version, which is not a version the user is running.
+        const auto& text = refused.content[0].text;
+        ASSERT_TRUE(text.find("Godot Engine v4.5.1.stable.official") != std::string::npos);
+        ASSERT_TRUE(text.find("attached") != std::string::npos);
+        // Nothing was written. A refused type must not leave a file behind.
+        ASSERT_TRUE(!std::filesystem::exists("only_on_4_7.tres"));
+    }
+
+    // The control: the same name on an engine that has it is written, and the
+    // report says which list decided.
+    {
+        std::set<std::string> engine_4_7 = engine_4_5;
+        engine_4_7.insert("DrawableTexture2D");
+        auto client = std::make_shared<ClassListClient>(
+            engine_4_7, "Godot Engine v4.7.stable.official", true);
+        const auto written = didi::mcp::handleResourceCreate(args, client);
+        ASSERT_TRUE(!written.isError);
+        const auto report = didi::json::parse(written.content[0].text);
+        ASSERT_EQ(report["property_check"]["type_checked_against"], "attached_engine");
+    }
+}
+
+static void test_resource_create_type_guard_keeps_the_reference_when_no_engine_answers() {
+    // Two ways for no engine to answer, and neither is the engine saying no.
+    // An addon older than the route, and no session at all: both fall back to
+    // the pinned reference rather than refusing a type that is in it.
+    ScopedToolProject project("resource-type-guard-fallback");
+    const didi::json args = {
+        {"save_path", "res://only_on_4_7.tres"},
+        {"resource_type", "DrawableTexture2D"},
+        {"properties", didi::json::object()}
+    };
+
+    {
+        auto client = std::make_shared<ClassListClient>(
+            std::set<std::string>{}, "Godot Engine v4.5.1.stable.official", false);
+        const auto written = didi::mcp::handleResourceCreate(args, client);
+        if (written.isError) throw std::runtime_error(written.content[0].text);
+        ASSERT_TRUE(!written.isError);
+        const auto report = didi::json::parse(written.content[0].text);
+        // Attached, and the bridge could not answer. Saying nothing here would
+        // read as the engine having agreed.
+        ASSERT_EQ(report["property_check"]["type_checked_against"], "api_reference");
+        ASSERT_TRUE(!report["property_check"].contains("type_unknown_to_attached_engine"));
+    }
+
+    {
+        // A second path: the first call wrote its file, and the overwrite guard
+        // is not what this test is about.
+        auto offline_args = args;
+        offline_args["save_path"] = "res://only_on_4_7_offline.tres";
+        const auto written = didi::mcp::handleResourceCreate(offline_args, nullptr);
+        if (written.isError) throw std::runtime_error(written.content[0].text);
+        const auto report = didi::json::parse(written.content[0].text);
+        // Offline keeps the shape it had. With no session there is no second
+        // list that could have been preferred.
+        ASSERT_TRUE(!report["property_check"].contains("type_checked_against"));
+    }
+}
+
+static void test_resource_create_type_guard_lets_the_engine_clear_a_type_the_dump_lacks() {
+    // The other direction. A GDExtension type is in the attached engine's
+    // ClassDB and in no dump, and the guard refused it on the dump's word
+    // alone. Its properties still cannot be checked, and the report says so.
+    ScopedToolProject project("resource-type-guard-gdextension");
+    const didi::json args = {
+        {"save_path", "res://extension_type.tres"},
+        {"resource_type", "SomeGDExtensionResource"},
+        {"properties", didi::json::object()}
+    };
+
+    auto client = std::make_shared<ClassListClient>(
+        std::set<std::string>{"SomeGDExtensionResource"},
+        "Godot Engine v4.5.1.stable.official", true);
+    const auto written = didi::mcp::handleResourceCreate(args, client);
+    ASSERT_TRUE(!written.isError);
+    const auto report = didi::json::parse(written.content[0].text);
+    ASSERT_EQ(report["property_check"]["checked"], false);
+    ASSERT_EQ(report["property_check"]["reason"], "type_not_in_api_reference");
+    ASSERT_EQ(report["property_check"]["allowed_by"], "attached_engine");
+
+    // Without the engine it is still refused, because the dump is then the only
+    // list there is and allow_unknown_type is the documented way past it.
+    auto silent = std::make_shared<ClassListClient>(
+        std::set<std::string>{}, "Godot Engine v4.5.1.stable.official", true);
+    ASSERT_TRUE(didi::mcp::handleResourceCreate(args, silent).isError);
+}
+
+static void test_resource_create_allow_unknown_type_records_the_engine_gap() {
+    // allow_unknown_type is the one way past the guard with a type the attached
+    // engine does not have. The property names were still checked against the
+    // pinned reference, so checked: true is true and would read as agreement
+    // without this.
+    ScopedToolProject project("resource-type-guard-override");
+    const didi::json args = {
+        {"save_path", "res://forced.tres"},
+        {"resource_type", "DrawableTexture2D"},
+        {"properties", didi::json::object()},
+        {"allow_unknown_type", true}
+    };
+
+    auto client = std::make_shared<ClassListClient>(
+        std::set<std::string>{"StyleBoxFlat"}, "Godot Engine v4.5.1.stable.official", true);
+    const auto written = didi::mcp::handleResourceCreate(args, client);
+    ASSERT_TRUE(!written.isError);
+    const auto report = didi::json::parse(written.content[0].text);
+    ASSERT_EQ(report["property_check"]["checked"], true);
+    ASSERT_EQ(report["property_check"]["type_unknown_to_attached_engine"], true);
+}
+
+static void test_resource_create_asks_the_engine_about_sub_resource_types_too() {
+    // A sub-resource type the engine lacks fails the same way the root type
+    // does: the whole file fails to load, so the whole call is refused.
+    ScopedToolProject project("resource-type-guard-sub");
+    const didi::json args = {
+        {"save_path", "res://with_sub.tres"},
+        {"resource_type", "StyleBoxFlat"},
+        {"properties", didi::json::object()},
+        {"sub_resources", didi::json::array({
+            didi::json{{"id", "one"}, {"resource_type", "BlitMaterial"},
+                       {"properties", didi::json::object()}}})}
+    };
+
+    auto client = std::make_shared<ClassListClient>(
+        std::set<std::string>{"StyleBoxFlat"}, "Godot Engine v4.5.1.stable.official", true);
+    const auto refused = didi::mcp::handleResourceCreate(args, client);
+    ASSERT_TRUE(refused.isError);
+    // Both types went in one round trip rather than one call each.
+    ASSERT_EQ(client->names_seen.size(), 2u);
+    ASSERT_EQ(client->names_seen[0], "StyleBoxFlat");
+    ASSERT_EQ(client->names_seen[1], "BlitMaterial");
+    ASSERT_TRUE(refused.content[0].text.find("BlitMaterial") != std::string::npos);
+    ASSERT_TRUE(!std::filesystem::exists("with_sub.tres"));
 }
 
 static void test_resource_create_preserves_existing_file_without_overwrite() {
@@ -7713,6 +7935,16 @@ struct RegisterToolTests {
                      test_offline_writer_schemas_require_explicit_overwrite);
         registerTest("Tools.ResourceCreateOverwriteGuard",
                      test_resource_create_preserves_existing_file_without_overwrite);
+    registerTest("resource_create type guard asks the attached engine",
+                 test_resource_create_type_guard_asks_the_attached_engine);
+    registerTest("resource_create type guard keeps the reference when no engine answers",
+                 test_resource_create_type_guard_keeps_the_reference_when_no_engine_answers);
+    registerTest("resource_create type guard lets the engine clear a type the dump lacks",
+                 test_resource_create_type_guard_lets_the_engine_clear_a_type_the_dump_lacks);
+    registerTest("resource_create allow_unknown_type records the engine gap",
+                 test_resource_create_allow_unknown_type_records_the_engine_gap);
+    registerTest("resource_create asks the engine about sub-resource types too",
+                 test_resource_create_asks_the_engine_about_sub_resource_types_too);
         registerTest("Tools.ResourceCreateUnicodeFileNames",
                      test_resource_create_writes_unicode_file_names);
         registerTest("Tools.AtomicWriteKeepsDestinationOnFailure",

@@ -9904,6 +9904,55 @@ json GodotBridge::execute(const std::string& method, const json& params,
              {"revert_with", before.value()}});
     }
 
+    if (method == "engine.classExists") {
+        // The class list of the engine that will load the file. resource_create
+        // checked its type guard against the pinned 4.7 dump and wrote
+        // resources a 4.5.1 editor then refused to load at all -- not one
+        // dropped property, the whole file -- while reporting the version
+        // mismatch in the same payload (#766).
+        //
+        // ClassDB.class_exists is 2619796661 on 4.5.1, 4.6.2 and 4.7.2, and its
+        // answers were measured on all three: DrawableTexture2D and
+        // BlitMaterial exist only on 4.7, JointLimitation3D arrived in 4.6.
+        //
+        // A class_name script type is not in ClassDB -- it lives in the script
+        // server's global list -- so it answers false here exactly as it is
+        // absent from the dump. allow_unknown_type stays the route for those.
+        if (!params.contains("class_names") || !params["class_names"].is_array()) {
+            return errorJson(400, "engine.classExists requires a class_names array");
+        }
+        const auto& names = params["class_names"];
+        // 65 because resource_create asks about one root type and up to 64
+        // sub-resource types, and a cap below what the caller can legitimately
+        // ask would send it back to the pinned reference in silence, which is
+        // the bug this route exists to close.
+        if (names.empty() || names.size() > 65) {
+            return errorJson(400, "engine.classExists accepts 1 to 65 class names");
+        }
+        auto required = requireMethodBind("ClassDB", "class_exists", 2619796661LL);
+        if (required.isErr()) return errorJson(501, required.error().message);
+        auto class_db = singleton("ClassDB");
+        if (class_db.isErr()) return errorJson(class_db.error().code, class_db.error().message);
+
+        json classes = json::array();
+        for (const auto& value : names) {
+            if (!value.is_string()) {
+                return errorJson(400, "engine.classExists class_names must be strings");
+            }
+            const std::string name = value.get<std::string>();
+            auto class_name = makeStringName(name);
+            if (class_name.isErr()) return errorJson(500, class_name.error().message);
+            auto answer = callObject(class_db.value(), "ClassDB", "class_exists", 2619796661LL,
+                                     {&class_name.value()});
+            if (answer.isErr()) return errorJson(500, answer.error().message);
+            auto known =
+                scalarFromVariant<GDExtensionBool>(answer.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+            if (known.isErr()) return errorJson(500, known.error().message);
+            classes.push_back({{"name", name}, {"exists", known.value() != 0}});
+        }
+        return liveResult({{"status", "success"}, {"classes", std::move(classes)}});
+    }
+
     if (method == "audio.listBuses") {
         // Every method hash below is identical on Godot 4.5.1, 4.6.2 and 4.7.2,
         // checked by dumping extension_api.json from each, so this needs no
