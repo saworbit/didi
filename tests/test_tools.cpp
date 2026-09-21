@@ -791,6 +791,118 @@ static void test_audio_list_buses_reads_the_project_layout_offline() {
     ASSERT_TRUE(registry.callTool("audio_list_buses", didi::json{{"bus", 1}}).isError);
 }
 
+static void test_audio_list_buses_reads_the_layout_godot_actually_writes() {
+    // Every fixture here was hand written with plain quotes and an explicit
+    // bus/0, which is the one shape the reader got right, so the reader and its
+    // tests agreed with each other and not with the engine (#844).
+    //
+    // This is the file byte for byte as ResourceSaver wrote it for a three bus
+    // project on 4.5.1 and 4.7.2. Names and sends are StringName literals, and
+    // Master is absent because every one of its properties is at its default.
+    ScopedToolProject project("audio-buses-engine-written");
+    writeAuditFile("project.godot", "config_version=5\n");
+    writeAuditFile("default_bus_layout.tres",
+        "[gd_resource type=\"AudioBusLayout\" format=3]\n"
+        "\n"
+        "[sub_resource type=\"AudioEffectReverb\" id=\"AudioEffectReverb_j3pel\"]\n"
+        "\n"
+        "[resource]\n"
+        "bus/1/name = &\"Music And Voice\"\n"
+        "bus/1/solo = false\n"
+        "bus/1/mute = false\n"
+        "bus/1/bypass_fx = false\n"
+        "bus/1/volume_db = -6.5\n"
+        "bus/1/send = &\"Master\"\n"
+        "bus/2/name = &\"SFX\"\n"
+        "bus/2/solo = false\n"
+        "bus/2/mute = true\n"
+        "bus/2/bypass_fx = false\n"
+        "bus/2/volume_db = 0.0\n"
+        "bus/2/send = &\"Music And Voice\"\n"
+        "bus/2/effect/0/effect = SubResource(\"AudioEffectReverb_j3pel\")\n"
+        "bus/2/effect/0/enabled = true\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    const auto result = registry.callTool("audio_list_buses", didi::json::object());
+    ASSERT_TRUE(!result.isError);
+    const auto report = didi::json::parse(result.content[0].text);
+
+    // Three, which is what AudioServer reported for the project this came from.
+    ASSERT_EQ(report["bus_count"], 3u);
+    ASSERT_EQ(report["buses"][0]["index"], 0);
+    ASSERT_EQ(report["buses"][0]["name"], "Master");
+    ASSERT_EQ(report["buses"][0]["volume_db"].get<double>(), 0.0);
+    ASSERT_EQ(report["buses"][0]["send"], "");
+    // The name a caller carries to audio_configure_bus, with no & and no
+    // quotes left on it.
+    ASSERT_EQ(report["buses"][1]["name"], "Music And Voice");
+    ASSERT_EQ(report["buses"][1]["send"], "Master");
+    ASSERT_TRUE(report["buses"][1]["volume_db"].get<double>() < -6.0);
+    ASSERT_EQ(report["buses"][2]["name"], "SFX");
+    ASSERT_EQ(report["buses"][2]["send"], "Music And Voice");
+    ASSERT_TRUE(report["buses"][2]["mute"].get<bool>());
+}
+
+static void test_audio_list_buses_names_a_master_the_file_half_declares() {
+    // Change one thing about Master and the file carries that one line and
+    // still no name, so the bus arrived with an empty one. Master cannot be
+    // renamed -- AudioServer.set_bus_name(0, "x") is ignored on both lines --
+    // so index 0 is Master whatever the file says.
+    ScopedToolProject project("audio-buses-half-master");
+    writeAuditFile("project.godot", "config_version=5\n");
+    writeAuditFile("default_bus_layout.tres",
+        "[gd_resource type=\"AudioBusLayout\" format=3]\n"
+        "\n"
+        "[resource]\n"
+        "bus/0/mute = true\n"
+        "bus/1/name = &\"Music\"\n"
+        "bus/1/solo = false\n"
+        "bus/1/mute = false\n"
+        "bus/1/bypass_fx = false\n"
+        "bus/1/volume_db = 0.0\n"
+        "bus/1/send = &\"\"\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    const auto result = registry.callTool("audio_list_buses", didi::json::object());
+    ASSERT_TRUE(!result.isError);
+    const auto report = didi::json::parse(result.content[0].text);
+
+    ASSERT_EQ(report["bus_count"], 2u);
+    ASSERT_EQ(report["buses"][0]["name"], "Master");
+    ASSERT_TRUE(report["buses"][0]["mute"].get<bool>());
+    ASSERT_EQ(report["buses"][1]["name"], "Music");
+    // &"" is an empty send, not a send named &"".
+    ASSERT_EQ(report["buses"][1]["send"], "");
+}
+
+static void test_audio_list_buses_reads_a_layout_with_no_bus_lines_at_all() {
+    // What a project whose only bus is Master writes: the resource block and
+    // nothing under it. Loading that back gives one bus named Master, measured
+    // on 4.7.2, so the answer is one rather than none.
+    ScopedToolProject project("audio-buses-empty-resource");
+    writeAuditFile("project.godot", "config_version=5\n");
+    writeAuditFile("default_bus_layout.tres",
+        "[gd_resource type=\"AudioBusLayout\" format=3]\n"
+        "\n"
+        "[resource]\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    const auto result = registry.callTool("audio_list_buses", didi::json::object());
+    ASSERT_TRUE(!result.isError);
+    const auto report = didi::json::parse(result.content[0].text);
+
+    // layout_present is still true: the project ships a layout, and what it
+    // says is that nothing differs from the defaults.
+    ASSERT_TRUE(report["layout_present"].get<bool>());
+    ASSERT_EQ(report["bus_count"], 1u);
+    ASSERT_EQ(report["buses"][0]["name"], "Master");
+    ASSERT_EQ(report["buses"][0]["volume_db"].get<double>(), 0.0);
+    ASSERT_TRUE(!report["buses"][0]["mute"].get<bool>());
+}
+
 static void test_audio_list_buses_reports_a_project_with_no_layout_file() {
     // Godot writes the layout only once a project has more than the default
     // Master bus. Reporting that as a failure would send an agent looking for a
@@ -7475,6 +7587,12 @@ struct RegisterToolTests {
                      test_audio_list_buses_reports_a_project_with_no_layout_file);
         registerTest("Tools.AudioListBusesRelocatedLayout",
                      test_audio_list_buses_follows_a_relocated_layout_setting);
+        registerTest("Tools.AudioListBusesEngineWritten",
+                     test_audio_list_buses_reads_the_layout_godot_actually_writes);
+        registerTest("Tools.AudioListBusesHalfDeclaredMaster",
+                     test_audio_list_buses_names_a_master_the_file_half_declares);
+        registerTest("Tools.AudioListBusesEmptyResource",
+                     test_audio_list_buses_reads_a_layout_with_no_bus_lines_at_all);
         registerTest("Tools.AudioListBusesMissingLayout",
                      test_audio_list_buses_reports_the_default_when_the_named_layout_is_gone);
         registerTest("Tools.AudioListBusesSpacedHeader",
