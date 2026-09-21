@@ -222,16 +222,32 @@ per signal; when a cap is reached the payload sets `truncated` and names the cap
 in `truncated_at`. A node whose signal or connection count exceeds the response
 budget returns `413` rather than a partial answer that looks complete.
 
-Each connection carries `origin`. `scene` means the receiver is a node inside
-the edited scene, which is a connection the caller can act on and the only
-kind `signal_connect` makes. `editor` means the receiver is not, and in an open
-editor that is almost always the scene dock's own `SceneTreeEditor` listeners:
-they are alive only while the editor has this scene open, appear in no saved
-`.tscn`, and exist at runtime not at all. A freshly created node with no user
-connections reports five of them. `editor_connections` counts them at the top
-level so an answer that is entirely editor-owned can be recognised without
-walking the list. They are marked rather than filtered, because a caller
-debugging the editor itself has no other way to see them.
+Each connection carries `origin`, and it has three values.
+
+`scene` means the connection is `CONNECT_PERSIST`: it is stored in the saved
+`.tscn`, it is what the caller can act on, and it is the only kind
+`signal_connect` makes. `engine` means the receiver is a node in the edited
+scene and the connection is not saved, so the engine made it and will make it
+again: `Container::add_child` wires a container to its own children to keep the
+layout in order, which is three connections on every child of every container,
+and disconnecting one breaks the layout. `editor` means the receiver is not in
+the edited scene at all, and in an open editor that is almost always the scene
+dock's own `SceneTreeEditor` listeners: they are alive only while the editor has
+this scene open, appear in no saved `.tscn`, and exist at runtime not at all. A
+freshly created node with no user connections reports five of them.
+
+`editor_connections` and `engine_connections` count the last two at the top
+level, so an answer that is entirely the editor's or entirely layout plumbing
+can be recognised without walking the list. Neither kind is filtered out, because
+a caller debugging the editor or a layout has no other way to see them.
+
+`origin` used to key `scene` on where the receiver lives, which is a different
+question from the one it is read for: a `Button` in a `VBoxContainer` reported
+four connections where the saved scene carries one, and the three extra had a
+real path into the user's own scene and a method name that looked like project
+code. `CONNECT_PERSIST` is the engine's own answer to "is this in the scene file",
+so that is what `scene` means now. A filter of `origin != "editor"` selects the
+same set it always did.
 
 ### `signal_connect` and `signal_disconnect` — Live
 

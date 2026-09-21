@@ -2529,7 +2529,12 @@ try {
             @{ position = @{ x = 64; y = 48 }; size = @{ x = 40; y = 24 }; kind = "translation"; label = "proposed panel" }) }),
         (Tool-Request 2341 "editor_render_ghost_preview" @{ previews = @(
             @{ position = @{ x = 0; y = 0 }; size = @{ x = 8; y = 8 }; rotation_degrees = @{ x = 0; y = 0; z = 45 } }) }),
-        (Tool-Request 2342 "editor_clear_ghost_previews" @{})
+        (Tool-Request 2342 "editor_clear_ghost_previews" @{}),
+        # A Button in a VBoxContainer, which is the ordinary shape of any UI and
+        # the one that made origin mean the wrong thing (#768). Last in the
+        # batch, because it leaves a different scene open.
+        (Tool-Request 2350 "scene_open" @{ scene_path = "res://signal_container.tscn" }),
+        (Tool-Request 2351 "signal_list_connections" @{ target_node = "/root/ContainerRoot/Buttons/Play" })
     )
     $dotnetAvailable = $null -ne (Get-Command dotnet -ErrorAction SilentlyContinue)
     if ($dotnetAvailable) {
@@ -2931,6 +2936,44 @@ try {
     Assert-True $phase5ById[2341].result.isError "A 2D preview accepted a rotation it cannot draw."
     $flatCleared = Tool-Payload $phase5ById[2342]
     Assert-True ($flatCleared.cleared_shapes -eq 1 -and $flatCleared.live_shapes -eq 0) "Clearing left $($flatCleared.live_shapes) 2D shape(s) behind."
+
+    # origin: scene means the connection is in the saved scene, not that the
+    # receiver happens to live there.
+    #
+    # Container::add_child wires a container to its own children to keep the
+    # layout in order, and the receiver of those is inside the edited scene, so
+    # keying scene on where the receiver lives reported a Button in a
+    # VBoxContainer as four authored connections where the .tscn carries one.
+    # They are not what signal_connect makes and disconnecting one breaks the
+    # layout (#768). CONNECT_PERSIST is the engine's own answer and was already
+    # in the payload.
+    Assert-True (-not $phase5ById[2350].result.isError) "The container fixture scene did not open."
+    $containerSignals = Tool-Payload $phase5ById[2351]
+    $allConnections = @($containerSignals.signals | ForEach-Object { $_.connections })
+    Assert-True ($allConnections.Count -gt 1) "The Button in a VBoxContainer reported no connections to classify."
+
+    $authored = @($allConnections | Where-Object { $_.origin -eq "scene" })
+    Assert-True ($authored.Count -eq 1) "The container fixture stores one connection and $($authored.Count) were reported as scene: $(($allConnections | ConvertTo-Json -Compress -Depth 4))"
+    Assert-True ($authored[0].target_method -eq "_on_play_pressed") "The one authored connection is not the one the .tscn stores: $($authored[0].target_method)"
+    # The flag is what scene now means, so every scene row carries it.
+    foreach ($row in $authored) {
+        Assert-True (($row.flags -band 2) -ne 0) "A connection reported as scene is not CONNECT_PERSIST: $(($row | ConvertTo-Json -Compress))"
+    }
+
+    # The container plumbing, which used to be counted as authored. Its receiver
+    # is in the scene and it is not saved, which is exactly the third bucket.
+    $enginePlumbing = @($allConnections | Where-Object { $_.origin -eq "engine" })
+    Assert-True ($enginePlumbing.Count -ge 1) "The container's own layout connections were not reported as engine."
+    foreach ($row in $enginePlumbing) {
+        Assert-True (($row.flags -band 2) -eq 0) "A connection reported as engine is persistent and belongs in the scene bucket."
+        Assert-True ($null -ne $row.target_node) "A connection reported as engine has no receiver in this scene."
+    }
+    Assert-True ($containerSignals.engine_connections -eq $enginePlumbing.Count) "engine_connections disagreed with the rows it counts."
+    # A filter of origin != editor selects what it always did, which is what
+    # keeps this a rename of one bucket rather than a change of meaning for all
+    # three.
+    $notEditor = @($allConnections | Where-Object { $_.origin -ne "editor" })
+    Assert-True ($notEditor.Count -eq ($authored.Count + $enginePlumbing.Count)) "The three origin values do not partition the connections."
 
     $phase5Presets = Tool-Payload $phase5ById[502]
     Assert-True (@($phase5Presets.presets).Count -eq 1 -and $phase5Presets.presets[0].name -eq "Phase5 Pack") "Phase 5 export preset was not listed."
