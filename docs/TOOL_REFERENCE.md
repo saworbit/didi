@@ -254,10 +254,35 @@ same set it always did.
 Mutations. Both require `emitter_node`, `signal_name`, `target_node` and
 `target_method`.
 
-- `signal_connect` accepts `flags`, which must be `2` (`CONNECT_PERSIST`) when
-  present. No other flag value is accepted, because no other value survives a
-  scene save predictably.
-- `signal_disconnect` takes no `flags`: it removes the exact callable.
+- `signal_connect` accepts `flags`, default `2`. `CONNECT_PERSIST` is required
+  and may be combined with `CONNECT_DEFERRED` and `CONNECT_ONE_SHOT`, so `2`,
+  `3`, `6` and `7` are accepted, which is exactly what the editor's Connect
+  dialog writes when Deferred or One Shot is ticked. Each is accepted again with
+  `32` added, because that is how `signal_list_connections` reports a connection
+  inside an instanced scene and the value is meant to be handed straight back;
+  the bit is the engine's own provenance note and is masked off before
+  connecting. The response reports the flags the connection now has.
+- A value without `CONNECT_PERSIST` is refused, because the engine writes no
+  `[connection]` line for one: it would vanish on the next load and this tool
+  would have reported work that did not last. `CONNECT_REFERENCE_COUNTED` is
+  refused because it only counts a callable connected more than once and
+  `signal_connect` answers `409` for one that is already connected.
+  `CONNECT_APPEND_SOURCE_OBJECT` is refused because it appends the emitter to
+  the arguments, so the method needs one more than the signal declares, and the
+  arity precondition below checks it against the signal's own count. The refusal
+  names `flags` and lists what is accepted.
+- `signal_disconnect` takes no `flags`: it removes the exact callable, and
+  reports the flags the removed connection had, which is what `signal_connect`
+  needs to put it back. It removes any connection the scene file stores. One
+  that is not stored is refused with `409
+  unsupported_existing_connection_flags`: `origin` `engine` or `editor` means
+  the engine or the editor made it and will make it again, and removing one
+  breaks what it was keeping in order. An editor undo of a disconnect restores
+  the connection with the flags it had.
+
+Measured on 4.5.1, 4.6.2 and 4.7.2: every combination that includes
+`CONNECT_PERSIST` round-trips through a pack, a save and a load exactly, and
+none without it is written to the file at all.
 
 Connecting an already-connected callable returns `409`, as does disconnecting one
 that is not connected. Both run through `UndoRedo`, so an editor undo removes the

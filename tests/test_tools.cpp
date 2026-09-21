@@ -2718,7 +2718,15 @@ static void test_every_pinned_parameter_says_why_it_is_pinned() {
     }
     // The count is asserted so a refactor that stops publishing const cannot
     // turn this into a test of nothing.
-    ASSERT_TRUE(pinned_seen >= 4);
+    //
+    // It was four until #852. signal_connect's `flags` was `enum: [2]`, and the
+    // pin was wrong: the engine round-trips every combination that includes
+    // CONNECT_PERSIST, so 2, 3, 6 and 7 are now published and the parameter is
+    // no longer pinned to one value. A parameter leaving this set because the
+    // pin was measured and found false is the outcome this invariant wants; the
+    // floor moves with it rather than the description pretending to a pin that
+    // is gone.
+    ASSERT_TRUE(pinned_seen >= 3);
 }
 
 static void test_a_length_bound_counts_the_characters_it_publishes() {

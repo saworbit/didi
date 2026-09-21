@@ -137,10 +137,13 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
          "The method on the receiving node to call. The argument is target_method, not "
          "method_name, and the method must exist."},
         {"signal_connect.flags",
-         "Godot connection flags. Only 2, CONNECT_PERSIST, is accepted: a connection that is "
-         "not stored in the scene file would vanish on reload and this tool would have "
-         "reported work that did not last. Deferred and one-shot connections are not on "
-         "offer here."},
+         "Godot connection flags, default 2. CONNECT_PERSIST is required and may be combined "
+         "with CONNECT_DEFERRED and CONNECT_ONE_SHOT: 2, 3, 6 or 7, which is what the editor's "
+         "Connect dialog writes. Add 32 and each is accepted again, because that is how "
+         "signal_list_connections reports a connection inside an instanced scene and it is "
+         "meant to be handed straight back. A value without CONNECT_PERSIST is refused: it "
+         "would not be stored in the scene file, so it would vanish on reload and this tool "
+         "would have reported work that did not last."},
         {"signal_disconnect.emitter_node",
          "The node that emits the signal. The argument is emitter_node, not source_node."},
         {"signal_disconnect.signal_name",

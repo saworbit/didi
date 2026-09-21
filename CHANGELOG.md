@@ -215,6 +215,42 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **`signal_connect` writes the flags the editor's own Connect dialog writes.**
+  `flags` had to be exactly `2`, on the documented premise that "no other value
+  survives a scene save predictably". The engine disagrees: connecting with 2,
+  3, 6 or 7, packing, saving and loading with `CACHE_MODE_IGNORE` round-trips
+  the value exactly on 4.5.1, 4.6.2 and 4.7.2, and 3, 6 and 7 are what the
+  editor writes when Deferred or One Shot is ticked. So a connection a user
+  authored could be read through the surface and removed through the surface
+  and not put back, and the one put back had quietly stopped being deferred --
+  which is a behaviour change, not a cosmetic one, because deferred exists for
+  the cases where calling the method inside the signal's own emission is not
+  safe (#852). The persist bit stays required: without it the engine writes no
+  `[connection]` line at all, so the tool would be reporting work that did not
+  last. `CONNECT_REFERENCE_COUNTED` and `CONNECT_APPEND_SOURCE_OBJECT` are
+  refused for measured reasons rather than by omission -- the first only counts
+  a callable connected more than once and this surface answers `409` for one
+  that is already connected, and the second appends the emitter to the
+  arguments, so a zero-argument signal never reaches a zero-argument method
+  while the connect-time arity check says the pair is compatible.
+- **The same rule was wrong in four more places in the same call.**
+  `signal_disconnect` refused any connection whose flags were not exactly 2,
+  which is every deferred or one-shot connection in the open scene and every
+  connection at all inside an instanced scene, where the engine adds
+  `CONNECT_INHERITED` to the value it reports; it now removes anything the
+  scene file stores and still refuses an engine or editor connection, by name
+  and with the reason. An editor undo of a disconnect restored the connection
+  as a plain one; it now restores the flags it had. The response reported
+  `flags: 2` whatever happened, so a caller who asked for a deferred connection
+  could not tell whether it got one; it now reports what the connection has,
+  and a disconnect reports what the removed one had, which is what
+  `signal_connect` needs to put it back. The refusal was the bare identifier
+  `invalid_signal_connect_request` with `flags` named nowhere, so a caller who
+  passed `3` could not tell whether the problem was the flag, the method, the
+  node or the signal; it now names the argument, says which values are accepted
+  and says why the one sent is not. `include/didi/common/connection_flags.hpp`
+  is the one place the rule is stated, so the server and the bridge cannot
+  drift apart on it again.
 - **`resource_create`'s type guard asks the engine that will load the file.**
   The guard's own description says a name the reference does not list is refused
   "because Godot cannot load a resource whose type it does not know", and it was
