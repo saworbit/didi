@@ -126,6 +126,11 @@ public:
 
     CommandTicket postCommand(const std::string& method, const json& params = json::object());
     void setSessionKind(const std::string& session_kind);
+    // Which kind of process this extension is loaded into, where it knows.
+    // Used to be reachable only through the test seam, so a refusal built
+    // inside the engine could not tell an editor from a game and called every
+    // headless process an editor (#777).
+    std::optional<runtime::SessionKind> sessionKind() const;
 
     void scheduleRuntimeStep(int frames,
                              const std::shared_ptr<std::promise<json>>& promise,

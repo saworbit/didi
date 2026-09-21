@@ -35,8 +35,17 @@ Result<std::string> makeUniqueCaptureId(CaptureCache& cache) {
     return Error::internal("Unable to allocate a unique live capture ID");
 }
 
+// Every renderer failure on the way out, with whatever the failure attached.
+//
+// The data was dropped here, so a fact put on an Error anywhere below this line
+// never reached a caller. Two were: the headless refusal says which kind of
+// process it is refusing and which argument relaunches it (#777), and the
+// isolation restore failure below says whether the scene was put back, which is
+// the one thing a caller needs to know when nodes may still be hidden.
 json rendererError(const Error& error) {
-    return {{"error", {{"code", error.code}, {"message", error.message}}}};
+    json payload = {{"code", error.code}, {"message", error.message}};
+    if (!error.data.is_null()) payload["data"] = error.data;
+    return {{"error", std::move(payload)}};
 }
 
 struct CapturedFrame {

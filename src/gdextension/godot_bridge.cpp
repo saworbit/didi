@@ -11923,17 +11923,58 @@ constexpr int64_t kMinimumCaptureEdge = 8;
 
 // The refusal every capture makes on an engine that cannot draw.
 //
-// 409 rather than 404: nothing the caller named is missing, and no argument
-// they could send would help. It is the shape the far-plane refusal beside it
-// already uses -- a real sentence about a condition that will not change while
-// this editor is running (#676).
+// 409 rather than 404: nothing the caller named is missing. The diagnosis is
+// the same for both kinds of process and the remedy is not, so the sentence
+// asks which one it is in (#777).
+//
+// For an editor nothing about the request can fix it, which is what the wording
+// below says, and the synthesised preview is a real second route.
+//
+// For a game every word of that was wrong. It is not an editor, restarting an
+// editor with a display does nothing for it, and detaching does not produce a
+// preview of a game. `runtime_launch` defaults to `headless: true`, so this is
+// the state a caller who did not think about it is in, and the fix is one
+// argument on the call that started the process. Saying "nothing about the
+// request can fix that" there reads as "nothing can fix this", which sent
+// callers away from a loop this surface supports.
+//
+// The kind is the one the session descriptor published, which is the same fact
+// `editor_save_scene` and `scene_get_hierarchy` already refuse a game with.
 Error headlessCaptureRefusal() {
-    return Error(409,
-                 "This editor is running headless (display driver '" + displayServerName() +
-                     "'), so there is no rendering device behind its viewports and no frame to "
-                     "capture. Nothing about the request can fix that. Run the editor with a "
-                     "display, or detach and call again with no editor attached to get the "
-                     "synthesised preview.");
+    const auto kind = EditorHook::instance().sessionKind();
+    const std::string driver = displayServerName();
+    const bool is_game = kind == runtime::SessionKind::game;
+
+    std::string message;
+    if (is_game) {
+        message = "This game is running headless (display driver '" + driver +
+                  "'), so there is no rendering device behind its viewports and no frame to "
+                  "capture. runtime_launch defaults to headless: true; stop this session and "
+                  "launch it again with headless: false to capture frames from it.";
+    } else if (kind == runtime::SessionKind::editor) {
+        message = "This editor is running headless (display driver '" + driver +
+                  "'), so there is no rendering device behind its viewports and no frame to "
+                  "capture. Nothing about the request can fix that. Run the editor with a "
+                  "display, or detach and call again with no editor attached to get the "
+                  "synthesised preview.";
+    } else {
+        // An extension older than the session-kind field, or a process that
+        // published none. Say what is true of both rather than guess which.
+        message = "This engine is running headless (display driver '" + driver +
+                  "'), so there is no rendering device behind its viewports and no frame to "
+                  "capture. An editor has to be run with a display; a game has to be launched "
+                  "again with headless: false.";
+    }
+    // The prose says which process this is and the data lets a caller branch on
+    // it without reading the sentence, which is what the editor-only refusals
+    // beside it already do.
+    return Error(409, message,
+                 {{"code", "headless_engine"},
+                  {"display_driver", driver},
+                  {"session_kind", kind == runtime::SessionKind::game      ? json("game")
+                                   : kind == runtime::SessionKind::editor  ? json("editor")
+                                                                           : json(nullptr)},
+                  {"relaunch_argument", is_game ? json("headless") : json(nullptr)}});
 }
 
 Result<ViewportPixels> captureViewportObject(GDExtensionObjectPtr viewport_object,

@@ -686,6 +686,10 @@ try {
         (Tool-Request 377 "runtime_detach_session" @{}),
         (Tool-Request 378 "runtime_attach_session" @{ session_id = $gameSession.session_id }),
         (Tool-Request 302 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot"; max_depth = 2 }),
+        # The game this harness runs is headless, which is the state
+        # runtime_launch's own default leaves a caller in, so this is the
+        # refusal #777 is about asked of a real one.
+        (Tool-Request 379 "viewport_capture_frame" @{}),
         (Tool-Request 390 "runtime_read_profiler" @{ duration_ms = 100; sample_count = 3; categories = @("physics", "frame") }),
         # Phase 7C input injection, proven by the fixture's _input counter rather
         # than by the dispatch count. One of each event class, then a tree read
@@ -1102,6 +1106,26 @@ try {
     Assert-True ($canaryWarning.Count -ge 1) "Engine push_warning() was not captured by runtime_read_output."
     Assert-True ($canaryWarning[0].level -eq "warning") "Captured engine warning was not recorded at warning level."
     Assert-True ($canaryWarning[0].details.file -like "*runtime_probe.gd*" -or $canaryWarning[0].details.function -eq "push_warning") "Captured engine warning carried no origin details."
+
+    # A headless game is not an editor, and the remedy is not an editor's.
+    #
+    # The refusal called every headless process an editor and offered two fixes
+    # that are both wrong for a game: running the editor with a display does
+    # nothing for it, and detaching does not produce a preview of it. It also
+    # said nothing about the request can fix that, which reads as nothing can,
+    # when one argument on the call that started the process does (#777).
+    $headlessCapture = $runtimeResponses | Where-Object { $_.id -eq 379 }
+    Assert-True ([bool]$headlessCapture.result.isError) "Capturing a frame from a headless game did not refuse."
+    $headlessError = ($headlessCapture.result.content[0].text | ConvertFrom-Json).error
+    Assert-True ($headlessError.code -eq 409) "The headless refusal changed code: $($headlessError.code)"
+    Assert-True ($headlessError.message -match "This game is running headless") "The headless refusal still calls a game an editor: $($headlessError.message)"
+    Assert-True ($headlessError.message -match "headless: false") "The headless refusal does not name the argument that fixes it: $($headlessError.message)"
+    Assert-True ($headlessError.message -notmatch "synthesised preview") "The headless refusal still offers a game the editor's preview remedy."
+    # And the same fact without reading the sentence, which is what the
+    # editor-only refusals beside it already publish.
+    Assert-True ($headlessError.data.code -eq "headless_engine") "The headless refusal published no branchable code."
+    Assert-True ($headlessError.data.session_kind -eq "game") "The headless refusal did not name the session kind it refused."
+    Assert-True ($headlessError.data.relaunch_argument -eq "headless") "The headless refusal did not name the relaunch argument."
 
     $runtimeTree = Tool-Payload $runtimeById[302]
     Assert-True ($runtimeTree.scene_tree.path -eq "/root/RuntimeRoot") "Runtime tree root was not canonical."

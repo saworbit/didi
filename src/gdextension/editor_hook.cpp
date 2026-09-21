@@ -118,6 +118,10 @@ CommandTicket EditorHook::postCommand(const std::string& method, const json& par
     return {std::move(fut), std::move(prom), std::move(control)};
 }
 
+std::optional<runtime::SessionKind> EditorHook::sessionKind() const {
+    return m_sessionKind;
+}
+
 void EditorHook::setSessionKind(const std::string& session_kind) {
     if (session_kind == "editor") m_sessionKind = runtime::SessionKind::editor;
     else if (session_kind == "game") m_sessionKind = runtime::SessionKind::game;
