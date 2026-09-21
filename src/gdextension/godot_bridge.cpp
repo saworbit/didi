@@ -8213,6 +8213,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
             // than to the scene, so a caller can tell an empty answer from one
             // that is entirely the scene dock without walking the list (#461).
             size_t editor_connection_count = 0;
+            size_t engine_connection_count = 0;
             auto mark_truncated = [&](const std::string& location) {
                 truncated = true;
                 if (truncated_at.is_null()) truncated_at = location;
@@ -8378,18 +8379,47 @@ json GodotBridge::execute(const std::string& method, const json& params,
                     // .tscn and in nothing at runtime. An agent asking what is
                     // wired to this node got five false positives and one true
                     // one, at a ratio that gets worse the emptier the scene.
-                    //
-                    // The surface already knew the difference and did not say it.
-                    // A connection the caller can act on has a receiver inside the
-                    // edited scene, so its path resolved; the editor's do not.
                     // Marked rather than filtered, because a caller debugging the
                     // editor itself has no other way to see them (#461).
-                    const bool from_scene = record.target_node.has_value();
+                    //
+                    // That fix keyed `scene` on where the receiver lives, which is
+                    // a different question from the one the field is read for, and
+                    // the two part company on any UI node. `Container::add_child`
+                    // wires the container to its own children to keep the layout
+                    // in order, and the receiver of those is inside the edited
+                    // scene, so a Button in a VBoxContainer reported four
+                    // connections where the saved .tscn carries one. They are not
+                    // what signal_connect makes and disconnecting one breaks the
+                    // layout (#768).
+                    //
+                    // CONNECT_PERSIST is the engine's own answer to "is this
+                    // stored in the scene", it is the only flag signal_connect
+                    // accepts, and it was already in this payload. So `scene`
+                    // means persistent, and the structural fact keeps its own
+                    // value rather than being thrown away:
+                    //
+                    //   scene   persistent, so it is in the .tscn and a caller
+                    //           can act on it
+                    //   engine  the receiver is in this scene and the connection
+                    //           is not saved, so the engine remade it and will
+                    //           remake it again
+                    //   editor  the receiver is not in this scene at all
+                    //
+                    // A filter of `origin != "editor"` selects the same set it
+                    // always did. A filter of `origin == "scene"` now selects what
+                    // the documentation always said it did.
+                    constexpr int64_t kConnectPersist = 2;
+                    const bool persistent = (record.flags & kConnectPersist) != 0;
+                    const bool receiver_in_scene = record.target_node.has_value();
+                    const char* origin = persistent          ? "scene"
+                                         : receiver_in_scene ? "engine"
+                                                             : "editor";
                     connections.push_back({{"target_node", std::move(target_path)},
                                            {"target_method", bounded_method.value()},
                                            {"flags", record.flags},
-                                           {"origin", from_scene ? "scene" : "editor"}});
-                    if (!from_scene) ++editor_connection_count;
+                                           {"origin", origin}});
+                    if (!persistent && !receiver_in_scene) ++editor_connection_count;
+                    if (!persistent && receiver_in_scene) ++engine_connection_count;
                 }
                 json signal = {{"name", name.value()}, {"arguments", std::move(arguments)},
                                {"connections", std::move(connections)}};
@@ -8397,6 +8427,12 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 json candidate = {{"target_node", params["target_node"]},
                                   {"signals", output_signals},
                                   {"editor_connections", editor_connection_count},
+                                  // The same service the count above performs,
+                                  // for the bucket that used to be counted as
+                                  // authored: an answer that is entirely the
+                                  // engine's own layout plumbing is recognisable
+                                  // without walking the list.
+                                  {"engine_connections", engine_connection_count},
                                   {"truncated", truncated},
                                   {"truncated_at", truncated_at}};
                 if (liveResult(candidate).dump().size() > 63u * 1024u) {
@@ -8408,6 +8444,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
             json response = {{"target_node", params["target_node"]},
                              {"signals", std::move(output_signals)},
                              {"editor_connections", editor_connection_count},
+                             {"engine_connections", engine_connection_count},
                              {"truncated", truncated},
                              {"truncated_at", truncated_at}};
             auto live = liveResult(response);

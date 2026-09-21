@@ -215,6 +215,27 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **`origin: scene` means the connection is in the scene, not that the receiver
+  happens to live there.** #461 gave every connection an `origin` so an agent
+  asking what is wired to a node could tell its own work from the scene dock's
+  listeners, and keyed `scene` on whether the receiver's path resolved inside
+  the edited scene. That is a different question from the one the field is read
+  for, and the two part company on any UI node: `Container::add_child` wires a
+  container to its own children to keep the layout in order, so a `Button` in a
+  `VBoxContainer` reported four connections where the saved `.tscn` carries one
+  (#768). The three extra were not what `signal_connect` makes, they cannot be
+  acted on because disconnecting one breaks the layout, and unlike the scene
+  dock's rows they had a real path into the user's own scene and a method name
+  that looked like project code, so nothing about them read as noise.
+  `CONNECT_PERSIST` is the engine's own answer to "is this stored in the scene
+  file", it is the only flag `signal_connect` accepts, and it was already in the
+  payload beside the field that could not tell them apart. So `scene` now means
+  persistent. The structural fact keeps its own value rather than being thrown
+  away: `engine` is a receiver in this scene whose connection is not saved, and
+  `editor` is a receiver that is not in this scene at all. `engine_connections`
+  counts the new bucket the way `editor_connections` already counted its own. A
+  filter of `origin != "editor"` selects the same set it always did.
+
 - **A headless game is refused as a game, and the renderer stopped dropping the
   facts a refusal carries.** `viewport_capture_frame` against a headless game
   answered with the editor's refusal: it called the game an editor, told the
