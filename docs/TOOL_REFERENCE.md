@@ -154,6 +154,22 @@ Non-finite numbers read back as the strings `"inf"`, `"-inf"` and `"nan"` rather
 
 The property is read back after the commit, and the result reports what it now holds rather than what was requested. `value` is that observed state, `old_value` is what it held before, `requested_value` is the argument, and `applied` says whether the two now agree. A committed UndoRedo action is not a changed property: Godot discards some writes, such as `anchors_preset` on a Control still in `layout_mode` 0, and those return `applied: false` with `value` unchanged. Numbers are compared by value, so writing an integer to a float property is `applied: true`.
 
+`applied: false` covers two different outcomes, and a `not_applied` block says which one. `outcome: "unchanged"` is the property still holding what it held. `outcome: "replaced"` is Godot storing a value of its own: `ProgressBar.value = 999` on a bar whose `max_value` is 100 comes back holding 100, which is neither the old value nor the requested one, and `value` alone reads as a plausible result. The block is present only when `applied` is false, so a write that landed costs nothing for it.
+
+The block does not say *why*, because this call cannot tell. `Timer.wait_time = -3.0`, `AudioStreamPlayer.bus = "Music"` on a project with no `Music` bus, and `anchors_preset = 15` on a Control in `layout_mode` 0 are three failures with three different remedies, and they are identical in everything the response can observe: the commit succeeds, the property holds its old value, and `isError` is false. Godot writes `Time should be greater than zero` for the first of them, to its own error stream, which a GDExtension has no route to. A `reason_code` guessing between the three would be a confident wrong answer more often than a right one.
+
+What the engine will state is what it declares about the property, and `engine_constraint` relays that when the declaration is about which values the property takes. Measured through this call against a live 4.5.1 editor, all three rows carry one:
+
+| property | `kind` | `hint_string` |
+| --- | --- | --- |
+| `wait_time` | `range` | `0.001,4096,0.001,or_greater,exp,suffix:s` |
+| `bus` | `enum` | `Master` |
+| `anchors_preset` | `enum` | `Custom:-1,Full Rect:15,Top Left:0,…` |
+
+The first two are the remedy. `0.001` is the minimum Godot's own error line was talking about, and the bus enum lists the buses that exist, which is how a caller learns there is no `Music` without a second call. The third is the opposite, and is relayed anyway: the enum contains 15, so the constraint says the value was fine and the cause is elsewhere. That is a fact about the property rather than a verdict on the write, and it is why the field is not presented as the reason.
+
+Note that `AudioStreamPlayer` fills its bus enum in under `is_editor_hint`, so the same read in a bare `SceneTree` comes back empty. This tool runs inside the editor, which is where it is populated. Only `range`, `enum` and `enum_suggestion` hints are relayed at all; the rest are editor affordances or type declarations this tool already validates against, and a hint whose string is empty is omitted rather than sent as an empty constraint, which would read as "the engine accepts nothing".
+
 Every live mutation of the edited scene, this one and `scene_instantiate_node`, `scene_remove_node`, `scene_reparent_node`, `scene_duplicate_node`, the group tools, `script_attach_to_node`, `script_detach_from_node`, `signal_connect`, `signal_disconnect`, `viewport_set_camera_transform`, `tilemap_set_cells` and `gridmap_set_cells`, carries `scene_saved: false` and a `limitation` sentence. The change is in the editor's open scene and its undo history, not on disk; `editor_save_scene` persists it, and closing the editor without saving discards it. `undo_redo_registered: true` says the change is real, not that it is saved.
 
 Every live scene answer names the scene it is about. `scene_get_hierarchy` and `scene_get_selection` carry `scene_file_path`, the `res://` path of the scene open in the editor, or `null` with `scene_is_unsaved: true` for one that has never been saved. A scene node 404 says which scene it searched. `scene_create` opens the scene it writes, so from that call on every later `scene_*` call answers about a different file; it now reports `edited_scene_changed` and `previous_scene_file_path` so that switch is visible rather than something a caller has to infer from nodes going missing.
