@@ -642,10 +642,10 @@ Result<VariantValue> makeColorFromJson(const json& value) {
 struct PropertyDescriptor {
     int declared_type{0};
     std::string class_name;
-    // What the engine declares about the values the property takes. Godot fills
-    // these in on every property it exports, and they are the only account of a
-    // rejected value that does not require knowing the class. See
-    // describeEngineConstraint.
+    // What the engine declares about the values the property takes. Godot
+    // fills these in on every property it exports, and they are the only
+    // account of a rejected value that does not require knowing the class.
+    // See notAppliedReport.
     int hint{0};
     std::string hint_string;
 };
