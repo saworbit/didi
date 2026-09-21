@@ -4044,7 +4044,8 @@ try {
         (@{ jsonrpc = "2.0"; id = 400; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
         (Tool-Request 401 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
         (Tool-Request 402 "asset_reimport" @{ paths = @("res://fresh_asset.png", "res://subject.gd"); timeout_ms = 10000 }),
-        (Tool-Request 403 "asset_reimport" @{ paths = @("res://fresh_asset.png"); timeout_ms = 10000 })
+        (Tool-Request 403 "asset_reimport" @{ paths = @("res://fresh_asset.png"); timeout_ms = 10000 }),
+        (Tool-Request 404 "project_audit_assets" @{ max_findings = 50 })
     )
     $rawImportResponses = Invoke-Didi -Requests $importRequests -Arguments @("--project", $fixtureRoot)
     $importResponses = @($rawImportResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.PSObject.Properties.Name -contains "id" })
@@ -4068,6 +4069,93 @@ try {
     $secondImport = Tool-Payload $importById[403]
     Assert-True (@($secondImport.reimported) -contains "res://fresh_asset.png") "An imported asset was not routed to reimport_files on the second call."
     Assert-True (@($secondImport.announced).Count -eq 0) "An imported asset was still reported as announced."
+
+    # The import freshness check reproduces four things Godot does by hand: the
+    # digest, the name of the record, where the record lives and what dest_md5
+    # is a digest of. Every test of it was written against a .md5 written here,
+    # so the fixture and the implementation shared one belief and a wrong
+    # belief still passed (#834). strings.csv is the asset that asks the engine
+    # instead. Godot's csv_translation importer writes its outputs beside the
+    # CSV and its record under the project data directory, so the record is
+    # nowhere near an output and looking beside one found nothing (#833).
+    $importedDirectory = Join-Path $fixtureRoot (Join-Path ".godot" "imported")
+    $translationRecord = @(Get-ChildItem -LiteralPath $importedDirectory -Filter "strings.csv-*.md5" -ErrorAction SilentlyContinue)
+    Assert-True ($translationRecord.Count -eq 1) "The editor wrote no import record for strings.csv under the project data directory."
+    $translationOutputs = @(Get-ChildItem -LiteralPath $fixtureRoot -Filter "strings.*.translation" | Sort-Object Name)
+    Assert-True ($translationOutputs.Count -eq 2) "The translation fixture did not import to two outputs beside its source."
+
+    # No false positive on the real project. The fixture's outputs are written
+    # by this editor's own scan, so they are newer than everything and a
+    # timestamp answer would be silent here too: this says the reader stayed
+    # quiet on a healthy project, and the pair below is what can fail.
+    $recordAudit = Tool-Payload $importById[404]
+    $translationFindings = @($recordAudit.import_issues | Where-Object { $_.source -eq "res://strings.csv" })
+    Assert-True ($translationFindings.Count -eq 0) "A healthy imported asset was reported as an import issue: $(($translationFindings | ConvertTo-Json -Compress -Depth 4))"
+    $probeFindings = @($recordAudit.import_issues | Where-Object { $_.source -eq "res://reimport_probe.svg" })
+    Assert-True ($probeFindings.Count -eq 0) "A healthy imported texture was reported as an import issue: $(($probeFindings | ConvertTo-Json -Compress -Depth 4))"
+
+    # The pair that can fail, on a copy of the same asset and the same record.
+    # Copied rather than edited in place: the editor is still attached to the
+    # fixture and would reimport the asset out from under the assertion.
+    #
+    # The CSV is given a modification time newer than its outputs, which is the
+    # #827 shape every clone of every project is in. An audit that finds the
+    # record compares digests and says nothing. An audit that cannot find it
+    # falls back to the timestamps and reports source_newer_than_output, which
+    # is what looking for the record beside an output did for every importer
+    # that writes its outputs anywhere else (#833).
+    $recordProject = Join-Path ([System.IO.Path]::GetTempPath()) ("didi-import-record-" + [Guid]::NewGuid().ToString("N"))
+    try {
+        New-Item -ItemType Directory -Path (Join-Path $recordProject (Join-Path ".godot" "imported")) -Force | Out-Null
+        # Written rather than copied, because the fixture's own manifest has
+        # been rewritten several times by now and none of it is about imports.
+        Set-Content -LiteralPath (Join-Path $recordProject "project.godot") -Encoding utf8 -Value @(
+            'config_version=5', '', '[application]', '', 'config/name="Didi Import Record Probe"')
+        Copy-Item -LiteralPath (Join-Path $fixtureRoot "strings.csv") -Destination $recordProject
+        Copy-Item -LiteralPath (Join-Path $fixtureRoot "strings.csv.import") -Destination $recordProject
+        foreach ($output in $translationOutputs) { Copy-Item -LiteralPath $output.FullName -Destination $recordProject }
+        Copy-Item -LiteralPath $translationRecord[0].FullName -Destination (Join-Path $recordProject (Join-Path ".godot" "imported"))
+        $copiedSource = Join-Path $recordProject "strings.csv"
+        (Get-Item -LiteralPath $copiedSource).LastWriteTimeUtc = [DateTime]::UtcNow.AddHours(1)
+
+        $freshRequests = @(
+            (@{ jsonrpc = "2.0"; id = 405; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
+            (Tool-Request 406 "project_audit_assets" @{ max_findings = 50 })
+        )
+        $rawFreshRecordResponses = Invoke-Didi -Requests $freshRequests -Arguments @("--project", $recordProject)
+        $freshResponses = @($rawFreshRecordResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.PSObject.Properties.Name -contains "id" })
+        Assert-True ($LASTEXITCODE -eq 0) "Import-record MCP process exited with $LASTEXITCODE."
+        $freshById = @{}
+        foreach ($response in $freshResponses) { $freshById[[int]$response.id] = $response }
+        $freshAudit = Tool-Payload $freshById[406]
+        $freshFindings = @($freshAudit.import_issues | Where-Object { $_.source -eq "res://strings.csv" })
+        Assert-True ($freshAudit.scanned_import_metadata -eq 1) "The import-record probe scanned $($freshAudit.scanned_import_metadata) sidecars instead of the one it was built with."
+        Assert-True ($freshFindings.Count -eq 0) "A current asset whose source is newer than its outputs was reported stale, so the record Godot wrote was not read: $(($freshFindings | ConvertTo-Json -Compress -Depth 4))"
+
+        # One byte on the end of one output, and nothing else changed. The
+        # source still matches its own digest, so this finding can only come
+        # from the dest_md5 half of the record, over two files concatenated in
+        # the order dest_files declares them.
+        $changedOutput = Join-Path $recordProject $translationOutputs[0].Name
+        $changedBytes = [System.IO.File]::ReadAllBytes($changedOutput)
+        [System.IO.File]::WriteAllBytes($changedOutput, $changedBytes + [byte]0x78)
+
+        $changedRequests = @(
+            (@{ jsonrpc = "2.0"; id = 407; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
+            (Tool-Request 408 "project_audit_assets" @{ max_findings = 50 })
+        )
+        $rawChangedRecordResponses = Invoke-Didi -Requests $changedRequests -Arguments @("--project", $recordProject)
+        $changedResponses = @($rawChangedRecordResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.PSObject.Properties.Name -contains "id" })
+        Assert-True ($LASTEXITCODE -eq 0) "Edited-output MCP process exited with $LASTEXITCODE."
+        $changedById = @{}
+        foreach ($response in $changedResponses) { $changedById[[int]$response.id] = $response }
+        $changedAudit = Tool-Payload $changedById[408]
+        $changedFindings = @($changedAudit.import_issues | Where-Object { $_.source -eq "res://strings.csv" })
+        Assert-True ($changedFindings.Count -eq 1 -and $changedFindings[0].kind -eq "output_changed_since_import") "An edited import output was not reported against the record Godot wrote: $(($changedAudit.import_issues | ConvertTo-Json -Compress -Depth 4))"
+    }
+    finally {
+        Remove-Item -LiteralPath $recordProject -Recurse -Force -ErrorAction SilentlyContinue
+    }
 
     # An editor raycast against a scene that actually holds a body. The edited
     # scene is parented into a SubViewport under the editor's docks, so the

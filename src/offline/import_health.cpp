@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -35,8 +36,8 @@ struct ImportMetadata {
     std::vector<std::string> dest_files;
 };
 
-// What the record beside the output says about the last import. Either half
-// can be absent: a sidecar that declares no outputs is written with no
+// What the record Godot wrote for this asset says about the last import. Either
+// half can be absent: a sidecar that declares no outputs is written with no
 // `dest_md5`, and a record from an older engine may carry only the source.
 struct RecordedDigests {
     std::optional<std::string> source;
@@ -138,22 +139,23 @@ ImportSections importSections(const config_file::Scan& scanned) {
     return sections;
 }
 
-std::optional<std::string> readBounded(const fs::path& path) {
+std::optional<std::string> readBounded(const fs::path& path,
+                                       size_t limit = kMaxImportMetadataBytes) {
     std::ifstream input(path, std::ios::binary);
     if (!input) return std::nullopt;
-    std::string contents(kMaxImportMetadataBytes + 1, '\0');
+    std::string contents(limit + 1, '\0');
     input.read(contents.data(), static_cast<std::streamsize>(contents.size()));
     const auto bytes_read = static_cast<size_t>(input.gcount());
-    if (bytes_read > kMaxImportMetadataBytes) return std::nullopt;
+    if (bytes_read > limit) return std::nullopt;
     contents.resize(bytes_read);
     return contents;
 }
 
 // MD5 (RFC 1321), for one purpose and no other.
 //
-// Godot records the digest of the source it imported in a `.md5` beside the
-// output it wrote, and answering "does this asset need reimporting" the way the
-// engine answers it means computing the same digest and comparing. The
+// Godot records the digest of the source it imported in a `.md5` under the
+// project data directory, and answering "does this asset need reimporting" the
+// way the engine answers it means computing the same digest and comparing. The
 // algorithm is the file format's, not a choice made here, and nothing about
 // this is security: it reads a record the project already contains.
 constexpr uint32_t kMd5Sine[64] = {
@@ -446,6 +448,70 @@ std::optional<fs::path> resolveResourcePath(const fs::path& root, const std::str
     return candidate;
 }
 
+// Whether Godot reads this setting value as off.
+//
+// The engine does not require the word `false`: it parses the value into a
+// Variant and calls `booleanize()`, which is `!is_zero()`. Measured on 4.5.1,
+// 4.6.2 and 4.7.2 against `application/config/use_hidden_project_data_directory`:
+// `false`, `0` and `null` all move the data directory, and `"false"` and `1`
+// leave it alone, because a string is not zero.
+bool godotReadsAsFalse(const std::string& value_text) {
+    const auto text = strings::trim(value_text);
+    if (text == "false" || text == "null") return true;
+    if (text.empty()) return false;
+    char* end = nullptr;
+    const double number = std::strtod(text.c_str(), &end);
+    return end != text.c_str() && *end == '\0' && number == 0.0;
+}
+
+// The one directory Godot writes every import record into.
+//
+// `ResourceFormatImporter::get_import_base_path` joins
+// `ProjectSettings::get_imported_files_path()` with the source's stem, and that
+// path is the project data directory plus `imported`. It has nothing to do with
+// where the outputs land. `csv_translation` writes its `.translation` files
+// beside the CSV it imported and its record still goes here, so taking the
+// directory from a declared output found the record for a texture and for
+// nothing else, and every other importer fell through to the timestamps #827
+// was filed about (#833).
+//
+// The data directory is `.godot`, or `godot` when
+// `application/config/use_hidden_project_data_directory` is off. Measured both
+// ways on all three lines: the setting moves the record and moves no output.
+// The file is read through the shared ConfigFile scan rather than a regex
+// because `config / use_hidden_project_data_directory = false` is the same
+// setting to the engine, and it moves the directory too (#809).
+//
+// A project.godot that is missing, too large to read or unparseable leaves
+// `.godot`, which is the engine's default. A project whose manifest does not
+// load does not open at all, so there is no record under either name; what the
+// readers of an unloadable manifest should say is #826.
+fs::path importedDirectory(const fs::path& root) {
+    std::string data_directory = ".godot";
+    const auto manifest = root / "project.godot";
+    std::error_code status_error;
+    const auto status = fs::symlink_status(manifest, status_error);
+    // A symlink is refused here for the reason the scan refuses one anywhere
+    // else: it can leave the project. The answer is then the default, which is
+    // the answer for every manifest this cannot read.
+    if (status_error || fs::is_symlink(status) || !fs::is_regular_file(status)) {
+        return root / data_directory / "imported";
+    }
+    if (const auto contents = readBounded(manifest, kMaxProjectManifestBytes)) {
+        const auto scanned = config_file::scan(*contents);
+        for (const auto& entry : scanned.entries) {
+            if (entry.section != "application" ||
+                entry.key != "config/use_hidden_project_data_directory") {
+                continue;
+            }
+            // No break: a key the file declares twice is the last one to the
+            // engine, so it is the last one here.
+            data_directory = godotReadsAsFalse(entry.value_text) ? "godot" : ".godot";
+        }
+    }
+    return root / data_directory / "imported";
+}
+
 // What Godot recorded when it last imported this asset, or nothing where it
 // left no record to read.
 //
@@ -453,52 +519,44 @@ std::optional<fs::path> resolveResourcePath(const fs::path& root, const std::str
 // `<imported dir>/<file name>-<md5 of the res:// path>.md5`, and
 // `EditorFileSystem::_test_for_reimport` reads both `source_md5` and
 // `dest_md5` out of it, so this is the file the engine consults and the name
-// it consults it under. The imported directory is taken from an output this
-// sidecar declares rather than assumed to be `res://.godot/imported/`, because
-// the project setting that names it can move it. A symlink is refused here for
-// the reason the scan refuses one anywhere else.
+// it consults it under. A symlink is refused here for the reason the scan
+// refuses one anywhere else.
 //
 // Both halves come back from one read, because they are two keys in one file
 // and the file is opened once per sidecar.
-std::optional<RecordedDigests> recordedDigests(const fs::path& root,
-                                               const std::string& source,
-                                               const std::vector<std::string>& outputs) {
+std::optional<RecordedDigests> recordedDigests(const fs::path& imported_directory,
+                                               const std::string& source) {
     const auto separator = source.find_last_of('/');
     if (separator == std::string::npos || separator + 1 == source.size()) return std::nullopt;
     const auto record_name = source.substr(separator + 1) + "-" + md5Hex(source) + ".md5";
-    for (const auto& output : outputs) {
-        const auto output_path = resolveResourcePath(root, output);
-        if (!output_path) continue;
-        fs::path record_path;
-        try {
-            record_path = output_path->parent_path() / paths::projectPathFromUtf8(record_name);
-        } catch (const fs::filesystem_error&) {
-            continue;
-        }
-        std::error_code status_error;
-        const auto status = fs::symlink_status(record_path, status_error);
-        if (status_error || fs::is_symlink(status) || !fs::is_regular_file(status)) continue;
-        const auto contents = readBounded(record_path);
-        if (!contents) continue;
-        const auto record = config_file::scan(*contents);
-        if (!record.complete) continue;
-        RecordedDigests digests;
-        for (const auto& entry : record.entries) {
-            if (entry.key == "source_md5") {
-                if (auto recorded = quotedValue(entry.value_text, false)) {
-                    digests.source = std::move(recorded);
-                }
-            } else if (entry.key == "dest_md5") {
-                if (auto recorded = quotedValue(entry.value_text, false)) {
-                    digests.destination = std::move(recorded);
-                }
+    fs::path record_path;
+    try {
+        record_path = imported_directory / paths::projectPathFromUtf8(record_name);
+    } catch (const fs::filesystem_error&) {
+        return std::nullopt;
+    }
+    std::error_code status_error;
+    const auto status = fs::symlink_status(record_path, status_error);
+    if (status_error || fs::is_symlink(status) || !fs::is_regular_file(status)) return std::nullopt;
+    const auto contents = readBounded(record_path);
+    if (!contents) return std::nullopt;
+    const auto record = config_file::scan(*contents);
+    if (!record.complete) return std::nullopt;
+    RecordedDigests digests;
+    for (const auto& entry : record.entries) {
+        if (entry.key == "source_md5") {
+            if (auto recorded = quotedValue(entry.value_text, false)) {
+                digests.source = std::move(recorded);
+            }
+        } else if (entry.key == "dest_md5") {
+            if (auto recorded = quotedValue(entry.value_text, false)) {
+                digests.destination = std::move(recorded);
             }
         }
-        // A record with neither key is not a record. Keep walking the declared
-        // outputs rather than stopping on a file that answers nothing.
-        if (digests.source || digests.destination) return digests;
     }
-    return std::nullopt;
+    // A record with neither key is not a record.
+    if (!digests.source && !digests.destination) return std::nullopt;
+    return digests;
 }
 
 std::string metadataResourcePath(const fs::path& root, const fs::path& metadata) {
@@ -520,6 +578,11 @@ json inspectImportHealth(const std::string& root_dir, size_t max_findings) {
     const auto root = fs::weakly_canonical(paths::projectPathFromUtf8(root_dir), root_error);
     if (root_error || !fs::is_directory(root, root_error) || root_error) return result;
 
+    // One per scan. The setting that names it is a property of the project, not
+    // of any asset, so reading project.godot once per sidecar would ask the
+    // same question of the same file for every import in the tree.
+    const auto imported_directory = importedDirectory(root);
+
     size_t scanned = 0;
     bool truncated = false;
     const size_t retained_limit = std::min(max_findings, static_cast<size_t>(5000));
@@ -536,9 +599,15 @@ json inspectImportHealth(const std::string& root_dir, size_t max_findings) {
         if (entry.is_directory(status_error)) {
             const auto name = entry.path().filename();
             const auto name_text = paths::projectPathToUtf8(name);
+            // `.godot` stays on the list by name, because a project that has
+            // since turned the hidden directory off still has the old one
+            // sitting there. The comparison is what covers `godot`, which is
+            // the generated directory for every project that turned it off and
+            // is an ordinary folder name for every project that did not.
             if (name == ".git" || name == ".godot" || name == "build" ||
                 strings::startsWith(name_text, "build-") || name == ".worktrees" ||
-                name == ".vs" || name == "out" || name == "bin") {
+                name == ".vs" || name == "out" || name == "bin" ||
+                entry.path() == imported_directory.parent_path()) {
                 it.disable_recursion_pending();
             }
             continue;
@@ -610,8 +679,8 @@ json inspectImportHealth(const std::string& root_dir, size_t max_findings) {
                                     parsed->source});
         }
 
-        // Godot writes its own answer to "does this need reimporting" beside the
-        // output it wrote: a `.md5` holding the digest of the source it
+        // Godot writes its own answer to "does this need reimporting" into the
+        // project data directory: a `.md5` holding the digest of the source it
         // imported. Modification times are not that answer. Git does not record
         // them, so after any clone, checkout or worktree the ordering of a
         // committed source and a committed output is whichever order the
@@ -624,7 +693,7 @@ json inspectImportHealth(const std::string& root_dir, size_t max_findings) {
         std::optional<RecordedDigests> recorded;
         std::optional<std::string> source_digest;
         if (source_exists) {
-            recorded = recordedDigests(root, parsed->source, parsed->outputs);
+            recorded = recordedDigests(imported_directory, parsed->source);
             if (recorded && recorded->source) {
                 // Asked before the file is opened, so that "too large to hash"
                 // and "could not be read" stay apart. They arrived as the same

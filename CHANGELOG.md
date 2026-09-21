@@ -215,6 +215,43 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **The import record is looked for where Godot writes it.** The record was
+  found by taking the parent directory of a declared output, which is the right
+  answer for a texture and for nothing else. Godot builds that path from the
+  project data directory, so every importer whose outputs land somewhere else
+  got no record at all, fell back to the modification times and reported
+  `source_newer_than_output` for an asset the engine considers current (#833).
+  Godot's own `csv_translation` is the clearest case: on a three locale CSV it
+  writes the `.translation` files beside the CSV and the record under
+  `.godot/imported/`, so the two are nowhere near each other. The scene
+  importers do the same whenever meshes or materials are extracted to real
+  files. The audit now reads
+  `application/config/use_hidden_project_data_directory` out of `project.godot`
+  and builds the path the way the engine does. Measured on 4.5.1, 4.6.2 and
+  4.7.2 both ways: turning that setting off moves the record to
+  `godot/imported/` and moves no output at all, and a project that has turned it
+  off since its last import has a stale record sitting in the old directory,
+  which is why the setting is read rather than both names being tried. The
+  setting is read through the shared ConfigFile scan, so
+  `config / use_hidden_project_data_directory = false` is the same setting here
+  that it is to the engine (#809). A `project.godot` that is missing or does not
+  parse leaves the default `.godot`; a project whose manifest does not load has
+  no record under either name, and what the readers of an unloadable manifest
+  should say is #826. The project data directory is also skipped by the scan
+  under whichever name it has, which `.godot` alone did not cover.
+- **The freshness reproduction is tested against records Godot wrote.** The
+  audit reproduces four things the engine does by hand: the digest, the name of
+  the record, where the record lives, and what `dest_md5` is a digest of. Every
+  test of it was written against a `.md5` built by the test, so the fixture and
+  the implementation shared one belief and a wrong belief still passed a green
+  suite three times (#834). The live harness now imports a two locale CSV in the
+  smoke project on all three engine lines and audits the result. One assertion
+  covers a current asset whose source is newer than its outputs, which is the
+  state every clone is in and which only a record can answer. The other appends
+  one byte to one output and expects `output_changed_since_import`, which only
+  the `dest_md5` half can answer, over two files rather than the single output a
+  texture has. Both were run against the previous lookup and both fail there.
+
 - **The audit reads both halves of the record, and says so when it reads
   neither.** #827 taught `project_audit_assets` to answer the freshness
   question out of the `.md5` Godot writes beside an imported output. It read
