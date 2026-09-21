@@ -751,6 +751,120 @@ void test_a_source_above_the_budget_is_unchecked_rather_than_timestamped() {
     ASSERT_TRUE(!report["import_issues"][0].contains("line"));
 }
 
+// A csv_translation sidecar: every output beside the CSV at the project root,
+// and the record nowhere near any of them. Godot's own three-locale CSV writes
+// exactly this shape, measured on 4.5.1, 4.6.2 and 4.7.2.
+std::string translationMetadata(const std::string& source,
+                                const std::string& first,
+                                const std::string& second) {
+    return "[remap]\n"
+           "importer=\"csv_translation\"\n"
+           "type=\"Translation\"\n\n"
+           "[deps]\n"
+           "source_file=\"" + source + "\"\n"
+           "dest_files=[\"" + first + "\", \"" + second + "\"]\n";
+}
+
+// md5("res://strings.csv"), which is the stem Godot names the record with. It
+// is written out rather than computed, and the engine agrees: importing a
+// strings.csv at the root of a scratch project on all three lines writes
+// .godot/imported/strings.csv-d31afa37497be317b120fe83e1aa65d6.md5.
+const char* const kTranslationRecordName =
+    "strings.csv-d31afa37497be317b120fe83e1aa65d6.md5";
+
+// The outputs and the times that make a timestamp answer a finding, so a test
+// that expects silence can only get it from the record.
+void writeTranslationAsset(ImportHealthFixture& fixture) {
+    const auto source = fixture.write("strings.csv", "source");
+    const auto first = fixture.write("strings.en.translation", "output");
+    const auto second = fixture.write("strings.fr.translation", "second");
+    fixture.write("strings.csv.import",
+                  translationMetadata("res://strings.csv", "res://strings.en.translation",
+                                      "res://strings.fr.translation"));
+    const auto now = std::filesystem::file_time_type::clock::now();
+    std::filesystem::last_write_time(first, now - std::chrono::hours(2));
+    std::filesystem::last_write_time(second, now - std::chrono::hours(2));
+    std::filesystem::last_write_time(source, now - std::chrono::hours(1));
+}
+
+void test_the_record_is_found_when_no_output_is_near_it() {
+    // #833: the record was looked for beside a declared output, which is where
+    // it sits for a texture and nowhere else. An importer that writes to the
+    // project root got no record, fell through to the timestamps, and reported
+    // source_newer_than_output for an asset the engine considers current.
+    ImportHealthFixture fixture("record-away-from-outputs");
+    writeTranslationAsset(fixture);
+    fixture.write(std::string(".godot/imported/") + kTranslationRecordName,
+                  record(kSourceDigest, kDeclaredOrderDigest));
+
+    const auto report = didi::offline::inspectImportHealth(fixture.root().string(), 500);
+
+    ASSERT_EQ(report["scanned_import_metadata"], 1u);
+    ASSERT_EQ(report["import_issue_count"], 0u);
+}
+
+void test_a_visible_project_data_directory_moves_the_record() {
+    // The one thing that moves the record: the project data directory is
+    // `godot` rather than `.godot` when the setting is off. Measured both ways
+    // on 4.5.1, 4.6.2 and 4.7.2 -- the record moves and no output moves at all.
+    ImportHealthFixture fixture("record-visible-data-dir");
+    writeTranslationAsset(fixture);
+    fixture.write("project.godot",
+                  "config_version=5\n\n[application]\n\n"
+                  "config/use_hidden_project_data_directory=false\n");
+    fixture.write(std::string("godot/imported/") + kTranslationRecordName,
+                  record(kSourceDigest, kDeclaredOrderDigest));
+
+    const auto report = didi::offline::inspectImportHealth(fixture.root().string(), 500);
+
+    ASSERT_EQ(report["scanned_import_metadata"], 1u);
+    ASSERT_EQ(report["import_issue_count"], 0u);
+}
+
+void test_a_record_left_in_the_hidden_directory_is_not_read() {
+    // The control for the test above, and the case that makes reading the
+    // setting worth it rather than looking under both names: turning the
+    // setting off leaves the old `.godot` behind with a record in it, and that
+    // record is not the one the engine consults. The key is spelled the way
+    // #809 was filed about, because the engine drops the whitespace inside a
+    // key and this is the same setting to it.
+    ImportHealthFixture fixture("record-stale-hidden-dir");
+    writeTranslationAsset(fixture);
+    fixture.write("project.godot",
+                  "config_version=5\n\n[application]\n\n"
+                  "config / use_hidden_project_data_directory = false\n");
+    fixture.write(std::string(".godot/imported/") + kTranslationRecordName,
+                  record(kSourceDigest, kDeclaredOrderDigest));
+
+    const auto report = didi::offline::inspectImportHealth(fixture.root().string(), 500);
+
+    ASSERT_EQ(report["import_issue_count"], 2u);
+    ASSERT_EQ(report["import_issues"][0]["kind"], "source_newer_than_output");
+    ASSERT_EQ(report["import_issues"][1]["kind"], "source_newer_than_output");
+}
+
+void test_a_symlinked_manifest_is_not_read() {
+    // The manifest is read for one setting and is refused as a symlink for the
+    // reason every other read in this scan refuses one: it can leave the
+    // project. Refused, the answer is the default, so the record that really is
+    // under `godot/imported` is not found and the timestamps answer instead.
+    ImportHealthFixture fixture("manifest-symlink");
+    writeTranslationAsset(fixture);
+    const auto real = fixture.write("elsewhere.godot",
+                                    "config_version=5\n\n[application]\n\n"
+                                    "config/use_hidden_project_data_directory=false\n");
+    std::error_code link_error;
+    std::filesystem::create_symlink(real, fixture.root() / "project.godot", link_error);
+    if (link_error) return; // No symlink privilege on this machine.
+    fixture.write(std::string("godot/imported/") + kTranslationRecordName,
+                  record(kSourceDigest, kDeclaredOrderDigest));
+
+    const auto report = didi::offline::inspectImportHealth(fixture.root().string(), 500);
+
+    ASSERT_EQ(report["import_issue_count"], 2u);
+    ASSERT_EQ(report["import_issues"][0]["kind"], "source_newer_than_output");
+}
+
 struct RegisterImportHealthTests {
     RegisterImportHealthTests() {
         registerTest("ImportHealth.Healthy", test_healthy_import_metadata_has_no_issues);
@@ -802,6 +916,13 @@ struct RegisterImportHealthTests {
                      test_several_outputs_hashed_in_the_wrong_order_do_not_match);
         registerTest("ImportHealth.OutputDigestIncomplete",
                      test_a_missing_output_makes_no_digest_claim);
+        registerTest("ImportHealth.RecordAwayFromOutputs",
+                     test_the_record_is_found_when_no_output_is_near_it);
+        registerTest("ImportHealth.VisibleProjectDataDirectory",
+                     test_a_visible_project_data_directory_moves_the_record);
+        registerTest("ImportHealth.StaleHiddenRecord",
+                     test_a_record_left_in_the_hidden_directory_is_not_read);
+        registerTest("ImportHealth.SymlinkedManifest", test_a_symlinked_manifest_is_not_read);
         registerTest("ImportHealth.SourceOverBudget",
                      test_a_source_above_the_budget_is_unchecked_rather_than_timestamped);
     }
