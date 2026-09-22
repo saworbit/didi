@@ -69,6 +69,23 @@ std::atomic<int> g_clientIdleReuseMs{kClientIdleReuseMs};
 int serverIdleRecycleMs() { return g_serverIdleRecycleMs.load(std::memory_order_relaxed); }
 int clientIdleReuseMs() { return g_clientIdleReuseMs.load(std::memory_order_relaxed); }
 
+// Makes room for the next chunk of a frame that is still arriving, without
+// letting the buffer get ahead of the frame by more than the growth needs.
+// Doubling on its own overshoots -- growing 128 MiB in 64 KiB steps ends with
+// 193 MiB of capacity -- which would have made a frame somebody actually sends
+// cost half as much again as allocating it outright. Capacity is capped at the
+// frame, so a completed frame peaks exactly where it used to and a frame that
+// is claimed and never sent peaks at one chunk.
+void growFrameBuffer(std::vector<char>& buffer, size_t filled, size_t want, size_t frame_bytes) {
+    const size_t needed = filled + want;
+    if (buffer.capacity() < needed) {
+        size_t next = buffer.capacity() < needed / 2 ? needed : buffer.capacity() * 2;
+        if (next > frame_bytes) next = frame_bytes;
+        buffer.reserve(next);
+    }
+    buffer.resize(needed);
+}
+
 } // namespace
 
 int serverConnectionSlots() { return static_cast<int>(kServerConnectionSlots); }
@@ -97,7 +114,21 @@ void clearIdleRecycleOverridesForTesting() {
 
 namespace {
 
+// The largest frame either side will read. This used to set the server's peak
+// allocation on its own, because a slot allocated the claimed length before a
+// byte of the payload had arrived and before the handler reached
+// SessionHost::authorize. Four slots (#873) made that peak four times what it
+// had been. The server now grows a payload as it arrives, in
+// kFrameReadChunkBytes steps, so this bounds what a frame may legitimately be
+// rather than what an unauthenticated claim costs.
 constexpr uint32_t kMaximumFrameBytes = 128U * 1024U * 1024U;
+// How much of a frame the server commits ahead of the bytes that justify it. A
+// length prefix is written by whoever connected and is read before anything has
+// been authorised, so it buys a read rather than a buffer: a claim of
+// kMaximumFrameBytes followed by silence costs one chunk per slot instead of
+// 128 MiB per slot. 64 KiB is the pipe buffer size, so a real frame still
+// arrives in whole buffers.
+constexpr uint32_t kFrameReadChunkBytes = 64U * 1024U;
 constexpr uint32_t kMaximumHandshakeResponseBytes = 64U * 1024U;
 // Bounds a frame that has already started arriving. Recycling an idle
 // connection is a different question with a different number; see
@@ -111,6 +142,9 @@ constexpr int kServerResponseTimeoutMs = 5000;
 // How long a cancelled overlapped operation gets to settle before we start
 // complaining. Cancellation is near-instant whenever it can happen at all.
 constexpr DWORD kCancelSettleMs = 250;
+// How long a slot waits before trying for a pipe instance again. Every slot but
+// the first can fail transiently on an endpoint that already exists.
+constexpr int kSlotListenRetryMs = 200;
 
 struct Win32Deadline {
     bool finite{false};
@@ -692,6 +726,9 @@ private:
         // Only slot 0 answers for startup. Every other slot creating its first
         // instance is an ordinary listen on an endpoint that already exists.
         bool firstPipeInstance = owns_startup;
+        // Per slot, so a slot that cannot listen says so once rather than five
+        // times a second, and says so again only after it has recovered.
+        bool listenFailureLogged = false;
 
         while (m_running.load()) {
             HANDLE pipe = CreateNamedPipeA(
@@ -712,14 +749,36 @@ private:
             );
 
             if (pipe == INVALID_HANDLE_VALUE) {
+                const DWORD create_error = GetLastError();
                 if (firstPipeInstance) {
+                    DIDI_LOG_ERROR("IPC_SERVER", "Unable to create the named pipe ", m_pipeName,
+                                   " (Win32 error ", create_error, ")");
                     m_running.store(false);
                     signalStartup(false);
                     break;
                 }
                 if (!m_running.load()) break;
-                std::this_thread::sleep_for(std::chrono::milliseconds(200));
+                // Retrying is right: a transient failure should not take a slot
+                // out of service for the life of the editor. Saying so is what
+                // was missing. Until this slot has an instance the server is
+                // listening on fewer connections than serverConnectionSlots()
+                // reports, and a client meets the admission stall #873 removed
+                // on a build that contains the fix.
+                if (!listenFailureLogged) {
+                    listenFailureLogged = true;
+                    DIDI_LOG_WARN("IPC_SERVER", "Slot ", slot,
+                                  " cannot create its pipe instance (Win32 error ", create_error,
+                                  "); retrying every ", kSlotListenRetryMs,
+                                  " ms. The server is listening on fewer slots than it reports.");
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(kSlotListenRetryMs));
                 continue;
+            }
+
+            if (listenFailureLogged) {
+                listenFailureLogged = false;
+                DIDI_LOG_WARN("IPC_SERVER", "Slot ", slot,
+                              " has a pipe instance again and is listening.");
             }
 
             if (firstPipeInstance) {
@@ -826,10 +885,23 @@ private:
                 // fail. The frame timeout is meant to bound a frame once it has
                 // started, not to run from before it did.
                 const auto payload_deadline = win32DeadlineAfter(kServerFrameTimeoutMs);
-                std::vector<char> req_payload(req_len);
-                if (readExactOverlapped(pipe, req_payload.data(), req_payload.size(), hIoEvent,
-                                        m_stopEvent, payload_deadline).status !=
-                    ExactIoStatus::completed) {
+                // Grown as it arrives rather than allocated from the claim. One
+                // deadline still covers the whole payload, so a slow trickle is
+                // dropped exactly where it was before.
+                std::vector<char> req_payload;
+                bool payload_complete = true;
+                for (uint32_t filled = 0; filled < req_len;) {
+                    const uint32_t want = (std::min)(kFrameReadChunkBytes, req_len - filled);
+                    growFrameBuffer(req_payload, filled, want, req_len);
+                    if (readExactOverlapped(pipe, req_payload.data() + filled, want, hIoEvent,
+                                            m_stopEvent, payload_deadline).status !=
+                        ExactIoStatus::completed) {
+                        payload_complete = false;
+                        break;
+                    }
+                    filled += want;
+                }
+                if (!payload_complete) {
                     break;
                 }
 
@@ -948,7 +1020,21 @@ private:
 // POSIX Domain Socket implementation
 namespace {
 
+// The largest frame either side will read. This used to set the server's peak
+// allocation on its own, because a slot allocated the claimed length before a
+// byte of the payload had arrived and before the handler reached
+// SessionHost::authorize. Four slots (#873) made that peak four times what it
+// had been. The server now grows a payload as it arrives, in
+// kFrameReadChunkBytes steps, so this bounds what a frame may legitimately be
+// rather than what an unauthenticated claim costs.
 constexpr uint32_t kMaximumFrameBytes = 128U * 1024U * 1024U;
+// How much of a frame the server commits ahead of the bytes that justify it. A
+// length prefix is written by whoever connected and is read before anything has
+// been authorised, so it buys a read rather than a buffer: a claim of
+// kMaximumFrameBytes followed by silence costs one chunk per slot instead of
+// 128 MiB per slot. 64 KiB is the pipe buffer size, so a real frame still
+// arrives in whole buffers.
+constexpr uint32_t kFrameReadChunkBytes = 64U * 1024U;
 constexpr uint32_t kMaximumHandshakeResponseBytes = 64U * 1024U;
 // Bounds a frame that has already started arriving. Recycling an idle
 // connection is a different question with a different number; see
@@ -957,6 +1043,9 @@ constexpr int kServerFrameTimeoutMs = 5000;
 // A response is the answer to a request the handler has already run; see the
 // Win32 branch above.
 constexpr int kServerResponseTimeoutMs = 5000;
+// How long a slot waits after an accept that failed for want of a file
+// descriptor. The connection stays queued, so without this the loop spins.
+constexpr int kAcceptBackoffMs = 200;
 // Slice length for a wait with no deadline, so stop() is still noticed.
 constexpr int kStopPollSliceMs = 100;
 #if defined(MSG_NOSIGNAL)
@@ -1444,6 +1533,10 @@ private:
         struct pollfd pfd;
         pfd.fd = m_listenSock;
         pfd.events = POLLIN;
+        // Per slot, so descriptor exhaustion is one line and a recovery line
+        // rather than a silent core at 100%.
+        bool descriptorsExhaustedLogged = false;
+        int lastUnexpectedErrno = 0;
 
         while (m_running.load()) {
             int pr = poll(&pfd, 1, 50);
@@ -1456,10 +1549,49 @@ private:
             // make them miss the stop below.
             int client = accept(m_listenSock, nullptr, nullptr);
             if (client < 0) {
+                const int accept_errno = errno;
                 if (!m_running.load()) break;
+                if (accept_errno == EMFILE || accept_errno == ENFILE) {
+                    // The one failure that leaves the connection queued. The
+                    // listener stays readable, so poll returns at once and this
+                    // loop spins at 100% of a core, once per slot, with nothing
+                    // said anywhere. Back off so the process is merely out of
+                    // descriptors rather than out of descriptors and busy.
+                    if (!descriptorsExhaustedLogged) {
+                        descriptorsExhaustedLogged = true;
+                        DIDI_LOG_WARN("IPC_SERVER", "Slot ", slot,
+                                      " cannot accept: out of file descriptors (errno ",
+                                      accept_errno, "). The connection stays queued; backing off ",
+                                      kAcceptBackoffMs, " ms between attempts.");
+                    }
+                    std::this_thread::sleep_for(std::chrono::milliseconds(kAcceptBackoffMs));
+                } else if (accept_errno != EAGAIN && accept_errno != EWOULDBLOCK &&
+                           accept_errno != EINTR && accept_errno != ECONNABORTED) {
+                    // EAGAIN is the ordinary one: several slots wake on the same
+                    // arrival and only one accept wins. EINTR and ECONNABORTED
+                    // are ordinary too. Anything else is worth a line, but only
+                    // the first of each kind, so a recurring failure is one line
+                    // rather than twenty a second.
+                    if (accept_errno != lastUnexpectedErrno) {
+                        lastUnexpectedErrno = accept_errno;
+                        DIDI_LOG_WARN("IPC_SERVER", "Slot ", slot, " accept failed: errno ",
+                                      accept_errno);
+                    }
+                }
                 continue;
             }
+            if (descriptorsExhaustedLogged) {
+                descriptorsExhaustedLogged = false;
+                DIDI_LOG_WARN("IPC_SERVER", "Slot ", slot, " is accepting again.");
+            }
+            lastUnexpectedErrno = 0;
             if (!setNonblockingCloseOnExec(client)) {
+                // Same rule as the accept failures above: a slot that drops an
+                // accepted connection says so. The peer sees a connect that
+                // closes immediately, and without this there is nothing to find.
+                DIDI_LOG_WARN("IPC_SERVER", "Slot ", slot,
+                              " dropped an accepted connection: it could not be made "
+                              "non-blocking and close-on-exec (errno ", errno, ")");
                 close(client);
                 continue;
             }
@@ -1485,11 +1617,25 @@ private:
                 const uint32_t req_len = decodeFrameLength(len_buf);
                 if (req_len == 0 || req_len > kMaximumFrameBytes) break;
 
-                std::vector<char> payload(req_len);
                 // Its own deadline, starting now, for the reason given in the
                 // Win32 branch above.
                 const auto payload_deadline = deadlineAfter(kServerFrameTimeoutMs);
-                if (!readExact(client, payload.data(), payload.size(), payload_deadline, &m_running)) break;
+                // Grown as it arrives rather than allocated from the claim; see
+                // kFrameReadChunkBytes. One deadline still covers the whole
+                // payload, so a slow trickle is dropped where it was before.
+                std::vector<char> payload;
+                bool payload_complete = true;
+                for (uint32_t filled = 0; filled < req_len;) {
+                    const uint32_t want = (std::min)(kFrameReadChunkBytes, req_len - filled);
+                    growFrameBuffer(payload, filled, want, req_len);
+                    if (!readExact(client, payload.data() + filled, want, payload_deadline,
+                                   &m_running)) {
+                        payload_complete = false;
+                        break;
+                    }
+                    filled += want;
+                }
+                if (!payload_complete) break;
 
                 json resp_json;
                 json req_json;

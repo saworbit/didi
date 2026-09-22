@@ -412,6 +412,12 @@ set(TEST_SOURCES
 if(DIDI_BUILD_TESTS)
     add_executable(didi_tests ${TEST_SOURCES} ${GDEXT_SOURCES})
     target_link_libraries(didi_tests PRIVATE didi_core)
+    if(WIN32)
+        # IPC.Win32UnauthenticatedFrameClaim reads this process's committed
+        # bytes to check that a claimed frame size is not allocated before the
+        # frame arrives. Nothing in the product needs psapi.
+        target_link_libraries(didi_tests PRIVATE psapi)
+    endif()
     # The reflection test reads the reference the same way the server does, so
     # it has to exist next to the test binary even when only this target builds.
     if(DIDI_CLASS_REFERENCE)

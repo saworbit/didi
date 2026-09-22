@@ -11,6 +11,7 @@
 
 #if defined(_WIN32)
 #include <windows.h>
+#include <psapi.h>
 #else
 #include <cerrno>
 #include <csignal>
@@ -312,6 +313,53 @@ static void test_ipc_client_server_roundtrip() {
     auto res = client->sendRequest("test.echo", {{"msg", "ping"}});
     ASSERT_TRUE(res.isOk());
     ASSERT_EQ(res.value()["echo"]["msg"].get<std::string>(), "ping");
+
+    client->disconnect();
+    server->stop();
+}
+
+// Break caught: the server allocated a request payload from the length prefix
+// alone, so a slot committed the claimed size before a byte of it had arrived
+// and before anything had been authorised. Four slots (#873) made the peak four
+// times what it was. The payload is now grown in kFrameReadChunkBytes steps,
+// and this covers the half of that change a wire test can see: a frame larger
+// than one chunk has to be reassembled across chunk boundaries and come back
+// byte for byte.
+static void test_a_frame_larger_than_one_read_chunk_round_trips() {
+#if defined(_WIN32)
+    const std::string test_pipe = "\\\\.\\pipe\\godot_didi_ipc_multichunk_test";
+#else
+    const std::string test_pipe = "/tmp/godot_didi_ipc_multichunk_test.sock";
+#endif
+
+    auto server = didi::ipc::createIpcServer();
+    server->setHandler([](const didi::json& req) -> didi::json {
+        const auto params = req.value("params", didi::json::object());
+        return {{"length", params.value("blob", std::string()).size()},
+                {"first", params.value("blob", std::string()).substr(0, 8)},
+                {"last", params.value("blob", std::string()).substr(
+                             params.value("blob", std::string()).size() - 8)}};
+    });
+
+    ASSERT_TRUE(server->start(test_pipe));
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+    auto client = didi::ipc::createIpcClient();
+    ASSERT_TRUE(client->connect(test_pipe, 2000));
+
+    // Several chunks and not a whole number of them, so the last read is short
+    // and an off-by-one in the loop shows up rather than cancelling out.
+    const size_t blob_bytes = 200u * 1024u + 37u;
+    std::string blob(blob_bytes, 'x');
+    for (size_t i = 0; i < blob_bytes; ++i) {
+        blob[i] = static_cast<char>('a' + (i % 26));
+    }
+
+    auto res = client->sendRequest("test.blob", {{"blob", blob}}, 10000);
+    ASSERT_TRUE(res.isOk());
+    ASSERT_EQ(res.value()["length"].get<size_t>(), blob_bytes);
+    ASSERT_EQ(res.value()["first"].get<std::string>(), blob.substr(0, 8));
+    ASSERT_EQ(res.value()["last"].get<std::string>(), blob.substr(blob_bytes - 8));
 
     client->disconnect();
     server->stop();
@@ -915,6 +963,69 @@ static void test_win32_server_drops_slow_partial_frame() {
     ASSERT_TRUE(!connection_alive);
 }
 
+// The other half of the same change, and the half that is the point of it: a
+// length prefix is read before the handler runs, so before SessionHost has
+// authorised anything. Four raw connections each claim the maximum frame and
+// then go quiet. Allocating from the claim made that 4 x 128 MiB of committed
+// memory inside the Godot editor process for the length of the frame deadline;
+// growing the payload as it arrives makes it 4 x 64 KiB.
+static void test_a_claimed_frame_is_not_committed_before_it_arrives() {
+    const auto name = rawPipeName("unauthenticated-frame-claim");
+    auto server = didi::ipc::createIpcServer();
+    ASSERT_TRUE(server->start(name));
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+    const auto private_bytes = []() -> size_t {
+        PROCESS_MEMORY_COUNTERS_EX counters{};
+        counters.cb = sizeof(counters);
+        if (!GetProcessMemoryInfo(GetCurrentProcess(),
+                                  reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&counters),
+                                  sizeof(counters))) {
+            return 0;
+        }
+        return counters.PrivateUsage;
+    };
+
+    const size_t baseline = private_bytes();
+    ASSERT_TRUE(baseline > 0);
+
+    // 128 MiB, the largest frame the server will read, claimed by every slot.
+    const uint32_t claim = 128u * 1024u * 1024u;
+    const uint8_t header[4] = {static_cast<uint8_t>(claim & 0xFF),
+                               static_cast<uint8_t>((claim >> 8) & 0xFF),
+                               static_cast<uint8_t>((claim >> 16) & 0xFF),
+                               static_cast<uint8_t>((claim >> 24) & 0xFF)};
+
+    std::array<HANDLE, 4> claimants{};
+    claimants.fill(INVALID_HANDLE_VALUE);
+    for (auto& claimant : claimants) {
+        claimant = CreateFileA(name.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr,
+                               OPEN_EXISTING, 0, nullptr);
+        ASSERT_TRUE(claimant != INVALID_HANDLE_VALUE);
+        DWORD written = 0;
+        ASSERT_TRUE(WriteFile(claimant, header, sizeof(header), &written, nullptr) &&
+                    written == sizeof(header));
+        // One byte of the 128 MiB, so the frame has started and will not finish.
+        const uint8_t crumb = '{';
+        ASSERT_TRUE(WriteFile(claimant, &crumb, 1, &written, nullptr) && written == 1);
+    }
+
+    // Inside the frame deadline, so the buffers are still alive to be counted.
+    std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    const size_t peak = private_bytes();
+
+    for (auto& claimant : claimants) {
+        if (claimant != INVALID_HANDLE_VALUE) CloseHandle(claimant);
+    }
+    server->stop();
+
+    // Four claims of 128 MiB is 512 MiB. The bound is generous on purpose: the
+    // point is that the claim is not what is committed, not the exact overhead
+    // of growing a payload that never arrives.
+    const size_t growth = peak > baseline ? peak - baseline : 0;
+    ASSERT_TRUE(growth < 64u * 1024u * 1024u);
+}
+
 static void test_win32_server_fails_closed_without_security_descriptor() {
     const auto name = rawPipeName("security-descriptor-failure");
     auto server = didi::ipc::testing::createIpcServerWithSecurityDescriptorFactory(
@@ -1477,6 +1588,93 @@ static void test_endpoint_path_limit_is_reported_rather_than_returned_false() {
 }
 
 #if !defined(_WIN32)
+// Break caught: serverLoop never looked at errno after accept, so the one
+// failure that leaves the connection queued was indistinguishable from the
+// ordinary one that does not. EAGAIN means another slot won the race and the
+// listener is now empty. EMFILE means the connection is still in the backlog,
+// so poll reports the listener readable at once, forever. That was one thread
+// at 100% of a core before #873 gave the server four slots, and four after,
+// with nothing logged on either side of the change.
+//
+// Measured as CPU rather than as a log line, because the spin is the cost.
+static void test_descriptor_exhaustion_does_not_spin_every_slot() {
+    const std::string socket_path = "/tmp/godot_didi_ipc_emfile_test.sock";
+    ::unlink(socket_path.c_str());
+
+    auto server = didi::ipc::createIpcServer();
+    ASSERT_TRUE(server->start(socket_path));
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+    struct LimitGuard {
+        struct rlimit previous {};
+        ~LimitGuard() { setrlimit(RLIMIT_NOFILE, &previous); }
+    } limit;
+    ASSERT_TRUE(getrlimit(RLIMIT_NOFILE, &limit.previous) == 0);
+
+    // The client's descriptor has to exist before the process runs out of them,
+    // and connect() on an existing socket needs no new one.
+    const int client_sock = socket(AF_UNIX, SOCK_STREAM, 0);
+    ASSERT_TRUE(client_sock >= 0);
+
+    struct HeldDescriptors {
+        std::vector<int> values;
+        ~HeldDescriptors() { for (const int value : values) close(value); }
+    } held;
+
+    // Lowered first so the exhaustion loop below is a handful of opens rather
+    // than a million on a runner with a generous soft limit.
+    auto reduced = limit.previous;
+    reduced.rlim_cur = static_cast<rlim_t>(countOpenDescriptors() + 16);
+    const bool lowered = setrlimit(RLIMIT_NOFILE, &reduced) == 0;
+    if (!lowered) {
+        close(client_sock);
+        server->stop();
+        ::unlink(socket_path.c_str());
+        return;
+    }
+    for (;;) {
+        const int spare = open("/dev/null", O_RDONLY);
+        if (spare < 0) break;
+        held.values.push_back(spare);
+    }
+    ASSERT_TRUE(!held.values.empty());
+
+    sockaddr_un address{};
+    address.sun_family = AF_UNIX;
+    ASSERT_TRUE(socket_path.size() < sizeof(address.sun_path));
+    std::copy(socket_path.begin(), socket_path.end(), address.sun_path);
+    // Queued rather than accepted: every slot now sees EMFILE with the
+    // connection still sitting in the backlog.
+    const int connected =
+        connect(client_sock, reinterpret_cast<sockaddr*>(&address), sizeof(address));
+    ASSERT_TRUE(connected == 0 || errno == EINPROGRESS);
+
+    const auto cpu_micros = []() -> long long {
+        rusage usage{};
+        if (getrusage(RUSAGE_SELF, &usage) != 0) return -1;
+        return static_cast<long long>(usage.ru_utime.tv_sec + usage.ru_stime.tv_sec) * 1000000LL +
+               usage.ru_utime.tv_usec + usage.ru_stime.tv_usec;
+    };
+
+    const long long before = cpu_micros();
+    ASSERT_TRUE(before >= 0);
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    const long long after = cpu_micros();
+    const long long burned = after - before;
+
+    for (const int value : held.values) close(value);
+    held.values.clear();
+    close(client_sock);
+    server->stop();
+    ::unlink(socket_path.c_str());
+
+    // Four slots spinning through a 500 ms window is whole seconds of CPU, and
+    // is bounded below by the runner's core count rather than by anything this
+    // test controls. Backing off is a few wakeups. The bound is deliberately
+    // nowhere near either number.
+    ASSERT_TRUE(burned < 250000LL);
+}
+
 static void test_posix_stop_owns_the_descriptors_it_closes() {
     // Break caught: stop() closed the listening descriptor and then joined the
     // thread that was still polling and accepting on it, so for up to one poll
@@ -1580,6 +1778,7 @@ struct RegisterIpcTests {
                      test_an_arriving_connection_is_read_while_another_sits_idle);
         registerTest("IPC.HandlerIsCalledOneAtATime",
                      test_two_connections_never_reach_the_handler_at_once);
+        registerTest("IPC.MultiChunkFrameRoundtrip", test_a_frame_larger_than_one_read_chunk_round_trips);
         registerTest("IPC.NoTimeoutRoundtrip", test_ipc_negative_timeout_waits_for_definitive_response);
         registerTest("IPC.HandlerExceptionClassification", test_ipc_server_classifies_handler_exception_with_request_id);
 #if defined(_WIN32)
@@ -1596,6 +1795,7 @@ struct RegisterIpcTests {
         registerTest("IPC.Win32MalformedResponse", test_win32_malformed_response_is_structured_and_quarantines);
         registerTest("IPC.Win32ResponseIdCorrelation", test_win32_client_rejects_mismatched_response_id);
         registerTest("IPC.Win32ServerFrameDeadline", test_win32_server_drops_slow_partial_frame);
+        registerTest("IPC.Win32UnauthenticatedFrameClaim", test_a_claimed_frame_is_not_committed_before_it_arrives);
         registerTest("IPC.Win32SecurityDescriptorFailClosed", test_win32_server_fails_closed_without_security_descriptor);
 #else
         registerTest("IPC.PosixFragmentedHeader", test_posix_client_accepts_fragmented_response_header);
@@ -1606,6 +1806,7 @@ struct RegisterIpcTests {
         registerTest("IPC.PosixQueuedIoDeadline", test_posix_expired_deadline_rejects_synchronous_io);
         registerTest("IPC.PosixResponseIdCorrelation", test_posix_client_rejects_mismatched_response_id);
         registerTest("IPC.PosixSocketIsOwnerOnly", test_posix_socket_is_owner_only_before_it_listens);
+        registerTest("IPC.PosixDescriptorExhaustionBacksOff", test_descriptor_exhaustion_does_not_spin_every_slot);
         registerTest("IPC.PosixStopOwnsItsDescriptors", test_posix_stop_owns_the_descriptors_it_closes);
 #endif
     }
