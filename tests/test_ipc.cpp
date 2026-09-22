@@ -2,6 +2,7 @@
 #include "didi/common/protocol.hpp"
 #include <algorithm>
 #include <array>
+#include <functional>
 #include <thread>
 #include <chrono>
 #include <atomic>
@@ -198,29 +199,72 @@ void noRestartSignalHandler(int) {}
 
 } // namespace
 
+// Serves a flat buffer to readFramePayload the way a socket would, one chunk
+// request at a time, so a test can drive the production reader without one.
+struct BufferedFrameSource {
+    const std::vector<uint8_t>* bytes{nullptr};
+    size_t offset{0};
+    size_t largest_request{0};
+
+    bool operator()(char* destination, uint32_t wanted) {
+        if (wanted > largest_request) largest_request = wanted;
+        if (bytes->size() - offset < wanted) return false;
+        for (uint32_t index = 0; index < wanted; ++index) {
+            destination[index] = static_cast<char>((*bytes)[offset + index]);
+        }
+        offset += wanted;
+        return true;
+    }
+};
+
+// Reads a whole frame -- header then payload -- out of a buffer, the way both
+// transports do it: decode the prefix, then readFramePayload for the rest.
+// `payload_read` counts bytes taken out of the payload region only, so zero
+// means the reader never asked the transport for anything.
+static didi::ipc::FrameReadOutcome readWholeFrame(const std::vector<uint8_t>& frame,
+                                                  std::vector<char>& payload,
+                                                  size_t* payload_read = nullptr,
+                                                  uint32_t maximum = didi::ipc::kMaximumFrameBytes) {
+    if (payload_read) *payload_read = 0;
+    if (frame.size() < didi::ipc::kFrameLengthPrefixBytes) {
+        return didi::ipc::FrameReadOutcome::read_failed;
+    }
+    const uint8_t header[didi::ipc::kFrameLengthPrefixBytes] = {frame[0], frame[1], frame[2],
+                                                                frame[3]};
+    BufferedFrameSource source{&frame, didi::ipc::kFrameLengthPrefixBytes, 0};
+    const auto outcome = didi::ipc::readFramePayload(didi::ipc::decodeFrameLength(header), maximum,
+                                                     payload, std::ref(source));
+    if (payload_read) *payload_read = source.offset - didi::ipc::kFrameLengthPrefixBytes;
+    return outcome;
+}
+
 static void test_ipc_framing() {
     didi::json msg = {{"test", 123}, {"str", "hello world"}};
     auto frame = didi::ipc::frameMessage(msg);
     ASSERT_TRUE(frame.size() > 4);
 
-    size_t consumed = 0;
-    auto parsed = didi::ipc::parseFramedMessage(frame.data(), frame.size(), consumed);
-    ASSERT_TRUE(parsed.has_value());
-    ASSERT_EQ(consumed, frame.size());
-    ASSERT_EQ((*parsed)["test"].get<int>(), 123);
-    ASSERT_EQ((*parsed)["str"].get<std::string>(), "hello world");
+    std::vector<char> payload;
+    size_t payload_read = 0;
+    ASSERT_TRUE(readWholeFrame(frame, payload, &payload_read) ==
+                didi::ipc::FrameReadOutcome::completed);
+    ASSERT_EQ(payload_read, frame.size() - didi::ipc::kFrameLengthPrefixBytes);
+
+    const auto parsed = didi::json::parse(payload.begin(), payload.end());
+    ASSERT_EQ(parsed["test"].get<int>(), 123);
+    ASSERT_EQ(parsed["str"].get<std::string>(), "hello world");
 }
 
 // Everything above round-trips a frame this code wrote itself, which is the
-// only shape the decoder was ever tested against. A decoder is defined by what
-// it does with input it did not write.
+// only shape a decoder is ever safe against by accident. A decoder is defined
+// by what it does with input it did not write.
+//
+// These used to drive didi::ipc::parseFramedMessage, a second decoder in the
+// same header that no shipping path called (#882). They drive the reader both
+// transports actually use now, so what they pin is what runs.
 static void test_ipc_framing_rejects_hostile_lengths() {
-    size_t consumed = 12345;
-
-    // The length field is attacker-controlled and four bytes wide. Written as
-    // `4 + len`, the bounds check was 32-bit unsigned arithmetic: 0xFFFFFFFC
-    // plus 4 is 0, so the guard passed for any buffer and a four-gigabyte
-    // std::string was constructed from eight bytes. It segfaulted.
+    // The length field is attacker-controlled and four bytes wide. A reader
+    // that trusts it allocates from it; this one buys a read with it, so a
+    // claim near UINT32_MAX costs one chunk and then fails for want of bytes.
     for (uint32_t hostile : {0xFFFFFFFFu, 0xFFFFFFFCu, 0xFFFFFFFDu, 0x80000000u, 0x7FFFFFFFu}) {
         std::vector<uint8_t> frame = {
             static_cast<uint8_t>(hostile & 0xFF),
@@ -229,62 +273,135 @@ static void test_ipc_framing_rejects_hostile_lengths() {
             static_cast<uint8_t>((hostile >> 24) & 0xFF),
             'n', 'u', 'l', 'l',
         };
-        consumed = 12345;
-        auto parsed = didi::ipc::parseFramedMessage(frame.data(), frame.size(), consumed);
-        ASSERT_TRUE(!parsed.has_value());
-        ASSERT_EQ(consumed, 0u);
+        std::vector<char> payload;
+        size_t payload_read = 0;
+        const auto outcome = readWholeFrame(frame, payload, &payload_read);
+        ASSERT_TRUE(outcome != didi::ipc::FrameReadOutcome::completed);
+        ASSERT_EQ(payload_read, 0u);
+        // Every one of these is past kMaximumFrameBytes, so it never reaches a
+        // read and never reserves anything.
+        ASSERT_TRUE(outcome == didi::ipc::FrameReadOutcome::rejected);
+        ASSERT_EQ(payload.capacity(), 0u);
+    }
+
+    // A claim inside the maximum that never arrives. This is the slowloris
+    // shape, and the assertion is the point of the whole growth policy: the
+    // claim buys one chunk, not the claim.
+    {
+        const uint32_t claim = didi::ipc::kMaximumFrameBytes;
+        std::vector<uint8_t> frame = {
+            static_cast<uint8_t>(claim & 0xFF),
+            static_cast<uint8_t>((claim >> 8) & 0xFF),
+            static_cast<uint8_t>((claim >> 16) & 0xFF),
+            static_cast<uint8_t>((claim >> 24) & 0xFF),
+        };
+        std::vector<char> payload;
+        ASSERT_TRUE(readWholeFrame(frame, payload) == didi::ipc::FrameReadOutcome::read_failed);
+        ASSERT_TRUE(payload.capacity() <= didi::ipc::kFrameReadChunkBytes);
     }
 
     // A header that promises one more byte than arrived.
     {
         std::vector<uint8_t> frame = {0x05, 0x00, 0x00, 0x00, '1', '2', '3', '4'};
-        consumed = 12345;
-        auto parsed = didi::ipc::parseFramedMessage(frame.data(), frame.size(), consumed);
-        ASSERT_TRUE(!parsed.has_value());
-        ASSERT_EQ(consumed, 0u);
+        std::vector<char> payload;
+        size_t payload_read = 0;
+        ASSERT_TRUE(readWholeFrame(frame, payload, &payload_read) ==
+                    didi::ipc::FrameReadOutcome::read_failed);
+        // A short read is a failed read, so the four bytes that did arrive are
+        // not handed on as if they were a frame.
+        ASSERT_EQ(payload_read, 0u);
     }
 
-    // Shorter than the header itself, including empty.
-    for (size_t prefix = 0; prefix < 4; ++prefix) {
-        std::vector<uint8_t> frame(prefix, 0xFF);
-        consumed = 12345;
-        auto parsed = didi::ipc::parseFramedMessage(frame.data(), frame.size(), consumed);
-        ASSERT_TRUE(!parsed.has_value());
-        ASSERT_EQ(consumed, 0u);
-    }
-
-    // Well formed but not JSON: rejected without consuming, so a caller cannot
-    // be walked past the end of its own buffer by a bad payload.
-    {
-        std::vector<uint8_t> frame = {0x03, 0x00, 0x00, 0x00, '{', '{', '{'};
-        consumed = 12345;
-        auto parsed = didi::ipc::parseFramedMessage(frame.data(), frame.size(), consumed);
-        ASSERT_TRUE(!parsed.has_value());
-    }
-
-    // A zero-length frame is a complete header describing no payload.
+    // A zero-length frame is a complete header describing no payload, and no
+    // payload is not a frame.
     {
         std::vector<uint8_t> frame = {0x00, 0x00, 0x00, 0x00};
-        consumed = 12345;
-        auto parsed = didi::ipc::parseFramedMessage(frame.data(), frame.size(), consumed);
-        ASSERT_TRUE(!parsed.has_value());
+        std::vector<char> payload;
+        ASSERT_TRUE(readWholeFrame(frame, payload) == didi::ipc::FrameReadOutcome::rejected);
     }
 
-    // The exact-fit and trailing-bytes cases still work: a fix that simply
-    // rejected everything would pass every assertion above.
+    // One past the caller's maximum is refused; the maximum itself is not. The
+    // handshake cap is the caller that relies on this.
+    {
+        const uint32_t cap = 64u * 1024u;
+        for (uint32_t claim : {cap, cap + 1u}) {
+            std::vector<uint8_t> frame = {
+                static_cast<uint8_t>(claim & 0xFF),
+                static_cast<uint8_t>((claim >> 8) & 0xFF),
+                static_cast<uint8_t>((claim >> 16) & 0xFF),
+                static_cast<uint8_t>((claim >> 24) & 0xFF),
+            };
+            std::vector<char> payload;
+            const auto outcome = readWholeFrame(frame, payload, nullptr, cap);
+            ASSERT_TRUE(outcome == (claim > cap ? didi::ipc::FrameReadOutcome::rejected
+                                                : didi::ipc::FrameReadOutcome::read_failed));
+        }
+    }
+
+    // A payload that is not JSON is still a complete frame. readFramePayload
+    // hands bytes back and says nothing about them; deciding they are rubbish
+    // is the caller's job, and both transports answer it with a 400 rather
+    // than dropping the connection.
+    {
+        std::vector<uint8_t> frame = {0x03, 0x00, 0x00, 0x00, '{', '{', '{'};
+        std::vector<char> payload;
+        size_t payload_read = 0;
+        ASSERT_TRUE(readWholeFrame(frame, payload, &payload_read) ==
+                    didi::ipc::FrameReadOutcome::completed);
+        ASSERT_EQ(payload_read, 3u);
+        ASSERT_EQ(payload.size(), 3u);
+    }
+
+    // Exact fit and trailing bytes still work: a fix that simply rejected
+    // everything would pass every assertion above.
     {
         auto frame = didi::ipc::frameMessage(didi::json{{"ok", true}});
-        consumed = 0;
-        auto parsed = didi::ipc::parseFramedMessage(frame.data(), frame.size(), consumed);
-        ASSERT_TRUE(parsed.has_value());
-        ASSERT_EQ(consumed, frame.size());
+        const size_t exact = frame.size() - didi::ipc::kFrameLengthPrefixBytes;
+        std::vector<char> payload;
+        size_t payload_read = 0;
+        ASSERT_TRUE(readWholeFrame(frame, payload, &payload_read) ==
+                    didi::ipc::FrameReadOutcome::completed);
+        ASSERT_EQ(payload_read, exact);
 
+        // A trailing byte is the next frame's business, not this one's.
         frame.push_back('X');
-        consumed = 0;
-        auto with_trailer = didi::ipc::parseFramedMessage(frame.data(), frame.size(), consumed);
-        ASSERT_TRUE(with_trailer.has_value());
-        ASSERT_EQ(consumed, frame.size() - 1);
+        payload.clear();
+        payload_read = 0;
+        ASSERT_TRUE(readWholeFrame(frame, payload, &payload_read) ==
+                    didi::ipc::FrameReadOutcome::completed);
+        ASSERT_EQ(payload_read, exact);
     }
+}
+
+// A frame larger than one chunk is read in chunk-sized pieces and never in one
+// go, whatever the claim says. This is the invariant the four transport call
+// sites share, and it used to be written out four times.
+static void test_ipc_framing_never_reads_more_than_one_chunk() {
+    const size_t payload_bytes = didi::ipc::kFrameReadChunkBytes * 2 + 37;
+    std::vector<uint8_t> frame(didi::ipc::kFrameLengthPrefixBytes + payload_bytes);
+    const uint32_t claim = static_cast<uint32_t>(payload_bytes);
+    frame[0] = static_cast<uint8_t>(claim & 0xFF);
+    frame[1] = static_cast<uint8_t>((claim >> 8) & 0xFF);
+    frame[2] = static_cast<uint8_t>((claim >> 16) & 0xFF);
+    frame[3] = static_cast<uint8_t>((claim >> 24) & 0xFF);
+    for (size_t index = 0; index < payload_bytes; ++index) {
+        frame[didi::ipc::kFrameLengthPrefixBytes + index] = static_cast<uint8_t>('a' + index % 26);
+    }
+
+    const uint8_t header[didi::ipc::kFrameLengthPrefixBytes] = {frame[0], frame[1], frame[2],
+                                                                frame[3]};
+    BufferedFrameSource source{&frame, didi::ipc::kFrameLengthPrefixBytes, 0};
+    std::vector<char> payload;
+    const auto outcome = didi::ipc::readFramePayload(didi::ipc::decodeFrameLength(header),
+                                                     didi::ipc::kMaximumFrameBytes, payload,
+                                                     std::ref(source));
+
+    ASSERT_TRUE(outcome == didi::ipc::FrameReadOutcome::completed);
+    ASSERT_EQ(payload.size(), payload_bytes);
+    ASSERT_EQ(source.largest_request, static_cast<size_t>(didi::ipc::kFrameReadChunkBytes));
+    // The last read is the short one, so an off-by-one in the loop shows up
+    // rather than cancelling out.
+    ASSERT_EQ(payload.back(), static_cast<char>('a' + (payload_bytes - 1) % 26));
 }
 
 static void test_ipc_client_server_roundtrip() {
@@ -1278,6 +1395,53 @@ static void test_posix_client_rejects_mismatched_response_id() {
 #endif
 
 #if !defined(_WIN32)
+// The other half of kServerFrameTimeoutMs, which had a test on the Windows
+// side and nothing here (#881). The bound is 5000 ms on this transport, for
+// the reason written beside the constant, so this pins it from both sides: a
+// started frame that stalls is still held well after the Windows bound would
+// have dropped it, and is gone by the time this one has.
+//
+// What it does not prove is that the payload got a deadline of its own rather
+// than sharing the header's idle window, because on this transport those two
+// numbers are the same. IPC.SplitRequestAcrossIdleDeadline is what covers
+// that, and it covers it by arriving on the far side of the window.
+static void test_posix_server_drops_a_stalled_frame_payload() {
+    const auto path = rawSocketPath("server-frame-deadline");
+    auto server = didi::ipc::createIpcServer();
+    ASSERT_TRUE(server->start(path));
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+    const int peer = socket(AF_UNIX, SOCK_STREAM, 0);
+    ASSERT_TRUE(peer >= 0);
+    sockaddr_un address{};
+    address.sun_family = AF_UNIX;
+    ASSERT_TRUE(path.size() < sizeof(address.sun_path));
+    std::copy(path.begin(), path.end(), address.sun_path);
+    ASSERT_TRUE(connect(peer, reinterpret_cast<sockaddr*>(&address), sizeof(address)) == 0);
+
+    // A complete header claiming 4 KiB, then silence.
+    const std::array<uint8_t, 4> header{0x00, 0x10, 0x00, 0x00};
+    ASSERT_TRUE(rawWriteExact(peer, header.data(), header.size()));
+
+    // Still held at 3000. A bound cut to the Windows number fails here, which
+    // is what stops this transport being tightened on its own again.
+    std::this_thread::sleep_for(std::chrono::milliseconds(3000));
+    uint8_t drained = 0;
+    const bool still_held = recv(peer, &drained, 1, MSG_DONTWAIT) < 0;
+
+    // Gone by 6500. A bound that stopped working at all fails here. The margin
+    // over 5000 is deliberately wide: a shared runner that is slow to schedule
+    // the accept thread moves when the deadline starts, not how long it is.
+    std::this_thread::sleep_for(std::chrono::milliseconds(3500));
+    const bool server_hung_up = recv(peer, &drained, 1, MSG_DONTWAIT) == 0;
+
+    close(peer);
+    server->stop();
+    unlink(path.c_str());
+    ASSERT_TRUE(still_held);
+    ASSERT_TRUE(server_hung_up);
+}
+
 static void test_posix_socket_is_owner_only_before_it_listens() {
     // Break caught: bind created the socket at 0777 & ~umask, commonly 0755, and
     // the old order was bind, listen, then chmod. The endpoint was accepting
@@ -1761,6 +1925,8 @@ struct RegisterIpcTests {
         registerTest("IPC.EndpointPathLimitReported",
                      test_endpoint_path_limit_is_reported_rather_than_returned_false);
         registerTest("IPC.Framing", test_ipc_framing);
+        registerTest("IPC.FramingNeverReadsMoreThanOneChunk",
+                     test_ipc_framing_never_reads_more_than_one_chunk);
         registerTest("IPC.FramingRejectsHostileLengths",
                      test_ipc_framing_rejects_hostile_lengths);
         registerTest("IPC.ClientServerRoundtrip", test_ipc_client_server_roundtrip);
@@ -1805,6 +1971,7 @@ struct RegisterIpcTests {
         registerTest("IPC.PosixReconnectSharesDeadline", test_posix_reconnect_and_io_share_request_deadline);
         registerTest("IPC.PosixQueuedIoDeadline", test_posix_expired_deadline_rejects_synchronous_io);
         registerTest("IPC.PosixResponseIdCorrelation", test_posix_client_rejects_mismatched_response_id);
+        registerTest("IPC.PosixServerFrameDeadline", test_posix_server_drops_a_stalled_frame_payload);
         registerTest("IPC.PosixSocketIsOwnerOnly", test_posix_socket_is_owner_only_before_it_listens);
         registerTest("IPC.PosixDescriptorExhaustionBacksOff", test_descriptor_exhaustion_does_not_spin_every_slot);
         registerTest("IPC.PosixStopOwnsItsDescriptors", test_posix_stop_owns_the_descriptors_it_closes);

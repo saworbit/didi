@@ -1,5 +1,6 @@
 #include "didi/common/ipc_channel.hpp"
 #include "didi/common/logger.hpp"
+#include "didi/common/protocol.hpp"
 #include <thread>
 #include <mutex>
 #include <condition_variable>
@@ -40,18 +41,45 @@ namespace {
 // a request the engine never saw. That is the one failure it cannot tell from a
 // request that ran. Two independently chosen numbers in two processes is how
 // that comes back, so both come from here and the margin is asserted.
+//
+// kServerFrameTimeoutMs is the third of the set and lives here for the same
+// reason. It bounds a frame that has already started arriving, which is a
+// different question from recycling a connection that never started one, but
+// it is the same quantity being spent: how long one peer may hold a slot
+// without finishing anything. #881 read the two branches side by side, saw
+// 1000 against 5000 under two copies of one comment, and called it drift left
+// behind by 8b598f1. Read next to the recycle window it is not drift: both
+// numbers are 1000 on Windows and 5000 on POSIX, and they have always moved
+// together. Making the frame deadline one number on both transports was tried
+// first and IPC.SplitRequestAcrossIdleDeadline caught it, which is the whole
+// point of that test: a POSIX client is allowed to split a request across an
+// idle window five times the Windows one, and its body still has to land
+// inside a frame deadline. Cut the deadline without cutting the window and a
+// request that was legitimately split is dropped.
+//
+// So they differ, for the reason the recycle window differs, and they sit
+// together so the next change to one is made next to the other rather than
+// under a copy of a comment that does not mention it.
 #if defined(_WIN32)
 constexpr int kServerIdleRecycleMs = 1000;
 constexpr int kClientIdleReuseMs = 300;
+constexpr int kServerFrameTimeoutMs = 1000;
 #else
 // A Unix socket keeps a listen backlog the kernel fills whether or not the
 // server has accepted, so a POSIX client is never refused outright and this
-// side can afford a longer window. Its frame timings are already built on it.
+// side can afford a longer window, and the frame deadline built on it is
+// longer by the same factor.
 constexpr int kServerIdleRecycleMs = 5000;
 constexpr int kClientIdleReuseMs = 1500;
+constexpr int kServerFrameTimeoutMs = 5000;
 #endif
 static_assert(kClientIdleReuseMs * 3 <= kServerIdleRecycleMs,
               "a client must stop reusing a connection well before a server recycles it");
+// What IPC.SplitRequestAcrossIdleDeadline needs in order to be writable at
+// all: a request split across the recycle window has to have somewhere to land
+// on the far side of it.
+static_assert(kServerFrameTimeoutMs >= kServerIdleRecycleMs,
+              "a frame that starts as the idle window closes must still have time to arrive");
 
 // How many connections a server listens on and serves at the same time.
 //
@@ -63,28 +91,20 @@ static_assert(kClientIdleReuseMs * 3 <= kServerIdleRecycleMs,
 // still here for, and keeps the cost at four idle threads.
 constexpr size_t kServerConnectionSlots = 4;
 
+// A response is the answer to a request the handler has already run. Giving up
+// on writing it back throws that work away and leaves the caller unable to tell
+// what happened, and a response larger than the pipe buffer needs the client to
+// drain it, so this is not a frame arrival deadline and does not share one.
+constexpr int kServerResponseTimeoutMs = 5000;
+// A handshake response is answered before a session exists, so it is capped
+// well below kMaximumFrameBytes.
+constexpr uint32_t kMaximumHandshakeResponseBytes = 64U * 1024U;
+
 std::atomic<int> g_serverIdleRecycleMs{kServerIdleRecycleMs};
 std::atomic<int> g_clientIdleReuseMs{kClientIdleReuseMs};
 
 int serverIdleRecycleMs() { return g_serverIdleRecycleMs.load(std::memory_order_relaxed); }
 int clientIdleReuseMs() { return g_clientIdleReuseMs.load(std::memory_order_relaxed); }
-
-// Makes room for the next chunk of a frame that is still arriving, without
-// letting the buffer get ahead of the frame by more than the growth needs.
-// Doubling on its own overshoots -- growing 128 MiB in 64 KiB steps ends with
-// 193 MiB of capacity -- which would have made a frame somebody actually sends
-// cost half as much again as allocating it outright. Capacity is capped at the
-// frame, so a completed frame peaks exactly where it used to and a frame that
-// is claimed and never sent peaks at one chunk.
-void growFrameBuffer(std::vector<char>& buffer, size_t filled, size_t want, size_t frame_bytes) {
-    const size_t needed = filled + want;
-    if (buffer.capacity() < needed) {
-        size_t next = buffer.capacity() < needed / 2 ? needed : buffer.capacity() * 2;
-        if (next > frame_bytes) next = frame_bytes;
-        buffer.reserve(next);
-    }
-    buffer.resize(needed);
-}
 
 } // namespace
 
@@ -114,31 +134,6 @@ void clearIdleRecycleOverridesForTesting() {
 
 namespace {
 
-// The largest frame either side will read. This used to set the server's peak
-// allocation on its own, because a slot allocated the claimed length before a
-// byte of the payload had arrived and before the handler reached
-// SessionHost::authorize. Four slots (#873) made that peak four times what it
-// had been. The server now grows a payload as it arrives, in
-// kFrameReadChunkBytes steps, so this bounds what a frame may legitimately be
-// rather than what an unauthenticated claim costs.
-constexpr uint32_t kMaximumFrameBytes = 128U * 1024U * 1024U;
-// How much of a frame the server commits ahead of the bytes that justify it. A
-// length prefix is written by whoever connected and is read before anything has
-// been authorised, so it buys a read rather than a buffer: a claim of
-// kMaximumFrameBytes followed by silence costs one chunk per slot instead of
-// 128 MiB per slot. 64 KiB is the pipe buffer size, so a real frame still
-// arrives in whole buffers.
-constexpr uint32_t kFrameReadChunkBytes = 64U * 1024U;
-constexpr uint32_t kMaximumHandshakeResponseBytes = 64U * 1024U;
-// Bounds a frame that has already started arriving. Recycling an idle
-// connection is a different question with a different number; see
-// kServerIdleRecycleMs.
-constexpr int kServerFrameTimeoutMs = 1000;
-// A response is the answer to a request the handler has already run. Giving up
-// on writing it back throws that work away and leaves the caller unable to tell
-// what happened, and a response larger than the pipe buffer needs the client to
-// drain it, so this is not a frame arrival deadline and does not share one.
-constexpr int kServerResponseTimeoutMs = 5000;
 // How long a cancelled overlapped operation gets to settle before we start
 // complaining. Cancellation is near-instant whenever it can happen at all.
 constexpr DWORD kCancelSettleMs = 250;
@@ -458,22 +453,32 @@ public:
                               transportReasonFor(header_result), waited_since());
         }
 
-        uint32_t resp_len = static_cast<uint32_t>(len_buf[0]) |
-                           (static_cast<uint32_t>(len_buf[1]) << 8) |
-                           (static_cast<uint32_t>(len_buf[2]) << 16) |
-                           (static_cast<uint32_t>(len_buf[3]) << 24);
-
+        const uint32_t resp_len = decodeFrameLength(len_buf);
         const uint32_t maximum_response = method == "session.handshake"
             ? kMaximumHandshakeResponseBytes
             : kMaximumFrameBytes;
-        if (resp_len == 0 || resp_len > maximum_response) {
+
+        // Grown as it arrives, the same way the server reads a request. The
+        // trust direction is the other way -- this is a response to a request
+        // this client sent, over a connection it opened -- so this is not the
+        // pre-authentication surface the server read is. It is the same file,
+        // though, and a length prefix that has not been justified by arrival
+        // should not cost more at one end of it than the other (#880). The
+        // deadline is still the request's, one for the whole payload, exactly
+        // as it was when this was a single read.
+        std::vector<char> resp_payload;
+        ExactIoResult payload_result{};
+        const auto payload_outcome = readFramePayload(
+            resp_len, maximum_response, resp_payload,
+            [&](char* destination, uint32_t bytes) {
+                payload_result = readExactOverlapped(m_pipe, destination, bytes, io_event.get(),
+                                                     nullptr, deadline);
+                return payload_result.status == ExactIoStatus::completed;
+            });
+        if (payload_outcome == FrameReadOutcome::rejected) {
             return failLocked("Invalid response payload size from IPC pipe", true, true, false);
         }
-
-        std::vector<char> resp_payload(resp_len);
-        const auto payload_result = readExactOverlapped(
-            m_pipe, resp_payload.data(), resp_payload.size(), io_event.get(), nullptr, deadline);
-        if (payload_result.status != ExactIoStatus::completed) {
+        if (payload_outcome != FrameReadOutcome::completed) {
             return failLocked(transportMessageFor(payload_result, "reading the response payload"),
                               true, true, payload_result.status == ExactIoStatus::timed_out,
                               transportReasonFor(payload_result), waited_since());
@@ -869,39 +874,25 @@ private:
                     break; // Disconnected or stop requested
                 }
 
-                uint32_t req_len = static_cast<uint32_t>(len_buf[0]) |
-                                  (static_cast<uint32_t>(len_buf[1]) << 8) |
-                                  (static_cast<uint32_t>(len_buf[2]) << 16) |
-                                  (static_cast<uint32_t>(len_buf[3]) << 24);
-
-                if (req_len == 0 || req_len > kMaximumFrameBytes) {
-                    break;
-                }
+                const uint32_t req_len = decodeFrameLength(len_buf);
 
                 // A deadline of its own, starting now. Sharing the idle
                 // deadline meant a header that arrived late in the idle window
                 // left almost no time for its payload, so a request that was
                 // fully sent was dropped and the client saw its response read
                 // fail. The frame timeout is meant to bound a frame once it has
-                // started, not to run from before it did.
+                // started, not to run from before it did. One deadline still
+                // covers the whole payload, so a slow trickle is dropped
+                // exactly where it was before.
                 const auto payload_deadline = win32DeadlineAfter(kServerFrameTimeoutMs);
-                // Grown as it arrives rather than allocated from the claim. One
-                // deadline still covers the whole payload, so a slow trickle is
-                // dropped exactly where it was before.
                 std::vector<char> req_payload;
-                bool payload_complete = true;
-                for (uint32_t filled = 0; filled < req_len;) {
-                    const uint32_t want = (std::min)(kFrameReadChunkBytes, req_len - filled);
-                    growFrameBuffer(req_payload, filled, want, req_len);
-                    if (readExactOverlapped(pipe, req_payload.data() + filled, want, hIoEvent,
-                                            m_stopEvent, payload_deadline).status !=
-                        ExactIoStatus::completed) {
-                        payload_complete = false;
-                        break;
-                    }
-                    filled += want;
-                }
-                if (!payload_complete) {
+                if (readFramePayload(req_len, kMaximumFrameBytes, req_payload,
+                                     [&](char* destination, uint32_t bytes) {
+                                         return readExactOverlapped(pipe, destination, bytes,
+                                                                    hIoEvent, m_stopEvent,
+                                                                    payload_deadline)
+                                                    .status == ExactIoStatus::completed;
+                                     }) != FrameReadOutcome::completed) {
                     break;
                 }
 
@@ -1020,29 +1011,6 @@ private:
 // POSIX Domain Socket implementation
 namespace {
 
-// The largest frame either side will read. This used to set the server's peak
-// allocation on its own, because a slot allocated the claimed length before a
-// byte of the payload had arrived and before the handler reached
-// SessionHost::authorize. Four slots (#873) made that peak four times what it
-// had been. The server now grows a payload as it arrives, in
-// kFrameReadChunkBytes steps, so this bounds what a frame may legitimately be
-// rather than what an unauthenticated claim costs.
-constexpr uint32_t kMaximumFrameBytes = 128U * 1024U * 1024U;
-// How much of a frame the server commits ahead of the bytes that justify it. A
-// length prefix is written by whoever connected and is read before anything has
-// been authorised, so it buys a read rather than a buffer: a claim of
-// kMaximumFrameBytes followed by silence costs one chunk per slot instead of
-// 128 MiB per slot. 64 KiB is the pipe buffer size, so a real frame still
-// arrives in whole buffers.
-constexpr uint32_t kFrameReadChunkBytes = 64U * 1024U;
-constexpr uint32_t kMaximumHandshakeResponseBytes = 64U * 1024U;
-// Bounds a frame that has already started arriving. Recycling an idle
-// connection is a different question with a different number; see
-// kServerIdleRecycleMs.
-constexpr int kServerFrameTimeoutMs = 5000;
-// A response is the answer to a request the handler has already run; see the
-// Win32 branch above.
-constexpr int kServerResponseTimeoutMs = 5000;
 // How long a slot waits after an accept that failed for want of a file
 // descriptor. The connection stays queued, so without this the loop spins.
 constexpr int kAcceptBackoffMs = 200;
@@ -1215,13 +1183,6 @@ bool writeExact(int socket_fd,
     return offset == length;
 }
 
-uint32_t decodeFrameLength(const uint8_t (&header)[4]) {
-    return static_cast<uint32_t>(header[0]) |
-           (static_cast<uint32_t>(header[1]) << 8) |
-           (static_cast<uint32_t>(header[2]) << 16) |
-           (static_cast<uint32_t>(header[3]) << 24);
-}
-
 } // namespace
 
 class PosixIpcClient : public IIpcClient {
@@ -1311,13 +1272,18 @@ public:
             ? kMaximumHandshakeResponseBytes
             : kMaximumFrameBytes;
 
-        if (resp_len == 0 || resp_len > maximum_response) {
+        // Grown as it arrives, for the reason given on the Win32 branch.
+        std::vector<char> payload;
+        SocketIoCause payload_cause = SocketIoCause::none;
+        const auto payload_outcome = readFramePayload(
+            resp_len, maximum_response, payload,
+            [&](char* destination, uint32_t bytes) {
+                return readExact(m_sock, destination, bytes, deadline, nullptr, &payload_cause);
+            });
+        if (payload_outcome == FrameReadOutcome::rejected) {
             return failLocked("Invalid payload length from Unix socket", true, true, false);
         }
-
-        std::vector<char> payload(resp_len);
-        SocketIoCause payload_cause = SocketIoCause::none;
-        if (!readExact(m_sock, payload.data(), payload.size(), deadline, nullptr, &payload_cause)) {
+        if (payload_outcome != FrameReadOutcome::completed) {
             return failLocked(socketMessageFor(payload_cause, "reading the response payload"), true,
                               true, payload_cause == SocketIoCause::deadline,
                               socketCauseName(payload_cause), waited_since());
@@ -1615,27 +1581,18 @@ private:
                 if (!readExact(client, len_buf, sizeof(len_buf), idle_deadline, &m_running)) break;
 
                 const uint32_t req_len = decodeFrameLength(len_buf);
-                if (req_len == 0 || req_len > kMaximumFrameBytes) break;
 
                 // Its own deadline, starting now, for the reason given in the
                 // Win32 branch above.
                 const auto payload_deadline = deadlineAfter(kServerFrameTimeoutMs);
-                // Grown as it arrives rather than allocated from the claim; see
-                // kFrameReadChunkBytes. One deadline still covers the whole
-                // payload, so a slow trickle is dropped where it was before.
                 std::vector<char> payload;
-                bool payload_complete = true;
-                for (uint32_t filled = 0; filled < req_len;) {
-                    const uint32_t want = (std::min)(kFrameReadChunkBytes, req_len - filled);
-                    growFrameBuffer(payload, filled, want, req_len);
-                    if (!readExact(client, payload.data() + filled, want, payload_deadline,
-                                   &m_running)) {
-                        payload_complete = false;
-                        break;
-                    }
-                    filled += want;
+                if (readFramePayload(req_len, kMaximumFrameBytes, payload,
+                                     [&](char* destination, uint32_t bytes) {
+                                         return readExact(client, destination, bytes,
+                                                          payload_deadline, &m_running);
+                                     }) != FrameReadOutcome::completed) {
+                    break;
                 }
-                if (!payload_complete) break;
 
                 json resp_json;
                 json req_json;
