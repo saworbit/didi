@@ -15,6 +15,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <cerrno>
 #include <fcntl.h>
 #include <signal.h>
 #endif
@@ -710,6 +711,19 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
         return result;
     }
 
+    // Built before the fork. The child half of a fork in a threaded process may
+    // only make async-signal-safe calls, and building an argument list is not
+    // one of them. ManagedProcess allocates before it spawns for the same
+    // reason. The list is the same one both platforms already carry.
+    std::vector<std::string> args_list;
+    args_list.reserve(arguments.size() + 1);
+    args_list.push_back(godot_exe);
+    for (const auto& a : arguments) args_list.push_back(a);
+    std::vector<char*> c_args;
+    c_args.reserve(args_list.size() + 1);
+    for (const auto& a : args_list) c_args.push_back(const_cast<char*>(a.c_str()));
+    c_args.push_back(nullptr);
+
     pid_t pid = fork();
     if (pid < 0) {
         close(pipefd[0]);
@@ -721,6 +735,31 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
 
     if (pid == 0) {
         // Child process
+        if (detach) {
+            // The detached game needs an owner, and it cannot be this server.
+            // A single fork leaves it a child of a process that by definition
+            // never waits for it, so every detached game that ends stays in the
+            // process table as a zombie until the server itself exits (#786).
+            // Forking again and letting this middle process go immediately
+            // orphans the game, and an orphan is adopted and reaped by init.
+            //
+            // The pid the caller drives is the game's, so the middle process
+            // publishes it up the pipe before it exits. Nothing else is written
+            // to that pipe on this path: a detached run has no output to read.
+            // A game whose pid never reaches the caller is a game nobody can
+            // name, so a failed publish ends it rather than leaving it running.
+            const pid_t game = fork();
+            if (game != 0) {
+                const pid_t published = game < 0 ? 0 : game;
+                ssize_t written;
+                do {
+                    written = write(pipefd[1], &published, sizeof(published));
+                } while (written < 0 && errno == EINTR);
+                const bool told = written == static_cast<ssize_t>(sizeof(published));
+                if (game > 0 && !told) kill(game, SIGKILL);
+                _exit(game > 0 && told ? 0 : 127);
+            }
+        }
         // Its own process group, so the timeout path can signal the whole tree
         // rather than only the process this fork produced. Godot spawns
         // helpers; killing the parent alone orphans them.
@@ -743,16 +782,6 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
             close(pipefd[1]);
         }
 
-        std::vector<std::string> args_list;
-        args_list.push_back(godot_exe);
-        if (headless) args_list.push_back("--headless");
-        if (!scene_path.empty()) args_list.push_back(scene_path);
-        for (const auto& a : extra_args) args_list.push_back(a);
-
-        std::vector<char*> c_args;
-        for (const auto& a : args_list) c_args.push_back(const_cast<char*>(a.c_str()));
-        c_args.push_back(nullptr);
-
         execvp(godot_exe.c_str(), c_args.data());
         _exit(127);
     }
@@ -760,11 +789,29 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
     // Parent process
     close(pipefd[1]);
     if (detach) {
-        // No wait, no kill, no reap: the game is running and this call is done
-        // with it. It is in its own process group, so nothing here can take it
-        // down by accident either.
+        // No kill and no wait on the game: it is running, it belongs to init
+        // now, and this call is done with it. It is in its own process group,
+        // so nothing here can take it down by accident either.
+        //
+        // The middle process is the one thing this does wait for, and it is
+        // already gone: it exits as soon as it has published the pid. Reading
+        // that pid cannot hang. There are three copies of the write end and
+        // all three close without waiting on anything: this one just above,
+        // the middle process when it exits, and the game before it execs.
+        pid_t game = 0;
+        ssize_t bytes;
+        do {
+            bytes = read(pipefd[0], &game, sizeof(game));
+        } while (bytes < 0 && errno == EINTR);
         close(pipefd[0]);
-        result.pid = static_cast<uint64_t>(pid);
+        while (waitpid(pid, nullptr, 0) < 0 && errno == EINTR) {
+        }
+        if (bytes != static_cast<ssize_t>(sizeof(game)) || game <= 0) {
+            result.success = false;
+            result.summary = "Failed to start the detached game";
+            return result;
+        }
+        result.pid = static_cast<uint64_t>(game);
         result.duration_seconds = std::chrono::duration<double>(
             std::chrono::steady_clock::now() - start_time).count();
         return result;
