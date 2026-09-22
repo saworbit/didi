@@ -1,6 +1,7 @@
 #include "didi/common/json_bounds.hpp"
 #include "didi/common/project_path.hpp"
 #include "didi/common/scene_node_path.hpp"
+#include "didi/gdextension/gdextension_ipc.hpp"
 #include "didi/gdextension/session_host.hpp"
 #include "didi/mcp/mutation_safety.hpp"
 #include "didi/mcp/tool_registry.hpp"
@@ -151,6 +152,39 @@ didi::mcp::MutationDecision evaluateBinding(didi::mcp::MutationSafety& safety,
 }
 
 } // namespace
+
+// The refusal the IPC handler answers an unauthorised peer with used to be
+// rebuilt from two of Error's three fields, so anything under `data` was
+// dropped on the way out (#890). Nothing was losing a code that day, which is
+// exactly why it needed pinning: the loss would have arrived with whichever
+// refusal grew one.
+TEST(Phase6, SessionRefusalKeepsTheStructuredHalf) {
+    const auto refusal = didi::godot::sessionRefusal(
+        didi::Error(403, "Runtime session token was rejected",
+                    {{"code", "session_token_rejected"}, {"retryable", false}}));
+
+    ASSERT_TRUE(refusal.contains("error"));
+    const auto& error = refusal["error"];
+    ASSERT_EQ(error["code"].get<int>(), 403);
+    ASSERT_EQ(error["message"].get<std::string>(), "Runtime session token was rejected");
+    ASSERT_TRUE(error.contains("data"));
+    ASSERT_EQ(error["data"]["code"].get<std::string>(), "session_token_rejected");
+    ASSERT_FALSE(error["data"]["retryable"].get<bool>());
+}
+
+// An Error with no data must produce no `data` key, not a null one. A null is
+// not the same as absent to the code that reads this: nlohmann's `value`
+// returns the stored null when the key is present, so
+// `error.value("data", json::object())` would hand back a null where it asked
+// for an object, and every reader of a live failure does exactly that.
+TEST(Phase6, SessionRefusalOmitsAbsentDataRatherThanNullingIt) {
+    const auto refusal = didi::godot::sessionRefusal(
+        didi::Error(503, "Runtime session host is not prepared"));
+
+    const auto& error = refusal["error"];
+    ASSERT_FALSE(error.contains("data"));
+    ASSERT_TRUE(error.value("data", didi::json::object()).is_object());
+}
 
 TEST(Phase6, ExplicitProjectRootRequiresGodotProject) {
     ScopedPhase6Directory directory("project-root");
