@@ -47,9 +47,17 @@ public:
     }
 
     static void success(const json& value) { require(!value.contains("error"), value.dump()); }
-    static void error(const json& value, int code, const std::string& message = {}) {
+
+    // The identifier a scenario pins is under `data.code`. It used to be the
+    // whole message, and this helper went on reading `message` for as long as
+    // nothing ran the probe: every call below that names an identifier was
+    // comparing it against a sentence written for a person, so the first one
+    // reached failed and took the rest of the run with it.
+    static void error(const json& value, int code, const std::string& identifier = {}) {
         require(value.contains("error") && value["error"].value("code", 0) == code, value.dump());
-        if (!message.empty()) require(value["error"].value("message", "") == message, value.dump());
+        if (identifier.empty()) return;
+        const json data = value.at("error").value("data", json::object());
+        require(data.value("code", "") == identifier, value.dump());
     }
 
     json list(const std::string& node) {
