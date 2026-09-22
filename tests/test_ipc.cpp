@@ -1303,27 +1303,31 @@ static void test_a_deadline_allows_for_the_wait_to_be_accepted() {
               didi::ipc::kWaitForDefinitiveResponse);
 }
 
-static void test_a_first_request_outlasts_the_window_it_arrived_in() {
-    // Break caught: a client that arrives while the server is still holding an
-    // idle connection is not refused. It connects, because the kernel takes it
-    // into the listen backlog and a named pipe hands out the next instance,
-    // and then it waits for the server to finish recycling before anything
-    // reads its request. A deadline shorter than that window gives up on a
-    // request that was always going to be answered.
+static void test_an_arriving_connection_is_read_while_another_sits_idle() {
+    // Break caught: both servers accepted one connection and only accepted the
+    // next after the one they held had gone idle, so the recycle window was an
+    // admission queue. A client arriving inside it connected -- the kernel
+    // takes it into the listen backlog, a named pipe hands out an instance
+    // when one comes free -- and then waited for the previous connection to go
+    // quiet before anything read its request. That is why every deadline that
+    // might cross a new connection had to carry the window (#782, #872), and
+    // #873 is the layer under all of it.
     //
-    // That is #782 in miniature: the attach handshake allowed a flat 3000 ms,
-    // over the Windows window of 1000 and under the POSIX window of 5000, so
-    // the runtime_attach_session that runtime_launch --detach documents failed
-    // on macOS and Linux and passed on Windows. The neighbouring test sleeps
-    // the window out before the second client arrives; this one arrives inside
-    // it, which is the case that was never covered.
+    // Both halves are asserted, because the number of slots is the claim. A
+    // client arriving while one connection sits idle is answered well inside
+    // the window. A client arriving when every slot is held is not, which is
+    // what the recycle window and withAcceptAllowance are still for.
     //
-    // Both ends on purpose. Which call reports the refusal differs by
-    // transport, connect on Windows and the response read on POSIX, so what
-    // is asserted is that the exchange does not complete, not how it failed.
-    ScopedIdleRecycleOverride override_margin(600, 150);
-    constexpr int kImpatientMs = 200;
-    constexpr int kWorkMs = 600;
+    // The window is wide next to the impatient deadline on purpose. What the
+    // second half asserts is that nothing is listening, and that stops being
+    // true the moment the first holder's slot recycles, so taking the other
+    // slots has to finish well inside the window even on a loaded runner.
+    //
+    // Before #873 the first half failed on both transports, and which call
+    // reported it differed: connect on Windows, the response read on POSIX. So
+    // what is asserted is whether the exchange completes, not how it failed.
+    ScopedIdleRecycleOverride override_margin(2000, 500);
+    constexpr int kImpatientMs = 250;
 
     auto server = didi::ipc::createIpcServer();
     server->setHandler([](const didi::json& request) -> didi::json {
@@ -1337,29 +1341,46 @@ static void test_a_first_request_outlasts_the_window_it_arrived_in() {
 #endif
     ASSERT_TRUE(server->start(endpoint));
 
-    // One client takes the connection and goes quiet, the way an attached route
-    // does between calls. The server is now inside its recycle window.
-    auto holder = didi::ipc::createIpcClient();
-    ASSERT_TRUE(holder->connect(endpoint, 2000));
-    ASSERT_TRUE(holder->sendRequest("test.echo", {{"msg", "hold"}}).isOk());
+    const auto exchange_completes = [&](int deadline_ms, const char* message) {
+        auto client = didi::ipc::createIpcClient();
+        if (!client->connect(endpoint, deadline_ms)) return false;
+        const auto served = client->sendRequest("test.echo", {{"msg", message}}, deadline_ms);
+        const bool answered = served.isOk() &&
+                              served.value()["echo"]["msg"].get<std::string>() == message;
+        client->disconnect();
+        return answered;
+    };
 
-    auto impatient = didi::ipc::createIpcClient();
-    const bool impatient_connected = impatient->connect(endpoint, kImpatientMs);
-    const bool impatient_answered =
-        impatient_connected &&
-        impatient->sendRequest("test.echo", {{"msg", "impatient"}}, kImpatientMs).isOk();
-    ASSERT_TRUE(!impatient_answered);
-    impatient->disconnect();
+    // Connections that take a slot and go quiet, the way an attached route does
+    // between calls. Each one leaves its slot inside the recycle window.
+    std::vector<std::unique_ptr<didi::ipc::IIpcClient>> holders;
+    const int slots = didi::ipc::serverConnectionSlots();
+    ASSERT_TRUE(slots >= 2);
 
-    auto patient = didi::ipc::createIpcClient();
-    ASSERT_TRUE(patient->connect(endpoint, didi::ipc::withAcceptAllowance(kWorkMs)));
-    const auto served = patient->sendRequest("test.echo", {{"msg", "patient"}},
-                                             didi::ipc::withAcceptAllowance(kWorkMs));
-    ASSERT_TRUE(served.isOk());
-    ASSERT_EQ(served.value()["echo"]["msg"].get<std::string>(), "patient");
+    auto first_holder = didi::ipc::createIpcClient();
+    ASSERT_TRUE(first_holder->connect(endpoint, 2000));
+    ASSERT_TRUE(first_holder->sendRequest("test.echo", {{"msg", "hold"}}).isOk());
+    holders.push_back(std::move(first_holder));
 
-    patient->disconnect();
-    holder->disconnect();
+    // One slot busy, the rest free: read on arrival, on a deadline that would
+    // never have covered the window.
+    ASSERT_TRUE(exchange_completes(kImpatientMs, "arriving"));
+
+    // Now take every remaining slot and ask again. Nothing is listening, so the
+    // same impatient deadline has to give up.
+    for (int taken = 1; taken < slots; ++taken) {
+        auto holder = didi::ipc::createIpcClient();
+        ASSERT_TRUE(holder->connect(endpoint, 2000));
+        ASSERT_TRUE(holder->sendRequest("test.echo", {{"msg", "hold"}}).isOk());
+        holders.push_back(std::move(holder));
+    }
+    ASSERT_TRUE(!exchange_completes(kImpatientMs, "impatient"));
+
+    // And a deadline that does allow for a slot recycling is answered, which is
+    // the contract withAcceptAllowance still carries.
+    ASSERT_TRUE(exchange_completes(didi::ipc::withAcceptAllowance(400), "patient"));
+
+    for (auto& holder : holders) holder->disconnect();
     server->stop();
 }
 
@@ -1496,8 +1517,8 @@ struct RegisterIpcTests {
                      test_a_client_does_not_reuse_a_connection_the_server_may_be_recycling);
         registerTest("IPC.DeadlineAllowsForBeingAccepted",
                      test_a_deadline_allows_for_the_wait_to_be_accepted);
-        registerTest("IPC.FirstRequestOutlastsTheRecycleWindow",
-                     test_a_first_request_outlasts_the_window_it_arrived_in);
+        registerTest("IPC.ArrivingConnectionIsReadWhileAnotherIsIdle",
+                     test_an_arriving_connection_is_read_while_another_sits_idle);
         registerTest("IPC.NoTimeoutRoundtrip", test_ipc_negative_timeout_waits_for_definitive_response);
         registerTest("IPC.HandlerExceptionClassification", test_ipc_server_classifies_handler_exception_with_request_id);
 #if defined(_WIN32)
