@@ -1190,7 +1190,7 @@ Result<json> authenticateSession(const std::shared_ptr<ipc::IIpcClient>& client,
     if (!client) return Error::internal("Runtime IPC client factory returned no client");
     const json handshake_params = {{"_didi_session_token", descriptor.token},
                                    {"protocol_version", "1.3"}};
-    auto handshake = client->sendRequest("session.handshake", handshake_params,
+    auto handshake = client->sendRequest(ipc::kSessionHandshakeMethod, handshake_params,
                                          ipc::withAcceptAllowance(kSessionHandshakeWorkMs));
     if (handshake.isErr()) return handshake.error();
     auto expected = descriptor.toJson();

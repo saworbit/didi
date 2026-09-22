@@ -30,6 +30,20 @@ inline std::string resolvePipeName(const std::string& explicit_name = "") {
     return !explicit_name.empty() ? explicit_name : kDefaultPipeName;
 }
 
+// The one exchange that happens before a session exists, so the one method
+// name the transport itself has to recognise. A client caps a handshake
+// response at kMaximumHandshakeResponseBytes rather than kMaximumFrameBytes,
+// which is a bound two thousand times tighter chosen by comparing this string,
+// so the sender and the two readers spell it from here rather than each from
+// their own literal.
+//
+// This is the wire name, not a policy key. `livePolicyForMethod` in
+// session_kind_policy.hpp also matches "session.handshake", and deliberately
+// still does it with a literal: there it is one row of a table of two dozen
+// method names, and lifting one of them out would say it is special in a
+// table where it is not.
+inline constexpr const char* kSessionHandshakeMethod = "session.handshake";
+
 // Framing: a 4-byte little-endian length prefix, then that many bytes of JSON.
 //
 // Everything below is the one implementation of that rule. It used to exist

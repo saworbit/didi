@@ -87,7 +87,7 @@ bool GDExtensionIpc::start(const std::string& kind, const std::string& project_p
         std::string method = sanitized.value("method", "");
         json params = sanitized.value("params", json::object());
 
-        if (method == "session.handshake") {
+        if (method == ipc::kSessionHandshakeMethod) {
             auto response = handleSessionHandshake(params, *session);
             if (!response.contains("error")) {
                 DIDI_LOG_INFO("GDEXT_IPC", "Authenticated runtime session handshake completed");
