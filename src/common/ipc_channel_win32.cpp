@@ -454,7 +454,12 @@ public:
         }
 
         const uint32_t resp_len = decodeFrameLength(len_buf);
-        const uint32_t maximum_response = method == "session.handshake"
+        // A handshake is answered before a session exists, so its response is
+        // capped well below a frame's. IPC.Win32HandshakeCap and
+        // IPC.PosixHandshakeResponseCap hold this wired: both advertise 256 KiB
+        // on a handshake and require the refusal inside 180 ms, which only
+        // happens if this comparison picked the tighter bound.
+        const uint32_t maximum_response = method == kSessionHandshakeMethod
             ? kMaximumHandshakeResponseBytes
             : kMaximumFrameBytes;
 
@@ -1268,7 +1273,8 @@ public:
         }
 
         const uint32_t resp_len = decodeFrameLength(len_buf);
-        const uint32_t maximum_response = method == "session.handshake"
+        // Capped below a frame, for the reason given on the Win32 branch.
+        const uint32_t maximum_response = method == kSessionHandshakeMethod
             ? kMaximumHandshakeResponseBytes
             : kMaximumFrameBytes;
 
