@@ -57,6 +57,12 @@ int clientIdleReuseMs() { return g_clientIdleReuseMs.load(std::memory_order_rela
 
 } // namespace
 
+int withAcceptAllowance(int work_ms) {
+    // A call that waits for a definitive response has no deadline to extend.
+    if (work_ms < 0) return work_ms;
+    return work_ms + serverIdleRecycleMs();
+}
+
 namespace testing {
 
 void setIdleRecycleOverridesForTesting(int server_recycle_ms, int client_reuse_ms) {

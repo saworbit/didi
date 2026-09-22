@@ -1289,6 +1289,80 @@ static void test_a_client_does_not_reuse_a_connection_the_server_may_be_recyclin
     server->stop();
 }
 
+static void test_a_deadline_allows_for_the_wait_to_be_accepted() {
+    // The arithmetic on its own, because the two numbers live in one place on
+    // purpose and this is the margin between them. A flat number cannot be
+    // right on both transports: the window is 1000 ms on Windows and 5000 on
+    // POSIX, and the attach handshake's flat 3000 sat between them (#782).
+    ScopedIdleRecycleOverride override_margin(600, 150);
+    ASSERT_EQ(didi::ipc::withAcceptAllowance(400), 1000);
+    ASSERT_TRUE(didi::ipc::withAcceptAllowance(1) > 600);
+    // A call that waits for a definitive response has no deadline to extend,
+    // and turning one into a finite 600 would be the opposite of the contract.
+    ASSERT_EQ(didi::ipc::withAcceptAllowance(didi::ipc::kWaitForDefinitiveResponse),
+              didi::ipc::kWaitForDefinitiveResponse);
+}
+
+static void test_a_first_request_outlasts_the_window_it_arrived_in() {
+    // Break caught: a client that arrives while the server is still holding an
+    // idle connection is not refused. It connects, because the kernel takes it
+    // into the listen backlog and a named pipe hands out the next instance,
+    // and then it waits for the server to finish recycling before anything
+    // reads its request. A deadline shorter than that window gives up on a
+    // request that was always going to be answered.
+    //
+    // That is #782 in miniature: the attach handshake allowed a flat 3000 ms,
+    // over the Windows window of 1000 and under the POSIX window of 5000, so
+    // the runtime_attach_session that runtime_launch --detach documents failed
+    // on macOS and Linux and passed on Windows. The neighbouring test sleeps
+    // the window out before the second client arrives; this one arrives inside
+    // it, which is the case that was never covered.
+    //
+    // Both ends on purpose. Which call reports the refusal differs by
+    // transport, connect on Windows and the response read on POSIX, so what
+    // is asserted is that the exchange does not complete, not how it failed.
+    ScopedIdleRecycleOverride override_margin(600, 150);
+    constexpr int kImpatientMs = 200;
+    constexpr int kWorkMs = 600;
+
+    auto server = didi::ipc::createIpcServer();
+    server->setHandler([](const didi::json& request) -> didi::json {
+        return {{"echo", request.value("params", didi::json::object())}};
+    });
+
+#if defined(_WIN32)
+    const std::string endpoint = "\\\\.\\pipe\\godot_didi_ipc_accept_allowance_test";
+#else
+    const auto endpoint = rawSocketPath("accept-allowance");
+#endif
+    ASSERT_TRUE(server->start(endpoint));
+
+    // One client takes the connection and goes quiet, the way an attached route
+    // does between calls. The server is now inside its recycle window.
+    auto holder = didi::ipc::createIpcClient();
+    ASSERT_TRUE(holder->connect(endpoint, 2000));
+    ASSERT_TRUE(holder->sendRequest("test.echo", {{"msg", "hold"}}).isOk());
+
+    auto impatient = didi::ipc::createIpcClient();
+    const bool impatient_connected = impatient->connect(endpoint, kImpatientMs);
+    const bool impatient_answered =
+        impatient_connected &&
+        impatient->sendRequest("test.echo", {{"msg", "impatient"}}, kImpatientMs).isOk();
+    ASSERT_TRUE(!impatient_answered);
+    impatient->disconnect();
+
+    auto patient = didi::ipc::createIpcClient();
+    ASSERT_TRUE(patient->connect(endpoint, didi::ipc::withAcceptAllowance(kWorkMs)));
+    const auto served = patient->sendRequest("test.echo", {{"msg", "patient"}},
+                                             didi::ipc::withAcceptAllowance(kWorkMs));
+    ASSERT_TRUE(served.isOk());
+    ASSERT_EQ(served.value()["echo"]["msg"].get<std::string>(), "patient");
+
+    patient->disconnect();
+    holder->disconnect();
+    server->stop();
+}
+
 static void test_endpoint_path_limit_is_reported_rather_than_returned_false() {
     // Break caught: both ends answered a sun_path overflow with a bare
     // `return false`. The plugin reported itself active, no descriptor was
@@ -1420,6 +1494,10 @@ struct RegisterIpcTests {
                      test_a_client_connects_while_the_server_is_between_instances);
         registerTest("IPC.ClientReuseBudgetKeepsOffTheBoundary",
                      test_a_client_does_not_reuse_a_connection_the_server_may_be_recycling);
+        registerTest("IPC.DeadlineAllowsForBeingAccepted",
+                     test_a_deadline_allows_for_the_wait_to_be_accepted);
+        registerTest("IPC.FirstRequestOutlastsTheRecycleWindow",
+                     test_a_first_request_outlasts_the_window_it_arrived_in);
         registerTest("IPC.NoTimeoutRoundtrip", test_ipc_negative_timeout_waits_for_definitive_response);
         registerTest("IPC.HandlerExceptionClassification", test_ipc_server_classifies_handler_exception_with_request_id);
 #if defined(_WIN32)

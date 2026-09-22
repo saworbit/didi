@@ -474,7 +474,14 @@ public:
             if (!state_->handshake_signaled.exchange(true)) state_->handshake_entered.set_value();
             state_->handshake_release_future.wait();
         }
-        if (timeout_ms <= 0 || timeout_ms > 3000) {
+        // A handshake has to be bounded: an unbounded one hangs attach on an
+        // engine that never answers, which is the break this fake was written
+        // for. The ceiling is the work budget plus what being accepted costs,
+        // because a flat number here is one the server's own idle-recycle
+        // window can outlast, and on POSIX the flat 3000 did (#782).
+        constexpr int kHandshakeWorkCeilingMs = 3000;
+        if (timeout_ms <= 0 ||
+            timeout_ms > didi::ipc::withAcceptAllowance(kHandshakeWorkCeilingMs)) {
             return didi::Error(500, "Handshake did not use its bounded deadline");
         }
         const auto& descriptor = state_->by_endpoint.at(endpoint_);

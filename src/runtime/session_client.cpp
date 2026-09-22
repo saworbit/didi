@@ -291,7 +291,10 @@ Result<ProcessIdentity> queryProcessIdentity(uint64_t pid) {
 namespace {
 
 constexpr uintmax_t kMaxDescriptorBytes = 64 * 1024;
-constexpr int kSessionHandshakeTimeoutMs = 3000;
+// How long the handshake itself gets. What being accepted costs is added by
+// ipc::withAcceptAllowance, because a flat number here is one the server's own
+// recycle window can outlast (#782).
+constexpr int kSessionHandshakeWorkMs = 3000;
 
 #if defined(_WIN32)
 class ScopedNativeHandle {
@@ -1188,7 +1191,7 @@ Result<json> authenticateSession(const std::shared_ptr<ipc::IIpcClient>& client,
     const json handshake_params = {{"_didi_session_token", descriptor.token},
                                    {"protocol_version", "1.3"}};
     auto handshake = client->sendRequest("session.handshake", handshake_params,
-                                         kSessionHandshakeTimeoutMs);
+                                         ipc::withAcceptAllowance(kSessionHandshakeWorkMs));
     if (handshake.isErr()) return handshake.error();
     auto expected = descriptor.toJson();
     expected["status"] = "ok";

@@ -129,6 +129,26 @@ std::unique_ptr<IIpcServer> createIpcServer();
 // separate limit.
 std::optional<std::string> endpointPathRejection(const std::string& endpoint);
 
+// What a deadline has to allow for besides the work, on a request that may be
+// the first one on a connection the server has not accepted yet.
+//
+// A server serves one accepted connection at a time and only accepts the next
+// once the one it holds has been idle for its recycle window. A client
+// arriving in the meantime still connects, because the kernel takes it into
+// the listen backlog and a named pipe hands out the next instance, and then
+// waits with a request nothing has read. So a deadline chosen from how long
+// the work should take refuses a request that was always going to be answered,
+// and the platform with the longer recycle window is the one it happens on.
+//
+// That is #782. The attach handshake allowed a flat 3000 ms, which is over the
+// Windows window of 1000 and under the POSIX window of 5000, so the
+// runtime_attach_session that runtime_launch --detach documents failed on
+// macOS and Linux and passed on Windows. Call sites say how long the work
+// gets; this adds what being accepted costs, from the same place the window
+// itself is set. kWaitForDefinitiveResponse is returned unchanged, because a
+// call with no deadline has nothing to extend.
+int withAcceptAllowance(int work_ms);
+
 namespace testing {
 // Drives the idle-recycle contract in milliseconds instead of seconds, so a
 // test can sit on the boundary without taking seconds to do it, and can invert

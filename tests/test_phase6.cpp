@@ -61,6 +61,43 @@ private:
     bool connected{false};
 };
 
+// The same fake, keeping the one thing the handshake deadline is about.
+class RecordingHandshakeClient final : public didi::ipc::IIpcClient {
+public:
+    RecordingHandshakeClient(didi::runtime::SessionDescriptor descriptor, int& handshake_timeout_ms)
+        : descriptor(std::move(descriptor)), timeout(handshake_timeout_ms) {}
+    bool connect(const std::string& endpoint, int) override {
+        connected = endpoint == descriptor.endpoint;
+        return connected;
+    }
+    void disconnect() override { connected = false; }
+    bool isConnected() const override { return connected; }
+    didi::Result<didi::json> sendRequest(const std::string& method, const didi::json&,
+                                         int timeout_ms) override {
+        if (!connected) return didi::Error::notConnected();
+        if (method != "session.handshake") return didi::json::object();
+        timeout = timeout_ms;
+        auto response = descriptor.toJson();
+        response["status"] = "ok";
+        return response;
+    }
+
+private:
+    didi::runtime::SessionDescriptor descriptor;
+    int& timeout;
+    bool connected{false};
+};
+
+// Restores the shipped idle-recycle numbers however the test leaves.
+struct ScopedIdleRecycleOverride {
+    ScopedIdleRecycleOverride(int server_recycle_ms, int client_reuse_ms) {
+        didi::ipc::testing::setIdleRecycleOverridesForTesting(server_recycle_ms, client_reuse_ms);
+    }
+    ~ScopedIdleRecycleOverride() {
+        didi::ipc::testing::clearIdleRecycleOverridesForTesting();
+    }
+};
+
 class CountingMutationClient final : public didi::ipc::IIpcClient {
 public:
     bool connect(const std::string&, int) override { return true; }
@@ -236,6 +273,50 @@ TEST(Phase6, AttachRefusesASessionFromAnotherProjectUnlessAsked) {
     ASSERT_TRUE(attached.isOk());
     ASSERT_FALSE(attached.value().value("project_mismatch", false));
     matched->disconnect();
+}
+
+// Break caught: the attach handshake allowed a flat 3000 ms. A server serves
+// one accepted connection at a time and only accepts the next once the one it
+// holds has been idle for its recycle window, so a client arriving during that
+// window connects and then waits with a request nothing has read. 3000 is over
+// the Windows window of 1000 and under the POSIX window of 5000, so the
+// runtime_attach_session that runtime_launch --detach documents answered 504
+// with outcome_unknown on macOS and Linux and worked on Windows (#782).
+//
+// The window is set well over the old flat number here, so a deadline that
+// goes back to being chosen without reference to it fails this.
+TEST(Phase6, AttachGivesTheHandshakeTimeToBeAccepted) {
+    ScopedPhase6Directory directory("handshake-deadline");
+    const auto session_directory = directory.root / "sessions";
+    std::filesystem::create_directories(session_directory);
+#if defined(_WIN32)
+    _putenv_s("DIDI_SESSION_DIR", session_directory.string().c_str());
+#else
+    setenv("DIDI_SESSION_DIR", session_directory.string().c_str(), 1);
+#endif
+    didi::godot::SessionHost host;
+    ASSERT_TRUE(host.prepare("editor", directory.root.string()).isOk());
+    ASSERT_TRUE(host.publish().isOk());
+    const auto descriptor = host.descriptor();
+    ASSERT_TRUE(descriptor.has_value());
+
+    constexpr int kRecycleMs = 4000;
+    ScopedIdleRecycleOverride override_margin(kRecycleMs, 1000);
+    int handshake_timeout_ms = 0;
+    auto factory = [descriptor, &handshake_timeout_ms] {
+        return std::make_unique<RecordingHandshakeClient>(*descriptor, handshake_timeout_ms);
+    };
+    auto client = didi::runtime::createRuntimeSessionClient(directory.root.string(), factory);
+    ASSERT_TRUE(client->attachSession(descriptor->session_id).isOk());
+    ASSERT_TRUE(handshake_timeout_ms > kRecycleMs);
+
+    client->disconnect();
+    host.stop();
+#if defined(_WIN32)
+    _putenv_s("DIDI_SESSION_DIR", "");
+#else
+    unsetenv("DIDI_SESSION_DIR");
+#endif
 }
 
 TEST(Phase6, RuntimeSessionClientsEnforceOneOwnerAndRecoverAfterDetach) {
