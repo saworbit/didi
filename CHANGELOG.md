@@ -252,6 +252,19 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **An authorization refusal keeps its structured half.** The handler the
+  extension installs on the IPC server rebuilt a refusal from two of `Error`'s
+  three fields, so anything under `data` was dropped on the one path that
+  answers a peer whose token has not been accepted yet. Nothing was losing a
+  code the day it was found, which is the argument for fixing it rather than
+  against: #862 and #865 were both this shape at five other sites, and the loss
+  would have arrived with whichever refusal grew a `data.code` first. The
+  envelope is built from the whole `Error` now, and the 503 for a session host
+  that went away mid-call carries `session_host_unavailable` so a client can
+  branch on it. `data` is left out rather than written as null when there is
+  none, because `error.value("data", json::object())` returns the null when the
+  key is present, which is how every reader of a live failure asks. #890
+
 - **One frame reader, called from both ends of both transports.** Reading a
   length prefix a peer wrote existed five times: a decoder in
   `protocol.hpp`, and a client read and a server read on each of the two

@@ -25,6 +25,13 @@ void reportToEditor(const std::string& message) {
 
 } // namespace
 
+json sessionRefusal(const Error& error) {
+    json envelope = {{"code", error.code}, {"message", error.message}};
+    // Absent, not null. See the note on the declaration.
+    if (!error.data.is_null()) envelope["data"] = error.data;
+    return {{"error", std::move(envelope)}};
+}
+
 GDExtensionIpc& GDExtensionIpc::instance() {
     static GDExtensionIpc s_instance;
     return s_instance;
@@ -77,11 +84,15 @@ bool GDExtensionIpc::start(const std::string& kind, const std::string& project_p
     m_server->setHandler([this](const json& request) -> json {
         const auto authorized = m_sessionHost.authorize(request);
         if (authorized.isErr()) {
-            return {{"error", {{"code", authorized.error().code}, {"message", authorized.error().message}}}};
+            return sessionRefusal(authorized.error());
         }
         const auto session = m_sessionHost.descriptor();
         if (!session.has_value()) {
-            return {{"error", {{"code", 503}, {"message", "Runtime session host is unavailable"}}}};
+            // A descriptor that was there when the token was checked and gone
+            // by now is the host being stopped underneath this call, which is
+            // a state worth branching on rather than reading about.
+            return sessionRefusal(Error(503, "Runtime session host is unavailable",
+                                        {{"code", "session_host_unavailable"}}));
         }
         const auto& sanitized = authorized.value();
         std::string method = sanitized.value("method", "");
