@@ -24,7 +24,9 @@
 #if defined(_WIN32)
 #include <windows.h>
 #else
+#include <cerrno>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #endif
 
@@ -604,6 +606,66 @@ void test_exit_code_259_is_not_a_live_process() {
     // reads as still running.
     ASSERT_TRUE(read_exit_code);
     ASSERT_EQ(exit_code, static_cast<DWORD>(259));
+
+    ASSERT_TRUE(dead.isErr());
+    ASSERT_TRUE(report.state == didi::runtime::ProcessInstanceState::proven_stale);
+}
+#else
+// The POSIX twin of the case above. A child that has exited and has not been
+// reaped is a zombie, and every gate the identity query used to have clears
+// one: kill(pid, 0) succeeds, /proc/<pid>/stat is still readable with a full
+// starttime, and proc_pidinfo still answers. So the query returned an identity
+// for a corpse and the session descriptor behind it read as alive (#869).
+//
+// The child blocks on a pipe rather than sleeping, so the identity read below
+// happens while it is definitely running, and waitid with WNOWAIT waits for it
+// to exit without collecting it, which is what leaves the zombie to measure.
+void test_zombie_is_not_a_live_process() {
+    int gate[2] = {-1, -1};
+    if (pipe(gate) != 0) throw std::runtime_error("Failed to open the zombie child gate");
+    const pid_t child = fork();
+    if (child < 0) {
+        close(gate[0]);
+        close(gate[1]);
+        throw std::runtime_error("Failed to fork the zombie child process");
+    }
+    if (child == 0) {
+        close(gate[1]);
+        char ignored = 0;
+        while (read(gate[0], &ignored, 1) < 0 && errno == EINTR) {
+        }
+        _exit(0);
+    }
+    close(gate[0]);
+
+    // Read the identity while the child is blocked on the gate, so the start
+    // time this test later expects to be refused is one the query does produce.
+    const auto live = didi::runtime::queryProcessIdentity(static_cast<uint64_t>(child));
+    if (live.isErr()) {
+        close(gate[1]);
+        int discarded = 0;
+        waitpid(child, &discarded, 0);
+        throw std::runtime_error("The child process had no identity while it was running");
+    }
+    const int64_t started_at_ms = live.value().started_at_ms;
+
+    close(gate[1]);
+    siginfo_t exited{};
+    while (waitid(P_PID, static_cast<id_t>(child), &exited, WEXITED | WNOWAIT) != 0) {
+        if (errno == EINTR) continue;
+        int discarded = 0;
+        waitpid(child, &discarded, 0);
+        throw std::runtime_error("The child process did not exit");
+    }
+
+    const auto dead = didi::runtime::queryProcessIdentity(static_cast<uint64_t>(child));
+    const auto report = didi::runtime::describeProcessInstance(
+        static_cast<uint64_t>(child), started_at_ms);
+
+    // Collect it, so the suite does not leave a zombie of its own behind.
+    int status = 0;
+    while (waitpid(child, &status, 0) < 0 && errno == EINTR) {
+    }
 
     ASSERT_TRUE(dead.isErr());
     ASSERT_TRUE(report.state == didi::runtime::ProcessInstanceState::proven_stale);
@@ -2891,6 +2953,9 @@ struct RegisterRuntimeRoutingTests {
 #if defined(_WIN32)
         registerTest("RuntimeRouting.WindowsExit259IsNotAlive",
                      test_exit_code_259_is_not_a_live_process);
+#else
+        registerTest("RuntimeRouting.PosixZombieIsNotAlive",
+                     test_zombie_is_not_a_live_process);
 #endif
         registerTest("RuntimeRouting.LiveEnvelopeAndFiniteDeadline",
                      test_live_runtime_tools_return_session_envelopes_and_finite_deadlines);

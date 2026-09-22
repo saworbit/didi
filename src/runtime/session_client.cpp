@@ -53,6 +53,52 @@ std::filesystem::path absoluteLexicalPath(const std::filesystem::path& path) {
     return (error ? path : absolute).lexically_normal();
 }
 
+#if defined(__linux__)
+// proc(5) puts the state in field 3 of /proc/<pid>/stat, the first token after
+// the comm field's closing bracket. Z is a zombie, X and x are dead, and a
+// process in any of the three has exited.
+bool isExitedProcState(const std::string& state) {
+    return state == "Z" || state == "X" || state == "x";
+}
+#elif defined(__APPLE__)
+// SZOMB in XNU's bsd/sys/proc.h.
+constexpr unsigned kProcStatusZombie = 5;
+#endif
+
+#if !defined(_WIN32)
+// A pid that has exited and has not been reaped is still a pid. kill(pid, 0)
+// succeeds for it, /proc/<pid>/stat is still there with a full starttime, and
+// proc_pidinfo still answers, so not one of those is a liveness test. Windows
+// has refused a corpse since #287 because the wait handle is honest about one.
+// POSIX has to read the process state to give the same answer (#869).
+//
+// Only an exited process reads true. A state that could not be read reads
+// false, because this refuses a corpse rather than claiming a verdict the
+// platform did not give.
+bool posixProcessHasExited(uint64_t pid) {
+#if defined(__linux__)
+    std::ifstream stat("/proc/" + std::to_string(pid) + "/stat");
+    std::string line;
+    if (!std::getline(stat, line)) return false;
+    const auto command_end = line.rfind(')');
+    if (command_end == std::string::npos || command_end + 2 > line.size()) return false;
+    std::istringstream fields(line.substr(command_end + 2));
+    std::string state;
+    return static_cast<bool>(fields >> state) && isExitedProcState(state);
+#elif defined(__APPLE__)
+    proc_bsdinfo info{};
+    if (proc_pidinfo(static_cast<int>(pid), PROC_PIDTBSDINFO, 0,
+                     &info, sizeof(info)) != sizeof(info)) {
+        return false;
+    }
+    return info.pbi_status == kProcStatusZombie;
+#else
+    (void)pid;
+    return false;
+#endif
+}
+#endif
+
 } // namespace
 
 Result<std::filesystem::path> resolveSessionDescriptorDirectory() {
@@ -166,12 +212,22 @@ Result<ProcessIdentity> queryProcessIdentity(uint64_t pid) {
     std::string stat_line;
     if (!std::getline(stat, stat_line)) return Error::notFound("Process identity is unavailable");
     const auto command_end = stat_line.rfind(')');
-    if (command_end == std::string::npos) return Error::internal("Malformed /proc process identity");
+    // The +2 steps over the bracket and the space after it, so a line that
+    // ends at the bracket is the malformed case rather than an out_of_range.
+    if (command_end == std::string::npos || command_end + 2 > stat_line.size()) {
+        return Error::internal("Malformed /proc process identity");
+    }
     std::istringstream fields(stat_line.substr(command_end + 2));
     std::string field;
     uint64_t start_ticks = 0;
     for (int index = 0; index <= 19; ++index) {
         if (!(fields >> field)) return Error::internal("Malformed /proc process identity");
+        // The state is the token this loop starts on. A zombie clears the
+        // kill(pid, 0) gate above and carries a full starttime, so this is the
+        // only place a process that has already exited gets refused.
+        if (index == 0 && isExitedProcState(field)) {
+            return Error::notFound("Process identity is unavailable");
+        }
         if (index == 19) {
             try { start_ticks = std::stoull(field); }
             catch (...) { return Error::internal("Malformed /proc process identity"); }
@@ -203,6 +259,11 @@ Result<ProcessIdentity> queryProcessIdentity(uint64_t pid) {
     proc_bsdinfo info{};
     if (proc_pidinfo(static_cast<int>(pid), PROC_PIDTBSDINFO, 0,
                      &info, sizeof(info)) != sizeof(info)) {
+        return Error::notFound("Process identity is unavailable");
+    }
+    // proc_pidinfo answers for a zombie as readily as for a running process,
+    // and pbi_status is the one field that separates them.
+    if (info.pbi_status == kProcStatusZombie) {
         return Error::notFound("Process identity is unavailable");
     }
     return ProcessIdentity{static_cast<int64_t>(info.pbi_start_tvsec) * 1000 +
@@ -738,6 +799,13 @@ ProcessInstanceReport describeProcessInstance(uint64_t pid, int64_t started_at_m
         if (errno == ESRCH) return {ProcessInstanceState::proven_stale, {}, 0};
         return {ProcessInstanceState::unverifiable, "open_denied",
                 static_cast<unsigned long>(errno)};
+    }
+    // kill(pid, 0) succeeds for a process that has exited and has not been
+    // reaped, so without the state read a corpse arrives here and is reported
+    // as running_but_unidentified. Windows reaches proven_stale through the
+    // wait handle above; this is the POSIX half of the same answer (#869).
+    if (posixProcessHasExited(pid)) {
+        return {ProcessInstanceState::proven_stale, {}, 0};
     }
     return {ProcessInstanceState::unverifiable, "running_but_unidentified", 0};
 #endif

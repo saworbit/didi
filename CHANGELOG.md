@@ -215,6 +215,28 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **A process that has exited no longer reads as present on macOS and Linux.**
+  `queryProcessIdentity` is the function that says whether the pid in a session
+  descriptor is a real process, and its Windows branch has refused a corpse
+  since #287 because the wait handle is the only honest liveness test there.
+  The two POSIX branches did not hold the same standard. A child that has
+  exited and has not been reaped is a zombie, and every gate they used clears
+  one: `kill(pid, 0)` succeeds for a zombie exactly as it does for a running
+  process, `/proc/<pid>/stat` is still there with a full starttime, and
+  `proc_pidinfo` answers as well and carries the state in `pbi_status`, a field
+  the code never read. So the server kept answering that an engine somebody
+  else started and did not reap was present, and every answer built on that
+  descriptor inherited it. Both branches now read the process state, which is
+  the only thing that separates the two cases: `Z`, `X` and `x` on Linux, the
+  three states proc(5) gives a process that has exited, and `SZOMB` on macOS.
+  `describeProcessInstance` needed the same read and is the half that decides
+  what a caller is told. Its Windows fallback reaches `proven_stale` through
+  the wait handle; its POSIX fallback stopped at `kill(pid, 0)` and reported a
+  corpse as `running_but_unidentified`, so fixing only the identity query would
+  have moved a zombie from "alive" to "something is running, we just cannot
+  name it". Both readers now share one state read. #786 gave didi's own
+  detached games an owner so the server stops making zombies; this is the
+  other half, for the editors it did not start (#869).
 - **A detached game is handed to init rather than left as the server's own
   child.** On macOS and Linux `runtime_launch` with `detach: true` forked once
   and returned, so the game stayed a child of a process that by design never
