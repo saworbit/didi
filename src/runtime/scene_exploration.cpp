@@ -215,6 +215,38 @@ json pausedExplorationRefusal(bool input_queued) {
                                      {"retryable", false}}}}}};
 }
 
+json relayedExplorationRefusal(const std::string& sentence, const json& bridge_error,
+                               const std::string& fallback_code, json extra) {
+    const json* published = nullptr;
+    if (bridge_error.is_object()) {
+        const auto found = bridge_error.find("error");
+        if (found != bridge_error.end() && found->is_object()) published = &*found;
+    }
+
+    // 500 rather than 400 when the bridge said nothing about the status: a call
+    // that failed for a reason nobody recorded is this server's problem, and
+    // reading it as a malformed request blames the caller for it.
+    int status = 500;
+    std::string detail = "unknown";
+    json data = json::object();
+    if (published != nullptr) {
+        status = published->value("code", 500);
+        detail = published->value("message", std::string("unknown"));
+        const auto found = published->find("data");
+        if (found != published->end() && found->is_object()) data = *found;
+    }
+
+    if (!data.contains("code")) data["code"] = fallback_code;
+    if (!data.contains("retryable")) data["retryable"] = false;
+    if (extra.is_object()) {
+        for (auto& [key, value] : extra.items()) data[key] = std::move(value);
+    }
+
+    return json{{"error", {{"code", status},
+                           {"message", sentence + ": " + detail},
+                           {"data", std::move(data)}}}};
+}
+
 SceneExploration::SceneExploration(SceneExplorationRequest request)
     : m_request(std::move(request)),
       m_tracked(m_request.probes.size()),

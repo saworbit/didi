@@ -283,6 +283,53 @@ void test_a_paused_game_is_refused_rather_than_explored() {
     ASSERT_TRUE(during["error"]["message"].get<std::string>() != sentence);
 }
 
+// A run that stops because a press was refused mid-window used to answer 400
+// with no data, so the error floor called it invalid_arguments -- the name for
+// a request that was malformed before the run started (#867). The run is
+// reporting the bridge's refusal, so it keeps the bridge's status and the
+// bridge's data, and adds the one fact the bridge did not have: which action.
+void test_a_relayed_refusal_keeps_the_code_the_bridge_published() {
+    const json refused = {{"error", {{"code", 409},
+                                     {"message", "The input queue is full."},
+                                     {"data", {{"code", "input_queue_full"},
+                                               {"retryable", true}}}}}};
+    const auto relayed = didi::runtime::relayedExplorationRefusal(
+        "Could not press the action jump", refused, "press_refused",
+        {{"action", "jump"}});
+
+    ASSERT_EQ(relayed["error"]["code"].get<int>(), 409);
+    ASSERT_EQ(relayed["error"]["data"]["code"].get<std::string>(),
+              std::string("input_queue_full"));
+    ASSERT_TRUE(relayed["error"]["data"]["retryable"].get<bool>());
+    ASSERT_EQ(relayed["error"]["data"]["action"].get<std::string>(), std::string("jump"));
+    // The bridge's sentence is kept, behind what this run was doing.
+    const auto sentence = relayed["error"]["message"].get<std::string>();
+    ASSERT_TRUE(sentence.find("Could not press the action jump") != std::string::npos);
+    ASSERT_TRUE(sentence.find("The input queue is full.") != std::string::npos);
+}
+
+// A bridge that refused without publishing a code of its own must not fall
+// through to the floor, because the floor reads the status and nothing else.
+void test_a_relayed_refusal_without_a_bridge_code_names_itself() {
+    const json refused = {{"error", {{"code", 400},
+                                     {"message", "No session is attached."}}}};
+    const auto relayed = didi::runtime::relayedExplorationRefusal(
+        "Could not press the action fire", refused, "press_refused",
+        {{"action", "fire"}});
+    ASSERT_EQ(relayed["error"]["code"].get<int>(), 400);
+    ASSERT_EQ(relayed["error"]["data"]["code"].get<std::string>(),
+              std::string("press_refused"));
+    ASSERT_EQ(relayed["error"]["data"]["action"].get<std::string>(), std::string("fire"));
+
+    // A refusal with nothing in it at all is this server's problem, not a
+    // malformed request, so it is not reported as one.
+    const auto empty = didi::runtime::relayedExplorationRefusal(
+        "Could not check the input actions", json::object(), "input_action_check_failed");
+    ASSERT_EQ(empty["error"]["code"].get<int>(), 500);
+    ASSERT_EQ(empty["error"]["data"]["code"].get<std::string>(),
+              std::string("input_action_check_failed"));
+}
+
 void test_a_survey_run_records_more_than_one_interval() {
     auto params = minimalParams();
     params["duration_ms"] = 4000;
@@ -374,6 +421,10 @@ struct RegisterSceneExplorationTests {
                      test_a_run_that_reads_its_probe_is_measured);
         registerTest("SceneExploration.PausedGameIsRefused",
                      test_a_paused_game_is_refused_rather_than_explored);
+        registerTest("SceneExploration.RelayedRefusalKeepsTheBridgeCode",
+                     test_a_relayed_refusal_keeps_the_code_the_bridge_published);
+        registerTest("SceneExploration.RelayedRefusalNamesItself",
+                     test_a_relayed_refusal_without_a_bridge_code_names_itself);
         registerTest("SceneExploration.SurveyRecordsSeveralIntervals",
                      test_a_survey_run_records_more_than_one_interval);
         registerTest("SceneExploration.EngineErrorStopsTheRun",

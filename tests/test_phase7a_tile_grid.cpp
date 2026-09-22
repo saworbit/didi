@@ -391,6 +391,15 @@ static void test_every_bridge_identifier_says_a_sentence() {
                               "missing_or_ambiguous_signal_connection"}) {
         ASSERT_TRUE(sentences.count(named) == 1);
     }
+
+    // The three that answered with the identifier as the whole message until
+    // #865, because they called errorJson rather than bridgeError and so had
+    // never needed a sentence.
+    for (const auto* named : {"invalid_shader_set_uniform_request",
+                              "invalid_shader_get_visual_graph_request",
+                              "invalid_shader_list_uniforms_request"}) {
+        ASSERT_TRUE(sentences.count(named) == 1);
+    }
 }
 
 struct RegisterPhase7TileGridBehavior {

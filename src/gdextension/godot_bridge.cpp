@@ -131,6 +131,12 @@ const std::map<std::string, std::string>& bridgeErrorSentences() {
      "The arguments do not match the published shape for this tool."},
     {"invalid_signal_list_connections_request",
      "The arguments do not match the published shape for this tool."},
+    {"invalid_shader_get_visual_graph_request",
+     "The arguments do not match the published shape for this tool."},
+    {"invalid_shader_list_uniforms_request",
+     "The arguments do not match the published shape for this tool."},
+    {"invalid_shader_set_uniform_request",
+     "The arguments do not match the published shape for this tool."},
     {"invalid_tilemap_get_used_rect_request",
      "The arguments do not match the published shape for this tool."},
     {"invalid_tilemap_set_cells_request",
@@ -11023,9 +11029,9 @@ json GodotBridge::execute(const std::string& method, const json& params,
             : hasOnlyKeys(params, {"target_node", "property_name"});
         if (!shape_ok || !params.contains("target_node") || !params["target_node"].is_string() ||
             !params.contains("property_name") || !params["property_name"].is_string()) {
-            return errorJson(400, setting ? "invalid_shader_set_uniform_request"
-                                          : (graphing ? "invalid_shader_get_visual_graph_request"
-                                                      : "invalid_shader_list_uniforms_request"));
+            return bridgeError(400, setting ? "invalid_shader_set_uniform_request"
+                                            : (graphing ? "invalid_shader_get_visual_graph_request"
+                                                        : "invalid_shader_list_uniforms_request"));
         }
         if (graphing) {
             for (const auto& bind : {

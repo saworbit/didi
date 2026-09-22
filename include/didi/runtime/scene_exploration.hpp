@@ -88,6 +88,24 @@ Result<SceneExplorationRequest> parseSceneExplorationRequest(const json& params)
 // which means one press is already held in the engine's queue.
 json pausedExplorationRefusal(bool input_queued);
 
+// The refusal for a run that stopped because a bridge call it made was itself
+// refused: the press that could not be delivered, or the InputMap check that
+// could not be read.
+//
+// A run reports these on the bridge's behalf, so it keeps the status and the
+// `data` the bridge published rather than flattening both. Without that, a
+// press the engine refused mid-window arrives as a bare 400, the error floor
+// fills `data.code` with `invalid_arguments`, and a client cannot tell it from
+// a request that was malformed before the run started. The one is the caller's
+// mistake and the other is not.
+//
+// `fallback_code` names the refusal when the bridge published no code of its
+// own, so the floor never gets to answer for it. `extra` is what this run knows
+// and the bridge did not, such as the action it was pressing.
+json relayedExplorationRefusal(const std::string& sentence, const json& bridge_error,
+                               const std::string& fallback_code,
+                               json extra = json::object());
+
 struct ExplorationReading {
     // Empty when the value could not be read this frame. A probe that never
     // arrived is never treated as a probe that did not move.
