@@ -31,7 +31,9 @@
 #include <libproc.h>
 #include <signal.h>
 #include <sys/attr.h>
+#include <sys/proc.h>
 #include <sys/stat.h>
+#include <sys/sysctl.h>
 #include <unistd.h>
 #else
 #include <fcntl.h>
@@ -61,16 +63,18 @@ bool isExitedProcState(const std::string& state) {
     return state == "Z" || state == "X" || state == "x";
 }
 #elif defined(__APPLE__)
-// SZOMB in XNU's bsd/sys/proc.h.
-constexpr unsigned kProcStatusZombie = 5;
+// SZOMB in XNU's bsd/sys/proc.h. Spelled out rather than taken from the
+// header, because the constant is declared beside a lot of kernel-only
+// material and this needs one number.
+constexpr char kProcStatusZombie = 5;
 #endif
 
 #if !defined(_WIN32)
 // A pid that has exited and has not been reaped is still a pid. kill(pid, 0)
-// succeeds for it, /proc/<pid>/stat is still there with a full starttime, and
-// proc_pidinfo still answers, so not one of those is a liveness test. Windows
-// has refused a corpse since #287 because the wait handle is honest about one.
-// POSIX has to read the process state to give the same answer (#869).
+// succeeds for it on both platforms and /proc/<pid>/stat is still there with a
+// full starttime, so neither of those is a liveness test. Windows has refused
+// a corpse since #287 because the wait handle is honest about one. POSIX has
+// to read the process state to give the same answer (#869).
 //
 // Only an exited process reads true. A state that could not be read reads
 // false, because this refuses a corpse rather than claiming a verdict the
@@ -86,12 +90,19 @@ bool posixProcessHasExited(uint64_t pid) {
     std::string state;
     return static_cast<bool>(fields >> state) && isExitedProcState(state);
 #elif defined(__APPLE__)
-    proc_bsdinfo info{};
-    if (proc_pidinfo(static_cast<int>(pid), PROC_PIDTBSDINFO, 0,
-                     &info, sizeof(info)) != sizeof(info)) {
-        return false;
-    }
-    return info.pbi_status == kProcStatusZombie;
+    // Not proc_pidinfo. #869 expected PROC_PIDTBSDINFO to answer for a zombie
+    // and carry the state in pbi_status, and the macOS runner says otherwise:
+    // it declines to fill the struct at all once the process has exited, so
+    // the state was never readable there. sysctl is the interface that does
+    // report a corpse, which is how ps prints Z.
+    int query[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, static_cast<int>(pid)};
+    struct kinfo_proc entry{};
+    size_t entry_size = sizeof(entry);
+    if (sysctl(query, 4, &entry, &entry_size, nullptr, 0) != 0) return false;
+    // A pid nothing owns answers with a zero-length result rather than an
+    // error, so the size is the part that says whether there is a state here.
+    if (entry_size < sizeof(entry)) return false;
+    return entry.kp_proc.p_stat == kProcStatusZombie;
 #else
     (void)pid;
     return false;
@@ -256,14 +267,17 @@ Result<ProcessIdentity> queryProcessIdentity(uint64_t pid) {
     if (pid > static_cast<uint64_t>(std::numeric_limits<pid_t>::max())) {
         return Error::notFound("Process identity is unavailable");
     }
+    // Refuse a corpse by reading its state, not as a side effect of the call
+    // below failing to describe one. proc_pidinfo does decline for a zombie on
+    // current macOS, so this is belt and braces there, but a liveness refusal
+    // that depends on another call's failure mode is one silent change away
+    // from not happening.
+    if (posixProcessHasExited(pid)) {
+        return Error::notFound("Process identity is unavailable");
+    }
     proc_bsdinfo info{};
     if (proc_pidinfo(static_cast<int>(pid), PROC_PIDTBSDINFO, 0,
                      &info, sizeof(info)) != sizeof(info)) {
-        return Error::notFound("Process identity is unavailable");
-    }
-    // proc_pidinfo answers for a zombie as readily as for a running process,
-    // and pbi_status is the one field that separates them.
-    if (info.pbi_status == kProcStatusZombie) {
         return Error::notFound("Process identity is unavailable");
     }
     return ProcessIdentity{static_cast<int64_t>(info.pbi_start_tvsec) * 1000 +
