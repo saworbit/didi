@@ -36,6 +36,7 @@ jobs:
           python -m unittest tests.test_editor_console -v
           python -m unittest tests.test_test_inventory -v
           python -m unittest tests.test_ci_change_classification -v
+          python -m unittest tests.test_fuzz_target_lists -v
           python -m unittest tests.test_vendored_versions -v
           python -m unittest tests.test_refusal_codes -v
           python tools/validate_documentation.py

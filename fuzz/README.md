@@ -100,7 +100,15 @@ one went when its decoder did. `fuzz_framed_message` carries a note of its own
 in its place: it does not assert that a completed payload is valid JSON,
 because `readFramePayload` hands the caller bytes and never looks at them.
 
-Add the target to `DIDI_FUZZ_TARGETS` in `CMakeLists.txt` and to the matrix in
-`.github/workflows/fuzz.yml`. Both lists are short and explicit on purpose: a
-target nobody runs is worse than no target, because the directory still looks
-like coverage.
+Add the target to `DIDI_FUZZ_TARGETS` in `CMakeLists.txt`, to the matrix in
+`.github/workflows/fuzz.yml`, and to the table at the top of this file, and
+give it a seed directory under `corpus/`. `SECURITY.md` names the number of
+decoders covered, so that moves too. The lists are short and explicit on
+purpose: a target nobody runs is worse than no target, because the directory
+still looks like coverage.
+
+Explicit does not mean they stay in step on their own, so
+`tests/test_fuzz_target_lists.py` holds all five to each other and forgetting
+one is a red test rather than a gap. The corpus is in there because the seed
+copy in `fuzz.yml` discards its errors: a directory that is missing, misnamed
+or empty costs the run its committed seeds and says nothing.
