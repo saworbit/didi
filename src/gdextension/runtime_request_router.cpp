@@ -42,7 +42,8 @@ json timeoutResponse(const std::string& method, const runtime::SessionDescriptor
                      const char* outcome, bool quarantine, const char* message) {
     return decorateRuntimeResponse(
         {{"error", {{"code", 504}, {"message", message},
-                    {"data", {{"outcome", outcome}, {"route_quarantine", quarantine},
+                    {"data", {{"code", "route_deadline_exceeded"},
+                              {"outcome", outcome}, {"route_quarantine", quarantine},
                               {"method", method}}}}}},
         session);
 }
@@ -54,7 +55,8 @@ json handleSessionHandshake(const json& params, const runtime::SessionDescriptor
         !params["protocol_version"].is_string() || params["protocol_version"] != "1.3") {
         return {{"error", {{"code", 409},
                            {"message", "Runtime session protocol 1.3 is required"},
-                           {"data", {{"required_protocol_version", "1.3"}}}}}};
+                           {"data", {{"code", "protocol_version_rejected"},
+                                     {"required_protocol_version", "1.3"}}}}}};
     }
     auto response = session.toJson();
     response["status"] = "ok";
@@ -70,10 +72,23 @@ std::optional<json> rejectDisallowedSessionMethod(
                        : policy == runtime::LiveSessionKindPolicy::game_only
                              ? json::array({"game"})
                              : json::array({"editor", "game"});
+    // A sentence for the person and the identifier under data.code, which is
+    // the shape editor_hook.cpp already uses for this same refusal. This one
+    // had them the other way round: the caller was shown the identifier as the
+    // explanation, and data carried no code, so the floor named it conflict.
+    std::string allowed_text;
+    for (size_t index = 0; index < allowed.size(); ++index) {
+        if (index > 0) allowed_text += " or ";
+        allowed_text += allowed[index].get<std::string>();
+    }
+    const std::string sentence = method + " needs " +
+                                 (allowed.size() == 1 ? "an " : "a ") + allowed_text +
+                                 " session, and a " + session.kind + " session is selected.";
     return decorateRuntimeResponse(
         {{"error", {{"code", 409},
-                    {"message", "session_kind_rejected"},
-                    {"data", {{"method", method},
+                    {"message", sentence},
+                    {"data", {{"code", "session_kind_rejected"},
+                              {"method", method},
                               {"selected_session_kind", session.kind},
                               {"allowed_session_kinds", std::move(allowed)},
                               {"retryable", false}}}}}},

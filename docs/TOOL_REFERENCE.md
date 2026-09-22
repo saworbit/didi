@@ -43,6 +43,14 @@ place rather than at each call site:
   arrive as `invalid_arguments`, because the encoder and an argument read at the
   wrong type raise the same C++ exception type, so a call with no arguments was
   told an argument was wrong.
+
+  Those are the names a refusal gets when it does not choose one. A refusal
+  that knows more about itself says so instead, and the extension emits about
+  twenty such names: `session_kind_rejected` rather than `conflict` when a
+  method needs the other kind of session, `expression_parse_failed` rather
+  than `unprocessable` when an expression would not parse, `unknown_method`
+  rather than `not_found`. Branch on the specific name when you know it and
+  fall back to the general one, which is always present.
 - `tool`: the name that was called, alias included.
 - `canonical_tool`: the name it resolves to. The same as `tool` unless a legacy
   alias was used.

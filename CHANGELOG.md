@@ -252,6 +252,21 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **Every refusal above 400 names itself, in all five files that emit one.**
+  `tests/test_refusal_codes.py` states the rule the surface runs on: a person
+  reads `error.message` and a client branches on `error.data.code`. It
+  enforced that against two files, and the extension emits refusals from five,
+  which is how #890 and this landed in the unwatched ones. The clearest was the
+  same refusal done both ways: `editor_hook.cpp` answered a session-kind
+  mismatch with a sentence and `session_kind_rejected` under `data.code`, and
+  `runtime_request_router.cpp`, four hundred lines away, handed the identifier
+  over as the message and carried no code at all. Sixteen refusals across the
+  router, the expression sandbox and the runtime bridge now carry a code, so a
+  parse failure and an execution failure are no longer both `unprocessable`,
+  and a response over budget is no longer `internal_error`. The router's
+  session-kind refusal is a sentence. The guard scans every file that emits a
+  refusal shape it understands, and a new file that emits one and is named by
+  no list fails a test of its own rather than being found by hand. #892
 - **An authorization refusal keeps its structured half.** The handler the
   extension installs on the IPC server rebuilt a refusal from two of `Error`'s
   three fields, so anything under `data` was dropped on the one path that

@@ -32,6 +32,15 @@ json errorJson(int code, const std::string& message) {
     return {{"error", {{"code", code}, {"message", message}}}};
 }
 
+// The same refusal with the identifier a caller branches on. Without this
+// overload every refusal here reached applyErrorDataFloor with no data.code
+// and was named from its status alone, so unrelated failures sharing a number
+// arrived under one name (#892).
+json errorJson(int code, const std::string& message, const char* data_code) {
+    return {{"error", {{"code", code}, {"message", message},
+                       {"data", {{"code", data_code}}}}}};
+}
+
 json liveResult(json result, const std::string& session_kind) {
     result["execution_mode"] = "live";
     result["is_live_engine"] = true;
@@ -447,10 +456,12 @@ json executeRuntimeBridge(const std::string& method, const json& params,
                           const std::string& session_kind) {
     if (!params.is_object()) return errorJson(400, "Runtime params must be an object");
     if (session_kind != "editor" && session_kind != "game") {
-        return errorJson(500, "Runtime session kind is unavailable");
+        return errorJson(500, "Runtime session kind is unavailable",
+                         "session_kind_unavailable");
     }
     if (method != "runtime.getTree" && session_kind != "game") {
-        return errorJson(409, "Runtime execution control is available only for game sessions");
+        return errorJson(409, "Runtime execution control is available only for game sessions",
+                         "session_kind_rejected");
     }
 
     auto tree = activeSceneTree();
@@ -475,7 +486,8 @@ json executeRuntimeBridge(const std::string& method, const json& params,
         auto serialized = serializeRuntimeNode(target.value(), 0, max_depth, false, state);
         if (serialized.isErr()) return errorJson(serialized.error().code, serialized.error().message);
         if (serialized.value().is_null()) {
-            return errorJson(507, "Runtime tree root exceeds the serialized response budget");
+            return errorJson(507, "Runtime tree root exceeds the serialized response budget",
+                                 "response_too_large");
         }
         auto paused = sceneTreePaused(tree.value());
         if (paused.isErr()) return errorJson(paused.error().code, paused.error().message);
@@ -486,7 +498,8 @@ json executeRuntimeBridge(const std::string& method, const json& params,
                                     {"truncated", state.truncated}},
                                    session_kind);
         if (response.dump().size() > kMaxRuntimeTreeResponseBytes) {
-            return errorJson(507, "Runtime tree response exceeds the 256 KiB serialized budget");
+            return errorJson(507, "Runtime tree response exceeds the 256 KiB serialized budget",
+                                 "response_too_large");
         }
         return response;
     }
@@ -501,7 +514,8 @@ json executeRuntimeBridge(const std::string& method, const json& params,
         auto observed = sceneTreePaused(tree.value());
         if (observed.isErr()) return errorJson(observed.error().code, observed.error().message);
         if (observed.value() != requested) {
-            return errorJson(500, "Godot SceneTree pause state did not match the requested value");
+            return errorJson(500, "Godot SceneTree pause state did not match the requested value",
+                                 "pause_state_mismatch");
         }
         DIDI_LOG_INFO("RUNTIME_BRIDGE", requested ? "Game paused" : "Game resumed");
         json response = liveResult({{"status", "success"}, {"paused", observed.value()}}, session_kind);
@@ -536,7 +550,8 @@ json executeRuntimeBridge(const std::string& method, const json& params,
                            {"exit_code", exit_code}}, session_kind);
     }
 
-    return errorJson(404, "Unknown runtime bridge method: " + method);
+    return errorJson(404, "Unknown runtime bridge method: " + method,
+                     "unknown_method");
 }
 
 } // namespace godot
