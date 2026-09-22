@@ -72,6 +72,22 @@ struct SceneExplorationRequest {
 // code 400.
 Result<SceneExplorationRequest> parseSceneExplorationRequest(const json& params);
 
+// The refusal for a run that would drive a paused game.
+//
+// A paused SceneTree does not hand an injected event to a node that pauses, so
+// runtime_inject_input holds the event and gives it to Input when the tree
+// resumes (#594). Every frame of a paused window is therefore a frame in which
+// nothing this run pressed could have moved anything, and reporting that
+// stillness as a stuck interval describes the pause rather than the game.
+//
+// It is the same finding the InputMap check already refuses -- a run that would
+// have driven nothing and reported its own stillness -- and the mirror of
+// runtime_step refusing a game that is not paused.
+//
+// `input_queued` is true when the pause was found after the window opened,
+// which means one press is already held in the engine's queue.
+json pausedExplorationRefusal(bool input_queued);
+
 struct ExplorationReading {
     // Empty when the value could not be read this frame. A probe that never
     // arrived is never treated as a probe that did not move.

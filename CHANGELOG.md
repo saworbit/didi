@@ -215,6 +215,23 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **A paused game is refused rather than explored.** `runtime_explore_scene`
+  drove a paused game for its whole window and reported a stuck interval with
+  `measured: true`, which is the one thing its own rules say must not happen: a
+  probe that cannot be read is excluded because no value is not stillness, and a
+  paused window is the same sentence with a different subject. A paused
+  `SceneTree` does not hand an injected event to a node that pauses, so
+  `runtime_inject_input` queues the event and gives it to `Input` when the tree
+  resumes. Every frame of a paused run was therefore a frame in which nothing it
+  pressed could have moved anything, and the report read as a finding about the
+  game. Pausing is how an agent arrives there: `pause_on_stuck` defaults to
+  true, so the tool's own output on a stuck interval is the input state of the
+  next call. It now refuses with 409 and `data.code: paused_game_session`,
+  naming `runtime_set_paused` as the way out, the same way the run already
+  refuses an action the project's InputMap does not declare and the mirror of
+  `runtime_step` refusing a game that is not paused. A pause that arrives after
+  the window opens is caught on the next press, which a queued release follows
+  so a refused run leaves no action down (#778).
 - **The Phase 7 signal bridge harness runs, and it passes.**
   `tests/run_phase7_signal_bridge.ps1` is the only thing that drives
   `signal.connect`, `signal.disconnect`, `signal.emit` and

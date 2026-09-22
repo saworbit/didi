@@ -580,6 +580,25 @@ void EditorHook::scheduleSceneExploration(
         return;
     }
 
+    // A paused tree does not deliver an injected event to a node that pauses,
+    // so every action this run holds would be queued and the whole window would
+    // be still because nothing was pressed. That is the finding the check above
+    // refuses for an action the InputMap does not declare, one cause along, and
+    // the mirror of scheduleRuntimeStep refusing a game that is not paused.
+    auto tree_state = executeRuntimeBridge("runtime.getTree",
+                                           {{"root_path", "/root"}, {"max_depth", 0}},
+                                           sessionKindName(m_sessionKind));
+    if (tree_state.contains("error")) {
+        control->markCompleted();
+        fulfillCommand(promise, control, std::move(tree_state));
+        return;
+    }
+    if (tree_state.value("paused", false)) {
+        control->markCompleted();
+        fulfillCommand(promise, control, runtime::pausedExplorationRefusal(false));
+        return;
+    }
+
     int duration_ms = 0;
     size_t action_count = 0;
     {
@@ -673,9 +692,36 @@ void EditorHook::processSceneExplorationFrame() {
                                                      {"pressed", true}}})}};
         const auto pressed = GodotBridge::instance().execute("runtime.injectInput", press,
                                                              sessionKindName(m_sessionKind));
+        // "queued" is runtime_inject_input succeeding at holding an event a
+        // paused tree will not deliver, and it is the end of this run: the
+        // window is open and nothing it presses can land. The tree was running
+        // when the run was scheduled, so it was paused since. Queue the release
+        // behind the press, outside the lock releaseExplorationAction takes, so
+        // a refused run does not leave an action down in the frame the tree
+        // resumes.
+        const bool press_queued = pressed.value("outcome", std::string()) == "queued";
+        if (press_queued) {
+            const json release = {{"events", json::array({{{"type", "action"},
+                                                           {"action_name", action_now_name},
+                                                           {"pressed", false}}})}};
+            const auto released = GodotBridge::instance().execute(
+                "runtime.injectInput", release, sessionKindName(m_sessionKind));
+            if (released.contains("error")) {
+                DIDI_LOG_WARN("EDITOR_HOOK", "Could not queue the release for ", action_now_name,
+                              ": ", released["error"].value("message", "unknown"));
+            }
+        }
         std::lock_guard<std::mutex> lock(m_explorationMutex);
         if (!m_pendingSceneExploration.has_value() ||
             m_pendingSceneExploration->control != running_for) {
+            return;
+        }
+        if (press_queued) {
+            auto finished = std::move(m_pendingSceneExploration);
+            m_pendingSceneExploration.reset();
+            finished->control->markCompleted();
+            fulfillCommand(finished->response_promise, finished->control,
+                           runtime::pausedExplorationRefusal(true));
             return;
         }
         if (pressed.contains("error")) {

@@ -4208,7 +4208,7 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "runtime_explore_scene";
-        t.description = "Drives a running game for a bounded window by holding the project's own input actions on a seeded schedule, samples values you name every frame, and reports where they went and the intervals in which nothing it pressed moved anything. It reports observations, not a verdict: it does not decide whether a level is beatable or whether a stuck interval is a bug.";
+        t.description = "Drives a running game for a bounded window by holding the project's own input actions on a seeded schedule, samples values you name every frame, and reports where they went and the intervals in which nothing it pressed moved anything. It reports observations, not a verdict: it does not decide whether a level is beatable or whether a stuck interval is a bug. A paused game is refused rather than explored, because a paused tree queues injected input instead of delivering it and the stillness would be the pause rather than the game.";
         t.inputSchema = {
             {"type", "object"},
             {"properties", {
