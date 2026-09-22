@@ -2,40 +2,65 @@
 
 ## Live signal bridge evidence
 
-Recorded 2026-08-30 with `tests/run_phase7_signal_bridge.ps1`, two runs per
-engine, against the real engines rather than a single pinned one:
+`tests/run_phase7_signal_bridge.ps1` drives `signal.connect`,
+`signal.disconnect`, `signal.emit` and `signal.listConnections` through a real
+editor. It is the only thing that does. Until #862 no workflow ran it, and it
+had been failing for as long as that was true. The Live Godot Integration job
+runs it now, on every change that can reach the engine, twice per engine, on
+all three supported lines, in both builds below.
 
-| Engine | Result |
-| :--- | :--- |
-| Godot 4.5.1 | `PHASE7_SIGNAL_BRIDGE_COMPLETE|4.5.1|runs=2` |
-| Godot 4.6.2 | `PHASE7_SIGNAL_BRIDGE_COMPLETE|4.6.2|runs=2` |
-| Godot 4.7.2 | `PHASE7_SIGNAL_BRIDGE_COMPLETE|4.7.2|runs=2` |
+Recorded 2026-09-22, and by CI on every engine-touching run since:
 
-Each run reports `PHASE7_SIGNAL_RAW_METHODS|list,connect,disconnect,emit|ok`.
-**This measures the test-seam build, not the shipped extension.** The probe
-loads `didi_extension_signal_tests`, which is compiled with
-`DIDI_PHASE7_SIGNAL_TEST_SEAMS=1`. Every signal handler in
-`src/gdextension/godot_bridge.cpp` and `src/gdextension/editor_hook.cpp` sits
-behind that macro, so the production `didi_extension` contains no signal
-handling at all. The result above therefore shows the bridge working on all
-three engines *when signals are compiled in*; it says nothing about the
-extension Didi actually ships, and it is not evidence for activation.
+| Engine | Seam build | Shipping extension |
+| :--- | :--- | :--- |
+| Godot 4.5.1 | `runs=2` | `runs=2` |
+| Godot 4.6.2 | `runs=2` | `runs=2` |
+| Godot 4.7.2 | `runs=2` | `runs=2` |
 
-It remains useful for one narrower thing: the handlers behave identically on
-4.5.1, 4.6.2 and 4.7.2, so nothing in the signal implementation requires the
-higher engine floor.
+Every run reports `PHASE7_SIGNAL_RAW_METHODS|list,connect,disconnect,emit|ok`
+and ends with `PHASE7_SIGNAL_BRIDGE_COMPLETE` naming the engine it detected.
 
-Two harness defects were repaired to obtain this. The runner required exactly
+**The two columns measure different binaries.** The seam build is
+`didi_extension_signal_tests`, compiled with `DIDI_PHASE7_SIGNAL_TEST_SEAMS=1`.
+That macro guards seven fault injection points and the
+`phase7SignalTest.configure` method that arms them. It guards nothing else: the
+signal handlers themselves are compiled unconditionally, and
+`src/gdextension/editor_hook.cpp` lists all four signal methods in its live
+method set with no macro around them. So the shipping `didi_extension` serves
+them, and the second column is the probe driving that binary with the failure
+scenarios skipped. An earlier version of this page said the production
+extension contained no signal handling at all. That stopped being true at
+`1a7aaf1`, and the second column is the measurement that says so.
+
+The handlers behave identically on 4.5.1, 4.6.2 and 4.7.2, so nothing in the
+signal implementation requires the higher engine floor.
+
+Three harness defects were repaired to obtain this. The runner required exactly
 Godot 4.7.2 through a helper that no longer exists on `main`, so it could not
 run at all; it now asserts the documented minimum version instead. Its
 completion marker also hard-coded the string `4.7.2` regardless of which engine
 executed, so any record it produced could name an engine it never ran. It now
-reports the version it actually detected.
+reports the version it actually detected. The third is the one #862 is about:
+the probe pinned each expected failure by comparing `error.message` to an
+identifier, and the bridge had moved those identifiers to `error.data.code`, so
+the first scenario that named one failed and took the rest of the run with it.
+The probe reads `data.code` now. All three defects share a cause, which is that
+nothing ran the thing.
 
-This is bridge evidence, not activation. All 18 Phase 7 names remain
-`implemented: false`.
+This is bridge evidence, not activation. The Phase 7 registration counts live in
+the status block in [CHANGELOG.md](../CHANGELOG.md), which is written from the
+built binary rather than by hand.
 
 ## Activation is gated out of the production extension
+
+**Superseded 2026-09-22.** This section records the state before `1a7aaf1`, the
+commit that delivered the four signal tools. That commit put
+`signal.listConnections`, `signal.connect`, `signal.disconnect` and
+`signal.emit` into the bridge's live method set with no build flag around them,
+and removed the `Phase7Signals.ProductionAdmissionClosed` test named below. The
+shipped extension serves all four today, measured on every supported engine line
+by the second column above. What follows is kept as the record of why the gate
+existed and what a live trial through it looked like.
 
 Established 2026-08-30 by activating the four signal tools and running the
 integration harness against a live Godot 4.5.1 editor with the shipped

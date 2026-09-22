@@ -123,6 +123,8 @@ const std::map<std::string, std::string>& bridgeErrorSentences() {
      "The arguments do not match the published shape for this tool."},
     {"invalid_signal_connect_request",
      "The arguments do not match the published shape for this tool."},
+    {"invalid_signal_disconnect_request",
+     "The arguments do not match the published shape for this tool."},
     {"invalid_signal_emit_argument_encoding",
      "An argument is not encoded the way this method expects."},
     {"invalid_signal_emit_request",
@@ -167,6 +169,8 @@ const std::map<std::string, std::string>& bridgeErrorSentences() {
      "The engine refused the emit."},
     {"signal_metadata_work_limit",
      "Reading the signal metadata would cost more work than this method will spend; ask for a narrower slice."},
+    {"signal_postcondition_mismatch",
+     "The connection did not read back as made or removed after the change was committed."},
     {"signal_target_arity_incompatible",
      "The target method cannot accept the arguments that signal carries."},
     {"signal_undo_redo_registration_failed",
@@ -8610,8 +8614,8 @@ json GodotBridge::execute(const std::string& method, const json& params,
                   (params["flags"].is_number_unsigned() &&
                    params["flags"].get<uint64_t>() >
                        static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))))) {
-                return errorJson(400, is_connect ? "invalid_signal_connect_request"
-                                                 : "invalid_signal_disconnect_request");
+                return bridgeError(400, is_connect ? "invalid_signal_connect_request"
+                                                   : "invalid_signal_disconnect_request");
             }
             // The flags this call will write. The server refuses an
             // unacceptable value first and with the same rule, so reaching
@@ -8981,7 +8985,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
                     }
                 }
                 if (force_rollback_failure) restored = false;
-                return errorJson(
+                return bridgeError(
                     500, "signal_postcondition_mismatch",
                     {{"retryable", false},
                      {"rollback", restored ? "completed" : "failed"},

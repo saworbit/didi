@@ -842,6 +842,36 @@ jobs:
           if (-not $godot) { throw "Godot executable not found under godot-bin" }
           ./tests/run_godot_integration.ps1 -GodotExecutable $godot.FullName
 
+      - name: Run Phase 7 Signal Bridge Harness
+        shell: pwsh
+        env:
+          GODOT_VERSION: ${{ matrix.godot-version }}
+        run: |
+          # The console build, and only the console build. The harness waits
+          # for PHASE7_SIGNAL_FIXTURE_READY on the editor's standard output,
+          # and the plain Windows build writes to no console, so the wait would
+          # time out on a fixture that came up correctly.
+          $godot = Get-ChildItem -Path godot-bin -Filter "Godot_v${env:GODOT_VERSION}-stable_win64_console.exe" |
+                   Select-Object -First 1
+          if (-not $godot) { throw "Godot console executable not found under godot-bin" }
+          $common = @{
+            GodotExecutable = $godot.FullName
+            ProbeExecutable = 'build/phase7_signal_bridge_probe.exe'
+            # Stated rather than inherited. The second run is what proves the
+            # first left the fixture on disk unchanged, and the evidence table
+            # in docs/PHASE_7_PARTIAL_IMPLEMENTATION_PLAN.md reports runs=2, so
+            # a change to the script's default would quietly weaken both.
+            Repeat = 2
+          }
+          # The seam build drives the failure paths: a rollback that completed,
+          # a rollback that did not, a bind the engine does not have. Nothing
+          # else in this repository reaches them against a real editor.
+          ./tests/run_phase7_signal_bridge.ps1 @common -ExtensionLibrary build/didi_extension_signal_tests.dll
+          # Then the extension people actually install. Its seams are compiled
+          # out, so the probe runs the real-behaviour half only, and without
+          # this the shipping binary is the one combination nothing drives.
+          ./tests/run_phase7_signal_bridge.ps1 @common -ExtensionLibrary build/didi_extension.dll -Production
+
       - name: Verify Managed Editor Crash Recovery
         shell: pwsh
         env:
@@ -886,6 +916,7 @@ jobs:
             build/godot_*.err
             build/godot_*.dmp
             build/recovery-artifacts/
+            build/phase7_signal_sessions/
           if-no-files-found: ignore
 
   # The option landed with #38; this is the job that uses it. ASan and UBSan see
