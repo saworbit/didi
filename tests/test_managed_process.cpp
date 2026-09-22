@@ -11,6 +11,7 @@
 #if defined(_WIN32)
 #include <windows.h>
 #elif defined(__APPLE__)
+#include <cerrno>
 #include <crt_externs.h>
 #include <csignal>
 #include <fcntl.h>
@@ -19,6 +20,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #else
+#include <cerrno>
 #include <csignal>
 #include <fcntl.h>
 #include <sys/resource.h>
@@ -779,6 +781,61 @@ static void detachedSessionDoesNotInheritServerHandles() {
 }
 #endif
 
+#if !defined(_WIN32)
+static void detachedSessionIsNotLeftAsAChildOfTheServer() {
+    // Break reported in #786: the POSIX detached launch forked once and
+    // returned, so the game stayed a child of a server that by definition
+    // never waits for it. The engine exits in half a second and the pid then
+    // sits in the process table as a zombie until the server itself exits.
+    // An agent loop that launches a game per change does that a few hundred
+    // times in one session, and Windows has no equivalent because a process
+    // that exits there leaves nothing behind once its handles are closed.
+    //
+    // The assertion is ownership rather than the zombie. Ownership is what was
+    // wrong, it is readable while the game is still running, and it does not
+    // depend on how promptly whoever adopts the orphan gets round to reaping
+    // it, which is a property of the host rather than of this fix. A process
+    // this one did not fork cannot be waited for: before the fix waitpid
+    // answers 0 for a live child of ours, after it ECHILD.
+    Temp temp;
+    const auto self = selfPath().string();
+    const auto wrapper = temp.path / "godot.sh";
+    {
+        std::ofstream script(wrapper);
+        script << "#!/bin/sh\n"
+               << "exec \"" << self << "\" --didi-managed-child hold_long\n";
+    }
+    fs::permissions(wrapper, fs::perms::owner_all | fs::perms::group_read |
+                                 fs::perms::group_exec);
+    setenv("GODOT_BIN", wrapper.c_str(), 1);
+
+    const auto result =
+        didi::offline::TestRunner::runSession("res://none.tscn", 6, true, true, {}, true);
+    unsetenv("GODOT_BIN");
+    CHECK_PROCESS(result.detached);
+    CHECK_PROCESS(result.success);
+    CHECK_PROCESS(result.pid != 0);
+
+    // It has to be running for the question to mean anything: waitpid answers
+    // ECHILD both for a pid that was never ours and for one already reaped,
+    // and only the first of those is the fix.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (!processAlive(result.pid) && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    CHECK_PROCESS(processAlive(result.pid));
+
+    errno = 0;
+    const pid_t observed = waitpid(static_cast<pid_t>(result.pid), nullptr, WNOHANG);
+    const int failure = errno;
+
+    // The game is detached by design, so nothing else will end it.
+    hardKill(result.pid);
+
+    CHECK_PROCESS(observed == -1);
+    CHECK_PROCESS(failure == ECHILD);
+}
+#endif
+
 struct RegisterManagedProcess {
     RegisterManagedProcess() {
         registerTest("ManagedProcess.ReportsArgumentsAndExit", reportsArgumentsAndExit);
@@ -802,6 +859,8 @@ struct RegisterManagedProcess {
 #if !defined(_WIN32)
         registerTest("ManagedProcess.LaunchClosesDescriptorsAboveSoftLimit",
                      launchClosesDescriptorsAboveSoftLimit);
+        registerTest("TestRunner.DetachedSessionIsNotLeftAsAChildOfTheServer",
+                     detachedSessionIsNotLeftAsAChildOfTheServer);
 #endif
     }
 } register_managed_process;

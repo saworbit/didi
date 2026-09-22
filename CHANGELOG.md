@@ -215,6 +215,25 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **A detached game is handed to init rather than left as the server's own
+  child.** On macOS and Linux `runtime_launch` with `detach: true` forked once
+  and returned, so the game stayed a child of a process that by design never
+  waits for it. The engine shuts down in about half a second and its pid then
+  sits in the process table as a zombie until the server itself exits. That
+  costs nothing on a batch run and is wrong for the loop `detach` exists to
+  support, where an agent starts a game per change and does it a few hundred
+  times in one session. Windows had no equivalent: a process that exits there
+  leaves nothing behind once its handles are closed. The launch now forks
+  twice. The middle process publishes the game's pid up the pipe the run
+  already had and exits immediately, which orphans the game into init's care,
+  and init reaps it. Reaping on a later call or from a `SIGCHLD` handler would
+  have made the leak rarer; this gives the process an owner, which is what
+  `detach` means. The argument list is now built before the fork as well,
+  because the child half of a fork in a threaded process may only make
+  async signal safe calls and building one is not. The test pins ownership
+  rather than the zombie, since a host reaps an orphan on its own schedule but
+  a pid this process never forked can never be waited for: `waitpid` answers
+  `ECHILD` while the game is still running (#786).
 - **Every refusal the extension emits names itself.** A client branches on
   `error.data.code` and a person reads `error.message`. Two places published
   neither. The three shader shape refusals answered with the identifier as the
