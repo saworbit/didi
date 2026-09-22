@@ -109,7 +109,10 @@ CommandTicket EditorHook::postCommand(const std::string& method, const json& par
         std::lock_guard<std::mutex> lock(m_queueMutex);
         if (!GodotApi::instance().isLiveReady()) {
             control->markCompleted();
-            fulfillCommand(prom, control, {{"error", {{"code", 503}, {"message", "Godot main-loop bridge is not ready"}}}});
+            fulfillCommand(prom, control, {{"error", {{"code", 503},
+                                       {"message", "Godot main-loop bridge is not ready"},
+                                       {"data", {{"code", "bridge_not_ready"},
+                                                 {"retryable", true}}}}}});
             return {std::move(fut), std::move(prom), std::move(control)};
         }
         m_commandQueue.push(std::move(cmd));
@@ -177,7 +180,13 @@ void EditorHook::processQueue() {
         }
         if (!cmd.control || !cmd.control->tryStart()) {
             fulfillCommand(cmd.response_promise, cmd.control,
-                           {{"error", {{"code", 504}, {"message", "Command cancelled before execution"}}}});
+                           {{"error", {{"code", 504},
+                                        {"message", "Command cancelled before execution"},
+                                        // Without a code of its own the 504 floor
+                                        // calls this a timeout, and it is not one:
+                                        // nothing waited and nothing ran.
+                                        {"data", {{"code", "command_cancelled"},
+                                                  {"retryable", true}}}}}});
             continue;
         }
         try {
@@ -249,7 +258,10 @@ void EditorHook::processQueue() {
             DIDI_LOG_ERROR("EDITOR_HOOK", "Exception executing command: ", cmd.method);
             cmd.control->markCompleted();
             fulfillCommand(cmd.response_promise, cmd.control,
-                           {{"error", {{"code", 500}, {"message", e.what()}}}});
+                           {{"error", {{"code", 500},
+                                        {"message", e.what()},
+                                        {"data", {{"code", "command_threw"},
+                                                  {"retryable", false}}}}}});
         }
     }
     processRuntimeStepFrame();
@@ -283,7 +295,9 @@ void EditorHook::scheduleProfilerRead(
         fulfillCommand(promise, control,
                        {{"error", {{"code", 501},
                                     {"message", "Performance.get_monitor is unavailable: " +
-                                                    preflight.error().message}}}});
+                                                    preflight.error().message},
+                                    {"data", {{"code", "required_bind_unavailable"},
+                                              {"retryable", false}}}}}});
         return;
     }
     int sample_count = 0;
@@ -295,7 +309,8 @@ void EditorHook::scheduleProfilerRead(
             fulfillCommand(promise, control,
                            {{"error", {{"code", 423},
                                         {"message", "A profiler collection is already active"},
-                                        {"data", {{"retryable", true}}}}}});
+                                        {"data", {{"code", "profiler_read_active"},
+                                                  {"retryable", true}}}}}});
             return;
         }
         sample_count = request.value().sample_count;
@@ -395,7 +410,9 @@ void EditorHook::scheduleInvariantWatch(
             fulfillCommand(promise, control,
                            {{"error", {{"code", 501},
                                         {"message", "Performance.get_monitor is unavailable: " +
-                                                        preflight.error().message}}}});
+                                                        preflight.error().message},
+                                        {"data", {{"code", "required_bind_unavailable"},
+                                                  {"retryable", false}}}}}});
             return;
         }
         break;
@@ -410,7 +427,8 @@ void EditorHook::scheduleInvariantWatch(
             fulfillCommand(promise, control,
                            {{"error", {{"code", 423},
                                         {"message", "An invariant watch is already active"},
-                                        {"data", {{"retryable", true}}}}}});
+                                        {"data", {{"code", "invariant_watch_active"},
+                                                  {"retryable", true}}}}}});
             return;
         }
         duration_ms = request.value().duration_ms;
@@ -562,9 +580,9 @@ void EditorHook::scheduleSceneExploration(
     if (missing.contains("error")) {
         control->markCompleted();
         fulfillCommand(promise, control,
-                       {{"error", {{"code", missing["error"].value("code", 500)},
-                                    {"message", "Could not check the input actions: " +
-                                                    missing["error"].value("message", "unknown")}}}});
+                       runtime::relayedExplorationRefusal(
+                           "Could not check the input actions", missing,
+                           "input_action_check_failed"));
         return;
     }
     const auto undefined = missing.value("missing", json::array());
@@ -608,7 +626,8 @@ void EditorHook::scheduleSceneExploration(
             fulfillCommand(promise, control,
                            {{"error", {{"code", 423},
                                         {"message", "A scene exploration is already running"},
-                                        {"data", {{"retryable", true}}}}}});
+                                        {"data", {{"code", "scene_exploration_active"},
+                                                  {"retryable", true}}}}}});
             return;
         }
         duration_ms = request.value().duration_ms;
@@ -725,18 +744,19 @@ void EditorHook::processSceneExplorationFrame() {
             return;
         }
         if (pressed.contains("error")) {
-            // An action the project does not define is a request that named a
-            // button nobody can press. Reporting the run as if it had driven
-            // the game would be the dishonest answer.
+            // The window is open and the press did not land, so reporting the
+            // run as if it had driven the game would be the dishonest answer.
+            // The InputMap check already refused an action nobody declared, so
+            // whatever is left is the engine refusing, not the request being
+            // wrong: it is reported under the bridge's own status and code
+            // rather than flattened to a 400 the floor calls invalid_arguments.
             auto finished = std::move(m_pendingSceneExploration);
             m_pendingSceneExploration.reset();
             finished->control->markCompleted();
             fulfillCommand(finished->response_promise, finished->control,
-                           {{"error", {{"code", 400},
-                                        {"message", "Could not press the action " +
-                                                        action_now_name + ": " +
-                                                        pressed["error"].value("message",
-                                                                               "unknown")}}}});
+                           runtime::relayedExplorationRefusal(
+                               "Could not press the action " + action_now_name, pressed,
+                               "press_refused", {{"action", action_now_name}}));
             return;
         }
         m_pendingSceneExploration->held_action = action_now;
@@ -859,7 +879,10 @@ void EditorHook::scheduleAssetReimport(
         control->markCompleted();
         fulfillCommand(promise, control,
                        {{"error", {{"code", 409},
-                                    {"message", "Asset reimport is available only in editor sessions"}}}});
+                                    {"message", "Asset reimport is available only in editor sessions"},
+                                    {"data", {{"code", "session_kind_rejected"},
+                                              {"method", "asset.reimport"},
+                                              {"retryable", false}}}}}});
         return;
     }
     if (!params.is_object() || !params.contains("paths") || !params["paths"].is_array() ||
@@ -901,7 +924,9 @@ void EditorHook::scheduleAssetReimport(
         control->markCompleted();
         fulfillCommand(promise, control,
                        {{"error", {{"code", 409},
-                                    {"message", "An asset reimport request is already active"}}}});
+                                    {"message", "An asset reimport request is already active"},
+                                    {"data", {{"code", "asset_reimport_active"},
+                                              {"retryable", true}}}}}});
         return;
     }
     auto resolved = GodotBridge::instance().resolveReimportPaths(paths);
@@ -1189,7 +1214,8 @@ void EditorHook::processAssetReimportFrame() {
             if (state == ReimportProgressState::TimedOut) {
                 response = {{"error", {{"code", 504},
                                         {"message", "Asset reimport did not reach editor idle before timeout"},
-                                        {"data", {{"outcome", "unknown_outcome"},
+                                        {"data", {{"code", "reimport_idle_timeout"},
+                                                   {"outcome", "unknown_outcome"},
                                                    {"route_quarantine", false}}}}}};
             } else {
                 // What the scan did, read off the filesystem rather than
@@ -1240,7 +1266,10 @@ void EditorHook::scheduleRuntimeStep(
         control->markCompleted();
         fulfillCommand(promise, control,
                        {{"error", {{"code", 409},
-                                    {"message", "Frame stepping is available only for game sessions"}}}});
+                                    {"message", "Frame stepping is available only for game sessions"},
+                                    {"data", {{"code", "session_kind_rejected"},
+                                              {"method", "runtime.step"},
+                                              {"retryable", false}}}}}});
         return;
     }
 
@@ -1256,7 +1285,10 @@ void EditorHook::scheduleRuntimeStep(
         control->markCompleted();
         fulfillCommand(promise, control,
                        {{"error", {{"code", 409},
-                                    {"message", "Frame stepping requires a paused game session"}}}});
+                                    {"message", "Frame stepping requires a paused game session"},
+                                    {"data", {{"code", "game_not_paused"},
+                                              {"paused", false},
+                                              {"retryable", false}}}}}});
         return;
     }
 
@@ -1266,7 +1298,9 @@ void EditorHook::scheduleRuntimeStep(
             control->markCompleted();
             fulfillCommand(promise, control,
                            {{"error", {{"code", 409},
-                                        {"message", "A runtime frame step is already active"}}}});
+                                        {"message", "A runtime frame step is already active"},
+                                        {"data", {{"code", "runtime_step_active"},
+                                                  {"retryable", true}}}}}});
             return;
         }
         if (m_pendingRuntimeStep.has_value()) {
@@ -1274,7 +1308,9 @@ void EditorHook::scheduleRuntimeStep(
             control->markCompleted();
             fulfillCommand(promise, control,
                            {{"error", {{"code", 409},
-                                        {"message", "A runtime frame step is already active"}}}});
+                                        {"message", "A runtime frame step is already active"},
+                                        {"data", {{"code", "runtime_step_active"},
+                                                  {"retryable", true}}}}}});
             return;
         }
         m_pendingRuntimeStep = PendingRuntimeStep{
@@ -1329,7 +1365,9 @@ void EditorHook::processRuntimeStepFrame() {
         completed->control->markCompleted();
         if (!paused.contains("error")) {
             paused = {{"error", {{"code", 500},
-                                  {"message", "Godot did not re-pause after the runtime frame step"}}}};
+                                  {"message", "Godot did not re-pause after the runtime frame step"},
+                                  {"data", {{"code", "repause_failed"},
+                                            {"retryable", false}}}}}};
         }
         fulfillCommand(completed->response_promise, completed->control, std::move(paused));
         return;
@@ -1354,7 +1392,10 @@ void EditorHook::cancelPendingCommands(const std::string& reason) {
         pending.pop();
         if (command.control && command.control->tryCancelPending()) {
             fulfillCommand(command.response_promise, command.control,
-                           {{"error", {{"code", 503}, {"message", reason}}}});
+                           {{"error", {{"code", 503},
+                                        {"message", reason},
+                                        {"data", {{"code", "live_session_ended"},
+                                                  {"retryable", false}}}}}});
         }
     }
     std::optional<PendingRuntimeStep> active_step;
@@ -1369,7 +1410,10 @@ void EditorHook::cancelPendingCommands(const std::string& reason) {
     if (active_step.has_value() && active_step->control &&
         active_step->control->tryCancelRunning()) {
         fulfillCommand(active_step->response_promise, active_step->control,
-                       {{"error", {{"code", 503}, {"message", reason}}}});
+                       {{"error", {{"code", 503},
+                                        {"message", reason},
+                                        {"data", {{"code", "live_session_ended"},
+                                                  {"retryable", false}}}}}});
     }
     std::optional<PendingAssetReimport> active_reimport;
     {
@@ -1382,7 +1426,10 @@ void EditorHook::cancelPendingCommands(const std::string& reason) {
     if (active_reimport.has_value() && active_reimport->control &&
         active_reimport->control->tryCancelRunning()) {
         fulfillCommand(active_reimport->response_promise, active_reimport->control,
-                       {{"error", {{"code", 503}, {"message", reason}}}});
+                       {{"error", {{"code", 503},
+                                        {"message", reason},
+                                        {"data", {{"code", "live_session_ended"},
+                                                  {"retryable", false}}}}}});
     }
     std::optional<PendingProfilerRead> active_profiler;
     {
@@ -1398,7 +1445,8 @@ void EditorHook::cancelPendingCommands(const std::string& reason) {
         active_profiler->control->tryCancelRunning()) {
         fulfillCommand(active_profiler->response_promise, active_profiler->control,
                        {{"error", {{"code", 504}, {"message", reason},
-                                    {"data", {{"outcome", active_profiler->collector.started()
+                                    {"data", {{"code", "live_session_ended"},
+                                              {"outcome", active_profiler->collector.started()
                                                               ? "unknown_outcome"
                                                               : "not_started"},
                                               {"retryable", false}}}}}});
@@ -1420,7 +1468,8 @@ void EditorHook::cancelPendingCommands(const std::string& reason) {
         active_watch->control->tryCancelRunning()) {
         fulfillCommand(active_watch->response_promise, active_watch->control,
                        {{"error", {{"code", 503}, {"message", reason},
-                                    {"data", {{"outcome", "unknown_outcome"},
+                                    {"data", {{"code", "live_session_ended"},
+                                              {"outcome", "unknown_outcome"},
                                               {"retryable", false}}}}}});
     }
 
@@ -1456,7 +1505,8 @@ void EditorHook::cancelPendingCommands(const std::string& reason) {
         if (active_exploration->control && active_exploration->control->tryCancelRunning()) {
             fulfillCommand(active_exploration->response_promise, active_exploration->control,
                            {{"error", {{"code", 503}, {"message", reason},
-                                        {"data", {{"outcome", "unknown_outcome"},
+                                        {"data", {{"code", "live_session_ended"},
+                                                  {"outcome", "unknown_outcome"},
                                                   {"retryable", false}}}}}});
         }
     }
@@ -1517,7 +1567,10 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
                                    method == "engine.classExists";
         if (m_sessionKind == runtime::SessionKind::game && !game_admitted) {
             return {{"error", {{"code", 409},
-                                {"message", "Editor-only method is unavailable in a game session: " + method}}}};
+                                {"message", "Editor-only method is unavailable in a game session: " + method},
+                                {"data", {{"code", "session_kind_rejected"},
+                                          {"method", method},
+                                          {"retryable", false}}}}}};
         }
         return GodotBridge::instance().execute(method, params, sessionKindName(m_sessionKind));
     }
@@ -1529,7 +1582,10 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
         if (m_sessionKind != runtime::SessionKind::editor &&
             params.value("node_isolation_path", "") != "") {
             return {{"error", {{"code", 409},
-                                {"message", "Viewport node isolation is unavailable in a game session"}}}};
+                                {"message", "Viewport node isolation is unavailable in a game session"},
+                                {"data", {{"code", "session_kind_rejected"},
+                                          {"method", method},
+                                          {"retryable", false}}}}}};
         }
         return ViewportRenderer::instance().captureViewport(params, sessionKindName(m_sessionKind));
     }
@@ -1543,7 +1599,10 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
         if (m_sessionKind != runtime::SessionKind::editor &&
             params.value("node_isolation_path", "") != "") {
             return {{"error", {{"code", 409},
-                                {"message", "Viewport node isolation is unavailable in a game session"}}}};
+                                {"message", "Viewport node isolation is unavailable in a game session"},
+                                {"data", {{"code", "session_kind_rejected"},
+                                          {"method", method},
+                                          {"retryable", false}}}}}};
         }
         return ViewportRenderer::instance().diffViewport(params, sessionKindName(m_sessionKind));
     }
@@ -1605,7 +1664,10 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
     };
     if (offline_only.count(method)) {
         return {{"error", {{"code", 409},
-                           {"message", "Offline-only method must execute in the standalone MCP process: " + method}}}};
+                           {"message", "Offline-only method must execute in the standalone MCP process: " + method},
+                           {"data", {{"code", "offline_only_method"},
+                                     {"method", method},
+                                     {"retryable", false}}}}}};
     }
 
     static const std::unordered_set<std::string> registered_but_unimplemented = {
@@ -1614,9 +1676,16 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
     };
     if (registered_but_unimplemented.count(method)) {
         return {{"error", {{"code", 501},
-                           {"message", "Method is registered for compatibility but has no trustworthy live implementation: " + method}}}};
+                           {"message", "Method is registered for compatibility but has no trustworthy live implementation: " + method},
+                           {"data", {{"code", "unimplemented_method"},
+                                     {"method", method},
+                                     {"retryable", false}}}}}};
     }
-    return {{"error", {{"code", 404}, {"message", "Unknown method: " + method}}}};
+    return {{"error", {{"code", 404},
+                       {"message", "Unknown method: " + method},
+                       {"data", {{"code", "unknown_method"},
+                                 {"method", method},
+                                 {"retryable", false}}}}}};
 }
 
 RuntimeLogRing& EditorHook::runtimeLogs() {

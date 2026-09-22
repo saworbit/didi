@@ -215,6 +215,26 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **Every refusal the extension emits names itself.** A client branches on
+  `error.data.code` and a person reads `error.message`. Two places published
+  neither. The three shader shape refusals answered with the identifier as the
+  whole message -- `invalid_shader_set_uniform_request` was the explanation a
+  person was shown -- because they called `errorJson` rather than `bridgeError`,
+  which is the helper that pairs an identifier with a sentence and keeps the
+  identifier in `data.code`. They now go through it, and a test pins the rule
+  that produced the gap: no `errorJson` call may hand a bare identifier over as
+  its message (#865). In `editor_hook.cpp` the refusals are built as literals,
+  and a refusal with no `data.code` is named by `applyErrorDataFloor`, which
+  reads the status and nothing else. So a `runtime_explore_scene` run that
+  stopped because the engine refused a press mid-window arrived as
+  `invalid_arguments` -- the name for a request that was malformed before the
+  run started -- and a cancelled command arrived as `timeout`, having waited for
+  nothing. The run now reports the bridge's refusal with the bridge's own status
+  and `data`, plus the action it was pressing, and every other refusal in that
+  file above 400 carries a code of its own: a profiler read, an invariant watch,
+  an exploration run and a frame step no longer share the word `conflict`
+  (#867). A 400 still takes `invalid_arguments` from the floor, because for an
+  argument this file validated and rejected that is the true name.
 - **A paused game is refused rather than explored.** `runtime_explore_scene`
   drove a paused game for its whole window and reported a stuck interval with
   `measured: true`, which is the one thing its own rules say must not happen: a
