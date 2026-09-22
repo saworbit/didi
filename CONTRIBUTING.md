@@ -80,6 +80,21 @@ add noise to the log and change nothing about who is responsible.
 
    On Windows, changes to the live bridge must also pass `tests/run_godot_integration.ps1` against a supported Godot 4.5+ editor build.
 
+   Changes to the signal bridge have a second harness,
+   `tests/run_phase7_signal_bridge.ps1`, which drives `signal.connect`,
+   `signal.disconnect`, `signal.emit` and `signal.listConnections` through a
+   real editor. It needs the console build, because it waits for a line on the
+   editor's standard output:
+   ```powershell
+   ./tests/run_phase7_signal_bridge.ps1 `
+     -GodotExecutable C:\Godot\Godot_v4.7.2-stable_win64_console.exe `
+     -ExtensionLibrary build/didi_extension_signal_tests.dll `
+     -ProbeExecutable build/phase7_signal_bridge_probe.exe
+   ```
+   Add `-ExtensionLibrary build/didi_extension.dll -Production` to trial the
+   extension people install, which has the failure seams compiled out. CI runs
+   both, on all three supported engine lines.
+
    To run one test on its own, which is how you tell a genuine failure from a
    leak an earlier test left behind:
    ```bash
