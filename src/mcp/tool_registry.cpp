@@ -1691,7 +1691,8 @@ std::optional<Error> probeCallMethodTarget(const json& arguments,
                {"method_name", arguments.value("method_name", json(nullptr))}};
     json request = arguments;
     request["preview"] = true;
-    auto response = client->sendRequest("scene.callMethod", request, 5000);
+    auto response = client->sendRequest("scene.callMethod", request,
+                                        ipc::withAcceptAllowance(5000));
 
     // A refusal the real call would hit is the whole point of reading the
     // target. Anything else means the probe could not reach the engine, which

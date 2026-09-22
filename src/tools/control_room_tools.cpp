@@ -131,7 +131,8 @@ CallToolResult handleControlRoom(const json& args, const std::shared_ptr<ipc::II
         // stays so; this is bounded, read-only, and a failure to answer is
         // reported as unknown rather than as clean (#557).
         if (lease->descriptor->kind == "editor") {
-            auto state = lease->sendRequest("editor.getState", json::object(), 3000);
+            auto state = lease->sendRequest("editor.getState", json::object(),
+                                            ::didi::ipc::withAcceptAllowance(3000));
             if (state.isOk() && state.value().is_object()) {
                 const auto& answer = state.value();
                 inputs.unsaved_scenes_asked = true;

@@ -235,8 +235,8 @@ coordination tools are for.
 
 1. Start Didi with `--project <canonical-project-root>` (or `DIDI_PROJECT_ROOT`). Phase 6 rejects startup if the explicit directory is missing or does not contain `project.godot`.
 2. Didi may auto-attach on first availability when there is one live project match, or one matching editor among games. Multiple editors or multiple games without an editor stay detached.
-3. Call `runtime_list_sessions`, then `runtime_attach_session` with an exact `session_id` and `kind` whenever auto-selection is unavailable or not the intended route. A 3-second token-authenticated handshake completes before the selected route changes; failed explicit attach preserves the old route.
-4. Call `runtime_get_session` to perform a fresh, at-most-3-second identity handshake and return token-free selection plus handshake metadata. Transport, authentication, or identity failure quarantines that route and returns a structured local-management error. If an explicit route change concurrently supersedes the refresh, it is retained and the stale refresh returns `409`.
+3. Call `runtime_list_sessions`, then `runtime_attach_session` with an exact `session_id` and `kind` whenever auto-selection is unavailable or not the intended route. A token-authenticated handshake on a finite deadline completes before the selected route changes; failed explicit attach preserves the old route.
+4. Call `runtime_get_session` to perform a fresh identity handshake on that same finite deadline and return token-free selection plus handshake metadata. Transport, authentication, or identity failure quarantines that route and returns a structured local-management error. If an explicit route change concurrently supersedes the refresh, it is retained and the stale refresh returns `409`.
 5. Route live operations and verify `session_kind` (`editor` versus `game`) in every response.
 6. Call `runtime_detach_session` before changing projects or choosing another process.
 

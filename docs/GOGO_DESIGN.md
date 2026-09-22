@@ -172,7 +172,7 @@ Behaviour:
 2. Create N workspace directories when isolation is on.
 3. Spawn N Godot children with the Didi extension loaded.
 4. Wait until each child publishes a schema-1 descriptor whose project path matches the workspace, kind matches, and PID+start identity is live.
-5. Perform the existing 3-second authenticated handshake **without** replacing the user's active route.
+5. Perform the existing authenticated handshake **without** replacing the user's active route.
 6. Return bench ids plus public session metadata. Never return tokens.
 
 Any child that misses the start deadline is killed and the whole acquire fails. No "3 of 8 are fine" success.

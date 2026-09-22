@@ -348,7 +348,7 @@ The extension binds its endpoint first, then atomically publishes one schema-`1`
 
 Before connecting, the standalone client acquires the descriptor's `<session-id>.lock`. The OS lock, not metadata-file presence, enforces one MCP owner. Another client receives `423`; process exit or crash releases the kernel lock. The lock metadata never contains the session authentication token. Releasing a lock does not remove the file it was taken on, so a later discovery scan sweeps one up on both platforms: a `<32hex>.lock` with no `<32hex>.json` beside it is removed only when this process can take the lock itself, which is what proves nobody holds it. A lock another client holds answers `423` to the sweep exactly as it does to an attach, and is left alone.
 
-Every routed live request copies public parameters and adds `_didi_session_token` internally. The extension compares all 64 token bytes in constant work, strips the field, then dispatches the command. `session.handshake` must complete within 3,000 ms and echo matching session/protocol identity before a candidate route replaces the current route. Failed attach is transactional.
+Every routed live request copies public parameters and adds `_didi_session_token` internally. The extension compares all 64 token bytes in constant work, strips the field, then dispatches the command. `session.handshake` must complete within a finite deadline, 3,000 ms plus the transport's idle-recycle window, and echo matching session/protocol identity before a candidate route replaces the current route. Failed attach is transactional.
 
 ```json
 {
