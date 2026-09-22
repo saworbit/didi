@@ -215,6 +215,27 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **A handshake deadline now allows for the wait to be accepted, so the attach
+  that `runtime_launch --detach` documents works on macOS and Linux.** A server
+  serves one accepted connection at a time and only accepts the next once the
+  one it holds has been idle for its recycle window. A client arriving in the
+  meantime still connects, because the kernel takes it into the listen backlog
+  and a named pipe hands out the next instance, and then waits with a request
+  nothing has read. The attach handshake allowed a flat 3,000 ms, which is over
+  the Windows window of 1,000 and under the POSIX window of 5,000. So
+  `runtime_attach_session`, the call `runtime_launch --detach` names as the next
+  step, answered `504` with `outcome_unknown: true` on both POSIX runners, four
+  runs out of four, while the session it said it could not reach then paused,
+  stepped and stopped perfectly. Windows was the control for the arithmetic, not
+  for the design. A deadline that may be spent on the first request over a new
+  connection now comes from `ipc::withAcceptAllowance`, which adds the window
+  from the same file the window is set in, so the two numbers stop being chosen
+  independently in two places. Three call sites used flat numbers and all take
+  it now: the handshake, the Control Room's one engine read, which was reporting
+  unsaved scenes as unknown, and the call-method preview probe, which was
+  skipping preview verification. `kWaitForDefinitiveResponse` is returned
+  unchanged, because a call with no deadline has nothing to extend. #782
+
 - **A process that has exited no longer reads as present on macOS and Linux.**
   `queryProcessIdentity` is the function that says whether the pid in a session
   descriptor is a real process, and its Windows branch has refused a corpse

@@ -215,7 +215,7 @@ Route the method from `EditorHook::executeOnMainThread` into a bounded implement
 - `src/runtime/checkpoint_store.cpp`: bounded saved-file inventory, manifest/hash validation, checkpoint publication, retention, and restore staging.
 - `src/runtime/managed_process.cpp`: owned-child launch, process identity, exit observation, logs, and termination.
 - `src/runtime/managed_recovery.cpp`: copied-project lifecycle, readiness, pre/post checkpoints, reconciliation latch, one automatic restart, and preserved-project restore.
-- `src/runtime/session_client.cpp`: descriptor discovery, opened-handle validation, cross-platform PID/process-start identity, 3-second transactional handshake, token insertion, and local route state.
+- `src/runtime/session_client.cpp`: descriptor discovery, opened-handle validation, cross-platform PID/process-start identity, transactional handshake on a finite deadline, token insertion, and local route state.
 - `src/gdextension/session_host.cpp`: bind-before-publish editor/game endpoint lifecycle, private descriptor generation, authentication stripping, and safe no-replace descriptor retirement.
 - `src/gdextension/runtime_log.cpp`: bounded 2,000-record ring, UTF-8-safe 16 KiB messages, 64 KiB details, cursor gaps, filtering, and logger sink mirroring.
 - `src/gdextension/runtime_bridge.cpp`: SceneTree resolution, UTF-8 field limits, 10,000-node/256 KiB tree budgets, explicit truncation, pause verification, exact one-active-step state machine, shutdown cancellation, and stop requests.
