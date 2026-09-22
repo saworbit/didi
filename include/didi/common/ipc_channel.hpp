@@ -107,6 +107,10 @@ public:
     virtual bool start(const std::string& pipe_name = kDefaultPipeName) = 0;
     virtual void stop() = 0;
     virtual bool isRunning() const = 0;
+    // The handler is called from one thread at a time, whichever connection the
+    // request arrived on. A server listens on serverConnectionSlots()
+    // connections at once (#873), so the reading is concurrent; the calling is
+    // not, and a handler does not have to be written for two callers.
     virtual void setHandler(MessageHandler handler) = 0;
 };
 
@@ -129,24 +133,39 @@ std::unique_ptr<IIpcServer> createIpcServer();
 // separate limit.
 std::optional<std::string> endpointPathRejection(const std::string& endpoint);
 
+// How many connections one server listens on and serves at the same time.
+//
+// A connection arriving while a slot is free is read when it arrives. One
+// arriving when every slot is held waits for a slot to recycle, which is what
+// withAcceptAllowance below is sized for.
+int serverConnectionSlots();
+
 // What a deadline has to allow for besides the work, on a request that may be
 // the first one on a connection the server has not accepted yet.
 //
-// A server serves one accepted connection at a time and only accepts the next
-// once the one it holds has been idle for its recycle window. A client
-// arriving in the meantime still connects, because the kernel takes it into
-// the listen backlog and a named pipe hands out the next instance, and then
-// waits with a request nothing has read. So a deadline chosen from how long
-// the work should take refuses a request that was always going to be answered,
-// and the platform with the longer recycle window is the one it happens on.
+// A server used to serve one accepted connection at a time and accept the next
+// only once the one it held had been idle for its recycle window. A client
+// arriving in the meantime still connected, because the kernel takes it into
+// the listen backlog and a named pipe hands out an instance when one comes
+// free, and then waited with a request nothing had read. So a deadline chosen
+// from how long the work should take refused a request that was always going
+// to be answered, and the platform with the longer recycle window was the one
+// it happened on.
 //
 // That is #782. The attach handshake allowed a flat 3000 ms, which is over the
 // Windows window of 1000 and under the POSIX window of 5000, so the
 // runtime_attach_session that runtime_launch --detach documents failed on
-// macOS and Linux and passed on Windows. Call sites say how long the work
-// gets; this adds what being accepted costs, from the same place the window
-// itself is set. kWaitForDefinitiveResponse is returned unchanged, because a
-// call with no deadline has nothing to extend.
+// macOS and Linux and passed on Windows.
+//
+// #873 gave the servers serverConnectionSlots() connections at once, so the
+// ordinary case no longer pays this. Two things still can. Every slot can be
+// held, by a client that walked away without closing its connections. And the
+// server on the other end is the addon binary sitting in someone's Godot
+// project, which is updated separately from this one, so it may predate the
+// change entirely. Call sites say how long the work gets; this adds what being
+// accepted can still cost, from the same place the window itself is set.
+// kWaitForDefinitiveResponse is returned unchanged, because a call with no
+// deadline has nothing to extend.
 int withAcceptAllowance(int work_ms);
 
 namespace testing {

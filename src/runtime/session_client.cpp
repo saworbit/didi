@@ -1693,7 +1693,9 @@ private:
             session_lock = std::move(acquired.value());
         }
         auto candidate = std::shared_ptr<ipc::IIpcClient>(m_factory());
-        if (!candidate || !candidate->connect(descriptor.endpoint, 2000)) {
+        if (!candidate ||
+            !candidate->connect(descriptor.endpoint,
+                                ipc::withAcceptAllowance(kRouteReconnectWorkMs))) {
             return Error::notConnected("Unable to connect to runtime session: " + descriptor.session_id);
         }
         auto handshake = authenticateSession(candidate, descriptor);

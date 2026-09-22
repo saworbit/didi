@@ -5,8 +5,10 @@
 #include <condition_variable>
 #include <chrono>
 #include <algorithm>
+#include <array>
 #include <cerrno>
 #include <climits>
+#include <vector>
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -25,10 +27,12 @@ namespace ipc {
 
 namespace {
 
-// A server holds one endpoint instance at a time: it accepts a connection,
-// serves it, and only listens again once that connection is gone. So an idle
-// connection has to be recycled or a second client can never get in, and this
-// is how long a server waits for a request before doing that.
+// How long a server waits for a request on an idle connection before taking it
+// back. This used to be the admission queue: a server listened again only once
+// the connection it held was gone, so an idle client kept everyone else out and
+// this number was the price of getting in (#873). A server now listens on
+// kServerConnectionSlots endpoints at once, so the window is a slowloris guard:
+// it bounds how long a connection that has stopped talking may keep a slot.
 //
 // A client reusing a connection has to give up on it well before then. Writing
 // into a connection the server is recycling puts the request in a buffer that
@@ -40,14 +44,24 @@ namespace {
 constexpr int kServerIdleRecycleMs = 1000;
 constexpr int kClientIdleReuseMs = 300;
 #else
-// A Unix socket server polls for its next accept rather than holding the only
-// instance of a named endpoint, so it can afford a longer window, and its frame
-// timings are already built on this one.
+// A Unix socket keeps a listen backlog the kernel fills whether or not the
+// server has accepted, so a POSIX client is never refused outright and this
+// side can afford a longer window. Its frame timings are already built on it.
 constexpr int kServerIdleRecycleMs = 5000;
 constexpr int kClientIdleReuseMs = 1500;
 #endif
 static_assert(kClientIdleReuseMs * 3 <= kServerIdleRecycleMs,
               "a client must stop reusing a connection well before a server recycles it");
+
+// How many connections a server listens on and serves at the same time.
+//
+// The session ownership lock means one client per session, so the second
+// connection is always the same process opening a new one: a
+// runtime_attach_session, or a repeat after a transport failure. One spare slot
+// would cover that. Four leaves room for a client that has abandoned a
+// connection without closing it, which is what the recycle window above is
+// still here for, and keeps the cost at four idle threads.
+constexpr size_t kServerConnectionSlots = 4;
 
 std::atomic<int> g_serverIdleRecycleMs{kServerIdleRecycleMs};
 std::atomic<int> g_clientIdleReuseMs{kClientIdleReuseMs};
@@ -56,6 +70,8 @@ int serverIdleRecycleMs() { return g_serverIdleRecycleMs.load(std::memory_order_
 int clientIdleReuseMs() { return g_clientIdleReuseMs.load(std::memory_order_relaxed); }
 
 } // namespace
+
+int serverConnectionSlots() { return static_cast<int>(kServerConnectionSlots); }
 
 int withAcceptAllowance(int work_ms) {
     // A call that waits for a definitive response has no deadline to extend.
@@ -530,7 +546,9 @@ public:
     explicit Win32IpcServer(testing::PipeSecurityDescriptorFactory security_descriptor_factory)
         : m_running(false),
           m_stopEvent(NULL),
-          m_securityDescriptorFactory(std::move(security_descriptor_factory)) {}
+          m_securityDescriptorFactory(std::move(security_descriptor_factory)) {
+        for (auto& pipe : m_activePipes) pipe.store(INVALID_HANDLE_VALUE);
+    }
     ~Win32IpcServer() override {
         stop();
     }
@@ -550,20 +568,26 @@ public:
             m_startupSucceeded = false;
         }
         m_running.store(true);
+        for (auto& pipe : m_activePipes) pipe.store(INVALID_HANDLE_VALUE);
 
-        m_thread = std::thread(&Win32IpcServer::serverLoop, this);
+        // Slot 0 owns the answer to "did this endpoint come up". It is the one
+        // that reports a name already taken or a security descriptor that would
+        // not build, and the rest are only started once it has said yes, so a
+        // refused endpoint still costs one thread rather than four.
+        m_threads.emplace_back(&Win32IpcServer::serverLoop, this, size_t{0}, true);
         std::unique_lock<std::mutex> lock(m_startupMutex);
         m_startupCv.wait(lock, [this] { return m_startupReady; });
         const bool started = m_startupSucceeded;
         lock.unlock();
         if (!started) {
             m_running.store(false);
-            if (m_thread.joinable()) {
-                m_thread.join();
-            }
+            joinThreads();
             CloseHandle(m_stopEvent);
             m_stopEvent = NULL;
             return false;
+        }
+        for (size_t slot = 1; slot < kServerConnectionSlots; ++slot) {
+            m_threads.emplace_back(&Win32IpcServer::serverLoop, this, slot, false);
         }
         DIDI_LOG_INFO("IPC_SERVER", "Named pipe server started on ", m_pipeName);
         return true;
@@ -571,19 +595,34 @@ public:
 
     void stop() override {
         const bool wasRunning = m_running.exchange(false);
-        if (!wasRunning && !m_thread.joinable()) return;
+        if (!wasRunning && m_threads.empty()) return;
 
         if (m_stopEvent) {
             SetEvent(m_stopEvent);
         }
 
-        HANDLE curPipe = m_activePipe.load();
-        if (curPipe != INVALID_HANDLE_VALUE) {
-            CancelIoEx(curPipe, NULL);
+        // Take each connection before cancelling it, the way the POSIX branch
+        // takes its client descriptors. Taking it makes that slot's
+        // compare_exchange fail, so the slot leaves the handle to the owner
+        // that is about to close it. Reading the handle and leaving it with the
+        // slot would let the slot close it between the read and the cancel, and
+        // with several slots the number could already be another slot's new
+        // pipe by then.
+        std::array<HANDLE, kServerConnectionSlots> taken_pipes{};
+        for (size_t slot = 0; slot < kServerConnectionSlots; ++slot) {
+            taken_pipes[slot] = m_activePipes[slot].exchange(INVALID_HANDLE_VALUE);
+            if (taken_pipes[slot] != INVALID_HANDLE_VALUE) {
+                CancelIoEx(taken_pipes[slot], NULL);
+            }
         }
 
-        if (m_thread.joinable()) {
-            m_thread.join();
+        joinThreads();
+
+        for (HANDLE pipe : taken_pipes) {
+            if (pipe != INVALID_HANDLE_VALUE) {
+                DisconnectNamedPipe(pipe);
+                CloseHandle(pipe);
+            }
         }
 
         if (m_stopEvent) {
@@ -603,6 +642,13 @@ public:
     }
 
 private:
+    void joinThreads() {
+        for (auto& thread : m_threads) {
+            if (thread.joinable()) thread.join();
+        }
+        m_threads.clear();
+    }
+
     void signalStartup(bool succeeded) {
         std::lock_guard<std::mutex> lock(m_startupMutex);
         if (!m_startupReady) {
@@ -612,7 +658,7 @@ private:
         }
     }
 
-    void serverLoop() {
+    void serverLoop(size_t slot, bool owns_startup) {
         SECURITY_ATTRIBUTES sa;
         sa.nLength = sizeof(SECURITY_ATTRIBUTES);
         sa.bInheritHandle = FALSE;
@@ -623,23 +669,29 @@ private:
             : nullptr;
         if (!pSD) {
             DIDI_LOG_ERROR("IPC_SERVER", "Unable to create owner-only named pipe security descriptor");
-            m_running.store(false);
-            signalStartup(false);
+            if (owns_startup) {
+                m_running.store(false);
+                signalStartup(false);
+            }
             return;
         }
         sa.lpSecurityDescriptor = pSD;
 
         HANDLE hIoEvent = CreateEventA(NULL, TRUE, FALSE, NULL);
         if (!hIoEvent) {
-            m_running.store(false);
-            signalStartup(false);
+            if (owns_startup) {
+                m_running.store(false);
+                signalStartup(false);
+            }
             if (pSD) {
                 LocalFree(pSD);
             }
             return;
         }
 
-        bool firstPipeInstance = true;
+        // Only slot 0 answers for startup. Every other slot creating its first
+        // instance is an ordinary listen on an endpoint that already exists.
+        bool firstPipeInstance = owns_startup;
 
         while (m_running.load()) {
             HANDLE pipe = CreateNamedPipeA(
@@ -705,19 +757,19 @@ private:
                 continue;
             }
 
-            m_activePipe.store(pipe);
+            m_activePipes[slot].store(pipe);
             DIDI_LOG_DEBUG("IPC_SERVER", "Client connected to IPC pipe");
 
             // Process requests on this connection
             while (m_running.load()) {
                 // This timeout is load bearing, and not only a frame deadline.
-                // serverLoop holds exactly one pipe instance at a time: it
-                // creates one, serves it, and only creates the next after this
-                // loop breaks. Waiting here without a deadline means an idle
-                // client keeps the single instance forever, so a second
-                // connection to the same endpoint has nothing to connect to and
-                // fails outright. See #65 for the churn this costs and what
-                // removing it would require first.
+                // A slot serves one connection at a time, so waiting here
+                // without a deadline means an idle client keeps this slot
+                // forever. That no longer shuts anyone out on its own, because
+                // the other slots are listening while this one is busy (#873),
+                // but a client that has stopped talking should not be able to
+                // take slots out of service one at a time either. See #65 for
+                // the churn recycling costs and what removing it would require.
                 const auto idle_deadline = win32DeadlineAfter(serverIdleRecycleMs());
                 uint8_t len_buf[4] = {0};
                 auto header = readExactOverlapped(pipe, len_buf, sizeof(len_buf), hIoEvent,
@@ -798,6 +850,14 @@ private:
                         std::lock_guard<std::mutex> lock(m_mutex);
                         handler_copy = m_handler;
                     }
+                    // One request runs at a time, whichever slot read it. The
+                    // slots exist so an arriving connection is read when it
+                    // arrives, not so the engine is asked two things at once:
+                    // the handler ends up on Godot's main thread through a
+                    // queue, and nothing below this line was written for two
+                    // callers. Reading concurrently and executing in turn is
+                    // the whole of the change.
+                    std::lock_guard<std::mutex> handler_lock(m_handlerCallMutex);
                     try {
                         if (!handler_copy) {
                             response_json = {
@@ -841,9 +901,14 @@ private:
                 }
             }
 
-            m_activePipe.store(INVALID_HANDLE_VALUE);
-            DisconnectNamedPipe(pipe);
-            CloseHandle(pipe);
+            // Close only while this slot still owns the handle. A failed
+            // exchange means stop() took it, has already cancelled its I/O, and
+            // closes it after the join. See stop().
+            HANDLE expected_pipe = pipe;
+            if (m_activePipes[slot].compare_exchange_strong(expected_pipe, INVALID_HANDLE_VALUE)) {
+                DisconnectNamedPipe(pipe);
+                CloseHandle(pipe);
+            }
             DIDI_LOG_DEBUG("IPC_SERVER", "Client disconnected from IPC pipe");
         }
 
@@ -861,12 +926,16 @@ private:
     }
 
     std::atomic<bool> m_running{false};
-    std::atomic<HANDLE> m_activePipe{INVALID_HANDLE_VALUE};
+    // One entry per slot, published by that slot's thread and taken by whoever
+    // ends the connection, so a stop cancels every connection rather than the
+    // newest one and exactly one owner closes each handle.
+    std::array<std::atomic<HANDLE>, kServerConnectionSlots> m_activePipes;
     std::string m_pipeName;
     HANDLE m_stopEvent{NULL};
-    std::thread m_thread;
+    std::vector<std::thread> m_threads;
     MessageHandler m_handler;
     std::mutex m_mutex;
+    std::mutex m_handlerCallMutex;
     std::mutex m_startupMutex;
     std::condition_variable m_startupCv;
     bool m_startupReady{false};
@@ -1251,7 +1320,9 @@ private:
 
 class PosixIpcServer : public IIpcServer {
 public:
-    PosixIpcServer() : m_running(false), m_listenSock(-1) {}
+    PosixIpcServer() : m_running(false), m_listenSock(-1) {
+        for (auto& client : m_activeClients) client.store(-1);
+    }
     ~PosixIpcServer() override { stop(); }
 
     bool start(const std::string& pipe_name = "") override {
@@ -1316,7 +1387,10 @@ public:
         }
 
         m_running.store(true);
-        m_thread = std::thread(&PosixIpcServer::serverLoop, this);
+        for (auto& client : m_activeClients) client.store(-1);
+        for (size_t slot = 0; slot < kServerConnectionSlots; ++slot) {
+            m_threads.emplace_back(&PosixIpcServer::serverLoop, this, slot);
+        }
         return true;
     }
 
@@ -1333,18 +1407,26 @@ public:
         // made this look harmless does not hold on macOS. The close is below
         // the join, where this thread is the only one left holding the number.
         //
-        // The client descriptor is different, and taking it here is load
-        // bearing twice over. It is connected, so shutdown() applies and ends
-        // the one long poll an idle client is sitting in; without it stop()
-        // would wait out the whole recycle window. And taking it makes
-        // serverLoop's compare_exchange fail, so the loop leaves this
-        // descriptor to the owner that is about to use it.
-        const int active_client = m_activeClient.exchange(-1);
-        if (active_client >= 0) shutdown(active_client, SHUT_RDWR);
+        // The client descriptors are different, and taking them here is load
+        // bearing twice over. They are connected, so shutdown() applies and
+        // ends the long poll an idle client is sitting in; without it stop()
+        // would wait out the whole recycle window. And taking one makes that
+        // slot's compare_exchange fail, so the loop leaves the descriptor to
+        // the owner that is about to use it.
+        std::array<int, kServerConnectionSlots> taken_clients{};
+        for (size_t slot = 0; slot < kServerConnectionSlots; ++slot) {
+            taken_clients[slot] = m_activeClients[slot].exchange(-1);
+            if (taken_clients[slot] >= 0) shutdown(taken_clients[slot], SHUT_RDWR);
+        }
         unlink(m_pipeName.c_str());
-        if (m_thread.joinable()) m_thread.join();
+        for (auto& thread : m_threads) {
+            if (thread.joinable()) thread.join();
+        }
+        m_threads.clear();
 
-        if (active_client >= 0) close(active_client);
+        for (const int client : taken_clients) {
+            if (client >= 0) close(client);
+        }
         if (m_listenSock >= 0) {
             close(m_listenSock);
             m_listenSock = -1;
@@ -1358,7 +1440,7 @@ public:
     }
 
 private:
-    void serverLoop() {
+    void serverLoop(size_t slot) {
         struct pollfd pfd;
         pfd.fd = m_listenSock;
         pfd.events = POLLIN;
@@ -1367,6 +1449,11 @@ private:
             int pr = poll(&pfd, 1, 50);
             if (pr <= 0) continue;
 
+            // Every slot polls the same listening descriptor, so one arriving
+            // connection can wake several of them and only one accept wins.
+            // The descriptor is non-blocking, so the others get EAGAIN here
+            // rather than blocking until the next client, which is what would
+            // make them miss the stop below.
             int client = accept(m_listenSock, nullptr, nullptr);
             if (client < 0) {
                 if (!m_running.load()) break;
@@ -1376,12 +1463,12 @@ private:
                 close(client);
                 continue;
             }
-            m_activeClient.store(client);
+            m_activeClients[slot].store(client);
 
             while (m_running.load()) {
                 // Load bearing for the same reason as the Win32 branch above:
-                // this loop serves one accepted client at a time and only
-                // accepts the next after it breaks.
+                // this slot serves one accepted client at a time, and a client
+                // that stops talking should not keep it out of service.
                 const auto idle_deadline = deadlineAfter(serverIdleRecycleMs());
                 uint8_t len_buf[4] = {0};
                 // There is deliberately no equivalent here of the Win32 branch's
@@ -1420,6 +1507,10 @@ private:
                         std::lock_guard<std::mutex> lock(m_mutex);
                         h = m_handler;
                     }
+                    // One request runs at a time, whichever slot read it. See
+                    // the Win32 branch above for why reading concurrently and
+                    // executing in turn is the whole of the change.
+                    std::lock_guard<std::mutex> handler_lock(m_handlerCallMutex);
                     try {
                         if (!h) {
                             resp_json = {{"id", req_id},
@@ -1452,7 +1543,7 @@ private:
             // closes it after the join. Closing it here as well would free a
             // number the other thread still holds.
             int expected_client = client;
-            if (m_activeClient.compare_exchange_strong(expected_client, -1)) {
+            if (m_activeClients[slot].compare_exchange_strong(expected_client, -1)) {
                 close(client);
             }
         }
@@ -1462,18 +1553,21 @@ private:
     }
 
     std::atomic<bool> m_running{false};
-    std::atomic<int> m_activeClient{-1};
-    // Plain int on purpose. start() writes it before it creates the thread and
-    // stop() touches it only after the join, so both accesses are ordered by a
-    // synchronisation point and there is no concurrent reader to make atomic.
+    // One entry per slot, written only by that slot's thread and taken by
+    // stop() so a shutdown reaches every connection rather than the newest one.
+    std::array<std::atomic<int>, kServerConnectionSlots> m_activeClients;
+    // Plain int on purpose. start() writes it before it creates the threads and
+    // stop() touches it only after the joins, so both accesses are ordered by a
+    // synchronisation point and there is no concurrent writer to make atomic.
     // That holds because start and stop are called from one thread, which is
-    // how the main loop drives this; it is the accept thread they are ordered
+    // how the main loop drives this; it is the accept threads they are ordered
     // against, not each other.
     int m_listenSock{-1};
     std::string m_pipeName;
-    std::thread m_thread;
+    std::vector<std::thread> m_threads;
     MessageHandler m_handler;
     std::mutex m_mutex;
+    std::mutex m_handlerCallMutex;
 };
 
 #endif

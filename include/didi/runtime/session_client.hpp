@@ -404,18 +404,27 @@ std::optional<RuntimeRouteLease> acquireRuntimeRouteLeaseFor(
 bool quarantineRuntimeRoute(const std::shared_ptr<ipc::IIpcClient>& router,
                             const RuntimeRouteLease& lease);
 
-// How long a repeat attempt gets to open a new connection to the same session.
-// The endpoint is a local pipe or socket that either accepts immediately or is
-// not there, so this is a bound on a stall rather than a budget to spend.
-inline constexpr int kRouteReconnectMs = 2000;
+// How long opening a new connection to the same session gets, before what
+// being accepted costs.
+//
+// A local endpoint does not either accept immediately or turn out to be
+// missing, which is what this comment used to say. A named pipe whose
+// instances are all in use answers ERROR_PIPE_BUSY and the client retries
+// until its deadline, and a Unix socket takes the connection into the listen
+// backlog and leaves it there unread. So this is a budget and not only a bound
+// on a stall, and the part of it the server's own recycle window can outlast
+// comes from ipc::withAcceptAllowance rather than from a flat number here
+// (#874, the same shape as #782 one call along).
+constexpr int kRouteReconnectWorkMs = 2000;
 
 // Opens a new connection for a lease whose old one a transport failure closed,
 // so a call that is safe to repeat can be repeated on the same session. The
 // session token travels in every request, so a new connection needs no second
 // handshake. False means the endpoint would not take a connection, which is
 // the answer when the engine has gone.
-bool reconnectRuntimeRoute(const RuntimeRouteLease& lease,
-                           int timeout_ms = kRouteReconnectMs);
+bool reconnectRuntimeRoute(
+    const RuntimeRouteLease& lease,
+    int timeout_ms = ipc::withAcceptAllowance(kRouteReconnectWorkMs));
 
 // What a live request came back with, and whether it took two attempts.
 struct RouteRequestResult {
