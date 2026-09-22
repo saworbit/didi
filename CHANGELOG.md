@@ -234,6 +234,34 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **One frame reader, called from both ends of both transports.** Reading a
+  length prefix a peer wrote existed five times: a decoder in
+  `protocol.hpp`, and a client read and a server read on each of the two
+  transports in `ipc_channel_win32.cpp`. No two of them agreed. The server
+  stopped allocating from the claim in #876 and the client was not moved with
+  it, so the same file held two answers to what a claimed frame buys (#880).
+  The deadline bounding a frame that had started arriving was 1,000 ms on
+  Windows and 5,000 on POSIX under two copies of the same four-line comment,
+  because `8b598f1` tightened one branch and left the other, and only the
+  Windows number had a test (#881). And the decoder `SECURITY.md` named as the
+  fuzzed one, `didi::ipc::parseFramedMessage`, had no caller in `src/` or
+  `addons/` at all: the shipping transports had their own reader and no fuzz
+  target reached it (#882).
+
+  There is now one `didi::ipc::readFramePayload`, with the growth policy and
+  the maximum beside it, and all four transport sites call it. The client ends
+  grow a response as it arrives the way the server ends already grew a request,
+  keeping their existing single deadline over the whole payload. The frame
+  deadline is one number, 1,000 ms, hoisted above the platform split so the
+  next tightening cannot reach one transport and not the other; the idle
+  recycle window still differs by platform and still says why. POSIX has the
+  frame-deadline test it never had. `parseFramedMessage` is gone, and
+  `fuzz_framed_message` drives the real reader instead, serving the payload in
+  slices the fuzzer chooses so the slowloris shape is reachable; its corpus,
+  including the seed for the over-read that target originally found, is kept.
+  `SECURITY.md` and `fuzz/README.md` now name the decoder that is covered.
+  #880 #881 #882
+
 - **A frame the server has not been sent is no longer a buffer it has already
   allocated.** The server read a four-byte length prefix and allocated the
   claimed size from it, before a byte of the payload had arrived and before the

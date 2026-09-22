@@ -14,7 +14,7 @@ The current documented release is **2.0.0**. Security fixes are provided only fo
 
 Didi is local development tooling, not a remote or hostile-host isolation boundary. Phase 6 requires an explicit Godot project, includes a stable project key in each process-unique endpoint, and uses an OS-backed per-session lock to permit one MCP client at a time. Requests remain authenticated with a private 64-hex session token. POSIX defaults are owner-only; Windows grants the owning SID and local administrators and fails startup before pipe creation if that DACL cannot be constructed.
 
-A connection is admitted before it is authenticated, so what an unauthenticated peer can cost the server is bounded on purpose rather than by the token check. A server listens on four connection slots, and each one reads a four-byte length prefix before the handler reaches `SessionHost::authorize`. That prefix buys a read rather than a buffer: the payload grows as it arrives, in 64 KiB steps, so a frame a peer claims and never sends costs 64 KiB per slot instead of the 128 MiB a frame is allowed to be.
+A connection is admitted before it is authenticated, so what an unauthenticated peer can cost the server is bounded on purpose rather than by the token check. A server listens on four connection slots, and each one reads a four-byte length prefix before the handler reaches `SessionHost::authorize`. That prefix buys a read rather than a buffer: the payload grows as it arrives, in 64 KiB steps, so a frame a peer claims and never sends costs 64 KiB per slot instead of the 128 MiB a frame is allowed to be. A frame that has started arriving and then stalls holds its slot for at most one second, the same bound on both transports.
 
 Mutation confirmation tokens are 64 lowercase hex characters, expire after 120 seconds, are single-use, and are bound to the exact tool, arguments, canonical project, execution mode, session ID, and route generation. Treat them as short-lived capabilities: do not log, persist, publish, or reuse them. Dry-run previews do not call mutation handlers.
 
@@ -41,7 +41,7 @@ for it. Findings land in the repository's
 | [Dependency review](.github/workflows/supply-chain.yml) | A dependency arriving with a known vulnerability or a copyleft licence. | Every pull request |
 | [zizmor and actionlint](.github/workflows/lint.yml) | Workflow security: injectable `${{ }}` interpolation, over-broad tokens, credentials left on disk by `checkout`. | Every pull request |
 | [Sanitizers](.github/workflows/ci.yml) | ASan and UBSan over the whole native suite: real allocation and lifetime paths. | Every pull request that touches code |
-| [Fuzzing](.github/workflows/fuzz.yml) | libFuzzer against the three decoders that read bytes Didi did not write: the IPC frame decoder, the JSON-RPC parser, and base64. Built with ASan and UBSan. | Short run on every code pull request, longer nightly |
+| [Fuzzing](.github/workflows/fuzz.yml) | libFuzzer against the three decoders that read bytes Didi did not write: `didi::ipc::readFramePayload`, which is the frame reader both transports use at both ends, the JSON-RPC parser, and base64. Built with ASan and UBSan. | Short run on every code pull request, longer nightly |
 | Secret scanning with push protection | A credential committed by accident, blocked at push time. | Every push |
 | Dependabot | Security and version updates for the GitHub Actions and the pinned Python dependency. | Weekly and monthly |
 

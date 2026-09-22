@@ -9,11 +9,11 @@ three places that happens.
 
 | Target | Function | What arrives |
 | --- | --- | --- |
-| `fuzz_framed_message` | `didi::ipc::parseFramedMessage` | A four-byte length an attacker controls, then a payload that may not be there |
+| `fuzz_framed_message` | `didi::ipc::readFramePayload` | A four-byte length an attacker controls, then a payload that may not be there |
 | `fuzz_jsonrpc_request` | `didi::mcp::JsonRpcRequest::parse` | Every request the server ever answers |
 | `fuzz_base64_decode` | `didi::base64::decode` | Captured frames and encoded resource payloads |
 
-The first one is the reason this exists. Reading `parseFramedMessage` closely
+The first one is the reason this exists. Reading the frame decoder closely
 while deciding what to fuzz found a buffer over-read in it: the bounds check
 `size < 4 + len` was evaluated in 32-bit unsigned arithmetic, so a length near
 `UINT32_MAX` wrapped to a small number, the guard passed, and a four-gigabyte
@@ -22,6 +22,17 @@ while deciding what to fuzz found a buffer over-read in it: the bounds check
 The only test that function had round-tripped a frame the same code had just
 written — the one input shape guaranteed not to find it. **A decoder is defined
 by what it does with input it did not write.**
+
+That decoder was `didi::ipc::parseFramedMessage`, and it turned out to be the
+wrong one: nothing in `src/` or `addons/` called it, because both transports
+had their own reader and this target never reached it (#882). There is one
+reader now, `didi::ipc::readFramePayload`, and this target drives it. A server
+does not get a flat buffer, it gets a length and then a socket that hands over
+as much as it likes, so the target serves the payload in slices the fuzzer
+chooses -- including none at all, which is the slowloris case the growth policy
+exists for. What it asserts is that no read is larger than one chunk, that the
+buffer never runs ahead of the bytes that justified it, and that a rejected
+claim reads nothing.
 
 ## The corpus is the point
 
