@@ -215,6 +215,34 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **The Phase 7 signal bridge harness runs, and it passes.**
+  `tests/run_phase7_signal_bridge.ps1` is the only thing that drives
+  `signal.connect`, `signal.disconnect`, `signal.emit` and
+  `signal.listConnections` through a real editor. No workflow ran it, and it had
+  been failing for as long as that was true. The probe pinned every expected
+  failure by comparing `error.message` to an identifier, and the bridge stopped
+  answering that way when the identifiers moved to `error.data.code` and the
+  messages became sentences written for a person. The first scenario that named
+  an identifier failed and took the rest of the run with it, the same way on
+  4.5.1, 4.6.2 and 4.7.2. The probe now reads the identifier where the bridge
+  puts it, and the Live Godot Integration job runs the harness on all three
+  lines, in the seam build and again in the extension people install, so it
+  cannot rot unwatched again (#862). The second extension build the harness
+  needs adds about 18 seconds of compile, and a parallel build spends it beside
+  the first rather than after it, which is why it stays on by default now that
+  something collects the result.
+- **Two signal refusals say the identifier where every other one says it.** The
+  rule in the bridge is that `data.code` carries the stable identifier and
+  `message` carries a sentence. Two sites still built their error by hand, so
+  the identifier arrived as the whole message and `data.code` was absent: the
+  shape refusal shared by `signal_connect` and `signal_disconnect`, twelve lines
+  above a sibling that already did it the documented way, and the postcondition
+  mismatch that reports whether a rollback completed. A client switching on
+  `data.code` could not recognise either one, and a person was shown
+  `signal_postcondition_mismatch` as the explanation. Both route through
+  `bridgeError` now, and `invalid_signal_disconnect_request` and
+  `signal_postcondition_mismatch` have the sentences they were missing. Found by
+  the harness above, which is what it is for.
 - **A `scene_set_property` write that did not land says which of the two it
   was.** `applied: false` was the whole account, and it covered two outcomes
   that need different reactions. Measured on 4.5.1, 4.6.2 and 4.7.2, which
