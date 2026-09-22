@@ -31,6 +31,26 @@ ROOT = Path(__file__).resolve().parents[1]
 BRIDGE = ROOT / "src" / "gdextension" / "godot_bridge.cpp"
 HOOK = ROOT / "src" / "gdextension" / "editor_hook.cpp"
 
+# The rule is about refusals, not about two files. It used to name these two
+# and the extension emits refusals from five, so #890 and #892 both landed in
+# the unwatched ones: the router handed `session_kind_rejected` over as the
+# message while the hook, four hundred lines away and inside the guard, put the
+# same identifier under `data.code` where it belongs.
+#
+# `godot_bridge.cpp` is not in this list. It answers to the rule above instead,
+# which is about `bridgeError` and the message position, and its refusals are
+# built through helpers this scan cannot read line by line.
+ROUTER = ROOT / "src" / "gdextension" / "runtime_request_router.cpp"
+SANDBOX = ROOT / "src" / "gdextension" / "expression_sandbox.cpp"
+RUNTIME_BRIDGE = ROOT / "src" / "gdextension" / "runtime_bridge.cpp"
+IPC = ROOT / "src" / "gdextension" / "gdextension_ipc.cpp"
+
+# Every file whose refusals this scan understands, and the shape it finds them
+# in. A file added to src/gdextension that answers with either shape belongs
+# here; test_every_refusal_emitting_file_is_scanned is what says so out loud.
+LITERAL_REFUSAL_FILES = (HOOK, ROUTER, IPC)
+ERROR_JSON_FILES = (SANDBOX, RUNTIME_BRIDGE)
+
 # A bare identifier: lower case, at least one underscore, no spaces. The thing
 # a caller should never be shown as an explanation.
 IDENTIFIER = re.compile(r'^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$')
@@ -90,6 +110,23 @@ def _error_json_messages(source: str) -> list[tuple[int, str]]:
     return messages
 
 
+def _error_json_arguments(source: str) -> list[tuple[int, list[str]]]:
+    """Every ``errorJson(`` call as its line number and argument list."""
+    calls = []
+    for match in re.finditer(r'\berrorJson\(', source):
+        depth = 0
+        for index in range(match.end() - 1, len(source)):
+            if source[index] == '(':
+                depth += 1
+            elif source[index] == ')':
+                depth -= 1
+                if depth == 0:
+                    break
+        calls.append((source.count("\n", 0, match.start()) + 1,
+                      _split_top_level(source[match.end():index])))
+    return calls
+
+
 class BridgeIdentifiersReachCallersThroughBridgeError(unittest.TestCase):
     def test_no_errorjson_call_passes_a_bare_identifier(self) -> None:
         source = BRIDGE.read_text(encoding="utf-8")
@@ -144,6 +181,67 @@ class HookRefusalsNameThemselves(unittest.TestCase):
             "which knows only the status: every 409 becomes conflict and "
             "every 504 becomes timeout, whatever happened:\n  "
             + "\n  ".join(offenders))
+
+    def test_every_refusal_above_400_carries_a_code_everywhere_it_is_emitted(self) -> None:
+        offenders = []
+        for path in LITERAL_REFUSAL_FILES:
+            lines = path.read_text(encoding="utf-8").splitlines()
+            for index, line in enumerate(lines):
+                match = REFUSAL.search(line)
+                if not match:
+                    continue
+                status = int(match.group(1))
+                if status == 400:
+                    continue
+                window = "\n".join(lines[index:index + 9])
+                if re.search(r'\{"data", \{\{"code", "[a-z][a-z0-9_]+"\}', window) is None:
+                    offenders.append(f"{path.name}:{index + 1} ({status})")
+        for path in ERROR_JSON_FILES:
+            source = path.read_text(encoding="utf-8")
+            for line, arguments in _error_json_arguments(source):
+                status = arguments[0].strip()
+                if not status.isdigit() or int(status) == 400:
+                    continue
+                if len(arguments) < 3:
+                    offenders.append(f"{path.name}:{line} ({status})")
+        self.assertEqual(
+            offenders, [],
+            "A refusal with no data.code gets one from applyErrorDataFloor, "
+            "which knows only the status, so unrelated failures sharing a "
+            "number arrive under one name:\n  " + "\n  ".join(offenders))
+
+    def test_every_refusal_emitting_file_is_scanned(self) -> None:
+        # The list above is the thing that goes stale, which is how the router
+        # sat outside it. A new file in src/gdextension that answers with a
+        # refusal shape this test understands has to be added to it.
+        scanned = {path.name for path in LITERAL_REFUSAL_FILES + ERROR_JSON_FILES}
+        scanned.add(BRIDGE.name)
+        unscanned = []
+        for path in sorted((ROOT / "src" / "gdextension").glob("*.cpp")):
+            if path.name in scanned:
+                continue
+            source = path.read_text(encoding="utf-8")
+            emits = REFUSAL.search(source) or re.search(r'\berrorJson\(\d+,', source)
+            if emits:
+                unscanned.append(path.name)
+        self.assertEqual(
+            unscanned, [],
+            "These emit refusals and no list above names them, so the rule "
+            "that every refusal names itself does not reach them:\n  "
+            + "\n  ".join(unscanned))
+
+    def test_the_session_kind_refusal_is_a_sentence_on_both_paths(self) -> None:
+        # The hook and the router refuse the same thing. The router used to
+        # send the identifier as the message and no code at all (#892).
+        source = ROUTER.read_text(encoding="utf-8")
+        index = source.find('"session_kind_rejected"')
+        self.assertNotEqual(index, -1, "the router no longer names this refusal")
+        for literal in re.findall(r'\{"message", "([^"\\\n]*)"\}', source):
+            self.assertFalse(
+                IDENTIFIER.match(literal),
+                f"{ROUTER.name} hands {literal} to the caller as the "
+                "explanation. The identifier belongs under data.code and the "
+                "message belongs in sentences.")
 
     def test_the_cancelled_command_is_not_called_a_timeout(self) -> None:
         source = HOOK.read_text(encoding="utf-8")

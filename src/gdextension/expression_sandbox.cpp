@@ -34,6 +34,15 @@ json errorJson(int code, const std::string& message) {
     return {{"error", {{"code", code}, {"message", message}}}};
 }
 
+// The same refusal with the identifier a caller branches on. Without this
+// overload every refusal here reached applyErrorDataFloor with no data.code
+// and was named from its status alone, so unrelated failures sharing a number
+// arrived under one name (#892).
+json errorJson(int code, const std::string& message, const char* data_code) {
+    return {{"error", {{"code", code}, {"message", message},
+                       {"data", {{"code", data_code}}}}}};
+}
+
 bool isContinuation(unsigned char value) {
     return (value & 0xC0u) == 0x80u;
 }
@@ -1650,7 +1659,8 @@ json executeExpression(const json& params, const std::string& session_kind) {
     const auto started = std::chrono::steady_clock::now();
     if (!params.is_object()) return errorJson(400, "Expression params must be an object");
     if (session_kind != "editor" && session_kind != "game") {
-        return errorJson(500, "Runtime session kind is unavailable");
+        return errorJson(500, "Runtime session kind is unavailable",
+                             "session_kind_unavailable");
     }
     if (!params.contains("expression") || !params["expression"].is_string()) {
         return errorJson(400, "expression is required and must be a string");
@@ -1680,7 +1690,8 @@ json executeExpression(const json& params, const std::string& session_kind) {
 
     const auto source = params["expression"].get<std::string>();
     auto policy = ExpressionPolicy::validate(source);
-    if (policy.isErr()) return errorJson(403, "Unsafe expression: " + policy.error().message);
+    if (policy.isErr()) return errorJson(403, "Unsafe expression: " + policy.error().message,
+                                              "unsafe_expression");
     if (params.contains("context_node")) {
         auto valid_path = validateContextPath(params["context_node"].get<std::string>());
         if (valid_path.isErr()) return errorJson(valid_path.error().code, valid_path.error().message);
@@ -1708,14 +1719,18 @@ json executeExpression(const json& params, const std::string& session_kind) {
 
     NativeName expression_class("Expression");
     if (!expression_class.valid() || !GodotApi::instance().classdb_construct_object) {
-        return errorJson(500, "Godot Expression construction API is unavailable");
+        return errorJson(500, "Godot Expression construction API is unavailable",
+                         "required_bind_unavailable");
     }
     // classdb_construct_object2 is ClassDB::instantiate_without_postinitialization,
     // so the notification the engine's own memnew path sends is ours to send.
     // RefCounted initialises its refcount in the constructor, not here, so this
     // does not disturb the ownership OwnedObject assumes.
     OwnedObject expression(constructObject(expression_class.ptr()));
-    if (!expression.get()) return errorJson(500, "Godot could not construct Expression");
+    if (!expression.get()) {
+        return errorJson(500, "Godot could not construct Expression",
+                         "expression_construction_failed");
+    }
 
     auto source_value = makeString(executable_source);
     auto input_names = makeContainer(GDEXTENSION_VARIANT_TYPE_PACKED_STRING_ARRAY);
@@ -1745,7 +1760,8 @@ json executeExpression(const json& params, const std::string& session_kind) {
         auto detail = expressionErrorText(expression.get());
         return errorJson(422, detail.isOk() && !detail.value().empty()
                                   ? "Expression parse failed: " + detail.value()
-                                  : "Expression parse failed");
+                                  : "Expression parse failed",
+                         "expression_parse_failed");
     }
     within_timeout = requireWithinTimeout(started, timeout_ms);
     if (within_timeout.isErr()) return errorJson(within_timeout.error().code,
@@ -1785,7 +1801,8 @@ json executeExpression(const json& params, const std::string& session_kind) {
         auto detail = expressionErrorText(expression.get());
         return errorJson(422, detail.isOk() && !detail.value().empty()
                                   ? "Expression execution failed: " + detail.value()
-                                  : "Expression execution failed");
+                                  : "Expression execution failed",
+                         "expression_execution_failed");
     }
     within_timeout = requireWithinTimeout(started, timeout_ms);
     if (within_timeout.isErr()) return errorJson(within_timeout.error().code,
@@ -1811,7 +1828,8 @@ json executeExpression(const json& params, const std::string& session_kind) {
     };
     const auto response_size_without_timing = response.dump().size();
     if (response_size_without_timing > kMaxResultBytes - kResponseTimingReserve) {
-        return errorJson(413, "Expression response exceeds the 256 KiB serialized limit");
+        return errorJson(413, "Expression response exceeds the 256 KiB serialized limit",
+                         "response_too_large");
     }
     within_timeout = requireWithinTimeout(started, timeout_ms);
     if (within_timeout.isErr()) return errorJson(within_timeout.error().code,
