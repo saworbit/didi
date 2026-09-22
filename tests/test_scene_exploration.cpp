@@ -260,6 +260,29 @@ void test_a_run_that_reads_its_probe_is_measured() {
     ASSERT_TRUE(!payload.contains("unread_probes"));
 }
 
+// A paused game reported a stuck interval with measured: true, which is the
+// same finding the run refuses for an action nothing declares: a window in
+// which the input could not land is not a window in which nothing moved
+// (#778). The refusal has to be recognisable by a client switching on
+// data.code, and has to say which of the two states it found, because a pause
+// that arrived after the window opened left a press in the engine's queue.
+void test_a_paused_game_is_refused_rather_than_explored() {
+    const auto before = didi::runtime::pausedExplorationRefusal(false);
+    ASSERT_EQ(before["error"]["code"].get<int>(), 409);
+    ASSERT_EQ(before["error"]["data"]["code"].get<std::string>(), std::string("paused_game_session"));
+    ASSERT_TRUE(before["error"]["data"]["paused"].get<bool>());
+    ASSERT_TRUE(!before["error"]["data"]["input_queued"].get<bool>());
+    // A sentence, not the identifier, and it names the way out.
+    const auto sentence = before["error"]["message"].get<std::string>();
+    ASSERT_TRUE(sentence.find("runtime_set_paused") != std::string::npos);
+    ASSERT_TRUE(sentence.find("paused_game_session") == std::string::npos);
+
+    const auto during = didi::runtime::pausedExplorationRefusal(true);
+    ASSERT_EQ(during["error"]["code"].get<int>(), 409);
+    ASSERT_TRUE(during["error"]["data"]["input_queued"].get<bool>());
+    ASSERT_TRUE(during["error"]["message"].get<std::string>() != sentence);
+}
+
 void test_a_survey_run_records_more_than_one_interval() {
     auto params = minimalParams();
     params["duration_ms"] = 4000;
@@ -349,6 +372,8 @@ struct RegisterSceneExplorationTests {
                      test_a_probe_that_cannot_be_read_is_not_a_soft_lock);
         registerTest("SceneExploration.MeasuredRunNamesNoUnreadProbes",
                      test_a_run_that_reads_its_probe_is_measured);
+        registerTest("SceneExploration.PausedGameIsRefused",
+                     test_a_paused_game_is_refused_rather_than_explored);
         registerTest("SceneExploration.SurveyRecordsSeveralIntervals",
                      test_a_survey_run_records_more_than_one_interval);
         registerTest("SceneExploration.EngineErrorStopsTheRun",

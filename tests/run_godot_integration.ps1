@@ -892,6 +892,15 @@ try {
             @{ name = "children"; expression = "node.get_child_count()";
                context_node = "/root/RuntimeRoot" }) }),
         (Tool-Request 2361 "runtime_get_session" @{}),
+        # 2360 paused the game where it stopped, so the game is paused here,
+        # which is how an agent's own loop arrives at this call. A paused tree
+        # queues injected input instead of delivering it, so the window could
+        # not have moved and is refused rather than reported still (#778).
+        (Tool-Request 2366 "runtime_explore_scene" @{ duration_ms = 300; stuck_ms = 200;
+            actions = @("ui_accept");
+            probes = @(
+            @{ name = "children"; expression = "node.get_child_count()";
+               context_node = "/root/RuntimeRoot" }) }),
         (Tool-Request 2362 "runtime_set_paused" @{ paused = $false }),
         # A probe nobody could read is not a probe that stayed still. This must
         # come back having found nothing rather than calling a broken
@@ -1084,6 +1093,17 @@ try {
     Assert-True ($runtimeById[2371].result.isError) "A bare property read reached the engine."
     Assert-True ($runtimeById[2371].result.content[0].text -match "property reads are forbidden") "A bare property read was refused for the wrong reason."
     Assert-True ($runtimeById[2372].result.isError) "A non-component member of a property read was accepted."
+
+    # A paused game reported a stuck interval with measured: true, which is the
+    # one thing this tool's own rules say a window it could not have driven must
+    # not come back as.
+    Assert-True ([bool]$runtimeById[2366].result.isError) "Exploring a paused game was not refused, so the pause is still reportable as a stuck interval."
+    $pausedExplore = ($runtimeById[2366].result.content[0].text | ConvertFrom-Json).error
+    Assert-True ($pausedExplore.code -eq 409) "The paused-game refusal changed code: $($pausedExplore.code)"
+    Assert-True ($pausedExplore.data.code -eq "paused_game_session") "The paused-game refusal published no branchable code: $($pausedExplore.data.code)"
+    Assert-True ($pausedExplore.data.input_queued -eq $false) "A run refused before it opened claimed it had queued input."
+    Assert-True ($pausedExplore.message -match "runtime_set_paused") "The paused-game refusal does not name the call that fixes it: $($pausedExplore.message)"
+    Assert-True ($null -eq $pausedExplore.data.PSObject.Properties["stuck_intervals"]) "The paused-game refusal still carried exploration findings."
 
     Assert-True $runtimeById[2364].result.isError "An action the project does not define was accepted, and the run reported driving a game it never touched."
     Assert-True $runtimeById[2365].result.isError "A stuck window longer than the run was accepted, and nothing could ever have reported it."

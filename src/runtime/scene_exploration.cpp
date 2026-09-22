@@ -196,6 +196,25 @@ Result<SceneExplorationRequest> parseSceneExplorationRequest(const json& params)
     return request;
 }
 
+json pausedExplorationRefusal(bool input_queued) {
+    std::string sentence =
+        "Exploration requires a running game session. The game is paused, so the actions this run "
+        "holds are queued rather than delivered, and every frame of the window would be still "
+        "because nothing was pressed rather than because the game stopped responding. Resume it "
+        "with runtime_set_paused and explore again.";
+    if (input_queued) {
+        sentence +=
+            " The game was paused after the window opened, so the first action was queued; its "
+            "release is queued behind it and both land in the frame the tree resumes.";
+    }
+    return json{{"error", {{"code", 409},
+                           {"message", std::move(sentence)},
+                           {"data", {{"code", "paused_game_session"},
+                                     {"paused", true},
+                                     {"input_queued", input_queued},
+                                     {"retryable", false}}}}}};
+}
+
 SceneExploration::SceneExploration(SceneExplorationRequest request)
     : m_request(std::move(request)),
       m_tracked(m_request.probes.size()),
