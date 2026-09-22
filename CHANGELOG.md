@@ -51,6 +51,24 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Added
 
+- **The fuzz target lists cannot drift apart.** The set of fuzz targets was
+  written down five times with nothing joining them up: the `.cc` files in
+  `fuzz/`, `DIDI_FUZZ_TARGETS` in `CMakeLists.txt`, the matrix in `fuzz.yml`,
+  the table in `fuzz/README.md`, and the seed directories under
+  `fuzz/corpus/`. Every disagreement was quiet, and one was silent by
+  construction: the workflow builds the seed path by stripping `fuzz_` off the
+  target name and copies it with `2>/dev/null || true`, so a corpus directory
+  that is missing, misnamed or empty costs the run its committed seeds without
+  failing it, and the promise that the eight bytes which used to segfault the
+  frame decoder are re-executed on every run would stop being true in silence.
+  A target present in the build list and absent from the matrix is the same
+  shape from the other side: it compiles on every pull request and is fuzzed by
+  nothing, which is the case `fuzz.yml`'s own header calls worse than having no
+  target at all, and which #862 was when it happened to the Phase 7 harness.
+  `tests/test_fuzz_target_lists.py` now holds the five to each other, including
+  the decoder count `SECURITY.md` states. The lists stay explicit rather than
+  globbed, which is what `fuzz/README.md` asked for; explicit keeps them
+  readable and was never what kept them in step. #884
 - **The vendored headers have a watcher.** `THIRD_PARTY.md` ended by admitting
   that the three copied single-header libraries in `include/` were "reviewed by
   hand or not at all". They are files, not package manager entries, so
