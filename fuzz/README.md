@@ -77,22 +77,28 @@ produced an out-of-bounds read, and each of the two sees only one half of that.
 Assert invariants, not just absence of crashes. A target that only checks
 "did not crash" finds memory errors and nothing else; the interesting failures
 are usually a decoder disagreeing with its own contract. `fuzz_framed_message`
-checks that a caller can never be advanced past the end of its own buffer,
-which would not trip a sanitizer on its own.
+checks that no single read is larger than one chunk, however large a frame the
+input claims. A reader that allocated from the claim instead would satisfy
+every sanitizer it ever met and still let an unauthenticated peer commit
+128 MiB per connection slot.
 
 **Assert the contract the code has, not the one you wish it had.** Both of
 these targets failed on their first CI run, and neither had found a bug. One
-claimed that returning no message implied consuming no bytes; the decoder
-deliberately reports how many bytes a malformed frame occupied so a caller can
-skip it, and the crashing input was a seed committed in the same change. The
-other claimed a parsed request has a non-empty method; the parser requires
-`method` to be a string and says nothing about its length, which matches
-JSON-RPC 2.0. A fuzz target that asserts wishes reports them as bugs, and the
-cost is not just noise — it is that a real finding then arrives looking exactly
-like the two you already learned to dismiss.
+claimed that returning no message implied consuming no bytes; that decoder,
+since replaced by `readFramePayload`, deliberately reported how many bytes a
+malformed frame occupied so a caller could skip it, and the crashing input was
+a seed committed in the same change. The other claimed a parsed request has a
+non-empty method; the parser requires `method` to be a string and says nothing
+about its length, which matches JSON-RPC 2.0. A fuzz target that asserts
+wishes reports them as bugs, and the cost is not just noise — it is that a
+real finding then arrives looking exactly like the two you already learned to
+dismiss.
 
-Both are now recorded as explicit "deliberately not asserted" comments rather
-than deleted, so the next person does not re-add them.
+The JSON-RPC one is recorded as an explicit "deliberately not asserted"
+comment rather than deleted, so the next person does not re-add it. The frame
+one went when its decoder did. `fuzz_framed_message` carries a note of its own
+in its place: it does not assert that a completed payload is valid JSON,
+because `readFramePayload` hands the caller bytes and never looks at them.
 
 Add the target to `DIDI_FUZZ_TARGETS` in `CMakeLists.txt` and to the matrix in
 `.github/workflows/fuzz.yml`. Both lists are short and explicit on purpose: a
