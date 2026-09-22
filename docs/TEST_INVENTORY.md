@@ -10,14 +10,14 @@ Every number here is derived from the suites themselves rather than written down
 
 | Measure | Count |
 | --- | ---: |
-| Automated tests | **1193** |
+| Automated tests | **1194** |
 | Live-harness assertions | 1141 |
 
 The badge in the [README](../README.md) shows the automated test total. Harness assertions are counted separately because they are assertions inside one live scenario, not independently runnable cases; adding them together would flatter the number.
 
 ## Native C++ suite (`didi_tests`)
 
-**797 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
+**798 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
 
 | Suite | Tests |
 | --- | ---: |
@@ -34,7 +34,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `ExpressionSandbox` | 7 |
 | `GDScript` | 24 |
 | `Hierarchy` | 9 |
-| `IPC` | 27 |
+| `IPC` | 28 |
 | `ImageDiff` | 10 |
 | `ImportHealth` | 34 |
 | `InvariantWatch` | 4 |

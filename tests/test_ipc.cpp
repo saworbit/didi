@@ -1303,6 +1303,65 @@ static void test_a_deadline_allows_for_the_wait_to_be_accepted() {
               didi::ipc::kWaitForDefinitiveResponse);
 }
 
+static void test_two_connections_never_reach_the_handler_at_once() {
+    // The safety claim the slots rest on. A server reads several connections
+    // at once (#873) and calls its handler from one of them at a time, so
+    // nothing under the transport has to be written for two callers: the live
+    // handler authorises against the session host and then posts to Godot's
+    // main thread, and IIpcServer::setHandler says this is the contract.
+    //
+    // Nothing else would notice if the lock went. Every other test here drives
+    // one client, and the live handler's own components guard themselves, so
+    // removing it would pass the suite and change what the engine is asked.
+    // This is the assertion that fails instead.
+    ScopedIdleRecycleOverride override_margin(2000, 500);
+
+    std::atomic<int> inside{0};
+    std::atomic<int> overlapped{0};
+    std::atomic<int> served{0};
+
+    auto server = didi::ipc::createIpcServer();
+    server->setHandler([&](const didi::json& request) -> didi::json {
+        if (inside.fetch_add(1) != 0) overlapped.fetch_add(1);
+        // Wide enough that two handlers allowed to run together would be
+        // caught by the counter above rather than by luck.
+        std::this_thread::sleep_for(std::chrono::milliseconds(60));
+        inside.fetch_sub(1);
+        served.fetch_add(1);
+        return {{"echo", request.value("params", didi::json::object())}};
+    });
+
+#if defined(_WIN32)
+    const std::string endpoint = "\\\\.\\pipe\\godot_didi_ipc_handler_serialisation_test";
+#else
+    const auto endpoint = rawSocketPath("handler-serialisation");
+#endif
+    ASSERT_TRUE(server->start(endpoint));
+
+    // One caller per connection, all in flight together, which is the shape the
+    // slots made possible and the shape nothing below the transport expects.
+    const int callers = didi::ipc::serverConnectionSlots();
+    std::vector<std::thread> threads;
+    std::atomic<int> answered{0};
+    for (int caller = 0; caller < callers; ++caller) {
+        threads.emplace_back([&, caller] {
+            auto client = didi::ipc::createIpcClient();
+            if (!client->connect(endpoint, 4000)) return;
+            if (client->sendRequest("test.echo", {{"msg", caller}}, 4000).isOk()) {
+                answered.fetch_add(1);
+            }
+            client->disconnect();
+        });
+    }
+    for (auto& thread : threads) thread.join();
+
+    ASSERT_EQ(answered.load(), callers);
+    ASSERT_EQ(served.load(), callers);
+    ASSERT_EQ(overlapped.load(), 0);
+
+    server->stop();
+}
+
 static void test_an_arriving_connection_is_read_while_another_sits_idle() {
     // Break caught: both servers accepted one connection and only accepted the
     // next after the one they held had gone idle, so the recycle window was an
@@ -1519,6 +1578,8 @@ struct RegisterIpcTests {
                      test_a_deadline_allows_for_the_wait_to_be_accepted);
         registerTest("IPC.ArrivingConnectionIsReadWhileAnotherIsIdle",
                      test_an_arriving_connection_is_read_while_another_sits_idle);
+        registerTest("IPC.HandlerIsCalledOneAtATime",
+                     test_two_connections_never_reach_the_handler_at_once);
         registerTest("IPC.NoTimeoutRoundtrip", test_ipc_negative_timeout_waits_for_definitive_response);
         registerTest("IPC.HandlerExceptionClassification", test_ipc_server_classifies_handler_exception_with_request_id);
 #if defined(_WIN32)
