@@ -234,6 +234,39 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **A frame the server has not been sent is no longer a buffer it has already
+  allocated.** The server read a four-byte length prefix and allocated the
+  claimed size from it, before a byte of the payload had arrived and before the
+  handler reached `SessionHost::authorize`. That put the peak on the slot count:
+  giving each server four connection slots in #873 took the server's
+  unauthenticated ceiling from 128 MiB to 512 MiB inside the Godot editor
+  process, and nothing anywhere said so. The payload now grows as it arrives, in
+  64 KiB steps, so the prefix buys a read rather than a buffer and a claim the
+  peer never honours costs one chunk per slot. A legitimate frame is still
+  bounded by the same 128 MiB and still has the same single deadline across the
+  whole payload. `SECURITY.md` states the cost of an unauthenticated connection
+  where it describes the boundary. #876
+
+- **Four server threads no longer spin silently when the process runs out of
+  file descriptors.** `PosixIpcServer::serverLoop` never looked at `errno` after
+  `accept`, so the one failure that leaves the connection queued was
+  indistinguishable from the ordinary one that does not. `EAGAIN` means another
+  slot won the race and the listener is empty, which costs nothing. `EMFILE` and
+  `ENFILE` leave the connection in the backlog, so `poll` reports the listener
+  readable again immediately and the loop burns a core, once per slot since
+  #873, with no line anywhere naming a descriptor limit. Descriptor exhaustion
+  now logs once per slot and backs off, `EINTR` and `ECONNABORTED` stay quiet
+  with `EAGAIN`, and anything else logs the first of its kind. #877
+
+- **A Windows slot that cannot create its pipe instance says so.** Only slot 0
+  reports a refused endpoint; for the other three the same failure was a 200 ms
+  sleep and another go, with no log line in the path. Retrying is right, because
+  a transient failure should not take a slot out of service for the life of the
+  editor, but a slot that fails every time retried five times a second while
+  `isRunning()` answered true and `ipc::serverConnectionSlots()` answered 4. The
+  first failure per slot now logs with the Win32 error, and so does the recovery,
+  so the log says how many slots the server is really listening on. #878
+
 - **The two deadlines for opening a connection stop being flat 2,000 ms
   numbers, and the comment on one of them stops stating something that is not
   true.** `kRouteReconnectMs` said a local endpoint "either accepts immediately
