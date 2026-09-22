@@ -41,20 +41,45 @@ namespace {
 // a request the engine never saw. That is the one failure it cannot tell from a
 // request that ran. Two independently chosen numbers in two processes is how
 // that comes back, so both come from here and the margin is asserted.
+//
+// kServerFrameTimeoutMs is the third of the set and lives here for the same
+// reason. It bounds a frame that has already started arriving, which is a
+// different question from recycling a connection that never started one, but
+// it is the same quantity being spent: how long one peer may hold a slot
+// without finishing anything. #881 read the two branches side by side, saw
+// 1000 against 5000 under two copies of one comment, and called it drift left
+// behind by 8b598f1. Read next to the recycle window it is not drift: both
+// numbers are 1000 on Windows and 5000 on POSIX, and they have always moved
+// together. Making the frame deadline one number on both transports was tried
+// first and IPC.SplitRequestAcrossIdleDeadline caught it, which is the whole
+// point of that test: a POSIX client is allowed to split a request across an
+// idle window five times the Windows one, and its body still has to land
+// inside a frame deadline. Cut the deadline without cutting the window and a
+// request that was legitimately split is dropped.
+//
+// So they differ, for the reason the recycle window differs, and they sit
+// together so the next change to one is made next to the other rather than
+// under a copy of a comment that does not mention it.
 #if defined(_WIN32)
 constexpr int kServerIdleRecycleMs = 1000;
 constexpr int kClientIdleReuseMs = 300;
+constexpr int kServerFrameTimeoutMs = 1000;
 #else
 // A Unix socket keeps a listen backlog the kernel fills whether or not the
 // server has accepted, so a POSIX client is never refused outright and this
-// side can afford a longer window. This is the recycle window only: a frame
-// that has started arriving is bounded by kServerFrameTimeoutMs, which is one
-// number on both transports and is not derived from this one.
+// side can afford a longer window, and the frame deadline built on it is
+// longer by the same factor.
 constexpr int kServerIdleRecycleMs = 5000;
 constexpr int kClientIdleReuseMs = 1500;
+constexpr int kServerFrameTimeoutMs = 5000;
 #endif
 static_assert(kClientIdleReuseMs * 3 <= kServerIdleRecycleMs,
               "a client must stop reusing a connection well before a server recycles it");
+// What IPC.SplitRequestAcrossIdleDeadline needs in order to be writable at
+// all: a request split across the recycle window has to have somewhere to land
+// on the far side of it.
+static_assert(kServerFrameTimeoutMs >= kServerIdleRecycleMs,
+              "a frame that starts as the idle window closes must still have time to arrive");
 
 // How many connections a server listens on and serves at the same time.
 //
@@ -66,19 +91,6 @@ static_assert(kClientIdleReuseMs * 3 <= kServerIdleRecycleMs,
 // still here for, and keeps the cost at four idle threads.
 constexpr size_t kServerConnectionSlots = 4;
 
-// Bounds a frame that has already started arriving, on both transports.
-//
-// Recycling an idle connection is a different question with a different
-// number; see kServerIdleRecycleMs, which does differ by platform and says
-// why. This one used to as well -- 1000 here and 5000 on POSIX, under two
-// copies of the same comment -- because 8b598f1 tightened Windows and left
-// POSIX where it was (#881). 1000 is the number that was chosen: this is the
-// slowloris guard, a started frame that stalls holds one of
-// kServerConnectionSlots until it expires, and the largest frame either side
-// will read is 128 MiB, which crosses a local pipe or socket well inside a
-// second. It lives here so the next tightening cannot reach one transport
-// and not the other.
-constexpr int kServerFrameTimeoutMs = 1000;
 // A response is the answer to a request the handler has already run. Giving up
 // on writing it back throws that work away and leaves the caller unable to tell
 // what happened, and a response larger than the pipe buffer needs the client to

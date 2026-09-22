@@ -1395,11 +1395,16 @@ static void test_posix_client_rejects_mismatched_response_id() {
 #endif
 
 #if !defined(_WIN32)
-// The other half of kServerFrameTimeoutMs. That bound was 1000 ms on Windows
-// and 5000 here, under two copies of the same comment, and only the Windows
-// one had a test (#881). Both are 1000 now and this is what holds this side to
-// it: a peer that completes a header and then stops talking is dropped inside
-// the bound rather than five times later.
+// The other half of kServerFrameTimeoutMs, which had a test on the Windows
+// side and nothing here (#881). The bound is 5000 ms on this transport, for
+// the reason written beside the constant, so this pins it from both sides: a
+// started frame that stalls is still held well after the Windows bound would
+// have dropped it, and is gone by the time this one has.
+//
+// What it does not prove is that the payload got a deadline of its own rather
+// than sharing the header's idle window, because on this transport those two
+// numbers are the same. IPC.SplitRequestAcrossIdleDeadline is what covers
+// that, and it covers it by arriving on the far side of the window.
 static void test_posix_server_drops_a_stalled_frame_payload() {
     const auto path = rawSocketPath("server-frame-deadline");
     auto server = didi::ipc::createIpcServer();
@@ -1414,26 +1419,26 @@ static void test_posix_server_drops_a_stalled_frame_payload() {
     std::copy(path.begin(), path.end(), address.sun_path);
     ASSERT_TRUE(connect(peer, reinterpret_cast<sockaddr*>(&address), sizeof(address)) == 0);
 
-    // A complete header claiming 4 KiB, then silence. The frame has started, so
-    // what bounds it is the frame deadline and not the idle recycle window --
-    // which is 5000 ms here, and is the number this test must not accidentally
-    // be measuring.
+    // A complete header claiming 4 KiB, then silence.
     const std::array<uint8_t, 4> header{0x00, 0x10, 0x00, 0x00};
     ASSERT_TRUE(rawWriteExact(peer, header.data(), header.size()));
 
-    // Past 1000 and well inside 5000. A POSIX bound that goes back to 5000
-    // fails here rather than passing quietly on a number nobody chose.
-    std::this_thread::sleep_for(std::chrono::milliseconds(2000));
-
-    // The server closed the connection, so this ends the stream. A server still
-    // waiting on the payload would leave the socket open with nothing in it,
-    // which is EAGAIN and not a zero-length read.
+    // Still held at 3000. A bound cut to the Windows number fails here, which
+    // is what stops this transport being tightened on its own again.
+    std::this_thread::sleep_for(std::chrono::milliseconds(3000));
     uint8_t drained = 0;
-    const auto count = recv(peer, &drained, 1, MSG_DONTWAIT);
-    const bool server_hung_up = count == 0;
+    const bool still_held = recv(peer, &drained, 1, MSG_DONTWAIT) < 0;
+
+    // Gone by 6500. A bound that stopped working at all fails here. The margin
+    // over 5000 is deliberately wide: a shared runner that is slow to schedule
+    // the accept thread moves when the deadline starts, not how long it is.
+    std::this_thread::sleep_for(std::chrono::milliseconds(3500));
+    const bool server_hung_up = recv(peer, &drained, 1, MSG_DONTWAIT) == 0;
+
     close(peer);
     server->stop();
     unlink(path.c_str());
+    ASSERT_TRUE(still_held);
     ASSERT_TRUE(server_hung_up);
 }
 
