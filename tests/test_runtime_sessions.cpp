@@ -722,7 +722,12 @@ void test_session_attach_keeps_existing_route_when_candidate_handshake_fails() {
     g_lastHandshakeTimeoutMs = 0;
     ASSERT_TRUE(client->attachSession(black_hole_id).isErr());
     ASSERT_TRUE(g_lastHandshakeTimeoutMs > 0);
-    ASSERT_TRUE(g_lastHandshakeTimeoutMs <= 5000);
+    // Bounded, so a session that never answers cannot hold an attach open and
+    // cost the caller the healthy route it already had. The ceiling is the
+    // handshake's work budget plus what being accepted costs, because a flat
+    // number is one the transport's own idle-recycle window can outlast, and
+    // on POSIX 5000 did (#782).
+    ASSERT_TRUE(g_lastHandshakeTimeoutMs <= didi::ipc::withAcceptAllowance(3000));
     ASSERT_TRUE(client->activeSession().has_value());
     ASSERT_EQ(client->activeSession()->session_id, healthy_id);
 
