@@ -195,6 +195,25 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Changed
 
+- **A connection that arrives is read when it arrives, rather than when the
+  previous one goes quiet.** Both IPC servers accepted one connection and only
+  accepted the next after the one they held had been idle for the recycle
+  window, so that window was an admission queue: 1,000 ms on Windows, 5,000 on
+  POSIX, paid by every `runtime_attach_session` and every repeat after a
+  transport failure. It was worse than the window suggests, because a slot is
+  also held for as long as a request is running: a viewport capture or any tool
+  call on the extension's 15-second main-thread deadline kept the only endpoint
+  to itself for its whole duration, and a client reconnecting in that time was
+  answered `ERROR_PIPE_BUSY` on Windows or left unread in the listen backlog on
+  POSIX. Each server now listens on four connections at once, one slot per
+  thread, which is the pattern the Win32 named-pipe documentation describes.
+  Requests still execute one at a time under a single lock, because the handler
+  ends up on Godot's main thread through a queue and nothing below it was
+  written for two callers -- reading concurrently and executing in turn is the
+  whole of the change. The recycle window stays, and stops being a tax: it is
+  now a slowloris guard that bounds how long a connection that has stopped
+  talking may keep a slot. #873
+
 - **Every security alert now has a disposition written down, including the ones
   Scorecard raises.** `SECURITY.md` explained the ten CodeQL findings it
   dismissed and said why a Security tab full of permanent alerts is one nobody
@@ -214,6 +233,20 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
   change moved the `execvp` call, and it will happen again.
 
 ### Fixed
+
+- **The two deadlines for opening a connection stop being flat 2,000 ms
+  numbers, and the comment on one of them stops stating something that is not
+  true.** `kRouteReconnectMs` said a local endpoint "either accepts immediately
+  or is not there", so 2,000 was a bound on a stall rather than a budget. A
+  named pipe whose instances are all in use answers `ERROR_PIPE_BUSY` and the
+  client retries until its deadline, which is why
+  `IPC.ConnectsWhileServerIsBetweenInstances` exists, and a Unix socket takes
+  the connection into the listen backlog and leaves it unread. Both sites, the
+  reconnect after a transport failure and the connect inside `attachDescriptor`,
+  now take what being accepted costs from `ipc::withAcceptAllowance`, the same
+  place the request deadlines have taken it since #872, so the number and the
+  window stop being chosen independently. Neither deadline got shorter on either
+  platform. #874
 
 - **A handshake deadline now allows for the wait to be accepted, so the attach
   that `runtime_launch --detach` documents works on macOS and Linux.** A server
