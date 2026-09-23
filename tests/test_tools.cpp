@@ -824,6 +824,102 @@ static void test_audio_list_buses_reads_flags_the_way_the_engine_does() {
     ASSERT_TRUE(report["buses"][1]["bypass_effects"].get<bool>());
 }
 
+static didi::json listBusesOffline() {
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    const auto result = registry.callTool("audio_list_buses", didi::json::object());
+    ASSERT_TRUE(!result.isError);
+    return didi::json::parse(result.content[0].text);
+}
+
+static void test_audio_list_buses_answers_master_for_a_layout_that_does_not_load() {
+    // Godot drops a layout its parser refuses and runs on Master alone.
+    // Measured on 4.5.1, 4.6.2 and 4.7.2 with this file: one bus. The lines
+    // above the broken value were read as three buses, one muted (#903).
+    ScopedToolProject project("audio-buses-broken-layout");
+    writeAuditFile("project.godot", "config_version=5\n");
+    writeAuditFile("default_bus_layout.tres",
+        "[gd_resource type=\"AudioBusLayout\" format=3]\n"
+        "\n"
+        "[resource]\n"
+        "bus/1/name = &\"Music\"\n"
+        "bus/1/mute = true\n"
+        "bus/1/send = &\"Master\"\n"
+        "bus/2/name = &\"SFX\"\n"
+        "bus/2/volume_db = )\n");
+    const auto broken = listBusesOffline();
+    ASSERT_EQ(broken["bus_count"], 1u);
+    ASSERT_EQ(broken["buses"][0]["name"], "Master");
+    ASSERT_TRUE(broken["layout_present"].get<bool>());
+    ASSERT_TRUE(!broken["layout_loads"].get<bool>());
+    ASSERT_TRUE(broken["note"].get<std::string>().find("line 8") != std::string::npos);
+
+    // A value left open at the end of the file is the same answer.
+    writeAuditFile("default_bus_layout.tres",
+        "[gd_resource type=\"AudioBusLayout\" format=3]\n"
+        "\n"
+        "[resource]\n"
+        "bus/1/name = &\"Music\"\n"
+        "bus/1/mute = true\n"
+        "bus/1/send = &\"Mas\n");
+    const auto open = listBusesOffline();
+    ASSERT_EQ(open["bus_count"], 1u);
+    ASSERT_TRUE(!open["layout_loads"].get<bool>());
+}
+
+static void test_audio_list_buses_refuses_a_project_that_does_not_open() {
+    // A project.godot the engine refuses does not open, so the custom layout
+    // path in it names nothing the game runs on (#903).
+    ScopedToolProject project("audio-buses-broken-manifest");
+    writeAuditFile("project.godot",
+        "config_version=5\n"
+        "[audio]\n"
+        "buses/default_bus_layout=\"res://custom_layout.tres\"\n"
+        "[application]\n"
+        "config/broken=)\n");
+    writeAuditFile("custom_layout.tres",
+        "[gd_resource type=\"AudioBusLayout\" format=3]\n"
+        "\n"
+        "[resource]\n"
+        "bus/1/name = &\"Music\"\n");
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    const auto result = registry.callTool("audio_list_buses", didi::json::object());
+    ASSERT_TRUE(result.isError);
+    ASSERT_TRUE(result.content[0].text.find("ERR_PARSE_ERROR") != std::string::npos);
+}
+
+static void test_audio_list_buses_keeps_an_index_the_layout_skips() {
+    // Godot sizes the bus list to the highest index the file names, so a
+    // skipped index is an unnamed bus at its defaults. Measured on 4.5.1,
+    // 4.6.2 and 4.7.2: three buses here, and two for a file naming bus/1
+    // only through an effect key (#905).
+    ScopedToolProject project("audio-buses-index-gap");
+    writeAuditFile("project.godot", "config_version=5\n");
+    writeAuditFile("default_bus_layout.tres",
+        "[gd_resource type=\"AudioBusLayout\" format=3]\n"
+        "\n"
+        "[resource]\n"
+        "bus/2/name = &\"SFX\"\n"
+        "bus/2/send = &\"Master\"\n");
+    const auto gap = listBusesOffline();
+    ASSERT_EQ(gap["bus_count"], 3u);
+    ASSERT_EQ(gap["buses"][1]["index"], 1);
+    ASSERT_EQ(gap["buses"][1]["name"], "");
+    ASSERT_EQ(gap["buses"][1]["send"], "");
+    ASSERT_EQ(gap["buses"][2]["name"], "SFX");
+    ASSERT_TRUE(gap["layout_loads"].get<bool>());
+
+    writeAuditFile("default_bus_layout.tres",
+        "[gd_resource type=\"AudioBusLayout\" format=3]\n"
+        "\n"
+        "[resource]\n"
+        "bus/1/effect/0/enabled = true\n");
+    const auto effect_only = listBusesOffline();
+    ASSERT_EQ(effect_only["bus_count"], 2u);
+    ASSERT_EQ(effect_only["buses"][1]["name"], "");
+}
+
 static void test_audio_list_buses_reads_the_layout_godot_actually_writes() {
     // Every fixture here was hand written with plain quotes and an explicit
     // bus/0, which is the one shape the reader got right, so the reader and its
@@ -8145,6 +8241,12 @@ struct RegisterToolTests {
                      test_audio_list_buses_reads_the_layout_godot_actually_writes);
         registerTest("Tools.AudioListBusesNumericFlags",
                      test_audio_list_buses_reads_flags_the_way_the_engine_does);
+        registerTest("Tools.AudioListBusesBrokenLayout",
+                     test_audio_list_buses_answers_master_for_a_layout_that_does_not_load);
+        registerTest("Tools.AudioListBusesBrokenManifest",
+                     test_audio_list_buses_refuses_a_project_that_does_not_open);
+        registerTest("Tools.AudioListBusesIndexGap",
+                     test_audio_list_buses_keeps_an_index_the_layout_skips);
         registerTest("Tools.AudioListBusesHalfDeclaredMaster",
                      test_audio_list_buses_names_a_master_the_file_half_declares);
         registerTest("Tools.AudioListBusesEmptyResource",

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "didi/common/config_file_syntax.hpp"
 #include "didi/common/json.hpp"
 #include "didi/common/types.hpp"
 
@@ -83,5 +84,12 @@ Result<ProjectSettingWrite> writeProjectSetting(const std::filesystem::path& pro
                                                 const std::string& setting,
                                                 const json& value,
                                                 bool remove);
+
+// The refusal for a project.godot Godot will not load, or nothing when it loads.
+//
+// The project does not open at all, so any answer read out of the file would
+// describe a project nobody can run. `verb` finishes the remedy sentence, as in
+// "Repair the value before reading a setting out of it."
+std::optional<Error> refuseUnloadable(const config_file::Scan& scanned, const char* verb);
 
 } // namespace didi::offline
