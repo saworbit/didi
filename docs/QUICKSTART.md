@@ -24,11 +24,19 @@ Linux and macOS builds use the platform-specific executable and shared-library n
 
 The addon is assembled in the build directory rather than in the source tree, so what you copy is what the build produced and nothing a tool left behind. The `addons/didi` folder in the repository is the manifest that goes into that assembly, not a build output.
 
+### Option B: Download a Release
+
+The [latest release](https://github.com/saworbit/didi/releases/latest) has one archive per platform: `didi-windows-x64.zip`, `didi-linux-x64.tar.gz` and `didi-macos-arm64.tar.gz`. Unpack yours somewhere permanent, outside any Godot project. It holds the same two halves a build produces:
+- `bin/didi.exe` on Windows, `bin/didi` elsewhere (MCP Server binary), with `didi_class_reference.json` beside it
+- `addons/didi/` (the complete Godot addon, extension library included)
+
+The `README.md` inside the archive has the notes for that platform. On macOS, clear the download quarantine before anything else, because the binaries are not notarized. In the steps below, use the archive's `addons/didi` and `bin/` wherever they say `build/addons/didi` and `build/Release`.
+
 ---
 
 ## 🎮 Step 2: Enable the Godot Plugin
 
-1. Copy the built `build/addons/didi` folder into your Godot project root, as `addons/didi`:
+1. Copy the built `build/addons/didi` folder (or the archive's `addons/didi`) into your Godot project root, as `addons/didi`:
    ```
    your_game_project/
    ├── addons/

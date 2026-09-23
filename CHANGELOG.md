@@ -49,6 +49,20 @@ release changed, which is why it lives here and not in a version section.
 Discovery now exposes 116 canonical tools plus 10 legacy registrations (126 total). 113 canonical tools are implemented and 3 remain unimplemented.
 The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, recorded in [Surface Amendments](docs/SURFACE_AMENDMENTS.md).
 
+### Changed
+
+- **The website and the quickstart start from the download.** Both told a
+  newcomer to clone and build, with a `D:/didi/build/Release` path in the
+  client configuration, although every release ships a built archive for all
+  three platforms. The site's platform cards now link each archive directly
+  through `releases/latest/download`, which always serves the newest release
+  because the archive names do not change, and say what 2.0.1 settled: no
+  Visual C++ Redistributable on Windows, glibc 2.34 or newer on Linux, and the
+  quarantine step for the un-notarized macOS binaries. The setup steps start
+  with the archive and its layout, and building from source is the
+  alternative. `QUICKSTART.md`'s "Build or Install" step had only the build;
+  it gains the download as Option B.
+
 ## [2.0.1] - 2026-09-23
 
 Correctness work on 2.0.0, and release archives that stand on their own. Most
