@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(didi VERSION 2.0.0 LANGUAGES C CXX)
+project(didi VERSION 2.0.1 LANGUAGES C CXX)
 
 # The floor is 3.9, because that is what a stock macOS ships through the Xcode
 # Command Line Tools and the build has to work there. It did not: the schema

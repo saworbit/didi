@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-The current documented release is **2.0.0**. Security fixes are provided only for the current minor line.
+The current documented release is **2.0.1**. Security fixes are provided only for the current minor line.
 
 | Version | Supported |
 | ------- | --------- |
