@@ -264,6 +264,29 @@ class HookRefusalsNameThemselves(unittest.TestCase):
                 "explanation. The identifier belongs under data.code and the "
                 "message belongs in sentences.")
 
+    def test_retry_with_is_always_the_arguments_to_send(self) -> None:
+        """`retry_with` carries arguments, not the name of one.
+
+        It shipped with #705 as `retry_with: {"overwrite": true}`, an object a
+        caller can merge into the arguments it already has. #894 added eight
+        more refusals that carry it and wrote the name as a bare string, so one
+        key had two types and a client could not read it without checking which
+        it had been handed (#897).
+
+        Cheap and exact: the value opens a brace. A string does not.
+        """
+        offenders = []
+        for path in sorted((ROOT / "src").rglob("*.cpp")):
+            source = path.read_text(encoding="utf-8")
+            for match in re.finditer(r'\{"retry_with",\s*', source):
+                if source[match.end()] != "{":
+                    line = source.count("\n", 0, match.start()) + 1
+                    offenders.append(f"{path.name}:{line}")
+        self.assertEqual(
+            offenders, [],
+            "retry_with is an object of arguments to add, so it carries the "
+            "value and not only the name:\n  " + "\n  ".join(offenders))
+
     def test_a_rolled_back_mutation_says_rolled_back(self) -> None:
         """The failed-mutation outcome vocabulary has one word for success.
 

@@ -9551,7 +9551,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
         if (removing && !exists.value()) return errorJson(404, "Autoload not found: " + autoload_name);
         if (!removing && exists.value() && !params.value("replace", false)) {
             return errorJson(409, "Autoload already exists; pass replace: true to update it",
-                                  {{"code", "already_exists"}, {"retry_with", "replace"}});
+                                  {{"code", "already_exists"}, {"retry_with", {{"replace", true}}}});
         }
 
         VariantValue default_value;
@@ -9731,7 +9731,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
         }
         if (!removing && exists.value() && !params.value("replace", false)) {
             return errorJson(409, "Input action already exists; pass replace: true to update it",
-                                  {{"code", "already_exists"}, {"retry_with", "replace"}});
+                                  {{"code", "already_exists"}, {"retry_with", {{"replace", true}}}});
         }
 
         VariantValue default_value;
@@ -10476,14 +10476,14 @@ json GodotBridge::execute(const std::string& method, const json& params,
                                           "EditorInterface.get_unsaved_scenes arrives in Godot 4.7. "
                                           "Pass discard_unsaved: true to close explicitly",
                                      {{"code", "dirty_state_unavailable"},
-                                      {"retry_with", "discard_unsaved"}});
+                                      {"retry_with", {{"discard_unsaved", true}}}});
                 }
                 if (path.value().empty()) {
                     return errorJson(409, "The active scene has never been saved, so the engine cannot "
                                           "report it as clean; save it with editor_save_scene or pass "
                                           "discard_unsaved: true to close explicitly",
                                      {{"code", "scene_never_saved"},
-                                      {"retry_with", "discard_unsaved"}});
+                                      {"retry_with", {{"discard_unsaved", true}}}});
                 }
                 auto unsaved = callObject(editor, "EditorInterface", "get_unsaved_scenes", 1139954409LL);
                 if (unsaved.isErr()) return errorJson(unsaved.error().code, unsaved.error().message);
@@ -10500,7 +10500,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
                                           std::to_string(unsaved_count.value()) + "), so this scene cannot be "
                                           "proven clean; pass discard_unsaved: true to close explicitly",
                                      {{"code", "unsaved_scan_limit"},
-                                      {"retry_with", "discard_unsaved"}});
+                                      {"retry_with", {{"discard_unsaved", true}}}});
                 }
                 for (int64_t index = 0; index < unsaved_count.value(); ++index) {
                     auto index_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
@@ -10515,7 +10515,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
                                               "; save it with editor_save_scene or pass "
                                               "discard_unsaved: true to discard them",
                                          {{"code", "unsaved_changes"},
-                                          {"retry_with", "discard_unsaved"}});
+                                          {"retry_with", {{"discard_unsaved", true}}}});
                     }
                 }
                 verified_clean = true;
@@ -10596,7 +10596,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
 
         if (target_exists.value() && !params.value("overwrite", false)) {
             return errorJson(409, "Scene target already exists; pass overwrite: true to replace it",
-                                  {{"code", "already_exists"}, {"retry_with", "overwrite"}});
+                                  {{"code", "already_exists"}, {"retry_with", {{"overwrite", true}}}});
         }
 
         // Only the two writers reach this line, and ResourceSaver cannot create
