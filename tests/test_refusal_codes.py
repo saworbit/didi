@@ -264,6 +264,36 @@ class HookRefusalsNameThemselves(unittest.TestCase):
                 "explanation. The identifier belongs under data.code and the "
                 "message belongs in sentences.")
 
+    def test_a_refusal_that_names_an_argument_carries_it(self) -> None:
+        """A sentence telling the caller which argument to pass says it twice.
+
+        Five tools refuse a colliding output with the same words and every one
+        of them reads the argument its sentence names. Until #900 one of them
+        put that in `retry_with` and four left it in the prose, so a client had
+        to read English to find the fix that was sitting in a field on the
+        tool next door.
+
+        The rule is narrow on purpose: it fires on a message that says `pass
+        <argument>: true`, which is a promise about a specific argument, and
+        asks that the same refusal carries it. Refusals with nothing to add are
+        not its business.
+        """
+        offenders = []
+        for path in sorted((ROOT / "src").rglob("*.cpp")):
+            source = path.read_text(encoding="utf-8")
+            for match in re.finditer(r"pass ([a-z_]+): true", source):
+                argument = match.group(1)
+                window = source[match.start():match.start() + 600]
+                wanted = '{"retry_with", {{"%s", true}}}' % argument
+                if wanted not in window:
+                    line = source.count("\n", 0, match.start()) + 1
+                    offenders.append(f"{path.name}:{line} ({argument})")
+        self.assertEqual(
+            offenders, [],
+            "The sentence names the argument that fixes the call. retry_with "
+            "is where a client reads it without parsing prose:\n  "
+            + "\n  ".join(offenders))
+
     def test_retry_with_is_always_the_arguments_to_send(self) -> None:
         """`retry_with` carries arguments, not the name of one.
 

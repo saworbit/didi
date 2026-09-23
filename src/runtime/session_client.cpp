@@ -1797,7 +1797,9 @@ private:
                          ". Live calls would read and write that other project. Start Godot on "
                          "this project, or pass allow_foreign_project: true if driving the other "
                          "one is what you mean.",
-                         json{{"session_project_path", found->descriptor.project_path},
+                         json{{"code", "foreign_project_session"},
+                              {"retry_with", {{"allow_foreign_project", true}}},
+                              {"session_project_path", found->descriptor.project_path},
                               {"server_project_root", m_projectRoot},
                               {"session_id", session_id}});
         }

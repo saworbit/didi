@@ -301,7 +301,8 @@ CallToolResult handleScriptCreate(const json& args, std::shared_ptr<ipc::IIpcCli
     const bool already_there = fs::is_regular_file(disk_path, probe_error) && !probe_error;
     if (already_there && !overwrite) {
         return CallToolResult::errorJson(
-            409, "Script already exists; pass overwrite: true to replace it: " + reported_path);
+            409, "Script already exists; pass overwrite: true to replace it: " + reported_path,
+            {{"code", "already_exists"}, {"retry_with", {{"overwrite", true}}}});
     }
     if (disk_path.has_parent_path()) {
         std::error_code directory_error;
