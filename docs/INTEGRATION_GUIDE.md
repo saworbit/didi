@@ -25,6 +25,7 @@ This guide walks through configuring Didi with popular AI coding assistants and 
    │       ├── didi_plugin.gd
    │       ├── didi_console.gd        # the in-editor console
    │       ├── didi_brand.gd          # and the scripts and marks it is built from
+   │       ├── didi_await.gd
    │       ├── didi_client_config.gd
    │       ├── didi_diagnostics.gd
    │       ├── didi_log.gd
@@ -33,13 +34,16 @@ This guide walks through configuring Didi with popular AI coding assistants and 
    │       ├── didi_mark.svg
    │       ├── didi_mark_compact.svg
    │       ├── didi_signature.svg
+   │       ├── *.uid                  # Godot's ID file beside each script and the .gdextension
    │       └── bin/
    │           └── <platform extension library>
    └── project.godot
    ```
    Copy the directory whole. `plugin.cfg` names the plugin script, that script
    preloads the rest, and the console rasterises the marks for the editor's
-   theme, so a partial copy is an addon whose console cannot open.
+   theme, so a partial copy is an addon whose console cannot open. To upgrade,
+   replace the folder the same way, `.uid` files included: without them Godot
+   warns about each missing one on the next start.
 2. Open your project in the **Godot Editor**.
 3. Navigate to **Project $\rightarrow$ Project Settings $\rightarrow$ Plugins**.
 4. Check the **Enable** box next to **Didi Native MCP Bridge**.

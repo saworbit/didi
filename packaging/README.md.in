@@ -82,8 +82,10 @@ Configuring a client by hand looks like this, with your own two paths:
 ## Upgrading
 
 Replace the server and the addon together, and close Godot first so the
-extension library is not in use. The two halves report a build id, and the
-Didi tab shows the bridge amber when they come from different builds.
+extension library is not in use. Replace the whole `addons/didi` folder,
+`.uid` files included; without them Godot warns about each missing one on
+the next start. The two halves report a build id, and the Didi tab shows
+the bridge amber when they come from different builds.
 
 ## Verifying this download
 
