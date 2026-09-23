@@ -3690,12 +3690,12 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "resource_create";
-        t.description = "Writes textual .tres content under the project root. Every value is rendered as a Godot literal or the call is refused naming the property, so a resource is never reported as written when part of it was thrown away.";
+        t.description = "Writes textual .tres content under the project root. Every value is rendered as a Godot literal or the call is refused naming the property, so a resource is never reported as written when part of it was thrown away. With an editor attached, the editor's copy of the file is reloaded from what was written.";
         t.inputSchema = {
             {"type", "object"},
             {"properties", {
                 {"resource_type", {{"type", "string"}, {"default", "StandardMaterial3D"}}},
-                {"save_path", {{"type", "string"}, {"description", "Target res:// path"}}},
+                {"save_path", {{"type", "string"}, {"description", "Target res:// path ending in .tres. A .res is Godot's binary format and is refused."}}},
                 {"properties", {
                     {"description",
                      "An object, whose keys are written in sorted order, or an array of "
@@ -4383,7 +4383,7 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "editor_reload_project";
-        t.description = "Requests EditorFileSystem.scan_sources for the connected editor; this is not a full project restart.";
+        t.description = "Requests EditorFileSystem.scan_sources for the connected editor; this is not a full project restart, and it does not reload a resource the editor has already loaded.";
         t.inputSchema = {{"type", "object"}};
         t.handler = [this](const json& args) { return handleEditorReloadProject(args, m_ipcClient); };
         registerTool(std::move(t));

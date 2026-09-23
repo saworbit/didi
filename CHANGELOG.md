@@ -118,6 +118,19 @@ The three Phase 7 blockers are unchanged; the newest name is `anim_add_library`,
 
 ### Fixed
 
+- **`resource_create` wrote `.res` files Godot cannot load.** `.res` is
+  Godot's binary format and the loader reads it as binary whatever it holds,
+  so every `.res` this tool wrote was refused with "Unrecognized binary
+  resource file", and the editor's filesystem scan repeated that error on
+  every start. It is refused now, with the `.tres` spelling in `retry_with`.
+  Found in an editor console pasted into vibe session seventeen.
+- **An overwrite left the editor answering from its old copy.** The editor
+  keeps every resource it has loaded and does not re-read a file that changed
+  underneath it, not on `editor_reload_project` and not on its own filesystem
+  scan. So after `resource_create` overwrote a file, every live reader went on
+  reporting the old contents. With an editor attached the overwrite now
+  reloads the editor's copy in place, the way the editor does itself when it
+  notices a change, and says so with `editor_copy_reloaded`.
 - **`asset_reimport` reported a failed import as imported.** Godot writes the
   `.import` sidecar whether or not the import worked and records a failure as
   `valid=false`; a sidecar on disk was taken as success. It now answers

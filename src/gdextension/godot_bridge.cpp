@@ -7988,6 +7988,47 @@ json GodotBridge::execute(const std::string& method, const json& params,
     if (method == "anim.listTracks") return animListTracks(params, session_kind);
     if (method == "anim.playTrack") return animPlayTrack(params, session_kind);
     if (method == "anim.addLibrary") return animAddLibrary(params, session_kind);
+    if (method == "resource.refreshCached") {
+        // resource_create asks this after it has overwritten a file. The editor
+        // keeps what it has loaded and does not re-read a file that changed
+        // underneath it, so a reader in this process answers from the old copy
+        // until something reloads it. CACHE_MODE_REPLACE_DEEP (4) reloads the
+        // cached objects in place, keeping their identity, so anything holding
+        // the resource -- a player holding a library, a node holding a material
+        // -- shows the new contents. Measured on 4.5.1, 4.6.2 and 4.7.2.
+        // ResourceLoader.has_cached is 2323990056 on all three.
+        if (session_kind != "editor") return bridgeError(409, "session_kind_rejected");
+        const std::string path = params.value("path", "");
+        if (validateResPath(path, "").isErr()) {
+            return errorJson(400, "path must be a normalized res:// path");
+        }
+        for (const auto& bind : {std::make_tuple("ResourceLoader", "has_cached", 2323990056LL),
+                                 std::make_tuple("ResourceLoader", "load", 3358495409LL)}) {
+            if (requireMethodBind(std::get<0>(bind), std::get<1>(bind), std::get<2>(bind)).isErr()) {
+                return bridgeError(501, "required_bind_unavailable");
+            }
+        }
+        auto loader = singleton("ResourceLoader");
+        if (loader.isErr()) return errorJson(loader.error().code, loader.error().message);
+        auto path_value = makeString(path);
+        auto hint = makeString("");
+        auto replace_deep = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(4));
+        if (path_value.isErr() || hint.isErr() || replace_deep.isErr()) {
+            return errorJson(500, "Failed to construct reload arguments");
+        }
+        auto cached_value = callObject(loader.value(), "ResourceLoader", "has_cached", 2323990056LL,
+                                       {&path_value.value()});
+        if (cached_value.isErr()) return errorJson(500, cached_value.error().message);
+        auto cached = scalarFromVariant<GDExtensionBool>(cached_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+        if (cached.isErr()) return errorJson(500, cached.error().message);
+        if (!cached.value()) return liveResult({{"path", path}, {"cached", false}, {"reloaded", false}});
+        auto reloaded = callObject(loader.value(), "ResourceLoader", "load", 3358495409LL,
+                                   {&path_value.value(), &hint.value(), &replace_deep.value()});
+        auto object = reloaded.isOk() ? objectFromVariant(reloaded.value())
+                                      : Result<GDExtensionObjectPtr>(reloaded.error());
+        return liveResult({{"path", path}, {"cached", true},
+                           {"reloaded", object.isOk() && object.value() != nullptr}});
+    }
     auto editor_result = editorInterface();
     if (editor_result.isErr()) return errorJson(editor_result.error().code, editor_result.error().message);
     auto editor = editor_result.value();
