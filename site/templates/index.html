@@ -89,11 +89,11 @@
 <section id="platforms">
   <p class="eyebrow">Platforms</p>
   <h2>Windows, macOS and Linux.</h2>
-  <p>Every release ships a built archive for all three, with checksums and build provenance, and every push builds Didi and runs the suites on all three. The live editor harness runs on Windows in CI, so that is where Didi has the most hours behind it, and the other two are where a tester is worth the most.</p>
+  <p>Every release ships a built archive for all three, with checksums and build provenance, and every push builds Didi and runs the suites on all three. The live editor harness runs on Windows in CI, so that is where Didi has the most hours behind it, and the other two are where a tester is worth the most. Each link below downloads the latest release, and the README inside the archive covers installing it on that platform.</p>
   <div class="grid three">
-    <div class="card"><h3>Windows <span class="n">x64</span></h3><p class="tools">didi-windows-x64.zip &middot; didi.exe</p><p>MSVC build, the native and Python suites, and the live Godot editor harness on 4.5.1, 4.6.2 and 4.7.2, on every push. The platform Didi is developed on.</p></div>
-    <div class="card"><h3>Linux <span class="n">x64</span></h3><p class="tools">didi-linux-x64.tar.gz &middot; didi</p><p>gcc build, the suites, and an ASan and UBSan run on every push. The archive is built in an Ubuntu 22.04 container so it runs on older glibc. No live editor run in CI yet.</p></div>
-    <div class="card"><h3>macOS <span class="n">Apple silicon</span></h3><p class="tools">didi-macos-arm64.tar.gz &middot; didi</p><p>clang build and the suites on every push. No Intel archive, and no live editor run in CI yet.</p></div>
+    <div class="card"><h3>Windows <span class="n">x64</span></h3><p class="tools"><a href="https://github.com/saworbit/didi/releases/latest/download/didi-windows-x64.zip">didi-windows-x64.zip</a> &middot; didi.exe</p><p>MSVC build, the native and Python suites, and the live Godot editor harness on 4.5.1, 4.6.2 and 4.7.2, on every push. The platform Didi is developed on. The C++ runtime is built in, so no Visual C++ Redistributable is needed.</p></div>
+    <div class="card"><h3>Linux <span class="n">x64</span></h3><p class="tools"><a href="https://github.com/saworbit/didi/releases/latest/download/didi-linux-x64.tar.gz">didi-linux-x64.tar.gz</a> &middot; didi</p><p>gcc build, the suites, and an ASan and UBSan run on every push. The archive is built in an Ubuntu 22.04 container with a static C++ runtime, so it runs on glibc 2.34 or newer: Ubuntu 22.04, Debian 12, RHEL 9 and later. No live editor run in CI yet.</p></div>
+    <div class="card"><h3>macOS <span class="n">Apple silicon</span></h3><p class="tools"><a href="https://github.com/saworbit/didi/releases/latest/download/didi-macos-arm64.tar.gz">didi-macos-arm64.tar.gz</a> &middot; didi</p><p>clang build and the suites on every push. No Intel archive, and no live editor run in CI yet. The binaries are not notarized, so clear the download quarantine before the first run; the README inside the archive has the command.</p></div>
   </div>
   <div class="callout">
     <div>
@@ -161,22 +161,23 @@
 <section id="setup">
   <p class="eyebrow">Setup</p>
   <h2>Sixty seconds, three steps.</h2>
-  <p>Build the binary and the addon together, enable the plugin, point your assistant at the binary. The in-editor console generates the third step for you with the binary already located. <a href="https://github.com/saworbit/didi/blob/main/docs/QUICKSTART.md">The full quickstart</a> covers each client by hand, and <a href="https://github.com/saworbit/didi/releases/latest">the release page</a> has built archives for Windows, Linux and macOS with checksums and build provenance.</p>
+  <p>Download the archive for your platform, enable the plugin, point your assistant at the server. The in-editor console generates the third step for you. <a href="https://github.com/saworbit/didi/blob/main/docs/QUICKSTART.md">The full quickstart</a> covers each client by hand, and building from source.</p>
   <div class="steps">
     <div class="step">
-      <p class="num">Step 1 &middot; build</p>
-      <pre><code><span class="c"># Release binary and the complete addon, assembled under build/</span>
-git clone https://github.com/saworbit/didi.git
-cd didi
-cmake -B build -S .
-cmake --build build --config Release</code></pre>
-      <p>On Windows this produces <code>build/Release/didi.exe</code> and <code>build/addons/didi/</code> with the extension library inside it.</p>
+      <p class="num">Step 1 &middot; download</p>
+      <pre><code>didi-windows-x64/
+├── bin/
+│   └── didi.exe   <span class="c">← the server</span>
+├── addons/
+│   └── didi/      <span class="c">← the plugin</span>
+└── README.md</code></pre>
+      <p>Latest release for <a href="https://github.com/saworbit/didi/releases/latest/download/didi-windows-x64.zip">Windows</a>, <a href="https://github.com/saworbit/didi/releases/latest/download/didi-linux-x64.tar.gz">Linux</a> or <a href="https://github.com/saworbit/didi/releases/latest/download/didi-macos-arm64.tar.gz">macOS</a>. Unpack it somewhere permanent, outside any Godot project. Building from source gives you the same two halves under <code>build/</code>.</p>
     </div>
     <div class="step">
       <p class="num">Step 2 &middot; enable</p>
       <pre><code>your_game/
 ├── addons/
-│   └── didi/          <span class="c">← copy build/addons/didi here</span>
+│   └── didi/   <span class="c">← from the archive</span>
 │       ├── plugin.cfg
 │       ├── didi.gdextension
 │       └── bin/
@@ -188,12 +189,12 @@ cmake --build build --config Release</code></pre>
       <pre><code>{
   <span class="k">"mcpServers"</span>: {
     <span class="k">"didi"</span>: {
-      <span class="k">"command"</span>: <span class="s">"D:/didi/build/Release/didi.exe"</span>,
-      <span class="k">"args"</span>: [<span class="s">"--project"</span>, <span class="s">"D:/my_game"</span>]
+      <span class="k">"command"</span>: <span class="s">"C:/Tools/didi-windows-x64/bin/didi.exe"</span>,
+      <span class="k">"args"</span>: [<span class="s">"--project"</span>, <span class="s">"C:/Projects/my_game"</span>]
     }
   }
 }</code></pre>
-      <p>Into <code>claude_desktop_config.json</code>, <code>.cursor/mcp.json</code> or your client's equivalent. Or open the Didi tab's <b>Connect</b> page and copy the generated one.</p>
+      <p>Into <code>claude_desktop_config.json</code>, <code>.cursor/mcp.json</code> or your client's equivalent. Or open the Didi tab's <b>Connect</b> page, set the server path, and copy the configuration it generates.</p>
     </div>
   </div>
 </section>
