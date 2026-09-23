@@ -9919,7 +9919,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
             }
             return errorJson(422, reason,
                              {{"code", "script_assignment_rejected"},
-                              {"outcome", "reverted"}, {"rolled_back", true}});
+                              {"outcome", "rolled_back"}, {"rolled_back", true}});
         }
         return liveSceneMutation({{"status", "success"}, {"target_node", params.value("target_node", "")},
                                   {"script_path", script_path}, {"attached", attaching}, {"detached", !attaching},

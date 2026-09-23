@@ -264,6 +264,31 @@ class HookRefusalsNameThemselves(unittest.TestCase):
                 "explanation. The identifier belongs under data.code and the "
                 "message belongs in sentences.")
 
+    def test_a_rolled_back_mutation_says_rolled_back(self) -> None:
+        """The failed-mutation outcome vocabulary has one word for success.
+
+        `godot_bridge.cpp` answers a postcondition failure with
+        `outcome: rolled_back` when the undo took and `outcome: unknown` when
+        it did not. Nine sites do. One said `reverted` instead (#896), which
+        nothing read and nothing checked, so a caller branching on the word its
+        siblings use saw a mutation it could not classify.
+
+        `tests/phase7_signal_bridge_probe.cpp` pins `rolled_back` against a
+        live editor for the signal connect and disconnect paths. This is the
+        cheap half of the same rule: the word is not back.
+
+        Not a general check on `outcome`. That key names several unrelated
+        things in this file, from viewport projections to undo availability,
+        and the vocabulary that matters here cannot be told from the others by
+        reading the source text.
+        """
+        source = BRIDGE.read_text(encoding="utf-8")
+        self.assertNotIn(
+            '"reverted"', source,
+            "The failed-mutation outcome is rolled_back when the undo took and "
+            "unknown when it did not. reverted is a tenth word for the nine "
+            "sites' first one, and the live signal probe asserts rolled_back.")
+
     def test_the_cancelled_command_is_not_called_a_timeout(self) -> None:
         source = HOOK.read_text(encoding="utf-8")
         index = source.find('"Command cancelled before execution"')
