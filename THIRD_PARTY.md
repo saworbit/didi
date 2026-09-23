@@ -37,7 +37,9 @@ gitignored, and nothing compiles against them.
 ## Updating one
 
 There is no command for this. Replace the file with the upstream release,
-update the version in the table above, and run the full suite. The JSON header
+update the version in the table above and the notice in
+[`packaging/THIRD_PARTY_NOTICES.txt`](packaging/THIRD_PARTY_NOTICES.txt), which
+every release archive carries, and run the full suite. The JSON header
 parses every request that arrives from an MCP client, so treat a change to it
 as a change to the code on the untrusted input path, not as a routine bump.
 

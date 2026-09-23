@@ -1,0 +1,105 @@
+# Didi @VERSION@ for @PLATFORM_NAME@
+
+Didi (`godot-mcp-native`) is a native Model Context Protocol server for the
+Godot editor, version 4.5 or newer. It comes in two halves that are installed
+in two different places: a server your AI client starts, and an editor plugin
+that goes into your Godot project.
+
+| Path | What it is |
+| :--- | :--- |
+| `bin/@EXE@` | The MCP server. Your client runs this. |
+| `bin/didi_class_reference.json` | The Godot class reference the server reads offline. Keep it beside the server. |
+| `addons/didi/` | The Godot editor plugin, with its native extension in `addons/didi/bin/@LIBRARY@`. |
+| `LICENSE` | Didi's license (MIT). |
+| `THIRD_PARTY_NOTICES.txt` | The licenses of the third-party code compiled into both binaries. |
+
+## Install
+
+<!-- platform:macos -->
+**Clear the download quarantine first.** These binaries are signed ad hoc and
+not notarized, so macOS refuses to run the server or load the library when a
+browser downloaded them. Run this once on the extracted folder, before you copy
+anything out of it:
+
+```
+xattr -dr com.apple.quarantine /path/to/didi-macos-arm64
+```
+
+<!-- /platform:macos -->
+1. Put this folder somewhere permanent, **outside** any Godot project. The
+   server stays here and your client is pointed at it.
+2. Copy `addons/didi` into your Godot project, so that it sits at
+   `res://addons/didi`. Copy the whole folder: the plugin loads every file in
+   it.
+3. Open the project in Godot, go to **Project > Project Settings > Plugins**,
+   and enable **Didi Native MCP Bridge**. A **Didi** tab appears beside 2D, 3D
+   and Script.
+4. In the Didi tab, open **Connect** and set the server path to `bin/@EXE@` in
+   this folder. It is stored in Editor Settings as
+   `didi/server/executable_path`. The console never looks for the server
+   inside a project, so it will not find it on its own unless `bin` is on your
+   `PATH`.
+5. Still in **Connect**, pick your client and copy the configuration it
+   generates. It already has the server path and your project's path filled
+   in. The **Dashboard** page shows a card per part, green when that part is
+   working.
+
+Configuring a client by hand looks like this, with your own two paths:
+
+```json
+{
+  "mcpServers": {
+    "didi": {
+      "command": "@EXAMPLE_COMMAND@",
+      "args": ["--project", "@EXAMPLE_PROJECT@"]
+    }
+  }
+}
+```
+
+## Platform notes
+
+<!-- platform:windows -->
+- x64 only.
+- The C++ runtime is built into both binaries, so no Visual C++
+  Redistributable is needed.
+<!-- /platform:windows -->
+<!-- platform:macos -->
+- Apple silicon (arm64) only, macOS 14 or newer. There is no Intel build. On
+  an Intel Mac, Godot reports that no library exists for the machine rather
+  than loading one it cannot run.
+- If you copied `addons/didi` into a project before clearing the quarantine,
+  clear it on the copy as well:
+  `xattr -dr com.apple.quarantine /path/to/project/addons/didi`
+<!-- /platform:macos -->
+<!-- platform:linux -->
+- x86_64, glibc 2.34 or newer: Ubuntu 22.04, Debian 12, Rocky, RHEL and
+  AlmaLinux 9, or anything newer.
+- The C++ runtime is linked statically, so glibc is the only system library
+  version that matters.
+<!-- /platform:linux -->
+
+## Upgrading
+
+Replace the server and the addon together, and close Godot first so the
+extension library is not in use. The two halves report a build id, and the
+Didi tab shows the bridge amber when they come from different builds.
+
+## Verifying this download
+
+The release page carries `SHA256SUMS` and a signed build provenance
+attestation for every archive. With the GitHub CLI installed:
+
+```
+gh attestation verify @ARCHIVE_FILE@ --repo saworbit/didi --signer-workflow saworbit/didi/.github/workflows/release.yml --source-ref refs/tags/v@VERSION@
+```
+
+## Documentation
+
+These links point at the documentation as it was when @VERSION@ was tagged.
+
+- Quickstart: https://github.com/saworbit/didi/blob/v@VERSION@/docs/QUICKSTART.md
+- Tool reference: https://github.com/saworbit/didi/blob/v@VERSION@/docs/TOOL_REFERENCE.md
+- What changed: https://github.com/saworbit/didi/blob/v@VERSION@/CHANGELOG.md
+- Security and verifying releases: https://github.com/saworbit/didi/blob/v@VERSION@/SECURITY.md
+- Issues: https://github.com/saworbit/didi/issues
