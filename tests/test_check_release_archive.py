@@ -182,6 +182,57 @@ class VersionTests(unittest.TestCase):
                              ["the server reports 2.0.0, expected 2.0.1"])
 
 
+class UpgradeTests(unittest.TestCase):
+    def test_an_upgrade_replaces_the_folder_rather_than_copying_over_it(self):
+        # What the engine wrote into the folder goes with it, as it does when a
+        # person drops the new folder in place of the old; that is what made
+        # the missing .uid sidecars visible at all.
+        with tempfile.TemporaryDirectory() as scratch:
+            root = build_tree(Path(scratch) / "archive")
+            project = Path(scratch) / "project"
+            checker.write_project(root, project)
+            minted = project / "addons" / "didi" / "didi_plugin.gd.uid"
+            minted.write_text("uid://minted\n", encoding="utf-8")
+            (root / "addons" / "didi" / "didi_plugin.gd").write_text("# new\n", encoding="utf-8")
+            checker.upgrade_project(root, project)
+            self.assertFalse(minted.exists())
+            self.assertEqual((project / "addons" / "didi" / "didi_plugin.gd").read_text(encoding="utf-8"),
+                             "# new\n")
+            self.assertTrue((project / "project.godot").is_file())
+
+    def test_every_editor_is_asked_about_a_fresh_install_and_an_upgrade(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            scratch_dir = Path(scratch)
+            root = build_tree(scratch_dir / "source", platform=checker.host_platform())
+            archive = scratch_dir / "didi.zip"
+            with zipfile.ZipFile(archive, "w") as bundle:
+                for path in root.rglob("*"):
+                    if path.is_file():
+                        bundle.write(path, Path("didi") / path.relative_to(root))
+            asked = []
+
+            def fake_editor(godot, project, sessions, **_):
+                asked.append((godot.name, project.name))
+                return checker.EditorRun(godot=godot.name, plugin_active=True, sessions_published=1)
+
+            original = (checker.open_in_editor, checker.mcp_handshake, subprocess_run := checker.subprocess.run)
+            checker.open_in_editor = fake_editor
+            checker.mcp_handshake = lambda server, project: (1, [])
+            checker.subprocess.run = lambda *a, **k: type("R", (), {"stdout": "Didi 2.0.1\n"})()
+            try:
+                report = checker.Report(archive=archive.name)
+                work = scratch_dir / "work"
+                work.mkdir()
+                checker._check_unpacked(archive, [Path("godot_a"), Path("godot_b")], None,
+                                        [a for a in ADDON], work, report)
+            finally:
+                checker.open_in_editor, checker.mcp_handshake = original[0], original[1]
+                checker.subprocess.run = subprocess_run
+            self.assertEqual([run.scenario for run in report.editors],
+                             ["fresh install", "upgrade by replacing the folder"] * 2)
+            self.assertEqual([name for name, _ in asked], ["godot_a", "godot_a", "godot_b", "godot_b"])
+
+
 class EngineOutputTests(unittest.TestCase):
     def test_flags_what_the_engine_complains_about_and_nothing_else(self):
         output = io.StringIO(

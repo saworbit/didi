@@ -252,7 +252,8 @@ otherwise only show up as a red run.
    `python tools/check_release_archive.py <archive> --expect-version x.y.z --godot <editor>`,
    once per supported Godot line (`--godot` repeats). It checks the layout,
    the version, the MCP handshake, and that the archive's own addon comes up
-   in a fresh project with nothing on the engine's error output. It runs the
+   in a fresh project with nothing on the engine's error output, then again
+   after its addon folder is deleted and replaced the way a user upgrades. It runs the
    host's binaries, so each platform's archive needs that platform. Run it
    from a checkout of the tag.
 5. **Publish** with `gh release edit vx.y.z --draft=false`. If the draft is

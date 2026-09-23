@@ -46,19 +46,23 @@ The `README.md` inside the archive has the notes for that platform. On macOS, cl
    │       ├── didi_plugin.gd
    │       ├── didi_console.gd        # the in-editor console
    │       ├── didi_brand.gd          # and the scripts and marks it is built from
+   │       ├── didi_await.gd
    │       ├── didi_client_config.gd
    │       ├── didi_diagnostics.gd
+   │       ├── didi_log.gd
    │       ├── didi_session.gd
    │       ├── didi_settings.gd
    │       ├── didi_mark.svg
    │       ├── didi_mark_compact.svg
    │       ├── didi_signature.svg
+   │       ├── *.uid                  # Godot's ID file beside each script and the .gdextension
    │       └── bin/
    │           └── didi_extension.dll
    └── project.godot
    ```
    Copy the folder whole. Every file in it is loaded: `plugin.cfg` names the plugin script, that
-   script preloads the rest, and the console rasterises the marks for the editor's theme.
+   script preloads the rest, and the console rasterises the marks for the editor's theme. The
+   `.uid` files are Godot's own; keep them when you replace the folder to upgrade.
 2. Open your project in the **Godot Editor**.
 3. Go to **Project $\rightarrow$ Project Settings $\rightarrow$ Plugins**.
 4. Check **Enable** next to **Didi Native MCP Bridge**.
