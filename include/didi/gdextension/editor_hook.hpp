@@ -87,7 +87,22 @@ public:
         return m_responseClaimed.compare_exchange_strong(expected, true);
     }
 
+    // Where the engine's output stood when this command started, so the answer
+    // can carry what the engine printed while it ran. Zero until it starts.
+    void noteStart(std::string method, uint64_t engine_cursor) {
+        std::lock_guard<std::mutex> lock(m_startMutex);
+        m_method = std::move(method);
+        m_engineCursor = engine_cursor;
+    }
+    std::pair<std::string, uint64_t> started() const {
+        std::lock_guard<std::mutex> lock(m_startMutex);
+        return {m_method, m_engineCursor};
+    }
+
 private:
+    mutable std::mutex m_startMutex;
+    std::string m_method;
+    uint64_t m_engineCursor{0};
     std::atomic<CommandState> m_state{CommandState::Pending};
     std::atomic<bool> m_everStarted{false};
     std::atomic<bool> m_responseClaimed{false};

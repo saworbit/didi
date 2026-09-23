@@ -1307,6 +1307,15 @@ void ToolRegistry::registerTool(ToolDefinition tool) {
             if (!properties.contains("session_kind")) {
                 properties["session_kind"] = json{{"type", "string"}};
             }
+            // What the engine printed while a live call ran, which the bridge
+            // puts on any live answer when there was something (see
+            // engine_diagnostics.hpp). Declared here for the same reason as
+            // the three above: it is put there by the bridge, not the handler.
+            if (!properties.contains("engine_diagnostics")) {
+                properties["engine_diagnostics"] = json{{"type", "array"}};
+                properties["engine_diagnostics_note"] = json{{"type", "string"}};
+                properties["engine_diagnostics_omitted"] = json{{"type", "integer"}};
+            }
         }
     }
     if (!tool.capability.implemented) {

@@ -239,6 +239,15 @@ cmake --build build --config Release
 .\tests\run_godot_integration.ps1 -GodotExecutable C:\Godot\Godot_v4.7.2-stable_win64_console.exe
 ```
 
+**The engine's own output is a result.** The harness reads the editor's and
+the game's `--log-file` after the run, prints every ERROR and WARNING line with
+a count, and fails on any line that is not in `$allowedEngineLines`. Each
+allowed entry names the request that causes the line on purpose, or the open
+issue for a known defect. A new line means a request made the engine complain:
+find the call (its answer carries the line under `engine_diagnostics`), then fix
+the cause or, when the line is the point of the request, add an entry that says
+which request and why. Never widen a pattern to make a run pass.
+
 Two things catch people out running the harness by hand on Windows.
 
 **Build every target, not just `didi` and `didi_tests`.** The addon is its own

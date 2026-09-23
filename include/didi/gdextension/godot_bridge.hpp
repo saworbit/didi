@@ -209,6 +209,8 @@ public:
     // imported is an observation and not something to infer from the
     // call that was made.
     bool assetIsImported(const std::string& resource_path);
+    // Whether the .import sidecar Godot wrote records a failed import.
+    bool assetImportFailed(const std::string& resource_path);
     // Whether the editor still has work outstanding for this path.
     //
     // The scanning flag clears before the importer has written its sidecars, so

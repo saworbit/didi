@@ -186,6 +186,7 @@ set(CORE_SOURCES
     src/gdextension/session_host.cpp
     src/gdextension/runtime_log.cpp
     src/gdextension/engine_output_logger.cpp
+    src/gdextension/engine_diagnostics.cpp
     src/gdextension/runtime_request_router.cpp
     src/gdextension/expression_sandbox.cpp
     src/offline/gdscript_diagnostics.cpp
@@ -408,6 +409,7 @@ set(TEST_SOURCES
     tests/test_phase7b_spatial.cpp
     tests/test_phase7b_anim.cpp
     tests/test_anim_add_library.cpp
+    tests/test_engine_diagnostics.cpp
 )
 
 if(DIDI_BUILD_TESTS)

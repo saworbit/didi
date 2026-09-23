@@ -223,6 +223,8 @@ For a supported live change:
 
 Always preserve result provenance in summaries: distinguish live editor state, parsed files, a separate test process, and synthesized images.
 
+Read `engine_diagnostics` when it is there. It is what the engine printed to its own console while the call ran, and a success with an engine ERROR beside it is a success to check, not one to report. The lines are attributed by time, so one about a file you did not name came from work the call triggered, such as a filesystem scan importing a new file.
+
 ## Managed recovery
 
 With `--managed-editor` and `--recovery-workspace`, work targets an isolated saved-project copy. Automatic checkpoints cover saved files and supported active-scene saves; unsaved scripts/external resources, audio state, undo and game state are excluded. Read the compact `recovery` receipt after mutations. When `requires_reconciliation` is true, inspect `runtime_recovery_status`; restore a checkpoint or explicitly accept saved files only after the uncertain original editor is stopped. Do not retry the failed edit. `runtime_checkpoint` snapshots existing disk files and does not save all editor buffers. `runtime_restore_checkpoint` preserves the prior project and requires destructive confirmation. `runtime_recovery_status`, dry runs, and confirmation previews do not restart; other authorized reads may. Recovery has one automatic restart budget; `runtime_recover_editor` makes that action explicit when live discovery is unavailable. Restore launches an editor without resetting the budget. Every new managed host invocation requires a fresh workspace. See [Managed Recovery](MANAGED_RECOVERY.md).
