@@ -14,7 +14,6 @@ result must say which way it was confirmed.
 """
 
 import json
-import os
 import subprocess
 import unittest
 from pathlib import Path
@@ -51,13 +50,21 @@ _executable = _binary.resolve
 class ElicitationConfirmationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        # Resolved before anything is written. A checkout with no build skips
+        # here, and when the skip came after the write it left the probe in
+        # the fixture project: unittest runs no tearDownClass for a setUpClass
+        # that raised.
+        cls.executable = _executable()
         # The gate arms on the target, not on the flag (#425), so the probe
         # resource has to be there for an overwrite of it to be a gated
         # mutation at all.
-        (FIXTURE_PROJECT / "tmp_elicitation_probe.tres").write_text(
+        probe = FIXTURE_PROJECT / "tmp_elicitation_probe.tres"
+        probe.write_text(
             '[gd_resource type="Resource" format=3]\n\n[resource]\n', encoding="utf-8"
         )
-        cls.executable = _executable()
+        # A class cleanup, so it runs if the launch below fails too, and after
+        # tearDownClass has stopped the server that overwrites the probe.
+        cls.addClassCleanup(probe.unlink, missing_ok=True)
         cls.process = subprocess.Popen(
             [str(cls.executable), "--project", str(FIXTURE_PROJECT)],
             stdin=subprocess.PIPE,
@@ -70,9 +77,6 @@ class ElicitationConfirmationTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.process.kill()
-        written = FIXTURE_PROJECT / "tmp_elicitation_probe.tres"
-        if written.exists():
-            os.remove(written)
 
     @classmethod
     def _request(cls, method, params):
