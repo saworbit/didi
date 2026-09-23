@@ -213,6 +213,34 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Changed
 
+- **The release archives stand on their own.** Each archive shipped the
+  repository's README, whose banner images and most of whose links are
+  relative paths into a tree the archive does not contain, and which explains
+  how to build what the archive already holds. It now carries a README written
+  for someone who has only the download: what each file is, where each half
+  goes, how to point the Didi console at the server, and the notes for that
+  platform alone, including the quarantine a browser download puts on the
+  macOS binaries. Three things were wrong rather than unhelpful, and are fixed.
+  The archives carried no third-party notices, although both binaries compile
+  in MIT-licensed code (nlohmann/json, stb_image_write, Godot's GDExtension
+  header) whose licenses ask for their notices to travel with every copy;
+  `THIRD_PARTY_NOTICES.txt` now does. The Windows binaries imported
+  `MSVCP140.dll` and `VCRUNTIME140.dll`, so a machine without the Visual C++
+  Redistributable could not start the server or load the extension, and one
+  with a redistributable older than 14.40 could crash in `std::mutex`; the
+  runtime is now linked statically, as it already was on Linux (#647) and as
+  Godot's own Windows builds do. And nothing stopped a tag being pushed over a
+  tree that still carried the previous version number, which would have
+  published binaries reporting the old version under the new name. The release
+  workflow now refuses a tag that does not match `CMakeLists.txt`,
+  `plugin.cfg` and a `CHANGELOG.md` section before it compiles anything, checks
+  that each archive holds exactly the tracked addon, the two binaries, the
+  class reference and three documents, checks what each binary links against
+  on its platform, runs the smoke test against the staged server rather than
+  the build tree, and reopens every archive to compare it with what was staged.
+  A tag now produces a draft release, with the version's summary from this
+  file above the generated notes, so the published archives are the ones a
+  person downloaded and checked. `CONTRIBUTING.md` has the release steps.
 - **A connection that arrives is read when it arrives, rather than when the
   previous one goes quiet.** Both IPC servers accepted one connection and only
   accepted the next after the one they held had been idle for the recycle
@@ -1456,7 +1484,6 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
   `scene_instantiate_node` has always taken. A class the engine does not know
   and a class that is not a `Node` are refused separately, each naming the
   class, and neither writes a file.
-||||||| parent of 3449745 (Import an asset the editor has never seen, and say whether it did)
 - **An asset the editor has never seen gets imported, and the answer says
   whether it did.** Adding art is step one of building a game and there was no
   way to do it through the surface. `asset_reimport` sends a path with no

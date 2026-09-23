@@ -230,6 +230,34 @@ otherwise only show up as a red run.
 - Moving the pinned Godot version must refresh `resources/didi_class_reference.json`, which is what `script_reflect_class` answers from offline. Dump the API with `godot --headless --dump-extension-api --path .` and regenerate with `python tools/generate_class_reference.py --api extension_api.json --output resources/didi_class_reference.json`. The dump itself stays untracked; only the trimmed reference is committed.
 - Current-facing documentation must describe executable behavior. Do not commit agent-specific workflow reports, plans, or scratch artifacts; `.superpowers/` and `docs/superpowers/` are explicitly excluded from the project tree.
 
+### Cutting a release
+
+1. **Rehearse.** `gh workflow run release.yml --ref <branch>` builds, tests,
+   packages, checksums and signs exactly what a tag would, and leaves it as the
+   `release-dry-run` artifact instead of publishing. Download the archives and
+   read them before going further. Run it after any change to `release.yml` or
+   to `packaging/`.
+2. **Bump the version** in one pull request, following the release contract
+   above, and give the new `## [x.y.z] - <date>` section in `CHANGELOG.md` a
+   short summary above its first `###` heading. That summary leads the release
+   notes, so write it for someone deciding whether to upgrade, with absolute
+   links.
+3. **Tag the merge commit** on `main` as `vx.y.z` and push the tag. The
+   workflow refuses a tag that does not match `CMakeLists.txt`, `plugin.cfg`
+   and the changelog section, before it compiles anything.
+4. **Check the draft.** A tag produces a draft release, which nobody else can
+   see. Download its archives, compare them with `SHA256SUMS`, run
+   `gh attestation verify` as `SECURITY.md` describes, and unpack each one.
+5. **Publish** with `gh release edit vx.y.z --draft=false`. If the draft is
+   wrong, delete it and the tag, fix `main`, and tag again: nothing outside has
+   seen it.
+
+What goes into an archive is `packaging/README.md.in`, filled in per platform,
+`packaging/THIRD_PARTY_NOTICES.txt`, `LICENSE`, the server with its class
+reference, and the addon as the build assembles it. The workflow fails a
+package that holds anything else. A change to the vendored code in `include/`
+changes `THIRD_PARTY_NOTICES.txt` as well as `THIRD_PARTY.md`.
+
 ---
 
 ## 📬 Submitting a Pull Request

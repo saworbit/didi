@@ -108,6 +108,41 @@ jobs:
         with:
           persist-credentials: false
 
+      # Before anything is compiled, because the macOS leg takes most of an
+      # hour and a tag that names the wrong version should fail in seconds.
+      # Pushing v2.1.0 over a tree that still says 2.0.0 would otherwise build,
+      # test, sign and publish binaries whose --version, plugin.cfg and build id
+      # all say 2.0.0 under a release called v2.1.0. The documentation
+      # validator already holds the version files to each other; this holds the
+      # tag to them. A rehearsal runs from a branch, so it only reports.
+      - name: Check the tag names the version being built
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^project(didi VERSION \([0-9][0-9.]*\) .*/\1/p' CMakeLists.txt)"
+          if [ -z "${version}" ]; then
+            echo "CMakeLists.txt no longer declares project(didi VERSION x.y.z)" >&2
+            exit 1
+          fi
+          echo "DIDI_VERSION=${version}" >> "$GITHUB_ENV"
+          echo "Building Didi ${version} from ${GITHUB_REF}"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            status=0
+            if [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
+              echo "Tag ${GITHUB_REF_NAME} does not match CMakeLists.txt version ${version}" >&2
+              status=1
+            fi
+            if ! grep -qF "version=\"${version}\"" addons/didi/plugin.cfg; then
+              echo "addons/didi/plugin.cfg does not say version=\"${version}\"" >&2
+              status=1
+            fi
+            if ! grep -q "^## \[${version//./\\.}\] - " CHANGELOG.md; then
+              echo "CHANGELOG.md has no '## [${version}] - <date>' section" >&2
+              status=1
+            fi
+            exit "${status}"
+          fi
+
       - name: Setup CMake
         if: runner.os != 'Windows'
         uses: jwlawson/actions-setup-cmake@0d6a7d60b009d01c9e7523be22153ff8f19460d3 # v2.2.0
@@ -177,10 +212,24 @@ jobs:
       # substitution into the shell before it runs, which is the shape a
       # workflow injection takes even when today's value is a path this
       # workflow computed itself.
+      #
+      # The C++ runtime goes in statically on Windows, for the reason it does on
+      # Linux below: the binaries imported MSVCP140.dll and VCRUNTIME140.dll,
+      # which Windows does not ship, so a machine without the Visual C++
+      # Redistributable could not start didi.exe and Godot could not load the
+      # extension. A machine with an older redistributable is worse off than
+      # one with none: binaries built by a current toolset crash in std::mutex
+      # against a runtime older than 14.40, and nothing in the error says why.
+      # Godot's own Windows builds link the runtime statically for the same
+      # reason. The Debug half of the expression is for completeness; this job
+      # only builds Release.
       - name: Configure CMake (Windows)
         if: runner.os == 'Windows'
         shell: bash
-        run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DPython3_EXECUTABLE="$DIDI_RELEASE_PYTHON"
+        run: |
+          cmake -B build -S . -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_MSVC_RUNTIME_LIBRARY='MultiThreaded$<$<CONFIG:Debug>:Debug>' \
+            -DPython3_EXECUTABLE="$DIDI_RELEASE_PYTHON"
 
       # Ninja, matching ci.yml. This job used the default generator and took
       # fifty minutes on macOS against ten on Linux and seven on Windows, for
@@ -263,12 +312,200 @@ jobs:
       - name: Run Tests Before Packaging
         run: ctest --test-dir build -C Release --output-on-failure
 
-      - name: MCP Stdio Smoke Before Packaging
+      # One staging step for all three platforms, so the archives cannot drift
+      # apart the way two copies of the same commands can.
+      #
+      # The README is not the repository's. That one is written for someone
+      # browsing the source: its images and most of its links are relative
+      # paths into a tree the archive does not contain, and it explains how to
+      # build what the archive already holds. packaging/README.md.in is written
+      # for someone who has only the download, and is filled in for this
+      # platform. THIRD_PARTY_NOTICES.txt is there because the MIT licenses of
+      # the vendored code in include/ ask for their notices to travel with every
+      # copy, and the binaries are copies.
+      - name: Stage the archive
         shell: bash
+        env:
+          ARCHIVE: ${{ matrix.artifact_name }}
+          ARCHIVE_EXT: ${{ matrix.archive_ext }}
         run: |
           set -euo pipefail
-          exe=./build/didi
-          [ -x "$exe" ] || exe=./build/Release/didi.exe
+          case "${RUNNER_OS}" in
+            Windows)
+              built=build/Release; exe=didi.exe; library=didi_extension.dll
+              platform=windows; platform_name="Windows (x64)"
+              example_command="C:/Tools/${ARCHIVE}/bin/didi.exe"
+              example_project="C:/Projects/my_game" ;;
+            Linux)
+              built=build; exe=didi; library=libdidi_extension.so
+              platform=linux; platform_name="Linux (x64)"
+              example_command="/home/you/tools/${ARCHIVE}/bin/didi"
+              example_project="/home/you/projects/my_game" ;;
+            macOS)
+              built=build; exe=didi; library=libdidi_extension.dylib
+              platform=macos; platform_name="macOS (Apple silicon)"
+              example_command="/Users/you/Tools/${ARCHIVE}/bin/didi"
+              example_project="/Users/you/Projects/my_game" ;;
+            *)
+              echo "No packaging rule for ${RUNNER_OS}" >&2
+              exit 1 ;;
+          esac
+          {
+            echo "DIDI_EXE=${exe}"
+            echo "DIDI_LIBRARY=${library}"
+          } >> "$GITHUB_ENV"
+
+          stage="dist/${ARCHIVE}"
+          rm -rf dist
+          mkdir -p "${stage}/bin" "${stage}/addons"
+          cp "${built}/${exe}" "${built}/didi_class_reference.json" "${stage}/bin/"
+          # From the addon the build assembled, not from the source directory,
+          # which also holds whatever a tool generated in place.
+          cp -R build/addons/didi "${stage}/addons/"
+          cp LICENSE packaging/THIRD_PARTY_NOTICES.txt "${stage}/"
+
+          # This platform's blocks only, then the placeholders. Carriage
+          # returns go first: the Windows checkout converts line endings, and a
+          # marker line ending in \r would match nothing and ship every
+          # platform's instructions in every archive.
+          tr -d '\r' < packaging/README.md.in \
+            | awk -v keep="${platform}" '
+                /^<!-- platform:[a-z]+ -->$/ { block = $0; sub(/^<!-- platform:/, "", block); sub(/ -->$/, "", block); next }
+                /^<!-- \/platform:[a-z]+ -->$/ { block = ""; next }
+                block == "" || block == keep { print }
+              ' \
+            | sed -e "s|@VERSION@|${DIDI_VERSION}|g" \
+                  -e "s|@PLATFORM_NAME@|${platform_name}|g" \
+                  -e "s|@EXE@|${exe}|g" \
+                  -e "s|@LIBRARY@|${library}|g" \
+                  -e "s|@ARCHIVE_FILE@|${ARCHIVE}.${ARCHIVE_EXT}|g" \
+                  -e "s|@EXAMPLE_COMMAND@|${example_command}|g" \
+                  -e "s|@EXAMPLE_PROJECT@|${example_project}|g" \
+            > "${stage}/README.md"
+
+      # What a user unpacks, checked as a user would find it. Every check runs
+      # and reports before the step fails, so one red run names every problem
+      # rather than the first.
+      - name: Check the archive holds exactly what it should
+        shell: bash
+        env:
+          ARCHIVE: ${{ matrix.artifact_name }}
+        run: |
+          set -euo pipefail
+          stage="dist/${ARCHIVE}"
+          status=0
+
+          # The tracked addon, the library the build made for it, the server
+          # with its class reference, and three documents. Nothing else: not a
+          # stray file a tool left in the build tree, and not the repository.
+          expected="$(
+            {
+              git ls-files addons/didi
+              printf '%s\n' "addons/didi/bin/${DIDI_LIBRARY}" \
+                "bin/${DIDI_EXE}" bin/didi_class_reference.json \
+                README.md LICENSE THIRD_PARTY_NOTICES.txt
+            } | LC_ALL=C sort
+          )"
+          actual="$(cd "${stage}" && find . \( -type f -o -type l \) | sed 's|^\./||' | LC_ALL=C sort)"
+          if [ "${expected}" != "${actual}" ]; then
+            echo "The archive does not hold exactly what it should (< expected, > staged):" >&2
+            diff <(printf '%s\n' "${expected}") <(printf '%s\n' "${actual}") >&2 || true
+            status=1
+          fi
+          while IFS= read -r file; do
+            if [ ! -s "${stage}/${file}" ]; then
+              echo "Empty file in the archive: ${file}" >&2
+              status=1
+            fi
+          done <<< "${actual}"
+
+          if grep -nE '@[A-Z_]+@|<!-- /?platform:' "${stage}/README.md" >&2; then
+            echo "README.md still carries template markers" >&2
+            status=1
+          fi
+
+          # The version a user sees has to be the version the release is
+          # called, in both halves.
+          reported="$("${stage}/bin/${DIDI_EXE}" --version | tr -d '\r' | head -1)"
+          if [ "${reported}" != "didi (godot-mcp-native) v${DIDI_VERSION}" ]; then
+            echo "The server reports '${reported}', not v${DIDI_VERSION}" >&2
+            status=1
+          fi
+          if ! grep -qF "version=\"${DIDI_VERSION}\"" "${stage}/addons/didi/plugin.cfg"; then
+            echo "The addon's plugin.cfg is not version ${DIDI_VERSION}" >&2
+            status=1
+          fi
+
+          server="${stage}/bin/${DIDI_EXE}"
+          library="${stage}/addons/didi/bin/${DIDI_LIBRARY}"
+          case "${RUNNER_OS}" in
+            Windows)
+              # Neither binary may need the Visual C++ Redistributable. A check
+              # that cannot find its tool fails rather than passing unread.
+              vswhere="/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
+              dumpbin="$("${vswhere}" -latest -products '*' -find 'VC/Tools/MSVC/**/bin/Hostx64/x64/dumpbin.exe' | tr -d '\r' | head -1)"
+              if [ -z "${dumpbin}" ]; then
+                echo "dumpbin.exe not found, so the runtime check cannot run" >&2
+                exit 1
+              fi
+              for binary in "${server}" "${library}"; do
+                imports="$("$(cygpath -u "${dumpbin}")" -nologo -dependents "$(cygpath -w "${binary}")" | tr -d '\r')"
+                echo "${binary} imports:"
+                printf '%s\n' "${imports}" | grep -iE '^[[:space:]]+[^[:space:]]+\.dll$' || true
+                if printf '%s\n' "${imports}" | grep -qiE '^[[:space:]]+(msvcp|vcruntime|concrt)[0-9a-z_]*\.dll$'; then
+                  echo "${binary} needs the Visual C++ Redistributable" >&2
+                  status=1
+                fi
+              done
+              ;;
+            Linux)
+              # Only libraries every glibc system has. The floor check above
+              # covers their versions; this covers their names.
+              for binary in "${server}" "${library}"; do
+                needed="$(readelf -d "${binary}" | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p')"
+                echo "${binary} needs: $(printf '%s' "${needed}" | tr '\n' ' ')"
+                while IFS= read -r lib; do
+                  case "${lib}" in
+                    ''|libc.so.6|libm.so.6|libpthread.so.0|libdl.so.2|librt.so.1|ld-linux-x86-64.so.2) ;;
+                    *) echo "${binary} needs ${lib}, which is not part of glibc" >&2; status=1 ;;
+                  esac
+                done <<< "${needed}"
+              done
+              ;;
+            macOS)
+              # arm64 only, as the .gdextension declares; loading nothing from
+              # outside the operating system; and a signature that is intact,
+              # because Apple silicon will not run code without one.
+              for binary in "${server}" "${library}"; do
+                archs="$(lipo -archs "${binary}")"
+                if [ "${archs}" != "arm64" ]; then
+                  echo "${binary} is built for '${archs}', not arm64" >&2
+                  status=1
+                fi
+                otool -L "${binary}"
+                if otool -L "${binary}" | tail -n +2 | awk '{print $1}' \
+                    | grep -vE '^(/usr/lib/|/System/Library/|@rpath/libdidi_extension\.dylib$)' >&2; then
+                  echo "${binary} loads a library from outside the operating system" >&2
+                  status=1
+                fi
+                if ! codesign --verify --verbose=2 "${binary}"; then
+                  echo "${binary} does not carry a valid signature" >&2
+                  status=1
+                fi
+              done
+              ;;
+          esac
+          exit "${status}"
+
+      # Against the staged server rather than the build tree, so what passes is
+      # what ships.
+      - name: MCP Stdio Smoke Before Packaging
+        shell: bash
+        env:
+          ARCHIVE: ${{ matrix.artifact_name }}
+        run: |
+          set -euo pipefail
+          exe="dist/${ARCHIVE}/bin/${DIDI_EXE}"
           {
             # protocolVersion is a required string in InitializeRequest and is
             # refused when it is missing (#531). This smoke sent no params at
@@ -285,33 +522,28 @@ jobs:
           grep -q '"protocolVersion":"2024-11-05"' smoke.out
           echo "Packaging smoke passed"
 
-      - name: Package Binary & Addons (Windows)
-        if: runner.os == 'Windows'
+      # Unpacked again and compared byte for byte with what was staged, so the
+      # archiver cannot drop, rename or alter a file on the way in.
+      - name: Create the archive
         shell: bash
+        env:
+          ARCHIVE: ${{ matrix.artifact_name }}
         run: |
-          mkdir -p dist/${{ matrix.artifact_name }}/bin
-          mkdir -p dist/${{ matrix.artifact_name }}/addons/didi
-          cp build/Release/didi.exe dist/${{ matrix.artifact_name }}/bin/
-          cp build/Release/didi_class_reference.json dist/${{ matrix.artifact_name }}/bin/
-          # From the staged addon the build produced, not from the source
-          # directory, which also holds whatever a tool generated in place.
-          cp -r build/addons/didi/* dist/${{ matrix.artifact_name }}/addons/didi/
-          cp README.md LICENSE dist/${{ matrix.artifact_name }}/
+          set -euo pipefail
+          rm -rf reopened
+          mkdir reopened
           cd dist
-          7z a ../${{ matrix.artifact_name }}.zip ${{ matrix.artifact_name }}/
-
-      - name: Package Binary & Addons (Linux/macOS)
-        if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          mkdir -p dist/${{ matrix.artifact_name }}/bin
-          mkdir -p dist/${{ matrix.artifact_name }}/addons/didi
-          cp build/didi dist/${{ matrix.artifact_name }}/bin/
-          cp build/didi_class_reference.json dist/${{ matrix.artifact_name }}/bin/
-          cp -r build/addons/didi/* dist/${{ matrix.artifact_name }}/addons/didi/
-          cp README.md LICENSE dist/${{ matrix.artifact_name }}/
-          cd dist
-          tar -czvf ../${{ matrix.artifact_name }}.tar.gz ${{ matrix.artifact_name }}/
+          if [ "${RUNNER_OS}" = "Windows" ]; then
+            7z a -tzip "../${ARCHIVE}.zip" "${ARCHIVE}/" > /dev/null
+            7z l "../${ARCHIVE}.zip"
+            7z x -o../reopened "../${ARCHIVE}.zip" > /dev/null
+          else
+            tar -czf "../${ARCHIVE}.tar.gz" "${ARCHIVE}/"
+            tar -tzvf "../${ARCHIVE}.tar.gz"
+            tar -xzf "../${ARCHIVE}.tar.gz" -C ../reopened
+          fi
+          diff -r "${ARCHIVE}" "../reopened/${ARCHIVE}"
+          echo "The archive reopens to exactly the staged tree"
 
       - name: Upload Release Archive
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -338,6 +570,15 @@ jobs:
       # verify` works without the bundle in hand.
       attestations: write
     steps:
+      # CHANGELOG.md and nothing else, for the release notes. No code from the
+      # repository runs in the one job that holds a write token.
+      - name: Checkout the changelog
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: CHANGELOG.md
+          sparse-checkout-cone-mode: false
+
       - name: Download All Artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -399,11 +640,52 @@ jobs:
           cp "$BUNDLE" "dist/didi-${safe_ref}.intoto.jsonl"
           ls -l dist
 
+      # The generated notes are a list of pull request titles, and for 2.0.0
+      # that list put "Release 2.0.0" under Security and every fix under Tests,
+      # with the Breaking section a reader most needed nowhere on the page. The
+      # summary a person wrote for the version in CHANGELOG.md goes first. A
+      # rehearsal has no tag, so it renders the newest released section to
+      # show that the notes would come out.
+      - name: Write the release notes
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            version="${TAG#v}"
+          else
+            version="$(sed -n 's/^## \[\([0-9][0-9.]*\)\] - .*/\1/p' CHANGELOG.md | head -1)"
+          fi
+          lead="$(awk -v head="## [${version}] - " '
+              index($0, head) == 1 { on = 1; next }
+              on && (/^### / || /^## /) { exit }
+              on { print }
+            ' CHANGELOG.md | sed '/./,$!d')"
+          if [ -z "$(printf '%s' "${lead}" | tr -d '[:space:]')" ]; then
+            echo "CHANGELOG.md has no summary under '## [${version}]' to lead the release notes" >&2
+            exit 1
+          fi
+          base="https://github.com/${GITHUB_REPOSITORY}/blob/v${version}"
+          {
+            printf '%s\n\n' "${lead}"
+            printf 'Every change is listed in [CHANGELOG.md](%s/CHANGELOG.md). ' "${base}"
+            printf 'Each archive holds a README with the install steps for its platform. '
+            printf '%s and %s verify the downloads, ' "\`SHA256SUMS\`" "\`didi-v${version}.intoto.jsonl\`"
+            printf 'as [SECURITY.md](%s/SECURITY.md#verifying-a-release) describes.\n' "${base}"
+          } > release-notes.md
+          cat release-notes.md
+
       - name: Create GitHub Release
         # `gh` rather than a third-party action. This is the one job that holds
         # `contents: write`, and gh is already on the runner, so publishing
-        # costs no additional trusted code. Notes are generated by GitHub and
-        # grouped by the categories in .github/release.yml.
+        # costs no additional trusted code. GitHub's generated notes, grouped
+        # by the categories in .github/release.yml, follow the summary above.
+        #
+        # A draft, not a release. Everything is attached and attested, and
+        # nothing is public until a person has downloaded the archives from
+        # the draft, checked them, and published it with
+        # `gh release edit <tag> --draft=false`. CONTRIBUTING.md has the steps.
         if: startsWith(github.ref, 'refs/tags/')
         shell: bash
         env:
@@ -417,9 +699,10 @@ jobs:
             echo "No release assets were produced; refusing to publish an empty release." >&2
             exit 1
           fi
-          printf 'Publishing %s with %d assets:\n' "$TAG" "${#assets[@]}"
+          printf 'Drafting %s with %d assets:\n' "$TAG" "${#assets[@]}"
           printf '  %s\n' "${assets[@]}"
-          gh release create "$TAG" --title "$TAG" --generate-notes "${assets[@]}"
+          gh release create "$TAG" --draft --title "$TAG" \
+            --notes-file release-notes.md --generate-notes "${assets[@]}"
 
       - name: Upload the unpublished assets (manual run)
         # The rehearsal. A manual run produces and signs exactly what a tag
