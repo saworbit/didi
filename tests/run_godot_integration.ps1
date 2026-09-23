@@ -4758,7 +4758,7 @@ try {
         @{ Pattern = "switching to Direct3D 12"; Where = "platform/windows/display_server_windows\.cpp"; Cause = "the host has no Vulkan device, so the engine falls back to Direct3D 12 at startup" },
         @{ Pattern = "PSO caching is not implemented"; Where = "drivers/d3d12/"; Cause = "the Direct3D 12 fallback the host needs has no pipeline cache yet" },
         @{ Where = "drivers/wasapi/audio_driver_wasapi\.cpp"; Cause = "the host has no audio device; the engine's WASAPI driver says so at startup" },
-        @{ Pattern = "falling back to the dummy driver"; Where = "servers/audio_server\.cpp"; Cause = "the host has no audio device, so the engine uses its dummy audio driver" }
+        @{ Pattern = "falling back to the dummy driver"; Where = "servers/(audio/)?audio_server\.cpp"; Cause = "the host has no audio device, so the engine uses its dummy audio driver" }
     )
     $engineLineTally = @{}
     $unexpectedEngineLines = @()
