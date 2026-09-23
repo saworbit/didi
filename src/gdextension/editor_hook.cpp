@@ -1,4 +1,5 @@
 #include "didi/gdextension/editor_hook.hpp"
+#include "didi/gdextension/engine_diagnostics.hpp"
 #include "didi/gdextension/viewport_renderer.hpp"
 #include "didi/gdextension/godot_bridge.hpp"
 #include "didi/gdextension/gdextension_api.hpp"
@@ -22,6 +23,24 @@ void fulfillCommand(const std::shared_ptr<std::promise<json>>& promise,
                     const std::shared_ptr<CommandControl>& control,
                     json response) {
     if (promise && control && control->tryClaimResponse()) {
+        // Everything the engine printed at warning level or above since this
+        // command started, on its answer. One place, so a deferred command --
+        // a reimport, a coroutine, a capture -- carries what printed across
+        // the frames it waited for as well as a synchronous one does.
+        const auto [method, cursor] = control->started();
+        if (cursor != 0 && !methodReportsEngineOutputItself(method)) {
+            auto& ring = EditorHook::instance().engineOutput();
+            const size_t total = ring.countFrom(cursor, "warning");
+            if (total > 0) {
+                auto records = ring.read(cursor, kMaxEngineDiagnostics, "warning");
+                if (records.isOk()) {
+                    const auto found = records.value().find("records");
+                    if (found != records.value().end()) {
+                        attachEngineDiagnostics(response, *found, total);
+                    }
+                }
+            }
+        }
         promise->set_value(std::move(response));
     }
 }
@@ -189,6 +208,7 @@ void EditorHook::processQueue() {
                                                   {"retryable", true}}}}}});
             continue;
         }
+        cmd.control->noteStart(cmd.method, engineOutput().nextSequence());
         try {
             if (cmd.method == "asset.reimport") {
                 scheduleAssetReimport(cmd.params, cmd.response_promise, cmd.control);
@@ -1228,9 +1248,20 @@ void EditorHook::processAssetReimportFrame() {
                 // apart without guessing at the file's type.
                 json imported = json::array();
                 json announced = json::array();
+                json failed = json::array();
                 for (const auto& path : completed->refreshed) {
-                    (GodotBridge::instance().assetIsImported(path) ? imported : announced)
-                        .push_back(path);
+                    if (!GodotBridge::instance().assetIsImported(path)) {
+                        announced.push_back(path);
+                    } else if (GodotBridge::instance().assetImportFailed(path)) {
+                        failed.push_back(path);
+                    } else {
+                        imported.push_back(path);
+                    }
+                }
+                // A reimported path can fail as well as a new one: the engine
+                // rewrites the sidecar with valid=false either way.
+                for (const auto& path : completed->reimported) {
+                    if (GodotBridge::instance().assetImportFailed(path)) failed.push_back(path);
                 }
                 response = {{"paths", completed->paths},
                             {"accepted_count", completed->paths.size()},
@@ -1241,7 +1272,23 @@ void EditorHook::processAssetReimportFrame() {
                             {"elapsed_ms", elapsed}, {"idle", true},
                             {"execution_mode", "live"}, {"is_live_engine", true},
                             {"session_kind", "editor"}};
-                if (!announced.empty()) {
+                if (!failed.empty()) {
+                    // The engine refused the import, and says why in the lines
+                    // the answer carries (engine_diagnostics). Reported as a
+                    // refusal, because an asset that did not import is one
+                    // nothing can load.
+                    response = {{"error", {{"code", 422},
+                                           {"message", "Godot could not import " + failed.dump() +
+                                                           ". The .import sidecar records valid=false; "
+                                                           "the engine's reason is under engine_diagnostics."},
+                                           {"data", {{"code", "asset_import_failed"},
+                                                     {"failed", failed},
+                                                     {"imported", imported},
+                                                     {"announced", announced},
+                                                     {"outcome", imported.empty() ? "not_imported"
+                                                                                  : "partially_imported"},
+                                                     {"retryable", false}}}}}};
+                } else if (!announced.empty()) {
                     response["limitation"] =
                         "Paths under announced carry no .import sidecar after the scan. For a "
                         "script, a scene or a text resource that is the whole story: Godot's "

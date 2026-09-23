@@ -22,6 +22,28 @@ Phase 7 is `PARTIAL_DELIVERY`. The implementation is 114/117 canonical tools, an
 | Offline | Operates on project files or launches a separate Godot process. |
 | Unimplemented | Schema reserved for compatibility; calls are rejected. |
 
+## What the engine printed
+
+A live call's answer carries the ERROR and WARNING lines the engine printed while
+the call was running, under `engine_diagnostics`: a list of `{level, message,
+function, file, line}`, at most eight, with `engine_diagnostics_omitted` saying
+how many more there were and `engine_diagnostics_note` saying what the list is.
+A message longer than 1024 bytes is cut on a character boundary and marked
+`message_truncated: true`; `function`, `file` and `line` are there when the
+engine named them.
+On a success they sit beside the other fields; on a refusal they are under
+`error.data`. A call during which the engine printed nothing has no such field.
+The lines are the engine's own words and are attributed by time, not by cause:
+a call that needed a filesystem scan carries whatever the scan's imports printed,
+including files it was not asked about, because that is what the engine printed
+while it ran. `runtime_read_output`, `runtime_read_logs` and
+`runtime_watch_invariants` read the engine's output themselves and carry none,
+and `editor_save_scene` keeps its own note about headless thumbnails.
+
+Until this, those lines went only to the editor's console. A call could answer
+success while the engine printed an error about the same work, and three defects
+lived there unseen until vibe session seventeen read the console.
+
 ## What every error carries
 
 A failure comes back as an envelope, and `error.data` is the part a caller
@@ -1111,6 +1133,8 @@ Godot's import system owns only the files that carry a `.import` sidecar. `Edito
 A path with no sidecar is two different things, and this tool is the one that tells them apart. A `.gd`, a `.tscn` or a `.tres` never gets a sidecar and `update_file` is all it needs. An asset the editor has never scanned -- a `.png` written into the project by something other than Godot -- needs importing before anything can use it, and `update_file` does not import: it announces. So whenever any path lacks a sidecar the call also runs `EditorFileSystem.scan`, which is the walk that finds new files and runs the importer over them. `editor_reload_project` uses `scan_sources`, which only re-examines files the editor already knows about, and a file it has never seen is not one of those.
 
 The answer then reports what happened rather than what was asked for. `imported` lists the paths that carry a sidecar now and did not before, and `announced` lists the ones that still carry none. `refreshed` keeps its old meaning -- everything that went through `update_file` -- so the two new lists partition it. `announced` is the ordinary and correct answer for a script; for an image, an audio file or a font it means the editor did not import it and anything referencing it will load nothing, and the result says so in `limitation`.
+
+An import the engine refused is refused. Godot writes the `.import` sidecar whether or not the import worked and records a failure as `valid=false`; that is read the way the engine reads it, and the call answers `422 asset_import_failed` with `failed`, `imported`, `announced` and `outcome` (`not_imported` or `partially_imported`) under `error.data`, beside the engine's own reason in `engine_diagnostics`. It used to list such a path under `imported`.
 
 The scanning flag clears before the importer has finished writing sidecars, so a scan-driven call does not answer on the flag. It asks the editor whether its work on each path is finished -- `EditorFileSystemDirectory.get_file_import_is_valid`, which is false while an import is outstanding and true for a file that needs none -- and is bounded by `timeout_ms` like everything else.
 

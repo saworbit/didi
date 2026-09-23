@@ -51,6 +51,21 @@ The three Phase 7 blockers are unchanged; the newest name is `anim_add_library`,
 
 ### Added
 
+- **Every live answer carries what the engine printed while it ran.** Godot
+  writes its ERROR and WARNING lines to its console, and until now nothing a
+  caller or a test received ever mentioned them, so a call could answer success
+  while the engine printed an error about the same work. The extension already
+  captured those lines; every live answer now carries the ones printed during
+  the call under `engine_diagnostics` (under `error.data` on a refusal), at most
+  eight with the rest counted. `editor_save_scene` did this for itself since
+  #683. Found in vibe session seventeen, when three defects turned up in a
+  console that had been pasted by hand.
+- **The live harness reads the engine's own log.** It had written the editor's
+  and the game's logs on every run and searched them only for a leaked token
+  and an ObjectDB leak. It now fails on any ERROR or WARNING line that no
+  request causes on purpose, and prints them all with a count. The first run of
+  it found the defects below, a fixture that had never tested what it said,
+  and #913 and #914.
 - **`anim_add_library` gives an AnimationPlayer an animation (#770).** Nothing
   on the surface could, so `anim_list_tracks` answered an empty list and
   `anim_play_track` had nothing to name on any player the surface built.
@@ -100,6 +115,22 @@ The three Phase 7 blockers are unchanged; the newest name is `anim_add_library`,
   so a tarball holding a link, a device, an absolute path or a `..` component
   is refused before anything is unpacked. `CONTRIBUTING.md`'s release steps
   use it on the draft.
+
+### Fixed
+
+- **`asset_reimport` reported a failed import as imported.** Godot writes the
+  `.import` sidecar whether or not the import worked and records a failure as
+  `valid=false`; a sidecar on disk was taken as success. It now answers
+  `422 asset_import_failed` naming the failed paths, with the engine's reason
+  attached. The harness's fresh-asset PNG had a wrong CRC on every chunk and
+  passed its import test for as long as it existed; it is a valid image now,
+  and the old bytes are the fixture for the refusal.
+- **Refusals no longer let the engine print first.** `scene_create` and
+  `scene_instantiate_node` with a class the engine does not have, and
+  `script_attach_to_node` and `scene_set_property` with a `res://` path that has
+  no file behind it, each put two or three ERROR lines in the editor's log
+  before Didi refused. They check first now, so the refusal is the only thing
+  said.
 
 ### Changed
 

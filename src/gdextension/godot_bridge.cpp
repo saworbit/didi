@@ -810,6 +810,8 @@ std::string describeResourceTypeRefusalImpl(const std::string& property_name,
 // through ResourceTypeHint is for. It used to be compared whole, so the 34
 // properties whose declared type carries a comma -- every material slot in 2D
 // and 3D among them -- refused the types they were named after (#783).
+bool resourceFileExists(const std::string& path);
+
 Result<VariantValue> makeResourceForProperty(const std::string& property_name,
                                              const json& value,
                                              const std::string& expected_class) {
@@ -817,6 +819,10 @@ Result<VariantValue> makeResourceForProperty(const std::string& property_name,
     auto loader = singleton("ResourceLoader");
     if (loader.isErr()) return loader.error();
     const auto path = value.get<std::string>();
+    if (!resourceFileExists(path)) {
+        return Error::notFound("Property \"" + property_name + "\": no resource could be loaded from " +
+                               path + ", because there is no file there.");
+    }
     auto path_value = makeString(path);
     if (path_value.isErr()) return path_value.error();
     auto type_hint = makeString("");
@@ -2469,6 +2475,9 @@ Result<AttachableScript> loadAttachableScript(GDExtensionObjectPtr node,
             return Error(409, "Target node already has a script; detach it before attaching another");
         }
     }
+    if (!resourceFileExists(script_path)) {
+        return Error::notFound("Script resource not found: " + script_path);
+    }
     auto loader = singleton("ResourceLoader");
     if (loader.isErr()) return loader.error();
     auto path = makeString(script_path);
@@ -2520,6 +2529,44 @@ Result<AttachableScript> loadAttachableScript(GDExtensionObjectPtr node,
 // the real call uses to refuse it, and previewed it as planned anyway: the
 // '..' rule was #571, and these are the ownership, cycle and base-type rules
 // (#588, #589, #590, #603).
+// Whether the engine has a class by this name, asked before constructing one.
+// classdb_construct_object answers null for an unknown name, and first prints
+// "Cannot get class" to the editor's log, which the refusal that follows cannot
+// take back. The harness had been producing that line on every run for a
+// request whose whole purpose is to be refused cleanly (vibe session
+// seventeen). ClassDB.class_exists is 2619796661 on 4.5.1, 4.6.2 and 4.7.2.
+// Anything that stops the question being asked answers true, which leaves the
+// construction and its own refusal exactly as they were.
+bool engineHasClass(const std::string& name) {
+    if (requireMethodBind("ClassDB", "class_exists", 2619796661LL).isErr()) return true;
+    auto class_db = singleton("ClassDB");
+    if (class_db.isErr()) return true;
+    auto class_name = makeStringName(name);
+    if (class_name.isErr()) return true;
+    auto answer = callObject(class_db.value(), "ClassDB", "class_exists", 2619796661LL,
+                             {&class_name.value()});
+    if (answer.isErr()) return true;
+    auto known = scalarFromVariant<GDExtensionBool>(answer.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+    return known.isErr() || known.value() != 0;
+}
+
+// Whether ResourceLoader can see a file at this path, asked before loading it.
+// A load of a path with nothing behind it prints three ERROR lines to the
+// editor's log before it answers null, for a refusal the caller was going to
+// get anyway. Anything that stops the question being asked answers true.
+bool resourceFileExists(const std::string& path) {
+    auto loader = singleton("ResourceLoader");
+    if (loader.isErr()) return true;
+    auto path_value = makeString(path);
+    auto hint = makeString("");
+    if (path_value.isErr() || hint.isErr()) return true;
+    auto answer = callObject(loader.value(), "ResourceLoader", "exists", 4185558881LL,
+                             {&path_value.value(), &hint.value()});
+    if (answer.isErr()) return true;
+    auto found = scalarFromVariant<GDExtensionBool>(answer.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+    return found.isErr() || found.value() != 0;
+}
+
 // The slot anim_add_library fills, which scene_set_property cannot write. On
 // 4.5 it is one Dictionary, outside the scalar contract; from 4.6 it is one
 // libraries/<name> property per library, which a player without that library
@@ -3392,6 +3439,37 @@ bool GodotBridge::assetIsImported(const std::string& resource_path) {
     sidecar += ".import";
     std::error_code sidecar_error;
     return fs::is_regular_file(sidecar, sidecar_error) && !sidecar_error;
+}
+
+// Godot writes the .import sidecar whether or not the import worked, and marks
+// a failure with valid=false under [remap]. A sidecar on disk therefore said
+// nothing about success, and asset_reimport listed a PNG whose import the
+// engine had just refused under `imported`. The harness's own fixture was such
+// a PNG -- every chunk CRC wrong -- and passed for as long as it existed,
+// because the engine's "Error importing" line went to a log nothing read (vibe
+// session seventeen). `valid` is read the way the engine reads it, through the
+// same conversion the offline audit uses (#853).
+bool GodotBridge::assetImportFailed(const std::string& resource_path) {
+    namespace fs = std::filesystem;
+    if (!strings::startsWith(resource_path, "res://")) return false;
+    auto project_path = resolveGodotProjectPath();
+    if (project_path.isErr()) return false;
+    std::error_code ec;
+    const auto root = fs::weakly_canonical(
+        didi::paths::projectPathFromUtf8(project_path.value()), ec);
+    if (ec) return false;
+    auto sidecar = root / didi::paths::projectPathFromUtf8(resource_path.substr(6));
+    sidecar += ".import";
+    std::ifstream file(sidecar, std::ios::binary);
+    if (!file.is_open()) return false;
+    std::ostringstream contents;
+    contents << file.rdbuf();
+    for (const auto& entry : didi::config_file::scan(contents.str()).entries) {
+        if (entry.section == "remap" && entry.key == "valid") {
+            return !didi::config_file::booleanize(entry.value_text);
+        }
+    }
+    return false;
 }
 
 bool GodotBridge::assetImportSettled(const std::string& resource_path) {
@@ -11187,6 +11265,10 @@ json GodotBridge::execute(const std::string& method, const json& params,
             if (root_name.empty() || root_name.find('/') != std::string::npos || root_name.find('\\') != std::string::npos) {
                 return errorJson(400, "root_name must be a non-empty node name without path separators");
             }
+            if (!engineHasClass(root_type)) {
+                return errorJson(400, "Godot ClassDB could not instantiate scene root type: " +
+                                          root_type + ". The engine has no class by that name.");
+            }
             NativeName native_type(root_type);
             packed_root = constructObject(native_type.ptr());
             if (!packed_root) {
@@ -12314,6 +12396,10 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 : Result<std::string>(instance_class.error());
             if (instance_class_name.isOk()) node_type = instance_class_name.value();
         } else {
+            if (!engineHasClass(node_type)) {
+                return errorJson(400, "Godot ClassDB could not instantiate node type: " + node_type +
+                                          ". The engine has no class by that name.");
+            }
             NativeName type_name(node_type);
             node = constructObject(type_name.ptr());
             if (!node) return errorJson(400, "Godot ClassDB could not instantiate node type: " + node_type);

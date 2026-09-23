@@ -4281,8 +4281,9 @@ try {
     # written now, after the editor started, so it is genuinely unscanned.
     $freshAsset = Join-Path $fixtureRoot "fresh_asset.png"
     [System.IO.File]::WriteAllBytes($freshAsset, [System.Convert]::FromBase64String(
-        "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAIBAMAAABGfrPvAAAAD1BMVEX/AAAA/wAAAP//AAD///9c1kzTAAAAFklEQVQI12NgYGBgZGBgYGRgYGBgAAAAFAAB2rGYwgAAAABJRU5ErkJggg=="))
+        "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAG0lEQVR4nGNgYPj//z8DAwhhp/FKMoCo4WACAIMXf4EBK1dXAAAAAElFTkSuQmCC"))
     Assert-True (Test-Path -LiteralPath $freshAsset) "The fresh asset was not written into the fixture."
+
     Assert-True (-not (Test-Path -LiteralPath "$freshAsset.import")) "The fresh asset already carried an import sidecar before the tool ran."
 
     $importRequests = @(
@@ -4314,6 +4315,34 @@ try {
     $secondImport = Tool-Payload $importById[403]
     Assert-True (@($secondImport.reimported) -contains "res://fresh_asset.png") "An imported asset was not routed to reimport_files on the second call."
     Assert-True (@($secondImport.announced).Count -eq 0) "An imported asset was still reported as announced."
+    # A quiet import carries no engine lines; the field is only there when the
+    # engine printed something.
+    Assert-True ($null -eq $firstImport.engine_diagnostics) "A clean import carried engine diagnostics: $($firstImport.engine_diagnostics | ConvertTo-Json -Depth 6 -Compress)"
+
+    # And one the engine must refuse: the bytes the fresh asset used to be,
+    # which have a wrong CRC on every chunk. That fixture passed its import test
+    # for as long as it existed, because the engine's "Error importing" line
+    # went to a log nothing read and asset_reimport listed the file as imported
+    # (vibe session seventeen). Written after the clean imports and asked in a
+    # batch of its own: a call that needs a filesystem scan imports every new
+    # file the scan finds, so written earlier its errors land, truthfully, on
+    # whichever call ran the scan.
+    $corruptAsset = Join-Path $fixtureRoot "corrupt_asset.png"
+    [System.IO.File]::WriteAllBytes($corruptAsset, [System.Convert]::FromBase64String(
+        "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAIBAMAAABGfrPvAAAAD1BMVEX/AAAA/wAAAP//AAD///9c1kzTAAAAFklEQVQI12NgYGBgZGBgYGRgYGBgAAAAFAAB2rGYwgAAAABJRU5ErkJggg=="))
+    $corruptRequests = @(
+        (@{ jsonrpc = "2.0"; id = 2701; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
+        (Tool-Request 2702 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
+        (Tool-Request 2700 "asset_reimport" @{ paths = @("res://corrupt_asset.png"); timeout_ms = 10000 })
+    )
+    $rawCorrupt = Invoke-Didi -Requests $corruptRequests -Arguments @("--project", $fixtureRoot)
+    $corruptById = @{}
+    foreach ($response in @($rawCorrupt | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.PSObject.Properties.Name -contains "id" })) { $corruptById[[int]$response.id] = $response }
+    $corruptText = ($corruptById[2700].result.content | Where-Object { $_.type -eq "text" } | Select-Object -First 1).text
+    Assert-True $corruptById[2700].result.isError "asset_reimport reported an import Godot refused as a success: $corruptText"
+    $corruptError = ($corruptText | ConvertFrom-Json).error
+    Assert-True ($corruptError.data.code -eq "asset_import_failed" -and @($corruptError.data.failed) -contains "res://corrupt_asset.png") "The refused import was not reported as failed: $corruptText"
+    Assert-True (@($corruptError.data.engine_diagnostics | Where-Object { $_.message -match "corrupt_asset\.png" }).Count -ge 1) "The refused import did not carry the engine's own reason: $corruptText"
 
     # The import freshness check reproduces four things Godot does by hand: the
     # digest, the name of the record, where the record lives and what dest_md5
@@ -4628,6 +4657,9 @@ try {
         $failureById = @{}
         foreach ($response in $failureResponses) { $failureById[[int]$response.id] = $response }
         Assert-True ([bool]$failureById[201].result.isError) "Project setting save failure returned fake success: $($failureById[201] | ConvertTo-Json -Compress -Depth 20)"
+        # The engine said why the save failed, and the refusal carries it.
+        $saveFailureText = ($failureById[201].result.content | Where-Object { $_.type -eq "text" } | Select-Object -First 1).text
+        Assert-True ($saveFailureText -match "engine_diagnostics" -and $saveFailureText -match "Couldn't save project") "The refused save did not carry the engine's own line: $saveFailureText"
         Assert-True ([bool]$failureById[202].result.isError) "Failed project setting mutation remained in memory after rollback."
         Assert-True ([bool]$failureById[203].result.isError) "Autoload save failure returned fake success."
         Assert-True (-not (@((Tool-Payload $failureById[204]).autoloads.name) -contains "RollbackProbe")) "Failed autoload mutation remained in memory after rollback."
@@ -4705,6 +4737,52 @@ try {
             -ErrorAction SilentlyContinue
     ) -join "`n"
     Assert-True ($gameEngineTranscript -notmatch "ObjectDB instance") "A game process exited with a leaked ObjectDB instance."
+
+    # The engine's own output, read as a result. The editor and game logs were
+    # written on every run and searched for nothing but a leaked token and an
+    # ObjectDB leak, so a fixture PNG with a wrong CRC on every chunk passed its
+    # import test for as long as it existed, a script missing from disk and a
+    # class that does not exist each printed engine errors ahead of Didi's
+    # refusal, and the editor's undo manager called its own history
+    # inconsistent four times a run (vibe session seventeen). Every allowed line
+    # names the request that causes it on purpose; any other line fails the run.
+    $allowedEngineLines = @(
+        @{ Pattern = "Couldn't save project\.godot"; Cause = "requests 201, 203 and 205 deny the project file to prove rollback" },
+        @{ Pattern = 'Identifier "SignalProbeState" not declared|Failed to load script "res://signal_uses_autoload\.gd"'; Cause = "signal_uses_autoload.gd does not compile, on purpose, for target_script_not_compiled" },
+        @{ Pattern = "corrupt_asset\.png|IHDR: CRC error|ERR_FILE_CORRUPT"; Cause = "request 2700 imports a PNG with a wrong CRC on every chunk" },
+        @{ Pattern = "Inconsistent redo history"; Cause = "known defect #913: editor_undo and editor_redo step the scene's UndoRedo directly" },
+        @{ Pattern = "Task 'reimport' already exists|Condition `"!tasks\.has\(p_task\)`" is true"; Cause = "known defect #914: request 403 reimports while the editor's own import pass from request 402 is still open" },
+        @{ Pattern = "didi_output_canary_warning"; Cause = "the runtime fixture prints a warning canary for runtime_read_output" },
+        # The host, not a request. A CI runner has no GPU and no audio device,
+        # and the engine says so while its drivers start, before any request is
+        # sent. Matched on where in the engine the line comes from as well as
+        # what it says, so a line from anywhere else is still a finding.
+        @{ Where = "drivers/vulkan/rendering_context_driver_vulkan\.cpp"; Cause = "the host has no Vulkan device; the engine's rendering context says so at startup" },
+        @{ Pattern = "switching to Direct3D 12"; Where = "platform/windows/display_server_windows\.cpp"; Cause = "the host has no Vulkan device, so the engine falls back to Direct3D 12 at startup" },
+        @{ Pattern = "PSO caching is not implemented"; Where = "drivers/d3d12/"; Cause = "the Direct3D 12 fallback the host needs has no pipeline cache yet" },
+        @{ Where = "drivers/wasapi/audio_driver_wasapi\.cpp"; Cause = "the host has no audio device; the engine's WASAPI driver says so at startup" },
+        @{ Pattern = "falling back to the dummy driver"; Where = "servers/(audio/)?audio_server\.cpp"; Cause = "the host has no audio device, so the engine uses its dummy audio driver" }
+    )
+    $engineLineTally = @{}
+    $unexpectedEngineLines = @()
+    foreach ($engineLog in @(@{ Name = "editor"; Path = $editorEngineLogPath }, @{ Name = "game"; Path = $gameEngineLogPath }, @{ Name = "shutdown game"; Path = $shutdownGameEngineLogPath })) {
+        if (-not (Test-Path -LiteralPath $engineLog.Path)) { continue }
+        $engineLogLines = @(Get-Content -LiteralPath $engineLog.Path)
+        for ($lineIndex = 0; $lineIndex -lt $engineLogLines.Count; $lineIndex++) {
+            $engineLine = $engineLogLines[$lineIndex]
+            if ($engineLine -notmatch '^\s*(ERROR|WARNING|SCRIPT ERROR|USER ERROR|USER WARNING|SCRIPT WARNING)\b') { continue }
+            $where = if ($lineIndex + 1 -lt $engineLogLines.Count -and $engineLogLines[$lineIndex + 1] -match '^\s+at: ') { " (" + $engineLogLines[$lineIndex + 1].Trim() + ")" } else { "" }
+            $allowed = $allowedEngineLines | Where-Object {
+                (-not $_.Pattern -or $engineLine -match $_.Pattern) -and (-not $_.Where -or $where -match $_.Where)
+            } | Select-Object -First 1
+            $key = "[$($engineLog.Name)] $($engineLine.Trim())"
+            if ($allowed) { $key += "  <- $($allowed.Cause)" } else { $unexpectedEngineLines += "$key$where" }
+            $engineLineTally[$key] = 1 + [int]$engineLineTally[$key]
+        }
+    }
+    Write-Output "Engine output across the run ($(@($engineLineTally.Keys).Count) distinct ERROR/WARNING lines):"
+    foreach ($entry in ($engineLineTally.GetEnumerator() | Sort-Object Value -Descending)) { Write-Output ("  {0,4}x {1}" -f $entry.Value, $entry.Key) }
+    Assert-True ($unexpectedEngineLines.Count -eq 0) "The engine printed ERROR or WARNING lines no request causes on purpose:`n$($unexpectedEngineLines -join "`n")"
 
     $unexpectedSourceArtifacts = @(Get-ChildItem -LiteralPath $sourceFixtureRoot -Force -Recurse | Where-Object {
         $_.Name -like "*.didi-retired-*" -or
