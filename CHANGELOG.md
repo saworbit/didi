@@ -252,6 +252,13 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **A bus muted with `mute = 1` is reported as muted.** `audio_list_buses`
+  compared `mute`, `solo` and `bypass_fx` to the word `true`, and Godot
+  converts the value instead, so a hand written `1` was a muted bus to the
+  engine and an unmuted one here. The three flags now go through
+  `config_file::booleanize`, the rule the other readers already use. The same
+  one line fix lands in `project_audit_assets`, where `remap/valid = 0` read
+  as a valid import. (#853)
 - **A refusal that names the argument that fixes it carries that argument.**
   Five tools refuse a colliding output with the same sentence and all five read
   the `overwrite` argument that would make the call succeed. Only

@@ -795,6 +795,35 @@ static void test_audio_list_buses_reads_the_project_layout_offline() {
     ASSERT_TRUE(registry.callTool("audio_list_buses", didi::json{{"bus", 1}}).isError);
 }
 
+static void test_audio_list_buses_reads_flags_the_way_the_engine_does() {
+    // Godot converts a flag rather than comparing it to the word true, so a
+    // hand written `mute = 1` is a muted bus. Measured on 4.5.1 and 4.7.2:
+    // AudioServer reports bus 1 muted, and this said it was not (#853).
+    ScopedToolProject project("audio-buses-numeric-flags");
+    writeAuditFile("project.godot", "config_version=5\n");
+    writeAuditFile("default_bus_layout.tres",
+        "[gd_resource type=\"AudioBusLayout\" format=3]\n"
+        "\n"
+        "[resource]\n"
+        "bus/1/name = &\"Music\"\n"
+        "bus/1/mute = 1\n"
+        "bus/1/solo = 0\n"
+        "bus/1/bypass_fx = 1.0\n"
+        "bus/1/volume_db = -6.0\n"
+        "bus/1/send = &\"Master\"\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    const auto result = registry.callTool("audio_list_buses", didi::json::object());
+    ASSERT_TRUE(!result.isError);
+    const auto report = didi::json::parse(result.content[0].text);
+
+    ASSERT_EQ(report["buses"][1]["name"], "Music");
+    ASSERT_TRUE(report["buses"][1]["mute"].get<bool>());
+    ASSERT_TRUE(!report["buses"][1]["solo"].get<bool>());
+    ASSERT_TRUE(report["buses"][1]["bypass_effects"].get<bool>());
+}
+
 static void test_audio_list_buses_reads_the_layout_godot_actually_writes() {
     // Every fixture here was hand written with plain quotes and an explicit
     // bus/0, which is the one shape the reader got right, so the reader and its
@@ -8114,6 +8143,8 @@ struct RegisterToolTests {
                      test_audio_list_buses_follows_a_relocated_layout_setting);
         registerTest("Tools.AudioListBusesEngineWritten",
                      test_audio_list_buses_reads_the_layout_godot_actually_writes);
+        registerTest("Tools.AudioListBusesNumericFlags",
+                     test_audio_list_buses_reads_flags_the_way_the_engine_does);
         registerTest("Tools.AudioListBusesHalfDeclaredMaster",
                      test_audio_list_buses_names_a_master_the_file_half_declares);
         registerTest("Tools.AudioListBusesEmptyResource",

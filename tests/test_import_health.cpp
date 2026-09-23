@@ -221,6 +221,14 @@ void test_invalid_flag_malformed_path_and_source_mismatch_fail_closed() {
                   "path=\"res://.godot/imported/invalid.ctex\"\n\n"
                   "[deps]\nsource_file=\"res://art/invalid.png\"\n"
                   "dest_files=[\"res://.godot/imported/invalid.ctex\"]\n");
+    // `valid=0` is invalid to the engine, which converts the value to a bool
+    // rather than comparing it to the word false (#853).
+    fixture.write("art/zero.png", "source");
+    fixture.write("art/zero.png.import",
+                  "[remap]\nvalid=0\n"
+                  "path=\"res://.godot/imported/zero.ctex\"\n\n"
+                  "[deps]\nsource_file=\"res://art/zero.png\"\n"
+                  "dest_files=[\"res://.godot/imported/zero.ctex\"]\n");
     fixture.write("art/malformed-path.png.import",
                   "[remap]\npath=res://.godot/imported/icon.ctex\n\n"
                   "[deps]\nsource_file=\"res://art/malformed-path.png\"\n"
@@ -230,8 +238,9 @@ void test_invalid_flag_malformed_path_and_source_mismatch_fail_closed() {
 
     const auto report = didi::offline::inspectImportHealth(fixture.root().string(), 500);
 
-    ASSERT_EQ(report["import_issue_count"], 3u);
+    ASSERT_EQ(report["import_issue_count"], 4u);
     ASSERT_EQ(kindFor(report, "res://art/invalid.png.import"), "invalid_import_metadata");
+    ASSERT_EQ(kindFor(report, "res://art/zero.png.import"), "invalid_import_metadata");
     ASSERT_EQ(kindFor(report, "res://art/icon.png.import"), "invalid_import_metadata");
     // `path=res://...` with no quotes is the same ERR_PARSE_ERROR as an
     // unquoted path inside an array, so the file does not load at all (#823).
