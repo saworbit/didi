@@ -4749,7 +4749,16 @@ try {
         @{ Pattern = "corrupt_asset\.png|IHDR: CRC error|ERR_FILE_CORRUPT"; Cause = "request 2700 imports a PNG with a wrong CRC on every chunk" },
         @{ Pattern = "Inconsistent redo history"; Cause = "known defect #913: editor_undo and editor_redo step the scene's UndoRedo directly" },
         @{ Pattern = "Task 'reimport' already exists|Condition `"!tasks\.has\(p_task\)`" is true"; Cause = "known defect #914: request 403 reimports while the editor's own import pass from request 402 is still open" },
-        @{ Pattern = "didi_output_canary_warning"; Cause = "the runtime fixture prints a warning canary for runtime_read_output" }
+        @{ Pattern = "didi_output_canary_warning"; Cause = "the runtime fixture prints a warning canary for runtime_read_output" },
+        # The host, not a request. A CI runner has no GPU and no audio device,
+        # and the engine says so while its drivers start, before any request is
+        # sent. Matched on where in the engine the line comes from as well as
+        # what it says, so a line from anywhere else is still a finding.
+        @{ Where = "drivers/vulkan/rendering_context_driver_vulkan\.cpp"; Cause = "the host has no Vulkan device; the engine's rendering context says so at startup" },
+        @{ Pattern = "switching to Direct3D 12"; Where = "platform/windows/display_server_windows\.cpp"; Cause = "the host has no Vulkan device, so the engine falls back to Direct3D 12 at startup" },
+        @{ Pattern = "PSO caching is not implemented"; Where = "drivers/d3d12/"; Cause = "the Direct3D 12 fallback the host needs has no pipeline cache yet" },
+        @{ Where = "drivers/wasapi/audio_driver_wasapi\.cpp"; Cause = "the host has no audio device; the engine's WASAPI driver says so at startup" },
+        @{ Pattern = "falling back to the dummy driver"; Where = "servers/audio_server\.cpp"; Cause = "the host has no audio device, so the engine uses its dummy audio driver" }
     )
     $engineLineTally = @{}
     $unexpectedEngineLines = @()
@@ -4760,7 +4769,9 @@ try {
             $engineLine = $engineLogLines[$lineIndex]
             if ($engineLine -notmatch '^\s*(ERROR|WARNING|SCRIPT ERROR|USER ERROR|USER WARNING|SCRIPT WARNING)\b') { continue }
             $where = if ($lineIndex + 1 -lt $engineLogLines.Count -and $engineLogLines[$lineIndex + 1] -match '^\s+at: ') { " (" + $engineLogLines[$lineIndex + 1].Trim() + ")" } else { "" }
-            $allowed = $allowedEngineLines | Where-Object { $engineLine -match $_.Pattern } | Select-Object -First 1
+            $allowed = $allowedEngineLines | Where-Object {
+                (-not $_.Pattern -or $engineLine -match $_.Pattern) -and (-not $_.Where -or $where -match $_.Where)
+            } | Select-Object -First 1
             $key = "[$($engineLog.Name)] $($engineLine.Trim())"
             if ($allowed) { $key += "  <- $($allowed.Cause)" } else { $unexpectedEngineLines += "$key$where" }
             $engineLineTally[$key] = 1 + [int]$engineLineTally[$key]
