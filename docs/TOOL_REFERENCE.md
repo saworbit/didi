@@ -1636,7 +1636,18 @@ Requires a normalized existing `shader_path` ending in `.gdshader`; `timeout_sec
 
 ### `project_list_export_presets` — Offline
 
-Accepts no arguments and parses the project-root `export_presets.cfg` without launching Godot. It returns deterministic preset records containing only index, name, platform, runnable, export filter, and export path. Platform option fields and their values are never returned. Malformed sections and duplicate preset names are rejected.
+Accepts no arguments and parses the project-root `export_presets.cfg` without launching Godot. It returns deterministic preset records containing only index, name, platform, runnable, export filter, export path, and whether Godot will detect the preset. Platform option fields and their values are never returned. Malformed sections and duplicate preset names are rejected.
+
+Every `[preset.N]` section in the file is listed, and `detected` says whether Godot will read it. The Export dialog only shows the presets Godot detected, so a section it skips is otherwise invisible. `detected_count` counts the ones it will read. An undetected preset carries `not_detected` with a stable `reason`, a `detail` sentence saying what to change, and the fact the reason is about:
+
+| `reason` | What Godot does | Carries |
+| :--- | :--- | :--- |
+| `numbering_gap` | Reads `[preset.0]`, `[preset.1]` and so on and stops at the first number that is missing, so a preset after the gap is never read. | `missing_index` |
+| `section_not_read` | Asks for the number with no leading zero, so `[preset.01]` is never read. | `section` |
+| `misspelled_platform` | Matches the platform name exactly, so `windows desktop`, `Windows` (the OS name) and `HTML5` (the Godot 3 name) are skipped without a word. | `did_you_mean` |
+| `platform_not_shipped` | Skips a platform none of its exporters has, unless an editor plugin or a GDExtension registers a platform by exactly that name. | |
+
+Godot ships seven platforms under the same names on 4.5.1, 4.6.2 and 4.7.2: `Windows Desktop`, `Linux`, `macOS`, `Android`, `iOS`, `Web` and `visionOS`. `Linux/X11`, the name before 4.3, is still read as Linux. A preset on a platform Godot skips still counts for the numbering, and the next number is read.
 
 Godot writes `export_presets.cfg` the first time a preset is added, so a project that has never configured an export has no file. That is an empty list with `presets_file_exists: false`, not an error. A file that is there and cannot be read or parsed is still an error, so "no presets" and "the file is broken" stay different answers.
 
@@ -1648,6 +1659,8 @@ A project with no export presets answers the same way whether or not `export_pre
 Requires an existing `preset` and a normalized project-contained `output_path`. `mode` is `release` (default), `debug`, or `pack`; `timeout_seconds` is `1..900` (default `300`). The destination is preserved unless `overwrite: true`. Didi invokes the corresponding headless Godot export operation and verifies that a non-empty output artifact exists before reporting success. Installed export templates and platform SDKs remain Godot/operator prerequisites.
 
 `project_export` asks the same question through the same code, so the two cannot answer differently about the same file, and its confirmation preview asks it too: a preset the file does not declare is refused at the dry run with `404` and the names that are there under `available_presets`, rather than previewed cleanly and refused on the confirm. When Godot refuses the export, its console output is carried as `engine_output` under `error.data` with the terminal escapes removed, rather than concatenated into the message.
+
+A preset the file declares and Godot will never detect is refused the same way, at the dry run and on the call, with `422` before any Godot starts: `error.data` carries the `reason` from the table above, its `missing_index`, `section` or `did_you_mean`, the preset's `platform`, and `detected_presets`, the presets Godot will read. `available_presets` on a `404` lists only the presets the call would take. A platform Godot does not ship is the exception, because only the engine knows whether a plugin registered it: the call hands it to Godot, and the dry run says which case it is by carrying `not_detected` in the change's `before`. When Godot then does not detect it, the refusal is `404` with `reason: "not_detected_by_engine"`, `detected_presets` read from Godot's own list, and the console output as `engine_output`, rather than `500 internal_error`.
 
 ### `gridmap_export_mesh_library` — Offline
 

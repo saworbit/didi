@@ -128,14 +128,30 @@ ExportPresetsFile readExportPresets(const std::string& contents);
 std::string malformedPresetsMessage(const ExportPresetsFile& file);
 json malformedPresetsData(const ExportPresetsFile& file);
 
-// The refusal project_export gives for this preset, or nothing when the file
-// declares it. Reads export_presets.cfg beneath the current project root.
+// The export platforms Godot ships, spelled the way export_presets.cfg names
+// them. The same seven on 4.5.1, 4.6.2 and 4.7.2, matched exactly. The editor
+// skips a preset on any other name without a word, unless an editor plugin or
+// a GDExtension registers a platform by exactly that name (#921).
+const std::vector<std::string>& shippedExportPlatforms();
+
+// The shipped platform a file most likely meant by `written`, when `written`
+// is not one Godot reads: a difference of letter case, the OS name
+// (`Windows`) or the Godot 3 name (`HTML5`). Empty when nothing is that close,
+// and for `Linux/X11`, which the engine still reads as Linux.
+std::optional<std::string> shippedPlatformFor(const std::string& written);
+
+// The names Godot lists after "Invalid export preset name" when an export asks
+// for a preset it did not detect. Empty when the output holds no such list.
+std::vector<std::string> detectedPresetsInEngineOutput(const std::string& output);
+
+// The record for the preset project_export would hand to Godot, or the refusal
+// it gives instead. Reads export_presets.cfg beneath the current project root.
 //
 // Exported so the confirmation preview asks the same question the call asks.
 // Without it the preview returned the same clean answer in all five states the
 // file can be in, and the call failed in every one, including for a preset name
 // the sibling tool in the same process could prove does not exist (#652).
-std::optional<Error> checkExportPreset(const std::string& preset);
+Result<json> findExportPreset(const std::string& preset);
 
 // The presets alone, empty when the file is malformed. Kept for callers that
 // only need the list.

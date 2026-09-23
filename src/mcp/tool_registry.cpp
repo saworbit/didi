@@ -928,6 +928,8 @@ static json outputSchemaForTool(const std::string& name) {
     if (name == "project_list_export_presets") {
         return object_schema({{"presets", {{"type", "array"}}},
                               {"preset_count", integer_type},
+                              // How many of them Godot will detect (#921).
+                              {"detected_count", integer_type},
                               {"presets_file_exists", boolean_type},
                               // Named rather than silently dropped: a caller
                               // has to know the answer is not the whole file.
@@ -2156,8 +2158,8 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
                 return std::nullopt;
             }
             const auto preset = call_arguments["preset"].get<std::string>();
-            auto refused = offline::checkExportPreset(preset);
-            if (refused.has_value()) return *refused;
+            auto record = offline::findExportPreset(preset);
+            if (record.isErr()) return record.error();
 
             auto resolved =
                 paths::resolveProjectFileForWrite(call_arguments["output_path"].get<std::string>());
@@ -2166,7 +2168,14 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
             subject = {{"path", reported}, {"preset", preset}};
             std::error_code error;
             const bool exists = std::filesystem::is_regular_file(resolved.value(), error) && !error;
-            before = {{"exists", exists}, {"path", reported}, {"preset", preset}};
+            before = {{"exists", exists}, {"path", reported}, {"preset", preset},
+                      {"platform", record.value().value("platform", "")}};
+            // A platform Godot does not ship is handed to Godot, because a
+            // plugin may register it, and the preview says that is what it is
+            // rather than previewing it as an ordinary export (#921).
+            if (record.value().contains("not_detected")) {
+                before["not_detected"] = record.value()["not_detected"];
+            }
             if (exists) {
                 const auto size = std::filesystem::file_size(resolved.value(), error);
                 before["size_bytes"] = error ? 0 : static_cast<uint64_t>(size);

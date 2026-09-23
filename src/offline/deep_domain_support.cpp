@@ -159,6 +159,11 @@ ExportPresetsFile readExportPresets(const std::string& contents) {
     static const std::regex preset_section(R"(^preset\.([0-9]+)$)");
     std::vector<json> presets;
     std::map<std::string, size_t> preset_of_section;
+    // Per preset, in the same order: the section name as written, and whether
+    // it is the spelling the engine asks for. It asks for "preset." followed
+    // by the number with no leading zero, so [preset.01] is never read.
+    std::vector<std::string> section_names;
+    std::vector<bool> canonical_section;
     bool malformed = false;
 
     // The first cause wins and the rest are not collected. A file with two
@@ -244,6 +249,8 @@ ExportPresetsFile readExportPresets(const std::string& contents) {
         presets.push_back({{"index", index}, {"name", ""}, {"platform", ""},
                            {"runnable", false}, {"export_filter", ""}, {"export_path", ""}});
         preset_of_section.emplace(header.name, presets.size() - 1);
+        section_names.push_back(header.name);
+        canonical_section.push_back(digits == std::to_string(index));
     }
 
     for (const auto& entry : scanned.entries) {
@@ -306,6 +313,76 @@ ExportPresetsFile readExportPresets(const std::string& contents) {
                  0);
         }
     }
+
+    // Which of these the engine will detect. EditorExport::load_config reads
+    // [preset.0], [preset.1] and so on and stops at the first number that is
+    // not there, and it skips a preset whose platform no exporter has without
+    // printing anything. Both used to be listed as ordinary presets, and
+    // project_export's dry run previewed an export of them that the engine
+    // then refused (#921). Measured on 4.5.1, 4.6.2 and 4.7.2 with
+    // tools/vibe/probes/export_preset_engine.py.
+    if (!malformed) {
+        std::set<int> read_numbers;
+        for (size_t i = 0; i < presets.size(); ++i) {
+            if (canonical_section[i]) read_numbers.insert(presets[i]["index"].get<int>());
+        }
+        int first_missing = 0;
+        while (read_numbers.count(first_missing) != 0) ++first_missing;
+        const std::string missing_section = "[preset." + std::to_string(first_missing) + "]";
+
+        for (size_t i = 0; i < presets.size(); ++i) {
+            auto& preset = presets[i];
+            const int index = preset["index"].get<int>();
+            const std::string platform = preset.value("platform", "");
+            json not_detected;
+            if (!canonical_section[i]) {
+                const auto spelled = "[preset." + std::to_string(index) + "]";
+                not_detected = {
+                    {"reason", "section_not_read"},
+                    {"section", "[" + section_names[i] + "]"},
+                    {"detail", "Godot asks for the section " + spelled +
+                                   ", spelled with no leading zero, so it never reads [" +
+                                   section_names[i] + "]. Rename it " + spelled +
+                                   ", and its .options section with it."}};
+            } else if (index > first_missing) {
+                // A preset whose platform is unknown still counts: the engine
+                // skips it and goes on to the next number.
+                not_detected = {
+                    {"reason", "numbering_gap"},
+                    {"missing_index", first_missing},
+                    {"detail", "Godot reads [preset.0], [preset.1] and so on and stops at the "
+                               "first number that is missing, which is " + missing_section +
+                                   ", so it never reaches this preset. Renumber the sections so "
+                                   "they run from 0 with no gap, and the .options sections with "
+                                   "them. The Export dialog cannot do it, because it only shows "
+                                   "the presets Godot detected."}};
+            } else if (platform == "Linux/X11" ||
+                       std::find(shippedExportPlatforms().begin(), shippedExportPlatforms().end(),
+                                 platform) != shippedExportPlatforms().end()) {
+                // Detected. Linux/X11 is the name before 4.3, which the engine
+                // still reads as Linux.
+            } else if (const auto meant = shippedPlatformFor(platform)) {
+                not_detected = {
+                    {"reason", "misspelled_platform"},
+                    {"did_you_mean", *meant},
+                    {"detail", "Godot has no export platform named \"" + platform +
+                                   "\", and it matches the name exactly, so the editor skips this "
+                                   "preset without a word. The platform it ships is \"" + *meant +
+                                   "\"."}};
+            } else {
+                not_detected = {
+                    {"reason", "platform_not_shipped"},
+                    {"detail", "Godot ships no export platform named \"" + platform +
+                                   "\". The editor skips this preset without a word unless an "
+                                   "editor plugin or a GDExtension registers a platform by exactly "
+                                   "that name, which is why project_export still hands it to "
+                                   "Godot."}};
+            }
+            preset["detected"] = not_detected.is_null();
+            if (!not_detected.is_null()) preset["not_detected"] = std::move(not_detected);
+        }
+    }
+
     ExportPresetsFile file;
     file.section_count = presets.size();
     file.malformed = malformed;
@@ -347,7 +424,61 @@ json malformedPresetsData(const ExportPresetsFile& file) {
     return data;
 }
 
-std::optional<Error> checkExportPreset(const std::string& preset) {
+const std::vector<std::string>& shippedExportPlatforms() {
+    static const std::vector<std::string> platforms = {
+        "Windows Desktop", "Linux", "macOS", "Android", "iOS", "Web", "visionOS"};
+    return platforms;
+}
+
+std::optional<std::string> shippedPlatformFor(const std::string& written) {
+    if (written == "Linux/X11") return std::nullopt;
+    std::string folded = strings::trim(written);
+    std::transform(folded.begin(), folded.end(), folded.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    for (const auto& name : shippedExportPlatforms()) {
+        std::string candidate = name;
+        std::transform(candidate.begin(), candidate.end(), candidate.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (candidate == folded && name != written) return name;
+    }
+    // The names a file written by hand or by an older engine uses for a
+    // platform Godot 4 ships under another name. Each one is a preset the
+    // editor skips on all three supported lines.
+    static const std::map<std::string, std::string> other_names = {
+        {"windows", "Windows Desktop"}, {"html5", "Web"},   {"linux/x11", "Linux"},
+        {"x11", "Linux"},               {"osx", "macOS"},   {"mac osx", "macOS"},
+    };
+    const auto found = other_names.find(folded);
+    if (found != other_names.end()) return found->second;
+    return std::nullopt;
+}
+
+std::vector<std::string> detectedPresetsInEngineOutput(const std::string& output) {
+    // ERROR: Invalid export preset name: Stranded.
+    // The following presets were detected in this project's `export_presets.cfg`:
+    //
+    //         "Other"
+    //
+    //    at: _fs_changed (editor/editor_node.cpp:1417)
+    std::vector<std::string> names;
+    std::istringstream lines(output);
+    std::string line;
+    bool listing = false;
+    while (std::getline(lines, line)) {
+        const auto text = strings::trim(line);
+        if (!listing) {
+            listing = text.find("Invalid export preset name") != std::string::npos;
+            continue;
+        }
+        if (text.rfind("at:", 0) == 0) break;
+        if (text.size() >= 2 && text.front() == '"' && text.back() == '"') {
+            names.push_back(text.substr(1, text.size() - 2));
+        }
+    }
+    return names;
+}
+
+Result<json> findExportPreset(const std::string& preset) {
     std::error_code error;
     const auto root = std::filesystem::current_path(error);
     if (error) return Error::internal("The project root could not be resolved");
@@ -373,17 +504,44 @@ std::optional<Error> checkExportPreset(const std::string& preset) {
     buffer << input.rdbuf();
     const auto file = readExportPresets(buffer.str());
     if (file.malformed) return Error(422, malformedPresetsMessage(file), malformedPresetsData(file));
+
+    // A preset Godot can never detect is refused here rather than handed to
+    // an export that ends in "Invalid export preset name" (#921). A platform
+    // Godot does not ship is the exception: an editor plugin or a GDExtension
+    // can register one, and only the engine knows whether it did.
+    const auto accepted = [](const json& item) {
+        if (item.value("detected", true)) return true;
+        return item["not_detected"].value("reason", "") == "platform_not_shipped";
+    };
     json available = json::array();
-    for (const auto& item : file.presets) available.push_back(item.value("name", ""));
-    const bool found = std::any_of(file.presets.begin(), file.presets.end(),
-                                   [&](const json& item) {
-                                       return item.value("name", "") == preset;
-                                   });
-    if (!found) {
+    json detected = json::array();
+    for (const auto& item : file.presets) {
+        if (accepted(item)) available.push_back(item.value("name", ""));
+        if (item.value("detected", true)) detected.push_back(item.value("name", ""));
+    }
+    const auto match = std::find_if(file.presets.begin(), file.presets.end(),
+                                    [&](const json& item) {
+                                        return item.value("name", "") == preset;
+                                    });
+    if (match == file.presets.end()) {
         return Error(404, "Export preset not found: " + preset,
                      {{"preset", preset}, {"available_presets", std::move(available)}});
     }
-    return std::nullopt;
+    if (!accepted(*match)) {
+        const auto& why = (*match)["not_detected"];
+        json data = {{"preset", preset},
+                     {"platform", match->value("platform", "")},
+                     {"reason", why.value("reason", "")},
+                     {"detected_presets", std::move(detected)}};
+        for (const char* key : {"missing_index", "did_you_mean", "section"}) {
+            if (why.contains(key)) data[key] = why[key];
+        }
+        return Error(422,
+                     "Godot will not detect the export preset \"" + preset + "\". " +
+                         why.value("detail", ""),
+                     std::move(data));
+    }
+    return *match;
 }
 
 } // namespace didi::offline

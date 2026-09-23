@@ -628,8 +628,14 @@ CallToolResult handleProjectListExportPresets(const json& args, std::shared_ptr<
     // answers to one question (#651). A file that cannot be parsed is the
     // separate state, and has its own code now.
     if (file.malformed) return malformedPresetsRefusal(file);
+    // Every section is still listed, because it is in the file and the Export
+    // dialog will not show it; `detected` says which ones Godot will read, and
+    // `not_detected` why not (#921).
+    const auto detected = std::count_if(file.presets.begin(), file.presets.end(),
+                                        [](const json& item) { return item.value("detected", true); });
     return CallToolResult::successJson({{"presets", file.presets},
                                        {"preset_count", file.presets.size()},
+                                       {"detected_count", detected},
                                        {"execution_mode", "offline_fallback"},
                                        {"sensitive_options_omitted", true},
                                        {"presets_file_exists", true}});
@@ -652,9 +658,10 @@ CallToolResult handleProjectExport(const json& args, std::shared_ptr<ipc::IIpcCl
     // in while the call failed in every one (#652), and the call reported an
     // unparseable file as a missing preset, sending the reader off to add one
     // the file already declares (#651).
-    if (auto refused = offline::checkExportPreset(preset)) {
-        return CallToolResult::fromError(*refused);
-    }
+    auto record = offline::findExportPreset(preset);
+    if (record.isErr()) return CallToolResult::fromError(record.error());
+    const bool platform_shipped = record.value().value("detected", true);
+    const std::string platform = record.value().value("platform", "");
     const std::string mode = args.value("mode", "release");
     if (mode != "release" && mode != "debug" && mode != "pack") {
         return CallToolResult::error("mode must be release, debug, or pack");
@@ -692,6 +699,36 @@ CallToolResult handleProjectExport(const json& args, std::shared_ptr<ipc::IIpcCl
     if (run.isErr()) return CallToolResult::error("Failed to launch Godot export: " + run.error().message);
     if (run.value().timed_out) return CallToolResult::error("Project export timed out; output status is unknown");
     if (run.value().exit_code != 0) {
+        const auto engine_output = withoutTerminalEscapes(run.value().output);
+        // The one refusal whose cause is known: the engine did not detect the
+        // preset. The file check above already refuses every case it can
+        // prove, so what reaches here is a platform Godot does not ship and
+        // nothing registered. That is a preset the engine cannot find rather
+        // than a fault in Didi, and it used to come back as 500 internal_error
+        // (#921).
+        if (engine_output.find("Invalid export preset name") != std::string::npos) {
+            return CallToolResult::errorJson(
+                404,
+                "Godot did not detect the export preset \"" + preset + "\". " +
+                    (platform_shipped
+                         ? std::string("The file declared it where Godot reads it when the export "
+                                       "was checked, so export_presets.cfg changed while the "
+                                       "export ran.")
+                         : "Godot ships no export platform named \"" + platform +
+                               "\", and no editor plugin or GDExtension in this project "
+                               "registered one.") +
+                    " detected_presets is the list Godot printed.",
+                json{{"code", "not_found"},
+                     {"reason", "not_detected_by_engine"},
+                     {"preset", preset},
+                     {"platform", platform},
+                     {"mode", mode},
+                     {"detected_presets", offline::detectedPresetsInEngineOutput(engine_output)},
+                     {"exit_code", run.value().exit_code},
+                     {"engine_output", engine_output},
+                     {"output_truncated", run.value().output_truncated},
+                     {"retryable", false}});
+        }
         // The console transcript as data under a key, with the escapes gone,
         // rather than four kilobytes concatenated into a message (#651).
         return CallToolResult::errorJson(
@@ -700,7 +737,7 @@ CallToolResult handleProjectExport(const json& args, std::shared_ptr<ipc::IIpcCl
                  {"preset", preset},
                  {"mode", mode},
                  {"exit_code", run.value().exit_code},
-                 {"engine_output", withoutTerminalEscapes(run.value().output)},
+                 {"engine_output", engine_output},
                  {"output_truncated", run.value().output_truncated}});
     }
     if (!std::filesystem::is_regular_file(output.value(), error) || error ||

@@ -121,6 +121,11 @@ def load_variants() -> list[tuple[str, str, str]]:
          other + preset_text(2, BASE_KEYS, BASE_OPTIONS)),
         ("second_of_two", "the preset numbered 1, after one that loads",
          other + preset_text(1, BASE_KEYS, BASE_OPTIONS)),
+        ("numbered_from_one", "the only preset numbered 1, with no preset 0",
+         preset_text(1, BASE_KEYS, BASE_OPTIONS)),
+        ("zero_padded_number", "the only preset in a section spelled [preset.00]",
+         preset_text(0, BASE_KEYS, BASE_OPTIONS).replace("[preset.0]", "[preset.00]")
+         .replace("[preset.0.options]", "[preset.00.options]")),
         ("name_twice", "two presets with this name, Linux first and Windows second",
          preset_text(0, BASE_KEYS + [("custom_features", '"didi_first"')], BASE_OPTIONS,
                      overrides={"platform": '"Linux"'})
