@@ -247,7 +247,14 @@ otherwise only show up as a red run.
    and the changelog section, before it compiles anything.
 4. **Check the draft.** A tag produces a draft release, which nobody else can
    see. Download its archives, compare them with `SHA256SUMS`, run
-   `gh attestation verify` as `SECURITY.md` describes, and unpack each one.
+   `gh attestation verify` as `SECURITY.md` describes, then install each
+   archive the way its README says with
+   `python tools/check_release_archive.py <archive> --expect-version x.y.z --godot <editor>`,
+   once per supported Godot line (`--godot` repeats). It checks the layout,
+   the version, the MCP handshake, and that the archive's own addon comes up
+   in a fresh project with nothing on the engine's error output. It runs the
+   host's binaries, so each platform's archive needs that platform. Run it
+   from a checkout of the tag.
 5. **Publish** with `gh release edit vx.y.z --draft=false`. If the draft is
    wrong, delete it and the tag, fix `main`, and tag again: nothing outside has
    seen it.
