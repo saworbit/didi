@@ -12,6 +12,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot 'assert_godot_supported.ps1')
+. (Join-Path $PSScriptRoot 'remove_test_directory.ps1')
 $GodotExecutable = Assert-SupportedGodotExecutable -Executable $GodotExecutable
 
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
@@ -20,8 +21,10 @@ $fixture = Join-Path $root 'build\phase7_signal_bridge'
 $sessionRoot = Join-Path $root 'build\phase7_signal_sessions'
 if (-not $fixture.StartsWith((Join-Path $root 'build') + [IO.Path]::DirectorySeparatorChar,
         [StringComparison]::OrdinalIgnoreCase)) { throw 'Unsafe fixture path' }
-Remove-Item -LiteralPath $fixture -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath $sessionRoot -Recurse -Force -ErrorAction SilentlyContinue
+# CI runs this script twice in a row, and the editor the first run stopped can
+# still hold the fixture's extension copy when the second starts.
+Remove-TestDirectory -Path $fixture
+Remove-TestDirectory -Path $sessionRoot
 Copy-Item -LiteralPath $source -Destination $fixture -Recurse
 Copy-Item -LiteralPath (Join-Path $root 'addons\didi') -Destination (Join-Path $fixture 'addons\didi') -Recurse
 New-Item -ItemType Directory -Path (Join-Path $fixture 'addons\didi\bin') -Force | Out-Null
