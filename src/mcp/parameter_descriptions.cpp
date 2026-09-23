@@ -529,7 +529,8 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
          "name/animation. It may not contain '/', ':', ',' or '['."},
         {"anim_add_library.reload_from_disk",
          "Take the file's version when the editor's cached copy of the library no longer "
-         "matches it, as after the file was rewritten. The call refuses and says so otherwise. "
+         "matches it, as after the file was rewritten by anything but resource_create, which "
+         "reloads the editor's copy itself. The call refuses and says so otherwise. "
          "Reloading updates every player already holding the library and discards changes made "
          "to the editor's copy and not saved."},
 
