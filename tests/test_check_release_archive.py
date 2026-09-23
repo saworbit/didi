@@ -131,6 +131,38 @@ class UnpackTests(unittest.TestCase):
                 checker.unpack(archive, destination)
 
 
+    def test_refuses_a_tarball_that_reaches_outside_the_destination(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            base = Path(scratch)
+            archive = base / "escape.tar.gz"
+            with tarfile.open(archive, "w:gz") as bundle:
+                for name in ("didi-linux-x64/README.md", "didi-linux-x64/../../escaped.txt"):
+                    data = b"x"
+                    info = tarfile.TarInfo(name)
+                    info.size = len(data)
+                    bundle.addfile(info, io.BytesIO(data))
+            destination = base / "deep" / "out"
+            destination.mkdir(parents=True)
+            with self.assertRaisesRegex(ValueError, "outside the destination"):
+                checker.unpack(archive, destination)
+            self.assertFalse((base / "escaped.txt").exists())
+            self.assertFalse((base / "deep" / "escaped.txt").exists())
+
+    def test_refuses_a_link_inside_a_tarball(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            base = Path(scratch)
+            archive = base / "link.tar.gz"
+            with tarfile.open(archive, "w:gz") as bundle:
+                info = tarfile.TarInfo("didi-linux-x64/bin/didi")
+                info.type = tarfile.SYMTYPE
+                info.linkname = "/usr/bin/env"
+                bundle.addfile(info)
+            destination = base / "out"
+            destination.mkdir()
+            with self.assertRaisesRegex(ValueError, "not a regular file or folder"):
+                checker.unpack(archive, destination)
+
+
 class VersionTests(unittest.TestCase):
     def test_reads_the_version_the_server_prints(self):
         output = "didi (godot-mcp-native) v2.0.1\nbuild 2.0.1+8244df5006f9.20260923T084156\n"

@@ -133,11 +133,15 @@ def unpack(archive: Path, destination: Path) -> Path:
         with zipfile.ZipFile(archive) as bundle:
             bundle.extractall(destination)
     elif name.endswith((".tar.gz", ".tgz")):
+        if not hasattr(tarfile, "data_filter"):
+            raise ValueError(
+                f"{archive.name}: this Python has no tarfile extraction filter "
+                "(3.10.12, 3.11.4 or 3.12 and later have one), so it cannot "
+                "unpack a downloaded tarball safely"
+            )
         with tarfile.open(archive, "r:gz") as bundle:
-            if hasattr(tarfile, "data_filter"):
-                bundle.extractall(destination, filter="data")
-            else:  # pragma: no cover - Python without the extraction filters
-                bundle.extractall(destination)
+            members = release_members(bundle, destination, archive.name)
+            bundle.extractall(destination, members=members, filter="data")
     else:
         raise ValueError(f"{archive.name}: not a .zip or .tar.gz")
     entries = [entry for entry in destination.iterdir()]
@@ -145,6 +149,27 @@ def unpack(archive: Path, destination: Path) -> Path:
         names = ", ".join(sorted(entry.name for entry in entries)) or "nothing"
         raise ValueError(f"{archive.name}: expected one top-level folder, found {names}")
     return entries[0]
+
+
+def release_members(bundle: tarfile.TarFile, destination: Path, label: str) -> list[tarfile.TarInfo]:
+    """The members of a tarball, refused if any could land outside *destination*.
+
+    The archive being checked came off the internet, so it is treated as
+    untrusted before it is known to be a release. A release holds regular files
+    and folders only; a link, a device, an absolute path or a `..` component is
+    a finding in its own right, and none of them is unpacked. The `data` filter
+    applied on top enforces the same rules again inside tarfile.
+    """
+
+    root = destination.resolve()
+    members = bundle.getmembers()
+    for member in members:
+        if not (member.isfile() or member.isdir()):
+            raise ValueError(f"{label}: {member.name} is not a regular file or folder")
+        target = (root / member.name).resolve()
+        if target != root and root not in target.parents:
+            raise ValueError(f"{label}: {member.name} would unpack outside the destination")
+    return members
 
 
 def detect_platform(root: Path) -> str:
@@ -155,6 +180,16 @@ def detect_platform(root: Path) -> str:
         if (library_dir / library).is_file():
             return platform
     raise ValueError(f"{root.name}: no Didi extension library under addons/didi/bin")
+
+
+def host_platform() -> str:
+    """The platform whose archive this machine can run."""
+
+    if sys.platform == "win32":
+        return "windows"
+    if sys.platform == "darwin":
+        return "macos"
+    return "linux"
 
 
 def tracked_addon_files(repo_root: Path = REPO_ROOT) -> list[str]:
@@ -383,6 +418,15 @@ def _check_unpacked(archive: Path, godots: Sequence[Path], expected_version: str
     report.findings += check_layout(root, report.platform, addon_files)
     server = root / "bin" / PLATFORMS[report.platform][0]
     if not server.is_file():
+        return
+    if report.platform != host_platform():
+        # Not a defect in the archive, but a check that did not run must not
+        # read as one that passed.
+        report.findings.append(
+            f"a {report.platform} archive cannot run on {host_platform()}: only the layout "
+            f"was checked; run this on {report.platform} for the version, the handshake "
+            "and the editor"
+        )
         return
     try:
         version = subprocess.run([str(server), "--version"], capture_output=True,

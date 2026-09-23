@@ -63,7 +63,10 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
   and reports any ERROR or WARNING line, a plugin that never came up, or an
   extension that never published a session. Run against the published
   v2.0.0 Windows archive it reports three findings, and against v2.0.1 none.
-  `CONTRIBUTING.md`'s release steps use it on the draft.
+  An archive off the internet is untrusted until it is known to be a release,
+  so a tarball holding a link, a device, an absolute path or a `..` component
+  is refused before anything is unpacked. `CONTRIBUTING.md`'s release steps
+  use it on the draft.
 
 ### Changed
 
