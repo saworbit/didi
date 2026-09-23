@@ -49,6 +49,22 @@ release changed, which is why it lives here and not in a version section.
 Discovery now exposes 116 canonical tools plus 10 legacy registrations (126 total). 113 canonical tools are implemented and 3 remain unimplemented.
 The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, recorded in [Surface Amendments](docs/SURFACE_AMENDMENTS.md).
 
+### Added
+
+- **A release archive can be installed and checked in one command.** The
+  release workflow checks an archive's files, links and handshake, but no
+  runner has a Godot, and the live harness drives its own fixture addon rather
+  than the shipped one, so nothing opened the archive's addon in an editor the
+  way a user does. That is where v2.0.0 went wrong unseen: its extension
+  printed `ERROR: Attempt to get non-existent interface function` into every
+  4.5.1 editor that loaded it. `tools/check_release_archive.py` unpacks an
+  archive, holds it to the promised layout and version, asks its server for
+  its tools, then opens its addon in a fresh project on each editor it is given
+  and reports any ERROR or WARNING line, a plugin that never came up, or an
+  extension that never published a session. Run against the published
+  v2.0.0 Windows archive it reports three findings, and against v2.0.1 none.
+  `CONTRIBUTING.md`'s release steps use it on the draft.
+
 ### Changed
 
 - **The website and the quickstart start from the download.** Both told a
