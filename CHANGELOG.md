@@ -238,9 +238,10 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
   class reference and three documents, checks what each binary links against
   on its platform, runs the smoke test against the staged server rather than
   the build tree, and reopens every archive to compare it with what was staged.
-  A tag now produces a draft release, with the version's summary from this
-  file above the generated notes, so the published archives are the ones a
-  person downloaded and checked. `CONTRIBUTING.md` has the release steps.
+  A tag now produces a draft release, with the version's summary and Breaking
+  list from this file above the generated notes, so the published archives are
+  the ones a person downloaded and checked. `CONTRIBUTING.md` has the release
+  steps.
 - **A connection that arrives is read when it arrives, rather than when the
   previous one goes quiet.** Both IPC servers accepted one connection and only
   accepted the next after the one they held had been idle for the recycle

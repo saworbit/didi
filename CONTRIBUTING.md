@@ -239,9 +239,9 @@ otherwise only show up as a red run.
    to `packaging/`.
 2. **Bump the version** in one pull request, following the release contract
    above, and give the new `## [x.y.z] - <date>` section in `CHANGELOG.md` a
-   short summary above its first `###` heading. That summary leads the release
-   notes, so write it for someone deciding whether to upgrade, with absolute
-   links.
+   short summary above its first `###` heading. That summary, and the
+   `### Breaking` list when there is one, lead the release notes, so write them
+   for someone deciding whether to upgrade, with absolute links.
 3. **Tag the merge commit** on `main` as `vx.y.z` and push the tag. The
    workflow refuses a tag that does not match `CMakeLists.txt`, `plugin.cfg`
    and the changelog section, before it compiles anything.
