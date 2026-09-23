@@ -84,6 +84,10 @@ twice.
 | `probes/resource_fidelity.py` | What `resource_create` writes, against what Godot reads back. The declared-type check asked with a scalar, a number, a boolean and an array as well as the object shape #730 was about, and the packed arrays asked in the spelling the schema documents. Needs no editor, so it runs in the platform workflow's offline job on both runners; `--godot` is the witness and a run without one says the load column could not be filled rather than passing. |
 | `probes/detached_launch.py` | `runtime_launch --detach`, the half of the loop #733 said was missing. The loop itself is the green half and stays as the regression guard -- attach, pause, step, stop, and the kernel asked directly whether the process went. The red half is what the call *says*: which engine ran the game, and which pid the prose names. Runs twice, once with the editor attached and once without, because the engine row has no comparison in the second. |
 | `probes/project_scope_and_cost.py` | The project-level tools asked what a maintainer asks, and what the answer costs. Whether `project_audit_assets` sees an asset referenced only from `project.godot`, with `project_analyze_impact` as the control; the size of `project_list_input_actions`; and the per-call overhead over a short authoring arc. Writes its own icon and its own input action, because a row skipped for want of a precondition is not a row that passed. |
+| `probes/animation_library.py` | `anim_add_library` asked what an agent will get wrong: the arc #770 named (write the fade and its library with `resource_create`, add it, save, run the game, play it by the reported name), then twenty wrong calls with the editor's log read after each, path forms including a wrong letter case, the library rewritten through `resource_create` and behind the editor's back, undo across a scene switch, a player the scene does not own, a library too large to list, and the neighbouring routes an agent tries first. Ends with every engine line the run produced. |
+| `probes/editor_resource_cache.py` | What makes a live editor re-read a resource file that changed underneath it. Rewrites a library a player holds, then tries nothing, `editor_reload_project`, `EditorFileSystem.update_file`, `scan` and `CACHE_MODE_REPLACE` in turn. Only the last one works; that measurement is why `anim_add_library` compares the editor's copy with the file and `resource_create` reloads what it overwrote. |
+| `probes/reimport_overlap.py` | The harness's import sequence replayed against a live editor, printing each answer's `engine_diagnostics`: a never-seen PNG, the same PNG again at once. Pins #914 to the second call. |
+| `editor_log.py` | The editor's own console, read by every probe. `Session` finds the `editor.log` that `sandbox.py --launch` writes beside the project, reports what the editor printed before the session began, prints every new ERROR or WARNING under the call that caused it, and keeps them on `session.engine_lines`; `session.engine_summary()` groups them by call. Pass `editor_log=False` to turn it off. |
 | `fixtures/write_csharp_fixture.py` | A `.csproj` with one error and one warning in it. Kept out of `sandbox.py` because a C# project changes what Godot does with the directory. |
 | `editor_exit_status.py` | Not a probe against the server: the same editor invocation with and without the built addon installed, exit statuses side by side. The control for a crash on shutdown. |
 | `wait_for_session.py` | Polls `runtime_list_sessions` through the same binary the probes use, so a slow first import reads as a slow import rather than as an absent session. |
@@ -146,6 +150,21 @@ python tools/vibe/probe.py -p $env:TEMP\vibe\proj --call scene_add_to_group '{"g
 python tools/vibe/report.py $env:TEMP\vibe\findings --dry-run
 python tools/vibe/report.py $env:TEMP\vibe\findings
 ```
+
+**Read what the engine printed.** Godot writes its ERROR and WARNING lines to
+its own console, and for sixteen sessions nothing here read them unless a probe
+did so on purpose. Session seventeen found three defects -- a `.res` the editor
+could not load on every start, ten "Missing .uid file" warnings on every addon
+upgrade, and a harness fixture PNG whose every CRC was wrong -- in a console
+Shane pasted by hand. `Session` reads the editor's log now (see `editor_log.py`),
+and since that session every live answer carries its own `engine_diagnostics`
+and the live harness fails on an engine line nobody explained. Launch the editor
+with `sandbox.py --launch`, or with `--log-file` beside the project, so there is
+a log to read.
+
+`wait_for_session.py` filters by project since the same session: it used to
+return whichever editor was up, and handed a 4.7.2 wait the 4.5.1 editor on the
+next sandbox. `--any-project` keeps the old answer.
 
 Pass `--project` a path the server can open. On Windows that means a native
 path: a Git Bash style `/c/Users/...` is refused at startup with "The explicit
@@ -1126,6 +1145,8 @@ than zero` for the write the response reported only as `applied: false`.
 | 2026-09-18 | A game rather than a census: a 2D platformer built end to end through the surface -- a physics root, a collision shape as a real resource, a TileSet over an atlas, an autoload, input actions, a signal, a HUD, a script patch, and the game launched, attached, paused, injected and stepped; then a 3D arena and the raycast tools, the only ones whose answer is a node, and a game that crashes. The first session to walk a whole authoring workflow in order rather than asking each tool one question. | `2.0.0+6393d1435a6a`, and the same on the runners | #728-#744, sixteen findings. The thirteen from the 2D arc reproduced on macOS and Ubuntu as well as Windows; #732 is Windows only and the difference diagnosed it. |
 
 | 2026-09-19 | The other half of a game, and somebody else's game. A menu built end to end -- anchors, a theme override, a Button wired to a handler, an `AnimationPlayer`, an audio bus -- then Godot's own `dodge_the_creeps` opened as a project to maintain: read it, search it, rename across a scene and a script, audit it. Then the detached game loop #733 asked for, now that it shipped, and the first measurement of what a call costs the caller. | `2.0.0+6b2627d77c88`, and the same on the runners | #764-#784 and #786, twenty-two findings. #764 and #765 reproduce byte for byte on Windows, macOS and Ubuntu, and so do all four rows of the menu arc. Two split on platform, which is what diagnosed both: #773 is Windows only (two binaries for one program) and #782 and #786 are POSIX only (a 3000 ms attach deadline, and a child nothing reaps). Four drafts were cut or rewritten against `docs/`, which is the session's main method lesson. |
+
+| 2026-09-23 | One new tool driven end to end rather than the surface swept: `anim_add_library` (#770) on 4.5.1 and 4.7.2, through a menu, a library, a saved scene and a running game, then every way to be wrong with it. Then, prompted by an editor console Shane pasted, the engine's own output read for the first time: in the vibe client, in every live answer, and as a gate in the live harness. | `2.0.1+4298f13bde58`, then the stack #912, #915, #916, #917 | Fixed before merge: a wrong-case path saved into the scene, a rewritten library added as the editor's stale copy, a neighbour route that refused three different ways on three engines, `anim_list_tracks` claiming an `AnimationTree`, `asset_reimport` calling a failed import imported, a harness fixture PNG that had never tested a successful import, three refusals the engine printed errors ahead of, `resource_create` writing unloadable `.res`, an overwrite leaving the editor's copy stale, and the addon shipping no `.uid` sidecars. Filed: #913 (the editor's undo manager left inconsistent by `editor_undo`) and #914 (a reimport colliding with the editor's own import pass). Every library name the engine accepts was saved and reloaded on three engines and survives. |
 
 Add a row per session. The table is the reason this directory exists: a finding
 that keeps coming back in a new place is a design problem, and only the log
