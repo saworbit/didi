@@ -252,6 +252,16 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **A rolled back mutation says `rolled_back` everywhere.** A mutation whose
+  postcondition failed answers `outcome: rolled_back` when the undo took and
+  `outcome: unknown` when it did not. Nine sites in `godot_bridge.cpp` do. The
+  script attach and detach path said `reverted`, which nothing read and nothing
+  asserted, while `phase7_signal_bridge_probe.cpp` pins `rolled_back` against a
+  live editor for the signal paths, so the siblings were held to the word and
+  this one was not. One word, plus a pin so it does not come back. This is not
+  a general check on `outcome`: that key names several unrelated things in that
+  file, from viewport projections to undo availability, and the vocabulary that
+  matters here cannot be told from the others by reading the source. #896
 - **Twenty-seven bridge refusals say which conflict they are.** #892 left
   `godot_bridge.cpp` outside the rule, which was right for that change and
   wrong as an end state for the part of the file that never moved to
