@@ -2927,6 +2927,109 @@ try {
     # The file that was already there is the one that is still there.
     Assert-True ((Get-Content -LiteralPath $appliedScriptPath -Raw) -eq $appliedContent) "A refused apply changed a file it had decided not to write."
 
+    # anim_add_library. Nothing else on the surface can give an AnimationPlayer
+    # an animation, so on any player the surface built anim_list_tracks answered
+    # an empty list and anim_play_track had nothing to name (#770). A scene of
+    # its own, because its saved markup is read below and main.tscn is shared
+    # with every other batch; it is closed unsaved and main.tscn reopened at the
+    # end, so the next batch finds the editor as this one did.
+    $animLibraryProbe = "res://anim_library_probe.tres"
+    $animPlayer = "/root/AnimHost/Player"
+    $animLibraryRequests = @(
+        (@{ jsonrpc = "2.0"; id = 2600; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
+        (Tool-Request 2601 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
+        (Tool-Request 2602 "scene_create" @{ scene_path = "res://anim_library_host.tscn"; root_type = "Node2D"; root_name = "AnimHost" }),
+        (Tool-Request 2603 "scene_instantiate_node" @{ node_type = "AnimationPlayer"; parent_path = "/root"; name = "Player" }),
+        # The dry run reads the player and the file, and changes neither.
+        (Tool-Request 2604 "anim_add_library" @{ animation_player_path = $animPlayer; library_path = $animLibraryProbe; library_name = "moves"; dry_run = $true }),
+        (Tool-Request 2605 "anim_list_tracks" @{ animation_player_path = $animPlayer }),
+        (Tool-Request 2606 "anim_add_library" @{ animation_player_path = $animPlayer; library_path = $animLibraryProbe; library_name = "moves" }),
+        # Read back through a separate call rather than trusted from the
+        # response that made the change.
+        (Tool-Request 2607 "anim_list_tracks" @{ animation_player_path = $animPlayer }),
+        (Tool-Request 2608 "editor_save_scene" @{}),
+        # Each refusal the engine would otherwise answer with a bare error code
+        # and a line in the editor's log, or would not answer at all.
+        (Tool-Request 2609 "anim_add_library" @{ animation_player_path = $animPlayer; library_path = $animLibraryProbe; library_name = "moves" }),
+        (Tool-Request 2610 "anim_add_library" @{ animation_player_path = $animPlayer; library_path = $animLibraryProbe; library_name = "again" }),
+        (Tool-Request 2611 "anim_add_library" @{ animation_player_path = $animPlayer; library_path = $animLibraryProbe; library_name = "a/b" }),
+        (Tool-Request 2612 "anim_add_library" @{ animation_player_path = $animPlayer; library_path = "res://probe_tileset.tres"; library_name = "tiles" }),
+        (Tool-Request 2613 "anim_add_library" @{ animation_player_path = $animPlayer; library_path = "res://no_such_library.tres"; library_name = "none" }),
+        (Tool-Request 2614 "anim_add_library" @{ animation_player_path = $animPlayer; library_path = "res://../anim_library_probe.tres"; library_name = "escape" }),
+        (Tool-Request 2615 "anim_add_library" @{ animation_player_path = "/root/AnimHost"; library_path = $animLibraryProbe; library_name = "root" }),
+        # The preview refuses what the call refuses.
+        (Tool-Request 2616 "anim_add_library" @{ animation_player_path = $animPlayer; library_path = $animLibraryProbe; library_name = "moves"; dry_run = $true }),
+        # undo_redo_registered is a claim, so undo takes the library off and
+        # redo puts it back, each read back through a separate call.
+        (Tool-Request 2617 "editor_undo" @{}),
+        (Tool-Request 2618 "anim_list_tracks" @{ animation_player_path = $animPlayer }),
+        (Tool-Request 2619 "editor_redo" @{}),
+        (Tool-Request 2620 "anim_list_tracks" @{ animation_player_path = $animPlayer }),
+        # The default library, whose animations are played by their own names.
+        (Tool-Request 2621 "editor_undo" @{}),
+        (Tool-Request 2622 "anim_add_library" @{ animation_player_path = $animPlayer; library_path = $animLibraryProbe }),
+        (Tool-Request 2623 "anim_list_tracks" @{ animation_player_path = $animPlayer }),
+        (Tool-Request 2624 "scene_close" @{ discard_unsaved = $true }),
+        (Tool-Request 2625 "scene_open" @{ scene_path = "res://main.tscn" })
+    )
+    $rawAnimLibrary = Invoke-Didi -Requests $animLibraryRequests -Arguments @("--project", $fixtureRoot)
+    $animLibrary = @($rawAnimLibrary | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.PSObject.Properties.Name -contains "id" })
+    Assert-True ($animLibrary.Count -eq $animLibraryRequests.Count) "Expected $($animLibraryRequests.Count) anim_add_library responses, received $($animLibrary.Count)."
+    $animById = @{}
+    foreach ($response in $animLibrary) { $animById[[int]$response.id] = $response }
+
+    $animPreview = (Tool-Payload $animById[2604]).mutation_preview
+    Assert-True ($null -ne $animPreview) "anim_add_library dry_run did not return a preview."
+    Assert-True ($animPreview.target_read -eq $true -and $animPreview.changes[0].kind -eq "planned_mutation") "The anim_add_library preview did not read the player: $($animPreview | ConvertTo-Json -Depth 8 -Compress)"
+    Assert-True (@($animPreview.changes[0].before.library_names).Count -eq 0) "The preview did not report the player's libraries as it found them: $($animPreview.changes[0].before | ConvertTo-Json -Depth 6 -Compress)"
+    Assert-True (@($animPreview.changes[0].before.animations_to_add) -contains "moves/slide") "The preview did not say which names the player would answer to: $($animPreview.changes[0].before | ConvertTo-Json -Depth 6 -Compress)"
+    Assert-True ($animPreview.requires_confirmation -eq $false) "An additive, undoable add asked for a confirmation token."
+    Assert-True (@((Tool-Payload $animById[2605]).animations).Count -eq 0) "The anim_add_library dry run added the library."
+
+    $animAdded = Tool-Payload $animById[2606]
+    Assert-True ($animAdded.execution_mode -eq "live" -and $animAdded.undo_redo_registered -eq $true -and $animAdded.scene_saved -eq $false) "anim_add_library did not report a live, undoable, unsaved change: $($animAdded | ConvertTo-Json -Depth 6 -Compress)"
+    Assert-True (@($animAdded.animations).Count -eq 1 -and @($animAdded.animations)[0] -eq "moves/slide") "anim_add_library did not report the name anim_play_track takes: $(@($animAdded.animations) -join ',')"
+    Assert-True (@($animAdded.library_names) -contains "moves") "anim_add_library did not report the player's libraries afterwards: $(@($animAdded.library_names) -join ',')"
+    $animListed = @((Tool-Payload $animById[2607]).animations)
+    Assert-True ($animListed.Count -eq 1 -and $animListed[0].name -eq "moves/slide") "anim_list_tracks did not find the added library: $($animListed | ConvertTo-Json -Depth 6 -Compress)"
+    Assert-True (@($animListed[0].tracks)[0].path -eq "Target:position") "The added animation's track is not the fixture's: $(@($animListed[0].tracks)[0].path)"
+
+    # Saved by the engine, so in whichever form the running engine writes:
+    # 4.5.1 holds libraries in one Dictionary, 4.6.2 and 4.7.2 one property
+    # per library. Either way it is a reference to the file, not a copy.
+    Assert-True ((Tool-Payload $animById[2608]).status -eq "saved") "The scene holding the library did not save."
+    $animHostScene = Get-Content -LiteralPath (Join-Path $fixtureRoot "anim_library_host.tscn") -Raw
+    Assert-True ($animHostScene -match 'type="AnimationLibrary"[^\]]*path="res://anim_library_probe\.tres"') "The saved scene does not reference the library file: $animHostScene"
+    Assert-True ($animHostScene -match '(libraries/moves = ExtResource\(|"moves": ExtResource\()') "The saved scene does not hold the library under its name: $animHostScene"
+    Assert-True ($animHostScene -notmatch 'sub_resource type="AnimationLibrary"') "The library was copied into the scene rather than referenced: $animHostScene"
+
+    foreach ($refusal in @(
+        @{ Id = 2609; What = "a library name already in use"; Code = "animation_library_name_taken"; Match = "res://anim_library_probe.tres" },
+        @{ Id = 2610; What = "the same library under a second name"; Code = "animation_library_already_added"; Match = "on this player as" },
+        @{ Id = 2611; What = "a library name the engine refuses"; Code = $null; Match = "may not contain '/'" },
+        @{ Id = 2612; What = "a resource that is not an AnimationLibrary"; Code = "not_an_animation_library"; Match = "TileSet" },
+        @{ Id = 2613; What = "a file that is not there"; Code = $null; Match = "No resource at res://no_such_library.tres" },
+        @{ Id = 2614; What = "a path that climbs out of the project"; Code = $null; Match = "normalized res:// path" },
+        @{ Id = 2615; What = "a node that is not an AnimationPlayer"; Code = $null; Match = "not an AnimationPlayer" },
+        @{ Id = 2616; What = "a dry run for a library name already in use"; Code = "animation_library_name_taken"; Match = "already has" })) {
+        Assert-True $animById[$refusal.Id].result.isError "anim_add_library accepted $($refusal.What)."
+        $refusalText = ($animById[$refusal.Id].result.content | Where-Object { $_.type -eq "text" } | Select-Object -First 1).text
+        Assert-True ($refusalText -match [regex]::Escape($refusal.Match)) "The refusal of $($refusal.What) did not say why: $refusalText"
+        if ($refusal.Code) {
+            Assert-True ($refusalText -match [regex]::Escape($refusal.Code)) "The refusal of $($refusal.What) did not name itself: $refusalText"
+        }
+        Assert-True ($refusalText -notmatch "confirmation_token") "The refusal of $($refusal.What) handed back a token."
+    }
+
+    Assert-True (@((Tool-Payload $animById[2618]).animations).Count -eq 0) "editor_undo did not take the library off the player: $((Tool-Payload $animById[2618]).animations | ConvertTo-Json -Depth 6 -Compress)"
+    $animRedone = @((Tool-Payload $animById[2620]).animations)
+    Assert-True ($animRedone.Count -eq 1 -and $animRedone[0].name -eq "moves/slide") "editor_redo did not put the library back: $($animRedone | ConvertTo-Json -Depth 6 -Compress)"
+    $animDefault = Tool-Payload $animById[2622]
+    Assert-True (@($animDefault.animations).Count -eq 1 -and @($animDefault.animations)[0] -eq "slide" -and $animDefault.library_name -eq "") "The default library's animation was not reported by its own name: $(@($animDefault.animations) -join ',')"
+    $animDefaultListed = @((Tool-Payload $animById[2623]).animations)
+    Assert-True ($animDefaultListed.Count -eq 1 -and $animDefaultListed[0].name -eq "slide") "anim_list_tracks did not find the default library's animation by its own name: $($animDefaultListed | ConvertTo-Json -Depth 6 -Compress)"
+    Assert-True (-not $animById[2625].result.isError) "main.tscn did not reopen after the anim_add_library batch: $($animById[2625].result.content[0].text)"
+
     $previousGodotBin = $env:GODOT_BIN
     try {
         $env:GODOT_BIN = $GodotExecutable
@@ -4550,7 +4653,7 @@ try {
 
     $unexpectedSourceArtifacts = @(Get-ChildItem -LiteralPath $sourceFixtureRoot -Force -Recurse | Where-Object {
         $_.Name -like "*.didi-retired-*" -or
-        $_.Name -in @("packed_branch.tscn", "created_phase2.tscn", "transient_probe.tscn", "instance_host.tscn")
+        $_.Name -in @("packed_branch.tscn", "created_phase2.tscn", "transient_probe.tscn", "instance_host.tscn", "anim_library_host.tscn")
     })
     Assert-True ($unexpectedSourceArtifacts.Count -eq 0) "Integration generated artifacts in the checked-in source fixture."
     $integrationSucceeded = $true

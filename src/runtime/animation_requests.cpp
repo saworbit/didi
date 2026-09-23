@@ -77,6 +77,54 @@ Result<AnimPlayRequest> parseAnimPlayRequest(const json& params) {
     return request;
 }
 
+Result<AnimAddLibraryRequest> parseAnimAddLibraryRequest(const json& params) {
+    if (!params.is_object()) return Error::invalidArgument("Animation params must be an object");
+    if (!onlyKeys(params, {"animation_player_path", "library_path", "library_name", "preview"})) {
+        return Error::invalidArgument("Animation request contains an unknown property");
+    }
+    AnimAddLibraryRequest request;
+    auto player = boundedString(params, "animation_player_path", 1024);
+    if (player.isErr()) return player.error();
+    request.animation_player_path = player.value();
+    auto path = boundedString(params, "library_path", 1024);
+    if (path.isErr()) return path.error();
+    request.library_path = path.value();
+    const auto ends_with = [&](const std::string& suffix) {
+        return request.library_path.size() > suffix.size() &&
+               request.library_path.compare(request.library_path.size() - suffix.size(),
+                                            suffix.size(), suffix) == 0;
+    };
+    if (request.library_path.rfind("res://", 0) != 0 || (!ends_with(".tres") && !ends_with(".res"))) {
+        return Error::invalidArgument(
+            "library_path must be a res:// path to a .tres or .res file holding an "
+            "AnimationLibrary, such as res://animations/menu.tres");
+    }
+    if (params.contains("library_name")) {
+        const auto& name = params["library_name"];
+        if (!name.is_string()) return Error::invalidArgument("library_name must be a string");
+        request.library_name = name.get<std::string>();
+        if (request.library_name.size() > 256) {
+            return Error::invalidArgument("library_name must be at most 256 bytes");
+        }
+        if (request.library_name.find('\0') != std::string::npos) {
+            return Error::invalidArgument("library_name may not contain NUL");
+        }
+        for (const char refused : {'/', ':', ',', '['}) {
+            if (request.library_name.find(refused) != std::string::npos) {
+                return Error::invalidArgument(
+                    std::string("library_name may not contain '") + refused +
+                    "'. The player names a library's animations library/animation, so Godot "
+                    "refuses '/', ':', ',' and '[' in a library name.");
+            }
+        }
+    }
+    if (params.contains("preview")) {
+        if (!params["preview"].is_boolean()) return Error::invalidArgument("preview must be a boolean");
+        request.preview = params["preview"].get<bool>();
+    }
+    return request;
+}
+
 const char* animationTrackTypeName(int64_t type_id) {
     switch (type_id) {
         case 0: return "value";

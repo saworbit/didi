@@ -21,11 +21,29 @@ struct AnimPlayRequest {
     bool from_end{false};
 };
 
+struct AnimAddLibraryRequest {
+    std::string animation_player_path;
+    std::string library_path;
+    // Empty is the player's default library, whose animations are addressed by
+    // their own names. Any other name prefixes them as "name/animation".
+    std::string library_name;
+    // Set by the server's dry-run probe, never by a client: the published
+    // schema does not carry it. Everything is checked and nothing is changed.
+    bool preview{false};
+};
+
 // 400 on anything outside the approved Phase 7B contracts: unknown keys,
 // path or name length, a zero or non-finite speed, a speed outside -16..16,
 // or a negative speed without from_end.
 Result<AnimListRequest> parseAnimListRequest(const json& params);
 Result<AnimPlayRequest> parseAnimPlayRequest(const json& params);
+
+// 400 on an unknown key, a path that is not a res:// path ending in .tres or
+// .res, or a library name the engine would refuse. Godot refuses '/', ':', ','
+// and '[' in a library name with ERR_INVALID_PARAMETER and an error line in
+// the editor's log, on 4.5.1, 4.6.2 and 4.7.2 alike, so they are refused here
+// first and by name.
+Result<AnimAddLibraryRequest> parseAnimAddLibraryRequest(const json& params);
 
 // Plain data the engine side collects, in engine order. Caps are applied by
 // the builder, so the collector only has to stop reading one past each cap.

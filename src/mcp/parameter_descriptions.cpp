@@ -515,6 +515,16 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
          "Playback speed multiplier. 1 plays at the animation's own speed."},
         {"anim_play_track.from_end",
          "Start at the end and play backwards."},
+        {"anim_add_library.animation_player_path",
+         "The AnimationPlayer in the edited scene to give the library to."},
+        {"anim_add_library.library_path",
+         "A res:// path to a .tres or .res file holding an AnimationLibrary. Write one with "
+         "resource_create: an AnimationLibrary whose _data maps each animation name to an "
+         "Animation."},
+        {"anim_add_library.library_name",
+         "The name the player holds the library under. Empty, the default, is the player's own "
+         "library, whose animations are played by their own names; any other name makes them "
+         "name/animation. It may not contain '/', ':', ',' or '['."},
 
         // -- Audio ------------------------------------------------------------
         {"audio_configure_bus.volume_db",

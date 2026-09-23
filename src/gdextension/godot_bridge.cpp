@@ -83,6 +83,18 @@ const std::map<std::string, std::string>& bridgeErrorSentences() {
     {"input_queue_full",
      "Too many input events are held for the paused game. Resume it, or advance it a frame, "
      "so they are delivered first."},
+    {"animation_library_already_added",
+     "That library is already on this player under another name, and Godot holds one library "
+     "under one name only."},
+    {"animation_library_name_taken",
+     "The player already has a library by that name."},
+    {"animation_library_postcondition_mismatch",
+     "The player did not hold the library after the change was committed."},
+    {"animation_library_undo_registration_failed",
+     "The change could not be registered with the editor's undo history, so it was not made."},
+    {"animation_library_unloadable",
+     "A file is there, and the engine could not load a resource from it, which is what a file "
+     "that does not parse looks like."},
     {"camera_path_does_not_resolve_to_camera3d",
      "That path resolves to a node, but not to a Camera3D."},
     {"camera_postcondition_mismatch",
@@ -149,6 +161,8 @@ const std::map<std::string, std::string>& bridgeErrorSentences() {
      "The arguments do not match the published shape for this tool."},
     {"missing_or_ambiguous_signal_connection",
      "No single existing connection matches that emitter, signal, target and method."},
+    {"not_an_animation_library",
+     "The resource at that path is not an AnimationLibrary."},
     {"required_bind_unavailable",
      "A Godot method this call depends on is not available in the attached engine build, so the call was refused rather than half done."},
     {"response_limit",
@@ -6712,6 +6726,268 @@ json animPlayTrack(const json& params, const std::string& session_kind) {
                        {"rollback", "not_available"}, {"session_kind", session_kind}});
 }
 
+// The names in a TypedArray<StringName>, in engine order, up to a cap. `total`
+// is the whole count, so a caller can tell a short list from a cut one.
+struct NameList {
+    std::vector<std::string> names;
+    int64_t total{0};
+};
+
+Result<NameList> readNameList(VariantValue& list, size_t cap) {
+    auto size_value = callVariant(list, "size");
+    if (size_value.isErr()) return size_value.error();
+    auto size = scalarFromVariant<int64_t>(size_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+    if (size.isErr()) return size.error();
+    NameList result;
+    result.total = size.value();
+    for (int64_t index = 0; index < size.value() && result.names.size() < cap; ++index) {
+        auto index_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
+        if (index_value.isErr()) return index_value.error();
+        auto entry = callVariant(list, "get", {&index_value.value()});
+        if (entry.isErr()) return entry.error();
+        auto text = stringFromVariant(entry.value(), GodotApi::instance().variant_get_type(entry.value().ptr()));
+        if (text.isErr()) return text.error();
+        result.names.push_back(boundUtf8(text.value(), 256).value);
+    }
+    return result;
+}
+
+// Gives an AnimationPlayer in the edited scene an AnimationLibrary loaded from
+// a res:// file, through the editor UndoRedo stack (#770). Nothing else on the
+// surface could, so anim_list_tracks and anim_play_track had nothing to find
+// on any player the surface built.
+//
+// add_animation_library answers a bad name, a name in use and a library that
+// is already on the player with an error code and an ERROR line in the
+// editor's log, on 4.5.1, 4.6.2 and 4.7.2 alike. None of those is a sentence a
+// caller can act on, so each is checked here first and refused by name.
+//
+// A preview runs every check and stops before the undo action, so a dry run
+// refuses what the call would refuse and reports the libraries it would add
+// to.
+json animAddLibrary(const json& params, const std::string& session_kind) {
+    if (session_kind != "editor") return bridgeError(409, "session_kind_rejected");
+    auto parsed = runtime::parseAnimAddLibraryRequest(params);
+    if (parsed.isErr()) return errorJson(parsed.error().code, parsed.error().message);
+    const auto& request = parsed.value();
+    // Hash-identical on 4.5.1, 4.6.2 and 4.7.2; see the amendment.
+    for (const auto& bind : {std::make_tuple("AnimationMixer", "add_animation_library", 618909818LL),
+                             std::make_tuple("AnimationMixer", "remove_animation_library", 3304788590LL),
+                             std::make_tuple("AnimationMixer", "has_animation_library", 2619796661LL),
+                             std::make_tuple("AnimationMixer", "get_animation_library", 147342321LL),
+                             std::make_tuple("AnimationMixer", "get_animation_library_list", 3995934104LL),
+                             std::make_tuple("AnimationLibrary", "get_animation_list", 3995934104LL),
+                             std::make_tuple("Resource", "get_path", 201670096LL),
+                             std::make_tuple("ResourceLoader", "exists", 4185558881LL),
+                             std::make_tuple("ResourceLoader", "load", 3358495409LL)}) {
+        if (requireMethodBind(std::get<0>(bind), std::get<1>(bind), std::get<2>(bind)).isErr()) {
+            return bridgeError(501, "required_bind_unavailable");
+        }
+    }
+    if (preflightUndoManagerBindings().isErr() || preflightUndoRollbackBindings().isErr()) {
+        return bridgeError(501, "required_bind_unavailable");
+    }
+
+    auto editor = editorInterface();
+    if (editor.isErr()) return errorJson(editor.error().code, editor.error().message);
+    auto root = editedSceneRoot(editor.value());
+    if (root.isErr()) return errorJson(root.error().code, root.error().message);
+    auto player = resolveAnimationPlayer(request.animation_player_path, session_kind);
+    if (player.isErr()) return errorJson(player.error().code, player.error().message);
+    // A library added to a player inside an instance the edited scene does not
+    // own is dropped by the save, having been reported as added.
+    if (auto refused = refuseUnsavableEdit(root.value(), player.value(),
+                                           request.animation_player_path, SceneEdit::Property)) {
+        return *refused;
+    }
+
+    // The same normalisation rule every other res:// argument answers to, so
+    // '..', a doubled slash or a backslash is refused before the loader sees it.
+    const std::string suffix = strings::endsWith(request.library_path, ".tres") ? ".tres" : ".res";
+    auto valid_path = validateResPath(request.library_path, suffix);
+    if (valid_path.isErr()) {
+        return errorJson(400, "library_path must be a normalized res:// path ending in .tres or .res");
+    }
+    auto loader = singleton("ResourceLoader");
+    if (loader.isErr()) return errorJson(loader.error().code, loader.error().message);
+    auto path_value = makeString(request.library_path);
+    auto hint = makeString("");
+    auto cache_mode = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(1));
+    if (path_value.isErr() || hint.isErr() || cache_mode.isErr()) {
+        return errorJson(500, "Failed to construct library load arguments");
+    }
+    auto exists_value = callObject(loader.value(), "ResourceLoader", "exists", 4185558881LL,
+                                   {&path_value.value(), &hint.value()});
+    if (exists_value.isErr()) return errorJson(500, exists_value.error().message);
+    auto exists = scalarFromVariant<GDExtensionBool>(exists_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+    if (exists.isErr()) return errorJson(500, exists.error().message);
+    if (!exists.value()) {
+        return errorJson(404, "No resource at " + request.library_path +
+                                  ". Write the AnimationLibrary with resource_create first.");
+    }
+    // Through the loader's cache, so the object added is the one the editor
+    // already holds for that file and the scene saves a reference to it.
+    auto loaded_value = callObject(loader.value(), "ResourceLoader", "load", 3358495409LL,
+                                   {&path_value.value(), &hint.value(), &cache_mode.value()});
+    if (loaded_value.isErr()) return errorJson(500, loaded_value.error().message);
+    auto library = objectFromVariant(loaded_value.value());
+    if (library.isErr()) return errorJson(500, library.error().message);
+    if (!library.value()) {
+        return bridgeError(422, "animation_library_unloadable", {{"library_path", request.library_path}});
+    }
+    auto is_library = objectIsClass(library.value(), "AnimationLibrary");
+    if (is_library.isErr()) return errorJson(500, is_library.error().message);
+    if (!is_library.value()) {
+        const auto actual = nodeClassName(library.value());
+        std::string detail = request.library_path + " holds " + (actual.empty() ? "another type" : "a " + actual) + ".";
+        auto is_animation = objectIsClass(library.value(), "Animation");
+        if (is_animation.isOk() && is_animation.value()) {
+            // The likeliest mistake, and the fix is one more resource_create.
+            detail += " A player takes animations inside a library: write an AnimationLibrary whose "
+                      "_data maps a name to this Animation, and add that.";
+        }
+        return bridgeError(422, "not_an_animation_library",
+                           {{"library_path", request.library_path}, {"resource_class", actual}}, detail);
+    }
+
+    auto list_value = callObject(player.value(), "AnimationMixer", "get_animation_library_list", 3995934104LL);
+    if (list_value.isErr()) return errorJson(500, list_value.error().message);
+    auto existing = readNameList(list_value.value(), std::numeric_limits<size_t>::max());
+    if (existing.isErr()) return errorJson(500, existing.error().message);
+    const auto describe_name = [](const std::string& name) {
+        return name.empty() ? std::string("the default library \"\"") : "\"" + name + "\"";
+    };
+    // The name first: it is what the caller chose, so it is the refusal they
+    // can act on even when the library is also already there.
+    for (const auto& name : existing.value().names) {
+        if (name != request.library_name) continue;
+        json data = {{"library_name", name}, {"library_names", existing.value().names}};
+        std::string held_path;
+        auto name_value = makeStringName(name);
+        if (name_value.isOk()) {
+            auto held = callObject(player.value(), "AnimationMixer", "get_animation_library", 147342321LL,
+                                   {&name_value.value()});
+            auto held_object = held.isOk() ? objectFromVariant(held.value()) : Result<GDExtensionObjectPtr>(held.error());
+            if (held_object.isOk() && held_object.value()) {
+                auto held_path_value = callObject(held_object.value(), "Resource", "get_path", 201670096LL);
+                if (held_path_value.isOk()) {
+                    auto text = stringFromVariant(held_path_value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+                    if (text.isOk()) held_path = text.value();
+                }
+            }
+        }
+        // A library built into the scene has no file, and one whose path is
+        // inside a scene file is spelled "res://x.tscn::id"; neither is a path
+        // the caller could pass back, so only a real file is named.
+        const bool file_backed = !held_path.empty() && held_path.find("::") == std::string::npos;
+        data["existing_library_path"] = file_backed ? json(held_path) : json(nullptr);
+        std::string detail = "The player already has " + describe_name(name) +
+                             (file_backed ? ", from " + held_path : std::string(", built into the scene")) +
+                             ". This tool adds and never replaces; choose another library_name.";
+        return bridgeError(409, "animation_library_name_taken", std::move(data), detail);
+    }
+    for (const auto& name : existing.value().names) {
+        auto name_value = makeStringName(name);
+        if (name_value.isErr()) return errorJson(500, name_value.error().message);
+        auto held = callObject(player.value(), "AnimationMixer", "get_animation_library", 147342321LL,
+                               {&name_value.value()});
+        if (held.isErr()) return errorJson(500, held.error().message);
+        auto held_object = objectFromVariant(held.value());
+        if (held_object.isErr()) return errorJson(500, held_object.error().message);
+        if (held_object.value() != library.value()) continue;
+        return bridgeError(409, "animation_library_already_added",
+                           {{"library_name", name}, {"library_path", request.library_path}},
+                           request.library_path + " is on this player as " + describe_name(name) + ".");
+    }
+
+    // What the player will answer to once the library is on it: a named
+    // library's animations are "name/animation", the default library's are
+    // their own names. These are the names anim_play_track takes.
+    auto animation_list = callObject(library.value(), "AnimationLibrary", "get_animation_list", 3995934104LL);
+    if (animation_list.isErr()) return errorJson(500, animation_list.error().message);
+    auto contained = readNameList(animation_list.value(), runtime::kMaxAnimations);
+    if (contained.isErr()) return errorJson(500, contained.error().message);
+    json animations = json::array();
+    for (const auto& animation : contained.value().names) {
+        animations.push_back(request.library_name.empty() ? animation : request.library_name + "/" + animation);
+    }
+    const bool animations_truncated =
+        contained.value().total > static_cast<int64_t>(contained.value().names.size());
+
+    if (request.preview) {
+        return liveResult({{"preview", true},
+                           {"animation_player_path", request.animation_player_path},
+                           {"library_name", request.library_name},
+                           {"library_path", request.library_path},
+                           {"library_names", existing.value().names},
+                           {"animations", animations},
+                           {"animation_count", contained.value().total},
+                           {"animations_truncated", animations_truncated}});
+    }
+
+    auto name_value = makeStringName(request.library_name);
+    auto library_value = makeObject(library.value());
+    if (name_value.isErr() || library_value.isErr()) {
+        return errorJson(500, "Failed to construct library arguments");
+    }
+    auto manager = undoManager(editor.value());
+    if (manager.isErr()) return errorJson(manager.error().code, manager.error().message);
+    auto action = createAction(manager.value(),
+                               "Didi: add animation library " + describe_name(request.library_name),
+                               root.value());
+    if (action.isErr()) return errorJson(500, action.error().message);
+    auto apply = managerMethod(manager.value(), "add_do_method", player.value(), "add_animation_library",
+                               {&name_value.value(), &library_value.value()});
+    auto revert = apply.isOk()
+        ? managerMethod(manager.value(), "add_undo_method", player.value(), "remove_animation_library",
+                        {&name_value.value()})
+        : Result<void>(apply.error());
+    if (apply.isErr() || revert.isErr()) {
+        abandonAction(manager.value());
+        return bridgeError(500, "animation_library_undo_registration_failed");
+    }
+    auto committed = commitAction(manager.value());
+    if (committed.isErr()) return errorJson(committed.error().code, committed.error().message);
+
+    // The engine returns an Error from add_animation_library and the undo
+    // manager drops it, so the only evidence the add happened is the player
+    // holding this exact object under this name afterwards.
+    bool held_now = false;
+    auto has = callObject(player.value(), "AnimationMixer", "has_animation_library", 2619796661LL,
+                          {&name_value.value()});
+    auto has_flag = has.isOk() ? scalarFromVariant<GDExtensionBool>(has.value(), GDEXTENSION_VARIANT_TYPE_BOOL)
+                               : Result<GDExtensionBool>(has.error());
+    if (has_flag.isOk() && has_flag.value()) {
+        auto held = callObject(player.value(), "AnimationMixer", "get_animation_library", 147342321LL,
+                               {&name_value.value()});
+        auto held_object = held.isOk() ? objectFromVariant(held.value()) : Result<GDExtensionObjectPtr>(held.error());
+        held_now = held_object.isOk() && held_object.value() == library.value();
+    }
+    if (!held_now) {
+        auto reverted = undoLastAction(manager.value(), root.value());
+        if (reverted.isErr()) {
+            return bridgeError(500, "animation_library_postcondition_mismatch",
+                               {{"outcome", "unknown"}, {"rolled_back", false}},
+                               "The committed action could not be undone: " + reverted.error().message);
+        }
+        return bridgeError(500, "animation_library_postcondition_mismatch",
+                           {{"outcome", "rolled_back"}, {"rolled_back", true}});
+    }
+
+    auto after_value = callObject(player.value(), "AnimationMixer", "get_animation_library_list", 3995934104LL);
+    auto after = after_value.isOk() ? readNameList(after_value.value(), std::numeric_limits<size_t>::max())
+                                    : Result<NameList>(after_value.error());
+    return liveSceneMutation({{"status", "success"},
+                              {"animation_player_path", request.animation_player_path},
+                              {"library_name", request.library_name},
+                              {"library_path", request.library_path},
+                              {"library_names", after.isOk() ? json(after.value().names) : json(nullptr)},
+                              {"animations", animations},
+                              {"animation_count", contained.value().total},
+                              {"animations_truncated", animations_truncated},
+                              {"undo_redo_registered", true}});
+}
+
 } // namespace
 
 namespace {
@@ -7375,6 +7651,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
     if (method == "ui.hitTest") return uiHitTest(params, session_kind);
     if (method == "anim.listTracks") return animListTracks(params, session_kind);
     if (method == "anim.playTrack") return animPlayTrack(params, session_kind);
+    if (method == "anim.addLibrary") return animAddLibrary(params, session_kind);
     auto editor_result = editorInterface();
     if (editor_result.isErr()) return errorJson(editor_result.error().code, editor_result.error().message);
     auto editor = editor_result.value();

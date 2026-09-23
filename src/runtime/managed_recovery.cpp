@@ -62,7 +62,8 @@ bool scenePersistence(const std::string& name) {
                                                        "editor_redo",
                                                        "tilemap_set_cells",
                                                        "gridmap_set_cells",
-                                                       "viewport_set_camera_transform"};
+                                                       "viewport_set_camera_transform",
+                                                       "anim_add_library"};
     return names.count(name) != 0;
 }
 bool memoryOnly(const std::string& name) {

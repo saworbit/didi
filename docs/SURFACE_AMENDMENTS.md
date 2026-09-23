@@ -55,8 +55,8 @@ and verification, and it fails visibly wherever the surface has a hole.
 Six amendments are implemented: `runtime_read_output`, `audio_list_buses` and
 `audio_configure_bus`, all recorded below with tri-engine feasibility evidence,
 plus `project_audit_assets`, `project_analyze_impact`,
-`runtime_explore_scene`, `didi_control_room`, `ui_list_controls` and
-`scene_call_method`. One
+`runtime_explore_scene`, `didi_control_room`, `ui_list_controls`,
+`scene_call_method` and `anim_add_library`. One
 amendment adds no name and changes an existing contract: `scene_close` reads
 real dirty state where the engine can report it. One is withdrawn: raising the engine floor to
 Godot 4.7, refused in favour of runtime capability detection so that 4.5 and 4.6
@@ -64,10 +64,9 @@ users keep support. The remaining candidates come from the
 August 2026 competitive review and are proposed, not accepted, in
 [Realignment Implementation Plan](REALIGNMENT_IMPLEMENTATION_PLAN.md):
 `runtime_read_output`, `ui_list_controls`, `godot_api_reference`, and an `until`
-parameter on the existing `runtime_step` (a change, not a new name). One is
-accepted and not yet implemented: `anim_add_library`.
+parameter on the existing `runtime_step` (a change, not a new name).
 
-### ACCEPTED: `anim_add_library`
+### ACCEPTED (IMPLEMENTED): `anim_add_library`
 
 | Field | Value |
 | :--- | :--- |
@@ -75,7 +74,7 @@ accepted and not yet implemented: `anim_add_library`.
 | **Failing workflow** | *Fade the menu in and prove it plays.* Reported from vibe session 16 (#770). The agent writes the fade as an `Animation` and wraps it in an `AnimationLibrary` with `resource_create`, and a real engine loads both correctly, with the `Color` keys intact. Then it has to give the menu's `AnimationPlayer` that library, and every route is closed. `scene_set_property` refuses `libraries` because a Dictionary is outside the scalar property contract. `scene_call_method` only calls methods the node's own script declares, and `add_animation_library` is an engine method. `eval_gdscript` is read-only. `resource_create` writes `.tres` and `.res`, not the scene. So `anim_list_tracks` on every `AnimationPlayer` the surface can build answers `{"animations": []}`, and `anim_play_track` has nothing to name. Two shipped tools are unreachable for any project the surface built. |
 | **Execution modes** | `live`. Editor sessions only, resolved against the edited scene root the same way `scene_set_property` and `script_attach_to_node` are. A game session is refused: a library added to a running game is gone when it stops, and the failing workflow needs it in the scene file. No offline mode, for the reason under **Why live only** below. |
 | **Safety class** | `create/set`. Dry run, no confirmation token. The change goes on the editor UndoRedo stack and `editor_undo` removes it, the same class as `script_attach_to_node`. It is additive only (`destructiveHint: false`): a library name the player already uses is refused rather than replaced, so the call cannot remove anything that was there before it. |
-| **Proving test** | Native: `AnimAddLibrary.RequestValidation` covers the argument bounds, the `res://` path shape, the `.tres`/`.res` suffix and the four characters the engine refuses in a library name; `AnimAddLibrary.Registration` requires it to be live only, editor only, a mutation with `dry_run` and no confirmation token, additive and not read-only; `AnimAddLibrary.NoEditorNoCall` requires the call and its dry run to be refused without an engine rather than answered. Godot integration: requests 2600 to 2625 run in their own editor batch against a scene of their own. A dry run reports the player's libraries and changes nothing; the real call adds a checked-in fixture library under a name; `anim_list_tracks` then lists its animation under the name `anim_play_track` takes; the saved scene file references the library as an `ExtResource`; `editor_undo` removes it and `editor_redo` puts it back, each read back through `anim_list_tracks`; and a name already in use, the same library under a second name, a name the engine refuses, a resource that is not an `AnimationLibrary`, a missing file, a malformed path and a node that is not an `AnimationPlayer` are each refused, with the name-in-use refusal also asserted on the dry run. |
+| **Proving test** | Native: `AnimAddLibrary.RequestValidation` covers the argument bounds, the `res://` path shape, the `.tres`/`.res` suffix and the four characters the engine refuses in a library name; `AnimAddLibrary.Registration` requires it to be live only, editor only, a mutation with `dry_run` and no confirmation token, additive and not read-only; `AnimAddLibrary.NoEditorNoCall` requires the call to be refused without an engine rather than answered, its dry run to say it read nothing rather than describe a plan, and a game session to be refused at the hook. Godot integration: requests 2600 to 2625 run in their own editor batch against a scene of their own. A dry run reports the player's libraries and changes nothing; the real call adds a checked-in fixture library under a name; `anim_list_tracks` then lists its animation under the name `anim_play_track` takes; the saved scene file references the library as an `ExtResource`; `editor_undo` removes it and `editor_redo` puts it back, each read back through `anim_list_tracks`; and a name already in use, the same library under a second name, a name the engine refuses, a resource that is not an `AnimationLibrary`, a missing file, a malformed path and a node that is not an `AnimationPlayer` are each refused, with the name-in-use refusal also asserted on the dry run. |
 | **Reviewer** | Accepted by Shane Wall on 2026-09-23 for #770. It is a mutation, so the security argument is recorded below; nobody else has reviewed it. |
 
 **What it will not do.** It adds one `AnimationLibrary` to one

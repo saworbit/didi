@@ -407,6 +407,7 @@ set(TEST_SOURCES
     tests/test_phase7c_profiler.cpp
     tests/test_phase7b_spatial.cpp
     tests/test_phase7b_anim.cpp
+    tests/test_anim_add_library.cpp
 )
 
 if(DIDI_BUILD_TESTS)

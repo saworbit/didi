@@ -1539,7 +1539,7 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
         "signal.listConnections", "signal.connect", "signal.disconnect", "signal.emit",
         "runtime.injectInput", "physics.raycast", "physics.raycastBatch",
         "physics.clearance", "vision.frustumQuery", "nav.queryPath",
-        "anim.listTracks", "anim.playTrack", "vision.setCameraTransform",
+        "anim.listTracks", "anim.playTrack", "anim.addLibrary", "vision.setCameraTransform",
         "vision.toggleDebugDraw", "tilemap.setCells", "tilemap.getUsedRect",
         "gridmap.setCells", "shader.listUniforms", "shader.setUniform",
         "preview.renderGhost", "preview.clearGhosts",

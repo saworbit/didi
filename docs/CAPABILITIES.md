@@ -35,7 +35,7 @@ Do not infer availability from a tool name or description. Do not call a tool wh
 
 ## Canonical tools
 
-The current source / Unreleased surface registers 116 canonical tool names. 113 are implemented in at least one mode; 3 remain reserved and return an MCP tool error. In other words, 113 canonical tools are implemented. Ten legacy names are registered separately, for exactly 126 `tools/list` entries. The latest documented release is 2.0.1; its historical surface is recorded in the changelog.
+The current source / Unreleased surface registers 117 canonical tool names. 114 are implemented in at least one mode; 3 remain reserved and return an MCP tool error. In other words, 114 canonical tools are implemented. Ten legacy names are registered separately, for exactly 127 `tools/list` entries. The latest documented release is 2.0.1; its historical surface is recorded in the changelog.
 
 | Execution modes | Canonical tools | Current behavior |
 | :--- | :--- | :--- |
@@ -61,6 +61,7 @@ The current source / Unreleased surface registers 116 canonical tool names. 113 
 | `live` | `physics_raycast_query`, `nav_query_path` | Editor or game. Reads an existing World2D/World3D and navigation map -- a game's root viewport's, or the edited scene's own in an editor; creates nothing and bakes nothing. |
 | `live` | `anim_list_tracks` | Editor or game. Reads an AnimationPlayer's library through the pinned AnimationMixer and Animation binds; never edits a key. |
 | `live` | `anim_play_track` | Game only. One `AnimationPlayer.play` call, then state is reread; `dispatched` is not completion. |
+| `live` | `anim_add_library` | Editor only. Adds an `AnimationLibrary` loaded from a `res://` file to a player in the edited scene through UndoRedo, and reports the animation names the player then answers to. Adds only: a name in use or a library already on the player is refused, not replaced. The scene saves a reference to the file, not a copy. |
 | `live` | `runtime_inject_input` | Game only. Builds every event before dispatching any through `Input.parse_input_event`; the count is calls made, not events accepted. |
 | `live` | `runtime_read_profiler` | Editor or game. Samples `Performance` monitors from the frame callback over a bounded window; one collector per session. |
 | `live` | `ui_hit_test` | Editor-only. Traverses bounded live Control state at a viewport-space point without synthesizing or injecting input. |
@@ -98,7 +99,7 @@ applies unweakened.
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `113/116`
+**Canonical implementation:** `114/117`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->

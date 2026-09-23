@@ -51,5 +51,10 @@ CallToolResult handleAnimPlayTrack(const ResolvedToolBinding& binding, const jso
     return sendPhase7LiveRequest(binding, args, ipc);
 }
 
+CallToolResult handleAnimAddLibrary(const ResolvedToolBinding& binding, const json& args,
+                                    std::shared_ptr<ipc::IIpcClient> ipc) {
+    return sendPhase7LiveRequest(binding, args, ipc);
+}
+
 } // namespace mcp
 } // namespace didi

@@ -1,17 +1,17 @@
 # Didi MCP Tool Reference
 
-Didi exposes 116 canonical tool names plus 10 legacy names (126 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
+Didi exposes 117 canonical tool names plus 10 legacy names (127 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
 
 The `_meta.didi` object returned by `tools/list` is authoritative. A registered tool with `implemented: false` is unavailable and returns an MCP tool error. Every tool carries `legacy`, and the ten legacy registrations carry `legacy: true`; the eight of those that resolve to a differently named tool also carry `canonical` and name it in a closing sentence of their description. Ten of the 126 names are duplicates, and without that an agent has no way to tell which of two identical listings to call, or why error data names a `canonical_tool` it cannot find.
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `113/116`
+**Canonical implementation:** `114/117`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `PARTIAL_DELIVERY`. The implementation is 113/116 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+Phase 7 is `PARTIAL_DELIVERY`. The implementation is 114/117 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 ## Status legend
 
@@ -698,6 +698,24 @@ Starts an animation on a running game's AnimationPlayer. Delivered under the Pha
 One `AnimationPlayer.play(name, -1, custom_speed, from_end)` call, then `is_playing` and `current_animation` are reread rather than trusted. The result is `{dispatched: true, animation_name, custom_speed, from_end, playing, outcome: "completed", rollback: "not_available"}`; `dispatched` is not completion, and no key is edited. A mutation with `dry_run` and no confirmation token.
 
 Errors: `400`, `404`, `409` editor session, `500`, `501`, `504` if the call itself fails.
+
+### `anim_add_library` — Live (editor only)
+
+Gives an AnimationPlayer in the edited scene an `AnimationLibrary` loaded from a file. It is the step between writing an animation with `resource_create` and playing it with `anim_play_track`. Added by [Surface Amendment](SURFACE_AMENDMENTS.md) for #770.
+
+- `animation_player_path` (`string`, 1..1024, required). Resolved in the edited scene; anything that is not an AnimationPlayer is `404`, and a player inside an instance the edited scene does not own is `409 node_not_owned`.
+- `library_path` (`string`, 1..1024, required). A normalised `res://` path ending in `.tres` or `.res`. The file is loaded through `ResourceLoader`, and the object must be an `AnimationLibrary`.
+- `library_name` (`string`, 0..256, default `""`). `""` is the player's default library, whose animations are played by their own names. Any other name makes them `name/animation`. Godot refuses `/`, `:`, `,` and `[` in a library name, so they are refused here first.
+
+The library goes on the edited scene's UndoRedo stack as `add_animation_library`, with `remove_animation_library` as its undo, and the player is then read back to confirm it holds that library under that name. The result is `{status: "success", animation_player_path, library_name, library_path, library_names, animations, animation_count, animations_truncated, undo_redo_registered: true, scene_saved: false, limitation}`. `animations` lists the names the player now answers to, which are the names `anim_play_track` takes, capped at 128. `library_names` lists every library the player holds afterwards.
+
+It only adds. A library name the player already uses is `409 animation_library_name_taken`, with `existing_library_path` when that library came from a file. The same library object under a second name is `409 animation_library_already_added`, because Godot holds one library under one name only. `editor_undo` takes an add back off. The file is referenced, not copied: `editor_save_scene` writes an `ExtResource`, in whichever form the running engine uses (4.5 writes a `libraries` Dictionary, 4.6 and later write one `libraries/<name>` property per library). The library file is shared by every scene that references it, and this tool never edits it.
+
+`dry_run` runs every check against the player and the file and stops before the undo action. The preview's `before` lists the player's `library_names` and the `animations_to_add`. No confirmation token.
+
+`anim_play_track` is game only, so the full workflow is `anim_add_library`, then `editor_save_scene`, then `runtime_launch`, then `anim_play_track`.
+
+Errors: `400` malformed request, path or name; `404` no player, not an AnimationPlayer, or no file at the path; `409` session kind, `node_not_owned`, `animation_library_name_taken`, `animation_library_already_added`; `422` `not_an_animation_library` (naming the class it found, with a hint when it is a bare `Animation`) or `animation_library_unloadable`; `500` if the player does not hold the library after the commit, in which case the action is undone and `outcome` says so; `501` missing bind.
 
 ### Reserved physics and navigation schemas — Unimplemented
 
