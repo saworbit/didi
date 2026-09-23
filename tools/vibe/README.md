@@ -33,7 +33,7 @@ twice.
 | `probes/bridge_exclusivity.py` | Two servers, one editor. What the second one is told, against what a server with no editor is told. |
 | `probes/blackboard_rules.py` | The blackboard's own parameter descriptions, tested against the handler behind them. |
 | `probes/engine_crash.py` | The editor killed mid-session: what the first call after it says, and what every call after that says instead. |
-| `probes/surface_census.py` | The same question asked of all 126 tools: who rejects an unknown argument, what `execution_mode` each reports, who answers with a bare string. |
+| `probes/surface_census.py` | The same question asked of every registered tool: who rejects an unknown argument, what `execution_mode` each reports, who answers with a bare string. |
 | `probes/handler_error_census.py` | The failures *behind* the argument check: arguments built from each tool's own schema, naming something absent, plus the calls that must be meaningful-and-wrong to reach a handler at all. |
 | `probes/empty_string_census.py` | `""` sent to every required string parameter, sorted by whether the schema carries `minLength` -- the string half of the question #484 asked about numbers. |
 | `probes/windows_path_forms.py` | What a case-insensitive filesystem, a device name and a dot segment do to a `res://` path the validator already accepted. Destroys files; throwaway sandbox only. |
