@@ -118,6 +118,23 @@ The three Phase 7 blockers are unchanged; the newest name is `anim_add_library`,
 
 ### Fixed
 
+- **`project_list_export_presets` listed presets Godot never loads, and
+  `project_export` tried to export them (#921).** Godot reads `[preset.0]`,
+  `[preset.1]` and so on and stops at the first number that is missing, and it
+  skips a preset whose platform it does not know without printing anything. A
+  preset after a gap, in a section spelled `[preset.01]`, or on a misspelled
+  platform such as `windows desktop`, `Windows` or `HTML5` was listed as an
+  ordinary preset, the dry run previewed an export of it, and the real call
+  ended in a `500 internal_error` carrying Godot's `Invalid export preset name`.
+  Each preset now says whether Godot will detect it (`detected`), and why not
+  (`not_detected`, with the missing number or the platform it meant), and the
+  list carries `detected_count`. `project_export` and its dry run refuse those
+  presets with `422` before any Godot starts. A platform Godot does not ship is
+  still handed to Godot, because an editor plugin or a GDExtension can register
+  one, and when Godot does not detect it the refusal is `404` with
+  `reason: "not_detected_by_engine"` and the presets Godot printed as
+  `detected_presets`. Measured on 4.5.1, 4.6.2 and 4.7.2 with
+  `tools/vibe/probes/export_preset_engine.py`.
 - **Upgrading the addon printed ten "Missing .uid file" warnings.** Godot 4.4
   and later keeps a `.uid` sidecar beside each script and the `.gdextension`,
   and the addon shipped none, so replacing the `addons/didi` folder to upgrade

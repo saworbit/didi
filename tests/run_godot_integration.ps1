@@ -2531,6 +2531,13 @@ try {
         # which engine answered (#617).
         (Tool-Request 517 "script_check_syntax" @{ file_path = "res://subject.gd" }),
         (Tool-Request 505 "project_export" @{ preset = "Phase5 Pack"; output_path = "res://phase5-output.pck"; mode = "pack"; timeout_seconds = 120 }),
+        # Two presets Godot never detects (#921). The stranded one comes after a
+        # gap in the numbering and is refused from the file before any Godot
+        # starts. The plugin platform is handed to Godot, the only one that can
+        # know no plugin registered it, and its refusal is a preset the engine
+        # did not find rather than a 500.
+        (Tool-Request 519 "project_export" @{ preset = "Phase5 Stranded"; output_path = "res://phase5-stranded.pck"; mode = "pack"; timeout_seconds = 120 }),
+        (Tool-Request 520 "project_export" @{ preset = "Phase5 Plugin Platform"; output_path = "res://phase5-plugin.pck"; mode = "pack"; timeout_seconds = 120 }),
         (Tool-Request 506 "gridmap_export_mesh_library" @{ source_scene = "res://phase5_mesh_source.tscn"; output_path = "res://phase5.meshlib"; generate_collisions = $true; timeout_seconds = 60 }),
         (Tool-Request 511 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
         (Tool-Request 507 "scene_open" @{ scene_path = "res://phase5_ui.tscn" }),
@@ -3178,7 +3185,20 @@ try {
     Assert-True ($notEditor.Count -eq ($authored.Count + $enginePlumbing.Count)) "The three origin values do not partition the connections."
 
     $phase5Presets = Tool-Payload $phase5ById[502]
-    Assert-True (@($phase5Presets.presets).Count -eq 1 -and $phase5Presets.presets[0].name -eq "Phase5 Pack") "Phase 5 export preset was not listed."
+    Assert-True (@($phase5Presets.presets).Count -eq 3 -and $phase5Presets.presets[0].name -eq "Phase5 Pack") "The three Phase 5 export presets were not all listed."
+    Assert-True ($phase5Presets.detected_count -eq 1 -and $phase5Presets.presets[0].detected -eq $true) "Only Phase5 Pack is detected by Godot, and the list said detected_count=$($phase5Presets.detected_count)."
+    $pluginPresetRow = @($phase5Presets.presets | Where-Object { $_.name -eq "Phase5 Plugin Platform" })[0]
+    Assert-True ($pluginPresetRow.detected -eq $false -and $pluginPresetRow.not_detected.reason -eq "platform_not_shipped") "A preset on a platform Godot does not ship was not listed as undetected."
+    $strandedPresetRow = @($phase5Presets.presets | Where-Object { $_.name -eq "Phase5 Stranded" })[0]
+    Assert-True ($strandedPresetRow.detected -eq $false -and $strandedPresetRow.not_detected.reason -eq "numbering_gap" -and $strandedPresetRow.not_detected.missing_index -eq 2) "A preset after a gap in the numbering was not listed as undetected."
+    Assert-True $phase5ById[519].result.isError "project_export accepted a preset stranded after a numbering gap."
+    $strandedExport = ($phase5ById[519].result.content[0].text | ConvertFrom-Json).error
+    Assert-True ($strandedExport.code -eq 422 -and $strandedExport.data.reason -eq "numbering_gap" -and $strandedExport.data.missing_index -eq 2) "The stranded preset was refused as $($strandedExport.code) $($strandedExport.data.reason), not as a numbering gap."
+    Assert-True ($null -eq $strandedExport.data.engine_output) "The stranded preset reached Godot, when the file alone says it cannot be exported."
+    Assert-True $phase5ById[520].result.isError "project_export reported success for a preset on a platform no plugin registered."
+    $pluginExport = ($phase5ById[520].result.content[0].text | ConvertFrom-Json).error
+    Assert-True ($pluginExport.code -eq 404 -and $pluginExport.data.reason -eq "not_detected_by_engine") "Godot's refusal of an undetected preset came back as $($pluginExport.code) $($pluginExport.data.code), not as not_detected_by_engine."
+    Assert-True (@($pluginExport.data.detected_presets) -contains "Phase5 Pack" -and @($pluginExport.data.detected_presets).Count -eq 1) "The refusal did not carry the one preset Godot printed as detected: $(@($pluginExport.data.detected_presets) -join ', ')"
     Assert-True ($phase5ById[502].result.content[0].text -notmatch "phase5-secret") "Export preset options leaked a secret value."
     # Which engine answered, as a field rather than only inside raw_output, and
     # whether it is the one this session is attached to (#617).

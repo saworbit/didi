@@ -368,6 +368,154 @@ TEST(Phase5, ExportPresetParserRejectsMalformedAndDuplicateNames) {
     ASSERT_TRUE(duplicate.empty());
 }
 
+namespace {
+
+std::string windowsPreset(int index, const std::string& name,
+                          const std::string& platform = "Windows Desktop",
+                          const std::string& section = "") {
+    const auto header = section.empty() ? "preset." + std::to_string(index) : section;
+    return "[" + header + "]\nname=\"" + name + "\"\nplatform=\"" + platform +
+           "\"\nrunnable=false\nexport_filter=\"all_resources\"\n\n[" + header +
+           ".options]\ncustom_template/debug=\"\"\n\n";
+}
+
+didi::json onlyPreset(const std::string& contents) {
+    const auto file = readExportPresets(contents);
+    ASSERT_TRUE(!file.malformed);
+    ASSERT_EQ(file.presets.size(), 1u);
+    return file.presets[0];
+}
+
+} // namespace
+
+// Each row is what Godot did with the same file on 4.5.1, 4.6.2 and 4.7.2,
+// measured by exporting it with --export-pack in
+// tools/vibe/probes/export_preset_engine.py. Every one of the undetected
+// presets used to be listed as an ordinary preset (#921).
+TEST(Phase5, ExportPresetsSayWhichOnesGodotDetects) {
+    // The engine reads [preset.0], [preset.1] and so on and stops at the first
+    // number that is missing.
+    const auto gap = readExportPresets(windowsPreset(0, "Other") + windowsPreset(2, "AfterGap"));
+    ASSERT_TRUE(!gap.malformed);
+    ASSERT_EQ(gap.presets.size(), 2u);
+    ASSERT_EQ(gap.presets[0]["detected"], true);
+    ASSERT_TRUE(!gap.presets[0].contains("not_detected"));
+    ASSERT_EQ(gap.presets[1]["detected"], false);
+    ASSERT_EQ(gap.presets[1]["not_detected"]["reason"], "numbering_gap");
+    ASSERT_EQ(gap.presets[1]["not_detected"]["missing_index"], 1);
+    ASSERT_TRUE(gap.presets[1]["not_detected"]["detail"].get<std::string>().find("[preset.1]") !=
+                std::string::npos);
+
+    const auto from_one = onlyPreset(windowsPreset(1, "FromOne"));
+    ASSERT_EQ(from_one["detected"], false);
+    ASSERT_EQ(from_one["not_detected"]["missing_index"], 0);
+
+    // It asks for "preset." and the number with no leading zero.
+    const auto padded = onlyPreset(windowsPreset(0, "Padded", "Windows Desktop", "preset.00"));
+    ASSERT_EQ(padded["detected"], false);
+    ASSERT_EQ(padded["not_detected"]["reason"], "section_not_read");
+    ASSERT_EQ(padded["not_detected"]["section"], "[preset.00]");
+
+    // A preset on a platform it does not know is skipped, and the next number
+    // is still read.
+    const auto after_unknown = readExportPresets(windowsPreset(0, "Console", "Nintendo Switch") +
+                                                 windowsPreset(1, "Windows"));
+    ASSERT_EQ(after_unknown.presets[0]["detected"], false);
+    ASSERT_EQ(after_unknown.presets[0]["not_detected"]["reason"], "platform_not_shipped");
+    ASSERT_TRUE(!after_unknown.presets[0]["not_detected"].contains("did_you_mean"));
+    ASSERT_EQ(after_unknown.presets[1]["detected"], true);
+
+    // The seven it ships, and the pre-4.3 Linux name it still reads.
+    for (const auto& platform : didi::offline::shippedExportPlatforms()) {
+        ASSERT_EQ(onlyPreset(windowsPreset(0, "P", platform))["detected"], true);
+    }
+    ASSERT_EQ(didi::offline::shippedExportPlatforms().size(), 7u);
+    ASSERT_EQ(onlyPreset(windowsPreset(0, "P", "Linux/X11"))["detected"], true);
+
+    // It matches the name exactly, so these are presets that silently do not
+    // exist. The first three are the ones the probe exported.
+    const std::vector<std::pair<std::string, std::string>> misspelled = {
+        {"windows desktop", "Windows Desktop"}, {"Windows", "Windows Desktop"},
+        {"HTML5", "Web"},                       {"linux/x11", "Linux"},
+        {"MacOS", "macOS"},                     {" Linux", "Linux"},
+    };
+    for (const auto& [written, meant] : misspelled) {
+        const auto preset = onlyPreset(windowsPreset(0, "P", written));
+        ASSERT_EQ(preset["detected"], false);
+        ASSERT_EQ(preset["not_detected"]["reason"], "misspelled_platform");
+        ASSERT_EQ(preset["not_detected"]["did_you_mean"], meant);
+    }
+}
+
+TEST(Phase5, ProjectExportRefusesAPresetGodotCannotDetectBeforeItStartsGodot) {
+    ScopedPhase5Project project("preset-not-detected");
+    std::ofstream("export_presets.cfg")
+        << windowsPreset(0, "Kept") << windowsPreset(1, "Console", "Nintendo Switch")
+        << windowsPreset(2, "Lower", "windows desktop") << windowsPreset(4, "Stranded");
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const auto listed = toolPayload(
+        registry.callTool("project_list_export_presets", didi::json::object()));
+    ASSERT_EQ(listed["preset_count"], 4);
+    ASSERT_EQ(listed["detected_count"], 1);
+
+    // The call and its dry run refuse alike, with the reason and what Godot
+    // will detect instead. No Godot is started: the refusal is the file's.
+    for (const bool dry_run : {false, true}) {
+        didi::json arguments = {{"preset", "Stranded"}, {"output_path", "res://out.pck"},
+                                {"mode", "pack"}};
+        if (dry_run) arguments["dry_run"] = true;
+        const auto stranded = registry.callTool("project_export", arguments);
+        ASSERT_TRUE(stranded.isError);
+        const auto error = toolPayload(stranded)["error"];
+        ASSERT_EQ(error["code"], 422);
+        ASSERT_EQ(error["data"]["reason"], "numbering_gap");
+        ASSERT_EQ(error["data"]["missing_index"], 3);
+        ASSERT_EQ(error["data"]["detected_presets"], didi::json::array({"Kept"}));
+        ASSERT_TRUE(!std::filesystem::exists("out.pck"));
+
+        arguments["preset"] = "Lower";
+        const auto lower = toolPayload(registry.callTool("project_export", arguments))["error"];
+        ASSERT_EQ(lower["code"], 422);
+        ASSERT_EQ(lower["data"]["reason"], "misspelled_platform");
+        ASSERT_EQ(lower["data"]["did_you_mean"], "Windows Desktop");
+    }
+
+    // A name the file does not have lists the presets the call would take,
+    // which is not the ones Godot will never detect.
+    const auto missing = toolPayload(registry.callTool(
+        "project_export",
+        {{"preset", "Nope"}, {"output_path", "res://out.pck"}, {"mode", "pack"}}))["error"];
+    ASSERT_EQ(missing["code"], 404);
+    ASSERT_EQ(missing["data"]["available_presets"], didi::json::array({"Kept", "Console"}));
+
+    // A platform Godot does not ship is handed to Godot, because a plugin can
+    // register one. The preview says which case it is.
+    const auto console = registry.callTool(
+        "project_export",
+        {{"preset", "Console"}, {"output_path", "res://out.pck"}, {"mode", "pack"}, {"dry_run", true}});
+    ASSERT_TRUE(!console.isError);
+    const auto before = toolPayload(console)["mutation_preview"]["changes"][0]["before"];
+    ASSERT_EQ(before["platform"], "Nintendo Switch");
+    ASSERT_EQ(before["not_detected"]["reason"], "platform_not_shipped");
+}
+
+TEST(Phase5, ReadsTheDetectedPresetsOutOfGodotsRefusal) {
+    // What 4.7.2 printed for a preset stranded after a gap, verbatim.
+    const std::string refusal =
+        "[ DONE ] first_scan_filesystem\r\n\r\n"
+        "ERROR: Invalid export preset name: AfterGap.\r\n"
+        "The following presets were detected in this project's `export_presets.cfg`:\r\n\r\n"
+        "        \"Other\"\r\n"
+        "        \"Second one\"\r\n\r\n"
+        "   at: _fs_changed (editor/editor_node.cpp:1417)\r\n"
+        "        \"not a preset\"\r\n";
+    ASSERT_EQ(didi::offline::detectedPresetsInEngineOutput(refusal),
+              std::vector<std::string>({"Other", "Second one"}));
+    ASSERT_TRUE(didi::offline::detectedPresetsInEngineOutput("ERROR: something else\n").empty());
+}
+
 #if defined(_WIN32)
 TEST(Phase5, WindowsArgvQuotingPreservesSpacesQuotesAndTrailingSlashes) {
     ASSERT_EQ(didi::offline::detail::quoteWindowsArgument(L"plain"), L"plain");
