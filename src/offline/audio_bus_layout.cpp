@@ -2,10 +2,10 @@
 
 #include "didi/common/config_file_syntax.hpp"
 #include "didi/common/project_path.hpp"
+#include "didi/offline/project_settings_file.hpp"
 
 #include <fstream>
 #include <map>
-#include <regex>
 #include <sstream>
 
 namespace didi::offline {
@@ -55,8 +55,7 @@ std::string unquote(const std::string& value) {
 // reached.
 constexpr const char* kDefaultLayoutPath = "res://default_bus_layout.tres";
 
-std::string layoutPathFrom(const std::filesystem::path& root) {
-    const auto scanned = config_file::scan(readFile(root / "project.godot"));
+std::string layoutPathFrom(const config_file::Scan& scanned) {
     std::string path = kDefaultLayoutPath;
     for (const auto& entry : scanned.entries) {
         if (entry.section != "audio" || entry.key != "buses/default_bus_layout") continue;
@@ -94,14 +93,34 @@ struct Bus {
     bool mute{false};
     bool solo{false};
     bool bypass{false};
-    bool seen{false};
 };
+
+// The index a `bus/<n>/...` key names, or nothing for any other key.
+std::optional<int> busIndex(const std::string& key, std::string& rest) {
+    if (!strings::startsWith(key, "bus/")) return std::nullopt;
+    const auto slash = key.find('/', 4);
+    if (slash == std::string::npos || slash == 4) return std::nullopt;
+    int index = 0;
+    for (size_t at = 4; at < slash; ++at) {
+        if (key[at] < '0' || key[at] > '9') return std::nullopt;
+        index = index * 10 + (key[at] - '0');
+        if (static_cast<size_t>(index) >= kMaxBuses) return std::nullopt;
+    }
+    rest = key.substr(slash + 1);
+    return index;
+}
 
 } // namespace
 
 Result<json> readAudioBusLayout(const std::string& root_dir) {
     const auto root = paths::projectPathFromUtf8(root_dir);
-    const auto layout_path = layoutPathFrom(root);
+    // A project.godot the engine refuses does not open, so no layout is loaded
+    // from it and a custom path in it names nothing the game runs on (#903).
+    const auto manifest = config_file::scan(readFile(root / "project.godot"));
+    if (auto unloadable = refuseUnloadable(manifest, "reading the bus layout it names")) {
+        return *unloadable;
+    }
+    const auto layout_path = layoutPathFrom(manifest);
 
     auto relative = layout_path;
     if (strings::startsWith(relative, "res://")) relative.erase(0, 6);
@@ -115,6 +134,7 @@ Result<json> readAudioBusLayout(const std::string& root_dir) {
         // disagreed and the machine readable half was the wrong one (#837).
         return json{{"layout_path", layout_path},
                     {"layout_present", false},
+                    {"layout_loads", false},
                     {"buses", json::array({defaultMasterBus()})},
                     {"bus_count", 1},
                     {"note", "No bus layout file is at layout_path, so this is the default "
@@ -122,24 +142,41 @@ Result<json> readAudioBusLayout(const std::string& root_dir) {
                              "here was chosen by the project."}};
     }
 
-    // bus/0/name = "Master", bus/0/mute = false, and so on. Indices are not
-    // guaranteed contiguous in the file, so they are collected by index and
-    // emitted in order.
-    static const std::regex entry(R"re(^\s*bus/(\d+)/([a-z_]+)\s*=\s*(.+?)\s*$)re");
-    std::map<int, Bus> buses;
-    std::istringstream lines(text);
-    std::string line;
-    while (std::getline(lines, line)) {
-        if (!line.empty() && line.back() == '\r') line.pop_back();
-        std::smatch match;
-        if (!std::regex_match(line, match, entry)) continue;
-        const int index = std::atoi(match[1].str().c_str());
-        if (index < 0 || static_cast<size_t>(index) >= kMaxBuses) continue;
-        const auto key = match[2].str();
-        const auto value = match[3].str();
+    // A layout the parser refuses loads as nothing, and AudioServer keeps the
+    // one Master bus it starts with. Measured on 4.5.1, 4.6.2 and 4.7.2 with a
+    // good bus above a broken value and with a value left open at the end: one
+    // bus either way. Reading the lines that did parse listed buses the game
+    // does not have, one of them muted (#903).
+    const auto scanned = config_file::scan(text);
+    if (const auto failure = config_file::loadFailure(scanned)) {
+        const auto where = failure->line > 0
+            ? "line " + std::to_string(failure->line) + " of the file"
+            : std::string("the file");
+        const auto why = failure->unterminated
+            ? std::string("it ends part-way through a value")
+            : "the value on " + where + " does not parse: " + failure->value_reason;
+        return json{{"layout_path", layout_path},
+                    {"layout_present", true},
+                    {"layout_loads", false},
+                    {"buses", json::array({defaultMasterBus()})},
+                    {"bus_count", 1},
+                    {"note", "Godot does not load the layout at layout_path, because " + why +
+                             ". The project runs on the default Master bus alone until the "
+                             "file is repaired."}};
+    }
 
-        auto& bus = buses[index];
-        bus.seen = true;
+    // bus/1/name = &"Music", bus/1/mute = false, and so on, under [resource].
+    // Read through the shared scan, which knows what the engine counts as a key,
+    // a comment and the end of a value.
+    std::map<int, Bus> buses;
+    for (const auto& entry : scanned.entries) {
+        if (entry.section != "resource") continue;
+        std::string key;
+        const auto index = busIndex(entry.key, key);
+        if (!index) continue;
+        // Any key under the index makes the bus, including an effect key.
+        auto& bus = buses[*index];
+        const auto value = std::string(strings::trim(entry.value_text));
         if (key == "name") bus.name = unquote(value);
         else if (key == "send") bus.send = unquote(value);
         else if (key == "volume_db") bus.volume_db = std::atof(value.c_str());
@@ -149,6 +186,15 @@ Result<json> readAudioBusLayout(const std::string& root_dir) {
         else if (key == "mute") bus.mute = config_file::booleanize(value);
         else if (key == "solo") bus.solo = config_file::booleanize(value);
         else if (key == "bypass_fx") bus.bypass = config_file::booleanize(value);
+    }
+
+    // Godot sizes the list to the highest index the file names, so an index it
+    // skips is a bus with an empty name, no send and every default. Measured on
+    // 4.5.1, 4.6.2 and 4.7.2: a file naming only bus/2 is three buses, and one
+    // naming only bus/1/effect/0/enabled is two (#905).
+    if (!buses.empty()) {
+        const int last = buses.rbegin()->first;
+        for (int index = 0; index < last; ++index) buses[index];
     }
 
     // Bus 0 is Master, and the file is usually silent about it.
@@ -170,13 +216,11 @@ Result<json> readAudioBusLayout(const std::string& root_dir) {
     // carried all six of its keys, including one added and left untouched.
     {
         auto& master = buses[0];
-        master.seen = true;
         if (master.name.empty()) master.name = "Master";
     }
 
     json array = json::array();
     for (const auto& [index, bus] : buses) {
-        if (!bus.seen) continue;
         array.push_back({{"index", index},
                          {"name", bus.name},
                          {"volume_db", bus.volume_db},
@@ -189,6 +233,7 @@ Result<json> readAudioBusLayout(const std::string& root_dir) {
     return json{
         {"layout_path", layout_path},
         {"layout_present", true},
+        {"layout_loads", true},
         {"buses", std::move(array)},
         {"bus_count", buses.size()},
         // Effects are stored as sub-resources rather than as bus properties, so

@@ -252,6 +252,15 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **`audio_list_buses` offline lists the buses the engine loads from the
+  files.** A layout Godot's parser refuses loads as nothing and the game runs
+  on Master alone, but the lines above the break were read as buses, one of
+  them muted. That case now answers one Master bus with `layout_loads: false`
+  and the line to repair. A `project.godot` the engine refuses is refused here
+  too, rather than followed to a custom layout path. An index the layout skips
+  is kept as the unnamed default bus Godot makes of it, so `bus_count` matches
+  AudioServer. The layout is read through the shared ConfigFile scan. (#903,
+  #905)
 - **A bus muted with `mute = 1` is reported as muted.** `audio_list_buses`
   compared `mute`, `solo` and `bypass_fx` to the word `true`, and Godot
   converts the value instead, so a hand written `1` was a muted bus to the

@@ -45,14 +45,25 @@ std::string settingName(const config_file::Entry& entry) {
     return settingName(entry.section, entry.key);
 }
 
+Result<std::string> readWholeFile(const std::filesystem::path& path) {
+    std::ifstream input(path, std::ios::binary);
+    if (!input.is_open()) return Error::notFound("project.godot cannot be opened for reading");
+    std::ostringstream contents;
+    contents << input.rdbuf();
+    if (input.bad()) return Error::internal("project.godot could not be read");
+    return contents.str();
+}
+
+} // namespace
+
 // A project.godot Godot will not load is ERR_PARSE_ERROR and the project does
 // not open at all: `--headless --path` falls through to the project manager and
 // ConfigFile.load answers 43. The trap is that load() still hands back the
 // sections it managed to read, so a partial parse looks like a parse, and a
 // reader that answered out of it described a project that does not run (#817,
 // #820). `config_file::loadFailure` is where that decision lives; this is the
-// wording for the three calls below, which all end in a write or a read that
-// would be about a project nobody can open.
+// wording for every call that would otherwise read or write a project nobody
+// can open, here and in the bus layout reader (#903).
 std::optional<Error> refuseUnloadable(const config_file::Scan& scanned, const char* verb) {
     const auto failure = config_file::loadFailure(scanned);
     if (!failure) return std::nullopt;
@@ -70,17 +81,6 @@ std::optional<Error> refuseUnloadable(const config_file::Scan& scanned, const ch
                           "so the project does not open and none of the settings in it are "
                           "what it runs on. Repair the value before " + verb + ".");
 }
-
-Result<std::string> readWholeFile(const std::filesystem::path& path) {
-    std::ifstream input(path, std::ios::binary);
-    if (!input.is_open()) return Error::notFound("project.godot cannot be opened for reading");
-    std::ostringstream contents;
-    contents << input.rdbuf();
-    if (input.bad()) return Error::internal("project.godot could not be read");
-    return contents.str();
-}
-
-} // namespace
 
 Result<std::string> settingLiteral(const json& value, int depth) {
     if (depth > 16) {
