@@ -64,7 +64,94 @@ users keep support. The remaining candidates come from the
 August 2026 competitive review and are proposed, not accepted, in
 [Realignment Implementation Plan](REALIGNMENT_IMPLEMENTATION_PLAN.md):
 `runtime_read_output`, `ui_list_controls`, `godot_api_reference`, and an `until`
-parameter on the existing `runtime_step` (a change, not a new name).
+parameter on the existing `runtime_step` (a change, not a new name). One is
+accepted and not yet implemented: `anim_add_library`.
+
+### ACCEPTED: `anim_add_library`
+
+| Field | Value |
+| :--- | :--- |
+| **Name** | `anim_add_library` |
+| **Failing workflow** | *Fade the menu in and prove it plays.* Reported from vibe session 16 (#770). The agent writes the fade as an `Animation` and wraps it in an `AnimationLibrary` with `resource_create`, and a real engine loads both correctly, with the `Color` keys intact. Then it has to give the menu's `AnimationPlayer` that library, and every route is closed. `scene_set_property` refuses `libraries` because a Dictionary is outside the scalar property contract. `scene_call_method` only calls methods the node's own script declares, and `add_animation_library` is an engine method. `eval_gdscript` is read-only. `resource_create` writes `.tres` and `.res`, not the scene. So `anim_list_tracks` on every `AnimationPlayer` the surface can build answers `{"animations": []}`, and `anim_play_track` has nothing to name. Two shipped tools are unreachable for any project the surface built. |
+| **Execution modes** | `live`. Editor sessions only, resolved against the edited scene root the same way `scene_set_property` and `script_attach_to_node` are. A game session is refused: a library added to a running game is gone when it stops, and the failing workflow needs it in the scene file. No offline mode, for the reason under **Why live only** below. |
+| **Safety class** | `create/set`. Dry run, no confirmation token. The change goes on the editor UndoRedo stack and `editor_undo` removes it, the same class as `script_attach_to_node`. It is additive only (`destructiveHint: false`): a library name the player already uses is refused rather than replaced, so the call cannot remove anything that was there before it. |
+| **Proving test** | Native: `AnimAddLibrary.RequestValidation` covers the argument bounds, the `res://` path shape, the `.tres`/`.res` suffix and the four characters the engine refuses in a library name; `AnimAddLibrary.Registration` requires it to be live only, editor only, a mutation with `dry_run` and no confirmation token, additive and not read-only; `AnimAddLibrary.NoEditorNoCall` requires the call and its dry run to be refused without an engine rather than answered. Godot integration: requests 2600 to 2625 run in their own editor batch against a scene of their own. A dry run reports the player's libraries and changes nothing; the real call adds a checked-in fixture library under a name; `anim_list_tracks` then lists its animation under the name `anim_play_track` takes; the saved scene file references the library as an `ExtResource`; `editor_undo` removes it and `editor_redo` puts it back, each read back through `anim_list_tracks`; and a name already in use, the same library under a second name, a name the engine refuses, a resource that is not an `AnimationLibrary`, a missing file, a malformed path and a node that is not an `AnimationPlayer` are each refused, with the name-in-use refusal also asserted on the dry run. |
+| **Reviewer** | Accepted by Shane Wall on 2026-09-23 for #770. It is a mutation, so the security argument is recorded below; nobody else has reviewed it. |
+
+**What it will not do.** It adds one `AnimationLibrary` to one
+`AnimationPlayer` and nothing else. It takes a `res://` path, never a
+filesystem path, and the path must be normalised and end in `.tres` or `.res`,
+checked by the same rule `script_attach_to_node` uses for a script. The file is
+loaded through `ResourceLoader` and the loaded object must be an
+`AnimationLibrary`; any other class is refused by name. It does not write the
+library file, edit an animation inside it, or add an animation to a library the
+player already has. That last one is deliberate: a library loaded from a file
+is shared by every scene that references it, so editing it through one player
+would change the others without saying so. It does not replace or remove a
+library. A player already holding a library under the requested name is refused
+with that library's path, and the way back from an add is `editor_undo`.
+
+**Why live only.** The scene file is not the thing to edit. The editor holds
+the open scene and writes it back on its next save, so a `.tscn` changed
+underneath it is overwritten. And the format is not stable across the supported
+range. Measured by saving the same scene from each engine:
+
+| Engine | What `ResourceSaver` writes for a player with the default library |
+| :--- | :--- |
+| 4.5.1 | `libraries = {&"": ExtResource("1_bwirh")}`, a Dictionary property |
+| 4.6.2 | `libraries/ = ExtResource("1_bwirh")`, one property per library |
+| 4.7.2 | `libraries/ = ExtResource("1_bwirh")`, one property per library |
+
+A text writer would need both forms and would have to track the next change.
+The engine call is the same on all three, and `editor_save_scene` then writes
+whichever form the running engine uses. The same measurement rules out the
+narrower route #770 suggested, letting `scene_set_property` take a Dictionary
+for `libraries`: from 4.6 the library slots are separate properties, so a
+Dictionary contract for that one name would be describing 4.5's storage.
+
+**Feasibility, established 2026-09-23.** Every bind is hash-identical across
+the supported range, measured with `--dump-extension-api` from each binary:
+
+| Method | 4.5.1 | 4.6.2 | 4.7.2 |
+| :--- | :--- | :--- | :--- |
+| `AnimationMixer.add_animation_library` | 618909818 | 618909818 | 618909818 |
+| `AnimationMixer.remove_animation_library` | 3304788590 | 3304788590 | 3304788590 |
+| `AnimationMixer.has_animation_library` | 2619796661 | 2619796661 | 2619796661 |
+| `AnimationMixer.get_animation_library` | 147342321 | 147342321 | 147342321 |
+| `AnimationMixer.get_animation_library_list` | 3995934104 | 3995934104 | 3995934104 |
+| `AnimationMixer.get_animation_list` | 1139954409 | 1139954409 | 1139954409 |
+| `AnimationLibrary.get_animation_list` | 3995934104 | 3995934104 | 3995934104 |
+
+The UndoRedo binds, `ResourceLoader.exists` and `ResourceLoader.load` are the
+ones every other editor mutation already uses. `Object.is_class` keeps the
+4.5 hash available on 4.7.2 as a compatibility bind, which is how
+`anim_list_tracks` already calls it.
+
+A headless probe on all three engines added a library through
+`add_animation_library`, packed and saved the scene, reloaded it, and found the
+animation on the reloaded player. The same probe found the refusals the tool
+has to make before the engine does:
+
+- A library name containing `/`, `:`, `,` or `[` returns `ERR_INVALID_PARAMETER`
+  and prints an engine error. The player addresses a named library's animations
+  as `library/animation`, which is why. Every other name tried was accepted,
+  including a space and non-ASCII text.
+- The same library object under a second name returns `ERR_ALREADY_EXISTS` and
+  prints an engine error.
+- A name already in use returns `ERR_ALREADY_EXISTS`.
+
+The tool checks all three first, so a refusal is a sentence the caller can act
+on rather than an error line in the editor's log. An empty library is accepted
+by the engine and by the tool. Animations in the default library, named `""`,
+are addressed by their own names; animations in any other library are addressed
+as `name/animation`, and the result says which names the player now answers to,
+because those are the names `anim_play_track` takes.
+
+**What an agent does next.** `anim_play_track` is game only. The workflow is
+`anim_add_library`, `editor_save_scene`, `runtime_launch`, then
+`anim_play_track` on the running game. Until the scene is saved the library is
+in the editor's open scene and its undo history, not on disk, and the result
+says so the way every other scene mutation does.
 
 ### ACCEPTED (IMPLEMENTED): `scene_call_method`
 
