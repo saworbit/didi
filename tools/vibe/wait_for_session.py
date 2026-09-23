@@ -14,11 +14,17 @@ log shows how long the editor took as a matter of record rather than folklore.
 
 Exit status is 0 once a session of that kind is alive, 1 if the wait ran out --
 so a workflow step can decide whether the probes after it mean anything.
+
+Only sessions on *this* project count. `runtime_list_sessions` reports engines
+from every project on the machine, so an unfiltered wait returned whichever
+editor was already up -- session seventeen waited on a 4.7.2 editor and was
+handed the 4.5.1 one on the next sandbox. `--any-project` keeps the old answer.
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
 from pathlib import Path
@@ -37,6 +43,15 @@ def sessions(project: Path, binary: str | None) -> list[dict]:
     return []
 
 
+def same_project(entry: dict, project: Path) -> bool:
+    reported = entry.get("project_path")
+    if not reported:
+        return False
+    def norm(path: str | Path) -> str:
+        return os.path.normcase(os.path.realpath(str(path)))
+    return norm(reported) == norm(project)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("project")
@@ -44,6 +59,8 @@ def main() -> int:
     parser.add_argument("--kind", default="editor", help="editor or game.")
     parser.add_argument("--timeout", type=float, default=120.0, help="Seconds.")
     parser.add_argument("--interval", type=float, default=3.0)
+    parser.add_argument("--any-project", action="store_true",
+                        help="Count a session on any project, not only this one.")
     args = parser.parse_args()
 
     project = Path(args.project)
@@ -56,7 +73,8 @@ def main() -> int:
         except Exception as error:  # a server that will not start is worth printing, not hiding
             print(f"attempt {attempt}: the server did not answer ({error})", flush=True)
             found = []
-        alive = [s for s in found if s.get("kind") == args.kind and s.get("alive") is not False]
+        alive = [s for s in found if s.get("kind") == args.kind and s.get("alive") is not False
+                 and (args.any_project or same_project(s, project))]
         print(
             f"attempt {attempt}: {len(found)} session(s), {len(alive)} alive {args.kind}",
             flush=True,

@@ -38,6 +38,11 @@ from typing import Any, Iterable
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
+import sys as _sys  # noqa: E402
+
+_sys.path.insert(0, str(Path(__file__).resolve().parent))
+from editor_log import EditorLog, EngineLine  # noqa: E402
+
 PROTOCOL_VERSION = "2024-11-05"
 CLIENT_INFO = {"name": "didi-vibe", "version": "1"}
 
@@ -120,8 +125,30 @@ class Session:
         extra_args: Iterable[str] = (),
         log_level: str = "ERROR",
         env: dict[str, str] | None = None,
+        editor_log: str | os.PathLike[str] | bool | None = None,
+        echo_engine: bool = True,
     ) -> None:
         self.binary = Path(binary) if binary else resolve_binary()
+        # The editor's own console, read beside every call. None finds the log
+        # sandbox.py writes next to the project; False turns it off. See
+        # editor_log.py for why this is on by default.
+        if editor_log is False:
+            self.editor_log = None
+        elif editor_log is None or editor_log is True:
+            self.editor_log = EditorLog.beside(project)
+        else:
+            self.editor_log = EditorLog(editor_log)
+        self.echo_engine = echo_engine
+        # Every engine line seen during this session, as (tool, line), and the
+        # lines the last call produced.
+        self.engine_lines: list[tuple[str, EngineLine]] = []
+        self.last_engine_lines: list[EngineLine] = []
+        if self.editor_log is not None:
+            before = self.editor_log.startup()
+            if echo_engine:
+                print(f"[engine] {self.editor_log.path} -- what the editor printed before this "
+                      f"session ({len(before)} line(s)):")
+                print(EditorLog.summary(before))
         argv = [str(self.binary), "--log-level", log_level]
         if project:
             argv += ["--project", str(project)]
@@ -199,11 +226,33 @@ class Session:
         return self._read()
 
     def call(self, name: str, arguments: dict | None = None) -> tuple[Any, bool | None]:
-        """Call a tool. Returns `(payload, is_error)`; see :func:`unwrap`."""
+        """Call a tool. Returns `(payload, is_error)`; see :func:`unwrap`.
+
+        With an editor log attached, anything the editor printed during the call
+        is printed under it and kept in `last_engine_lines`.
+        """
         response = self.request(
             "tools/call", {"name": name, "arguments": arguments if arguments is not None else {}}
         )
+        self.last_engine_lines = []
+        if self.editor_log is not None:
+            self.last_engine_lines = self.editor_log.delta()
+            for line in self.last_engine_lines:
+                self.engine_lines.append((name, line))
+                if self.echo_engine:
+                    print(f"      [engine after {name}] {line}")
         return unwrap(response)
+
+    def engine_summary(self) -> str:
+        """Every engine line this session saw, grouped by the call that caused it."""
+        if self.editor_log is None:
+            return "[engine] no editor log attached; the editor's own output was not read"
+        if not self.engine_lines:
+            return "[engine] the editor printed no ERROR or WARNING lines during this session"
+        from collections import Counter
+        grouped = Counter(f"{tool}: {line.text}" for tool, line in self.engine_lines)
+        body = "\n".join(f"  {count:4}x {text}" for text, count in grouped.most_common())
+        return "[engine] lines printed during this session, by call:\n" + body
 
     def tools(self) -> list[dict]:
         """The published tool surface, schemas included.
