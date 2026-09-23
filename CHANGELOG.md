@@ -252,6 +252,16 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **`retry_with` has one shape again.** It shipped with #705 as
+  `retry_with: {"overwrite": true}`, an object a caller merges into the
+  arguments it already has, and `project_export` still answers a colliding
+  output path that way. #894 added eight more refusals carrying the key and
+  wrote the name as a bare string, so one field had two types and a client had
+  to check which it had been handed before it could read either. The eight are
+  objects now. `docs/TOOL_REFERENCE.md` describes the key for the first time,
+  including that `retryable` stays false alongside it, because the same call
+  unchanged would be refused again and `retry_with` is the change that makes it
+  succeed. A check pins the shape. #897
 - **A rolled back mutation says `rolled_back` everywhere.** A mutation whose
   postcondition failed answers `outcome: rolled_back` when the undo took and
   `outcome: unknown` when it did not. Nine sites in `godot_bridge.cpp` do. The
