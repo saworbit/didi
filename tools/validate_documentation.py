@@ -122,6 +122,14 @@ COUNT_FACTS = {
         ("legacy", r"\b{n} legacy", "legacy names"),
         ("total", r"\b{n} registrations", "total registrations"),
     ),
+    # The integration guide tells a client author what tools/list returns, and
+    # it was outside this map: its total stayed one behind through the surface
+    # change that added anim_add_library while every checked document moved.
+    "docs/INTEGRATION_GUIDE.md": (
+        ("canonical", r"\b{n} canonical", "canonical tools"),
+        ("legacy", r"\b{n} legacy", "legacy names"),
+        ("total", r"\b{n} in total", "total registrations"),
+    ),
     # The sentence describing what this validator locks is itself a count
     # claim, and it drifted through two surface changes without anything
     # noticing, because this document was not in this map. A checker that

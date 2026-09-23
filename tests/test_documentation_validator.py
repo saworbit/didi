@@ -142,7 +142,10 @@ Current release: 1.4.0.
                 "The validator locks the documented 117 canonical/10 legacy/127 total "
                 "surface and the 114 implemented/3 unimplemented split.\n"
             ),
-            "INTEGRATION_GUIDE.md": "# Integration Guide\n",
+            "INTEGRATION_GUIDE.md": (
+                "# Integration Guide\n\n`tools/list` returns 117 canonical tools and 10 legacy "
+                "registrations, 127 in total.\n"
+            ),
             "LLM_INSTRUCTIONS.md": "# LLM Instructions\n\nStart with --project or DIDI_PROJECT_ROOT. Preview with dry_run and use confirmation_token when returned. Phase 7 is PARTIAL_DELIVERY at 114/117 implemented; all 3 names remain unimplemented and API-blocked.\n",
             "QUICKSTART.md": "# Quickstart\n\nStart with --project. Preview mutations with dry_run and use confirmation_token when required.\n",
             "RESOURCES_AND_PROMPTS.md": "# Resources And Prompts\n",

@@ -66,7 +66,7 @@ a useful report contains.
 | ✅ [**Current Capability Matrix**](docs/CAPABILITIES.md) | **Everyone** | Authoritative live, offline, unavailable, and unimplemented behavior. |
 | ♻️ [**Managed Recovery**](docs/MANAGED_RECOVERY.md) | **Users / Operators** | Opt-in owned editor, project copies, checkpoints, and recovery limits. |
 | 🎛️ [**Control Room**](docs/CONTROL_ROOM_DESIGN.md) | **Users / Operators** | The MCP Apps dashboard: bridge lights, live tool modes, safety posture, and Didi's own log, rendered inside your assistant. |
-| 🗺️ [**Roadmap & 113-Tool Surface**](docs/ROADMAP.md) | **Developers / Contributors** | Completed phases and technical build order. |
+| 🗺️ [**Roadmap & Tool Surface**](docs/ROADMAP.md) | **Developers / Contributors** | Completed phases and technical build order. |
 | 🧪 [**Phase 7 API Feasibility Evidence**](docs/PHASE_7_API_FEASIBILITY.md) | **Developers / Governance** | Reproducible Godot 4.5.1/4.7.2 feasibility results and the exact three blocked contracts. |
 | 📋 [**Phase 7 Approved Executable Plan**](docs/PHASE_7_IMPLEMENTATION_PLAN.md) | **Developers / Governance** | Approved atomic 83/83 plan, stopped at its feasibility gate. |
 | 🛠️ [**Tool Reference Manual**](docs/TOOL_REFERENCE.md) | **Developers / LLMs** | Current behavior and limits for 117 canonical tools plus 10 legacy names. |
