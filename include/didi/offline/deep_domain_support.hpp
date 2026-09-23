@@ -116,6 +116,13 @@ struct ExportPresetsFile {
     // The line the cause is on, where the cause has one. Zero for a cause that
     // is about the file as a whole or about a preset rather than a line.
     int line{0};
+    // The first [preset.N] number the engine finds missing, which is where it
+    // stops reading and where the next preset has to go. Zero for an empty
+    // file; meaningless when malformed is set.
+    int first_missing_index{0};
+    // Every section header the file declares, [preset.N.options] and anything
+    // else included, as the engine names them.
+    std::vector<std::string> section_names;
 };
 
 ExportPresetsFile readExportPresets(const std::string& contents);
@@ -152,6 +159,37 @@ std::vector<std::string> detectedPresetsInEngineOutput(const std::string& output
 // file can be in, and the call failed in every one, including for a preset name
 // the sibling tool in the same process could prove does not exist (#652).
 Result<json> findExportPreset(const std::string& preset);
+
+// What project_add_export_preset appends, and the file it leaves.
+struct ExportPresetAddition {
+    int index{0};
+    // Exactly the text appended, which is also what the dry run shows.
+    std::string section_text;
+    // The whole file after the append: the bytes that were there, then the
+    // section. Nothing already in the file is rewritten.
+    std::string contents;
+    bool file_created{false};
+    size_t presets_before{0};
+};
+
+// Plans one new export preset, or says why it cannot be added. `existing` is
+// the file's text, or nothing when there is no file. `export_path` is already
+// confined to the project and spelled relative to it, or empty.
+//
+// It writes the fewest keys that every supported engine loads without printing
+// an ERROR, measured on 4.5.1, 4.6.2 and 4.7.2 and recorded in the
+// project_add_export_preset amendment in docs/SURFACE_AMENDMENTS.md. The
+// editor fills in the rest from its own defaults, which differ by line.
+Result<ExportPresetAddition> planExportPresetAddition(const std::optional<std::string>& existing,
+                                                      const std::string& name,
+                                                      const std::string& platform,
+                                                      const std::string& export_path);
+
+// The same plan for the project in the current directory, from the arguments
+// project_add_export_preset receives: it reads export_presets.cfg and confines
+// export_path to the project. The call and its dry run both come through
+// here, so a preview refuses what the call would.
+Result<ExportPresetAddition> planExportPresetForProject(const json& args);
 
 // The presets alone, empty when the file is malformed. Kept for callers that
 // only need the list.

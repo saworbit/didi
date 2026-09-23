@@ -48,6 +48,10 @@ const std::unordered_set<std::string_view> kMutations = {
     // The same, and it only adds: a name already in use is refused rather
     // than replaced (#770).
     "anim_add_library",
+    // A file write with no editor undo behind it, and it destroys nothing: it
+    // appends one preset and refuses a name already in the file, so a dry run
+    // and no confirmation token (#779).
+    "project_add_export_preset",
     "editor_undo", "editor_redo", "editor_save_scene", "editor_reload_project",
     "project_set_autoload", "project_remove_autoload", "project_set_input_action",
     "project_remove_input_action", "project_set_setting", "viewport_set_camera_transform",
@@ -165,7 +169,10 @@ const std::unordered_set<std::string_view> kAdditiveOnly = {
     "signal_connect", "blackboard_task_create", "runtime_checkpoint",
     "instantiate_asset", "mutate_scene_tree",
     // A library name the player already uses is refused, never replaced.
-    "anim_add_library"
+    "anim_add_library",
+    // Appends one preset, keeps every byte already in the file, and refuses a
+    // name that is there.
+    "project_add_export_preset"
 };
 
 // Writers that land in the same state when the same call is made twice. This is

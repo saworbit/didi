@@ -3290,6 +3290,136 @@ try {
         Assert-True ($csharpBuild.success -eq $true -and $csharpBuild.has_errors -eq $false) "C# diagnostic build did not compile the fixture."
     }
 
+    # project_add_export_preset (#779), in two halves.
+    #
+    # Offline first, on a project of its own with no presets file, which is the
+    # state of a project nobody has exported by hand. The preset the tool writes
+    # is listed, exported as a pack with no export templates, and the pack is
+    # run as the game: the workflow the tool exists for, end to end.
+    $presetRoot = [IO.Path]::GetFullPath((Join-Path $buildRoot "godot_export_preset_fixture"))
+    if (Test-Path -LiteralPath $presetRoot) { Remove-Item -LiteralPath $presetRoot -Recurse -Force }
+    New-Item -ItemType Directory -Force -Path $presetRoot | Out-Null
+    [IO.File]::WriteAllText((Join-Path $presetRoot "project.godot"),
+        "config_version=5`n`n[application]`n`nconfig/name=`"Didi export preset fixture`"`nrun/main_scene=`"res://main.tscn`"`n")
+    [IO.File]::WriteAllText((Join-Path $presetRoot "main.gd"),
+        "extends Node`n`nfunc _ready() -> void:`n`tprint(`"DIDI_PRESET_PACK_RAN`")`n`tget_tree().quit()`n")
+    [IO.File]::WriteAllText((Join-Path $presetRoot "main.tscn"),
+        "[gd_scene load_steps=2 format=3]`n`n[ext_resource type=`"Script`" path=`"res://main.gd`" id=`"1`"]`n`n[node name=`"Main`" type=`"Node`"]`nscript = ExtResource(`"1`")`n")
+    $presetOfflineRequests = @(
+        (@{ jsonrpc = "2.0"; id = 2800; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
+        (Tool-Request 2801 "project_list_export_presets" @{}),
+        (Tool-Request 2802 "project_add_export_preset" @{ name = "Harness Pack"; platform = "Linux"; export_path = "build/harness.x86_64"; dry_run = $true }),
+        (Tool-Request 2803 "project_add_export_preset" @{ name = "Harness Pack"; platform = "Linux"; export_path = "build/harness.x86_64" }),
+        (Tool-Request 2804 "project_list_export_presets" @{}),
+        (Tool-Request 2805 "project_export" @{ preset = "Harness Pack"; output_path = "res://harness.pck"; mode = "pack"; timeout_seconds = 120 }),
+        (Tool-Request 2806 "project_add_export_preset" @{ name = "Harness Pack"; platform = "Web" })
+    )
+    $previousGodotBin = $env:GODOT_BIN
+    try {
+        $env:GODOT_BIN = $GodotExecutable
+        Push-Location $presetRoot
+        try {
+            $rawPresetOfflineResponses = Invoke-Didi -Requests $presetOfflineRequests -Arguments @("--project", $presetRoot)
+        }
+        finally {
+            Pop-Location
+        }
+    }
+    finally {
+        if ($null -eq $previousGodotBin) { Remove-Item Env:GODOT_BIN -ErrorAction SilentlyContinue }
+        else { $env:GODOT_BIN = $previousGodotBin }
+    }
+    $presetOfflineResponses = @($rawPresetOfflineResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.PSObject.Properties.Name -contains "id" })
+    Assert-True ($presetOfflineResponses.Count -eq $presetOfflineRequests.Count) "Expected $($presetOfflineRequests.Count) offline export preset responses, received $($presetOfflineResponses.Count)."
+    $presetOfflineById = @{}
+    foreach ($response in $presetOfflineResponses) { $presetOfflineById[[int]$response.id] = $response }
+
+    $noPresets = Tool-Payload $presetOfflineById[2801]
+    Assert-True ($noPresets.preset_count -eq 0 -and $noPresets.presets_file_exists -eq $false) "The export preset fixture did not start with no presets file."
+    $presetPreview = (Tool-Payload $presetOfflineById[2802]).mutation_preview.changes[0].before
+    Assert-True ($presetPreview.exists -eq $false -and $presetPreview.index -eq 0 -and $presetPreview.section_to_append -match 'name="Harness Pack"') "The dry run did not show the section it would write: $($presetPreview | ConvertTo-Json -Compress)"
+    $presetAdded = Tool-Payload $presetOfflineById[2803]
+    Assert-True ($presetAdded.file_created -eq $true -and $presetAdded.preset.detected -eq $true -and $presetAdded.preset.export_path -eq "build/harness.x86_64") "project_add_export_preset did not create a detected preset: $($presetAdded | ConvertTo-Json -Compress -Depth 5)"
+    Assert-True ($presetAdded.editor_reloaded -eq $false -and $presetAdded.execution_mode -eq "offline_fallback" -and $presetAdded.limitation -match "Export dialog") "An offline add did not say that no editor was told."
+    $presetsAfterAdd = Tool-Payload $presetOfflineById[2804]
+    Assert-True ($presetsAfterAdd.preset_count -eq 1 -and $presetsAfterAdd.detected_count -eq 1 -and $presetsAfterAdd.presets[0].name -eq "Harness Pack") "project_list_export_presets did not list the added preset."
+    $presetExport = Tool-Payload $presetOfflineById[2805]
+    Assert-True ($presetExport.success -eq $true -and $presetExport.size_bytes -gt 0) "project_export could not export the preset project_add_export_preset wrote."
+    Assert-True $presetOfflineById[2806].result.isError "project_add_export_preset replaced a preset name already in the file."
+    $presetTaken = ($presetOfflineById[2806].result.content[0].text | ConvertFrom-Json).error
+    Assert-True ($presetTaken.code -eq 409 -and $presetTaken.data.code -eq "already_exists") "A name in use was refused as $($presetTaken.code) $($presetTaken.data.code)."
+    Assert-True (@([IO.File]::ReadAllLines((Join-Path $presetRoot "export_presets.cfg")) -match '^\[preset\.\d+\]$').Count -eq 1) "A refused add changed export_presets.cfg."
+
+    # The pack is the game. Run on its own, with no project beside it.
+    $packRunDirectory = Join-Path $buildRoot "godot_export_preset_pack_run"
+    New-Item -ItemType Directory -Force -Path $packRunDirectory | Out-Null
+    $packStdoutPath = Join-Path $buildRoot "godot_export_preset_pack_stdout.log"
+    $packStderrPath = Join-Path $buildRoot "godot_export_preset_pack_stderr.log"
+    $packRun = Start-Process -FilePath $GodotExecutable `
+        -ArgumentList @("--headless", "--main-pack", (Join-Path $presetRoot "harness.pck")) `
+        -WorkingDirectory $packRunDirectory -PassThru -Wait -WindowStyle Hidden `
+        -RedirectStandardOutput $packStdoutPath -RedirectStandardError $packStderrPath
+    $packRunOutput = @(Get-Content -LiteralPath $packStdoutPath, $packStderrPath -ErrorAction SilentlyContinue)
+    Assert-True (@($packRunOutput -match "DIDI_PRESET_PACK_RAN").Count -eq 1) "The pack exported from the added preset did not run as the game (exit $($packRun.ExitCode)): $($packRunOutput -join ' | ')"
+    Assert-True (@($packRunOutput -match '^\s*(ERROR|SCRIPT ERROR|USER ERROR):').Count -eq 0) "The pack exported from the added preset printed engine errors: $(@($packRunOutput -match '^\s*(ERROR|SCRIPT ERROR|USER ERROR):') -join ' | ')"
+
+    # Then with the editor attached. An open editor reads export_presets.cfg
+    # when it starts and writes its own list back over the file the next time
+    # any preset changes, so the tool has to make it read the file again. The
+    # probe script makes the editor save the list it holds, and the preset has
+    # to be in what it writes. Without the re-read it is not, because the
+    # editor started before the preset existed. After the Phase 5 batch, which
+    # still needs this project's presets as they were.
+    #
+    # Those presets include one stranded after a gap in the numbering (#921),
+    # so the first answer is a refusal, from the call and its dry run alike,
+    # and neither touches the file. The gap is then closed the way a person
+    # would close it, and the preset added.
+    $presetGapRequests = @(
+        (@{ jsonrpc = "2.0"; id = 2820; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
+        (Tool-Request 2821 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
+        (Tool-Request 2822 "project_add_export_preset" @{ name = "Harness Live"; platform = "Linux"; dry_run = $true }),
+        (Tool-Request 2823 "project_add_export_preset" @{ name = "Harness Live"; platform = "Linux" })
+    )
+    $presetsWithGap = [IO.File]::ReadAllText((Join-Path $fixtureRoot "export_presets.cfg"))
+    $rawPresetGapResponses = Invoke-Didi -Requests $presetGapRequests -Arguments @("--project", $fixtureRoot)
+    $presetGapResponses = @($rawPresetGapResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.PSObject.Properties.Name -contains "id" })
+    Assert-True ($presetGapResponses.Count -eq $presetGapRequests.Count) "Expected $($presetGapRequests.Count) export preset gap responses, received $($presetGapResponses.Count)."
+    foreach ($response in @($presetGapResponses | Where-Object { $_.id -in @(2822, 2823) })) {
+        Assert-True $response.result.isError "Request $($response.id) added a preset to a file with a gap in its numbering."
+        $gapRefusal = ($response.result.content[0].text | ConvertFrom-Json).error
+        Assert-True ($gapRefusal.code -eq 409 -and $gapRefusal.data.reason -eq "numbering_gap" -and $gapRefusal.data.missing_index -eq 2 -and @($gapRefusal.data.stranded_presets) -contains "Phase5 Stranded") "Request $($response.id) refused a gapped file as $($gapRefusal.code) $($gapRefusal.data.reason) missing $($gapRefusal.data.missing_index)."
+    }
+    Assert-True ([IO.File]::ReadAllText((Join-Path $fixtureRoot "export_presets.cfg")) -ceq $presetsWithGap) "A refused add changed export_presets.cfg."
+    [IO.File]::WriteAllText((Join-Path $fixtureRoot "export_presets.cfg"), $presetsWithGap.Substring(0, $presetsWithGap.IndexOf("[preset.3]")))
+
+    $presetLiveRequests = @(
+        (@{ jsonrpc = "2.0"; id = 2810; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
+        (Tool-Request 2811 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
+        (Tool-Request 2812 "project_add_export_preset" @{ name = "Harness Live"; platform = "Linux" }),
+        (Tool-Request 2813 "scene_open" @{ scene_path = "res://main.tscn" }),
+        (Tool-Request 2814 "scene_instantiate_node" @{ node_type = "Node"; parent_path = "/root/SmokeRoot"; name = "PresetSaveProbe" }),
+        (Tool-Request 2815 "script_attach_to_node" @{ target_node = "/root/SmokeRoot/PresetSaveProbe"; script_path = "res://export_preset_save_probe.gd" }),
+        (Tool-Request 2816 "scene_call_method" @{ target_node = "/root/SmokeRoot/PresetSaveProbe"; method_name = "force_preset_save"; arguments = @(); timeout_seconds = 20 }),
+        (Tool-Request 2817 "scene_remove_node" @{ target_node = "/root/SmokeRoot/PresetSaveProbe" })
+    )
+    # --yolo for scene_call_method, the same reason as its own batch above.
+    $rawPresetLiveResponses = Invoke-Didi -Requests $presetLiveRequests -Arguments @("--project", $fixtureRoot, "--yolo")
+    $presetLiveResponses = @($rawPresetLiveResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.PSObject.Properties.Name -contains "id" })
+    Assert-True ($presetLiveResponses.Count -eq $presetLiveRequests.Count) "Expected $($presetLiveRequests.Count) live export preset responses, received $($presetLiveResponses.Count)."
+    $presetLiveById = @{}
+    foreach ($response in $presetLiveResponses) { $presetLiveById[[int]$response.id] = $response }
+    $presetLive = Tool-Payload $presetLiveById[2812]
+    Assert-True ($presetLive.editor_reloaded -eq $true -and $presetLive.execution_mode -eq "live") "With an editor attached, project_add_export_preset did not make it read the file: $($presetLive | ConvertTo-Json -Compress -Depth 5)"
+    Assert-True ((Tool-Payload $presetLiveById[2816]).returned -eq $true) "The probe script could not make the editor save its presets: $($presetLiveById[2816].result.content[0].text)"
+    $presetsSavedByEditor = [IO.File]::ReadAllText((Join-Path $fixtureRoot "export_presets.cfg"))
+    # The editor's own writer puts keys in every preset that the tool never
+    # writes, so their presence says the file is the editor's list.
+    Assert-True ($presetsSavedByEditor -match "(?m)^script_export_mode=") "The editor did not save its presets, so the check below proves nothing."
+    Assert-True ($presetsSavedByEditor -match '(?m)^name="Harness Live"$') "The editor wrote its presets and dropped the one project_add_export_preset added: it never read the file again."
+    Assert-True ($presetsSavedByEditor -notmatch "didi/harness_forced_save") "The probe's own preset reached the file."
+    Assert-True (-not $presetLiveById[2817].result.isError) "The export preset probe node could not be removed."
+
     # Delivered signal tools, end to end through the MCP surface against a live editor.
     Assert-True (-not $byId[20].result.isError) "signal_connect failed against a live editor session: $($byId[20].result.content[0].text)"
     $connectPayload = Tool-Payload $byId[20]

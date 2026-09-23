@@ -10,14 +10,14 @@ Every number here is derived from the suites themselves rather than written down
 
 | Measure | Count |
 | --- | ---: |
-| Automated tests | **1245** |
-| Live-harness assertions | 1191 |
+| Automated tests | **1253** |
+| Live-harness assertions | 1214 |
 
 The badge in the [README](../README.md) shows the automated test total. Harness assertions are counted separately because they are assertions inside one live scenario, not independently runnable cases; adding them together would flatter the number.
 
 ## Native C++ suite (`didi_tests`)
 
-**822 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
+**829 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
 
 | Suite | Tests |
 | --- | ---: |
@@ -33,6 +33,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `EditorHook` | 5 |
 | `EngineDiagnostics` | 7 |
 | `ErrorData` | 3 |
+| `ExportPresetAdd` | 7 |
 | `ExpressionSandbox` | 7 |
 | `GDScript` | 24 |
 | `Hierarchy` | 9 |
@@ -92,7 +93,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 
 ## Python contract suites (`tests/test_*.py`)
 
-**423 tests.** Derived from `test_*` methods on every `unittest.TestCase` subclass, read with `ast`.
+**424 tests.** Derived from `test_*` methods on every `unittest.TestCase` subclass, read with `ast`.
 
 | File | Tests |
 | --- | ---: |
@@ -116,17 +117,17 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `test_phase7_signal_admission.py` | 3 |
 | `test_refusal_codes.py` | 10 |
 | `test_test_inventory.py` | 25 |
-| `test_tool_output_schema_contract.py` | 4 |
+| `test_tool_output_schema_contract.py` | 5 |
 | `test_vendored_versions.py` | 23 |
 | `test_yolo_mode.py` | 10 |
 
 ## Live Godot harness (`tests/*.ps1`)
 
-**1191 assertions.** Derived from `Assert-True` call sites. The harness is one long live scenario rather than a set of named cases, so this counts assertions and says so.
+**1214 assertions.** Derived from `Assert-True` call sites. The harness is one long live scenario rather than a set of named cases, so this counts assertions and says so.
 
 | File | Assertions |
 | --- | ---: |
-| `run_godot_integration.ps1` | 1191 |
+| `run_godot_integration.ps1` | 1214 |
 
 ## What is not counted here
 

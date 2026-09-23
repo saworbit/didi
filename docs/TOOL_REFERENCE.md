@@ -1,17 +1,17 @@
 # Didi MCP Tool Reference
 
-Didi exposes 117 canonical tool names plus 10 legacy names (127 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
+Didi exposes 118 canonical tool names plus 10 legacy names (128 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
 
 The `_meta.didi` object returned by `tools/list` is authoritative. A registered tool with `implemented: false` is unavailable and returns an MCP tool error. Every tool carries `legacy`, and the ten legacy registrations carry `legacy: true`; the eight of those that resolve to a differently named tool also carry `canonical` and name it in a closing sentence of their description. Ten of the listed names are duplicates, and without that an agent has no way to tell which of two identical listings to call, or why error data names a `canonical_tool` it cannot find.
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `114/117`
+**Canonical implementation:** `115/118`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `PARTIAL_DELIVERY`. The implementation is 114/117 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+Phase 7 is `PARTIAL_DELIVERY`. The implementation is 115/118 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 ## Status legend
 
@@ -1653,6 +1653,45 @@ Godot writes `export_presets.cfg` the first time a preset is added, so a project
 
 
 A project with no export presets answers the same way whether or not `export_presets.cfg` is on disk: `preset_count: 0`, an empty `presets` list, and `presets_file_exists` saying which case it is. A file that is there and cannot be parsed is the separate state and is refused with `422` and `code: "unprocessable"`, carrying `declared_preset_sections` so "there is nothing here" and "there is something here I cannot read" are answerable. The refusal names which of the six causes it is: `reason` is a stable token (`truncated_value`, `unloadable_value`, `no_section_header`, `key_before_section`, `incomplete_preset`, `duplicate_preset_name`), the message says what was found, and `line` is published where the cause has one. The first cause found is the one reported. The remedies differ, which is why one sentence for all of them was not enough: the Export dialog will not open a file that does not parse, so it is a remedy for a duplicate name and not for a truncated write. A valid ini holding sections that are not presets is the first case, not the second: its keys are skipped the way `[preset.N.options]` keys are. A file with content but no section the engine honours at all is the second. Section names and keys are read by the engine's rules: `[ preset.0 ]` is the preset section, `#` does not start a comment, and a `#` line with no `=` joins forward into the next key -- so a trailing note leaves the presets intact and a note above `platform` leaves a preset the engine has no platform for, which is refused rather than listed. Values are read by them too. `runnable` is read the way the engine reads it rather than compared against the two words Godot's own writer emits: the value is parsed and converted, so a number decides on being zero and `runnable=1` is a runnable preset rather than a file that could not be parsed. A value Godot's parser will not start, such as `export_path=)`, is `ERR_PARSE_ERROR` for the whole file and not for that one field: Godot's own answer is `Invalid export preset name` with an empty list of detected presets, even though the keys ahead of the bad value parse. So it is the unparseable case rather than a preset with an odd path, and `project_export` refuses it through the same code.
+
+### `project_add_export_preset` — Offline and live
+
+Adds one export preset to the project-root `export_presets.cfg`, which `project_export` needs and a project nobody has exported by hand does not have (#779). Takes `name`, `platform` and an optional `export_path`, and supports `dry_run`. There is no confirmation token: it only adds.
+
+`platform` is one of the seven export platforms Godot ships, spelled exactly: `Windows Desktop`, `Linux`, `macOS`, `Android`, `iOS`, `Web` or `visionOS`. The schema publishes them as an enum, so a client can offer exactly those, and any other value is refused with the list. `name` is 1 to 256 bytes on one line with no control characters, and is written with the `ConfigFile` string escapes, so a quote, a backslash or a bracket reads back unchanged. `export_path` is where the editor's Export dialog proposes to write the build. It is confined to the project the way `project_export`'s `output_path` is, may be given as `res://`, and is stored relative to the project, the way the editor stores a path inside it.
+
+It writes the fewest keys that 4.5.1, 4.6.2 and 4.7.2 all load with no ERROR or WARNING line, and leaves everything else to the editor, which fills in its own defaults when it loads the preset. The three lines save a preset differently, and 4.7 keeps the runnable flag in a section of its own, so writing more would mean writing one line's format for all three. For a preset numbered `N`:
+
+```ini
+[preset.N]
+
+name="<name>"
+platform="<platform>"
+runnable=false
+export_filter="all_resources"
+include_filter=""
+exclude_filter=""
+export_path="<export_path>"
+
+[preset.N.options]
+
+custom_template/debug=""
+```
+
+A missing file is created. An existing one is appended to: every byte already there is kept, the new section starts after a blank line, and a file written with CRLF line endings gets its section in CRLF. `N` is the first number after the unbroken run from 0. Refused, at the dry run and on the call alike, and without touching the file:
+
+| Refusal | Why |
+| :--- | :--- |
+| `409 already_exists` | The file has a preset with this name, on any platform. Godot exports the first preset with a name, so a second could never be reached. `existing` says where the first one is. |
+| `409` with `reason: "numbering_gap"` | The file already has a gap, and Godot never reads the presets after it. Adding one would strand it with them or bring them all back, so the refusal names `missing_index` and the `stranded_presets` and asks for the sections to be renumbered first. |
+| `409` with `reason: "orphan_options_section"` | The file has a `[preset.N.options]` section with no `[preset.N]`, and Godot would read those options as the new preset's. |
+| `422 unprocessable` | The file is one `project_list_export_presets` refuses, with the same `reason`. Appending to a file Godot cannot parse would still leave a project with no presets. |
+
+The result carries the new `preset` as `project_list_export_presets` now reads it, with `detected: true`, plus `written_to`, `file_created`, `section_written` (exactly the text appended), `preset_count` and `next_step`. The dry run's change carries the same text as `before.section_to_append`, with `before.index` and `before.exists`.
+
+An open editor reads `export_presets.cfg` once, when it starts, and writes its own list of presets back over the file 0.8 seconds after any preset changes in its Export dialog, so a preset written underneath it is lost with no error anywhere. With an editor session attached, the tool writes the file and then has the bridge make the editor read it again, by adding and removing an export platform, which is the one public event that makes it reload its presets. It answers after the editor's next frame, which is when the reload happens, and reports `editor_reloaded: true` and `execution_mode: "live"`. If the editor refuses, the file is still written, because it is what `project_export` reads, and `editor_reload_error` says why the editor was not told. With no session attached the result is `offline_fallback` with `editor_reloaded: false`, and `limitation` says that an editor open on the project without Didi keeps its own list until it restarts. A game session is refused, as it is for every project writer, because a running game holds no presets. Two things are not handled: an edit made in the Export dialog in the 0.8 seconds before the call is replaced by the file, and what an Export dialog that is open at that moment shows has only been checked headless. See [Surface Amendments](SURFACE_AMENDMENTS.md) for the measurements.
+
+`project_export` with the same name and `mode: "pack"` then writes a `.pck` with no export templates installed. A release or debug build needs the templates for the preset's platform.
 
 ### `project_export` — Offline
 

@@ -10,6 +10,7 @@ shape cannot be observed here does not declare a schema in the first place.
 
 import json
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -59,6 +60,28 @@ OFFLINE_CALLS = {
     "script_reflect_class": {"class_name": "Node2D"},
 }
 
+# Tools that write to the project. They run against a throwaway project of
+# their own, because the fixture every other call here reads is the source tree.
+SCRATCH_PROJECT_CALLS = {
+    "project_add_export_preset": {"name": "Contract", "platform": "Linux"},
+}
+
+
+def _start_on_scratch_project(executable):
+    """A server on an empty project that is deleted with the returned directory."""
+    directory = tempfile.TemporaryDirectory(prefix="didi-schema-contract-")
+    Path(directory.name, "project.godot").write_text(
+        'config_version=5\n\n[application]\n\nconfig/name="scratch"\n', encoding="utf-8"
+    )
+    process = subprocess.Popen(
+        [str(executable), "--project", directory.name],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    )
+    return directory, process
+
 
 # One resolver for every test that drives the binary. tests/ is imported two
 # ways -- as the top level directory by unittest discover, and as tests.<module>
@@ -87,21 +110,27 @@ class ToolOutputSchemaContractTests(unittest.TestCase):
             tool["name"]: tool
             for tool in cls._request("tools/list", {}, 2)["result"]["tools"]
         }
+        cls.scratch_directory, cls.scratch_process = _start_on_scratch_project(cls.executable)
+        cls._request("initialize", {"protocolVersion": "2024-11-05"}, 1, cls.scratch_process)
 
     @classmethod
     def tearDownClass(cls):
         cls.process.kill()
+        cls.scratch_process.kill()
+        cls.scratch_process.wait()
+        cls.scratch_directory.cleanup()
 
     @classmethod
-    def _request(cls, method, params, identifier):
-        cls.process.stdin.write(
+    def _request(cls, method, params, identifier, process=None):
+        process = process or cls.process
+        process.stdin.write(
             json.dumps(
                 {"jsonrpc": "2.0", "id": identifier, "method": method, "params": params}
             )
             + "\n"
         )
-        cls.process.stdin.flush()
-        line = cls.process.stdout.readline()
+        process.stdin.flush()
+        line = process.stdout.readline()
         if not line:
             raise RuntimeError("didi produced no response")
         return json.loads(line)
@@ -124,16 +153,18 @@ class ToolOutputSchemaContractTests(unittest.TestCase):
                 # answer needs an engine or an attached session has nothing
                 # offline that can. Absence therefore means unspecified,
                 # uniformly, rather than "this tool is special" (#509).
+                calls = {**OFFLINE_CALLS, **SCRATCH_PROJECT_CALLS}
                 self.assertIn(
                     name,
-                    OFFLINE_CALLS,
+                    calls,
                     "a tool declares an outputSchema but is never exercised here, so "
                     "the schema is an unverified promise",
                 )
                 response = self._request(
                     "tools/call",
-                    {"name": name, "arguments": OFFLINE_CALLS[name]},
+                    {"name": name, "arguments": calls[name]},
                     100 + declared.index(name),
+                    self.scratch_process if name in SCRATCH_PROJECT_CALLS else None,
                 )
                 result = response["result"]
                 self.assertFalse(result.get("isError"), f"{name} returned an error")
@@ -248,6 +279,39 @@ class OfflineDispatchContractTests(unittest.TestCase):
                 payload = json.loads(result["content"][0]["text"])
                 self.assertNotEqual(payload["execution_mode"], "live")
                 self.assertEqual(payload["execution_mode"], expected)
+
+    def test_an_offline_writer_answers_with_no_session_attached(self):
+        # project_add_export_preset writes the file itself in both modes. If it
+        # stopped advertising offline_fallback, the standalone process would
+        # refuse it with no editor, and only a run through the binary sees that.
+        directory, process = _start_on_scratch_project(_executable())
+        try:
+            for identifier, (method, params) in enumerate(
+                [
+                    ("initialize", {"protocolVersion": "2024-11-05"}),
+                    ("tools/call", {"name": "project_add_export_preset",
+                                    "arguments": {"name": "Offline", "platform": "Web"}}),
+                ],
+                start=1,
+            ):
+                process.stdin.write(json.dumps(
+                    {"jsonrpc": "2.0", "id": identifier, "method": method, "params": params}
+                ) + "\n")
+                process.stdin.flush()
+                answer = json.loads(process.stdout.readline())
+            result = answer["result"]
+            self.assertFalse(result.get("isError"), result["content"][0]["text"])
+            payload = json.loads(result["content"][0]["text"])
+            self.assertEqual(payload["execution_mode"], "offline_fallback")
+            self.assertFalse(payload["editor_reloaded"])
+            self.assertIn(
+                'name="Offline"',
+                Path(directory.name, "export_presets.cfg").read_text(encoding="utf-8"),
+            )
+        finally:
+            process.kill()
+            process.wait()
+            directory.cleanup()
 
 
 if __name__ == "__main__":

@@ -248,6 +248,17 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
          "How long the verification run may take before the apply is abandoned."},
         {"project_verify_changes.timeout_seconds",
          "How long the verification run may take before it is abandoned."},
+        {"project_add_export_preset.name",
+         "The preset's name, which project_export's preset argument then takes. It must not be "
+         "a name the file already has, because Godot exports the first preset with a name and "
+         "the second could never be reached. One line, no control characters."},
+        {"project_add_export_preset.platform",
+         "The export platform, spelled exactly as Godot names it. The same seven on every "
+         "supported line; Godot skips a preset on any other name without a word."},
+        {"project_add_export_preset.export_path",
+         "Where the editor's Export dialog proposes to write the build, relative to the project "
+         "or as res://. Optional: project_export takes its own output_path either way. Stored "
+         "relative to the project, the way the editor stores a path inside it."},
         {"project_export.preset",
          "The export preset name, exactly as export_presets.cfg spells it."},
         {"project_export.output_path",

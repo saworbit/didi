@@ -321,6 +321,7 @@ ExportPresetsFile readExportPresets(const std::string& contents) {
     // project_export's dry run previewed an export of them that the engine
     // then refused (#921). Measured on 4.5.1, 4.6.2 and 4.7.2 with
     // tools/vibe/probes/export_preset_engine.py.
+    int first_missing_index = 0;
     if (!malformed) {
         std::set<int> read_numbers;
         for (size_t i = 0; i < presets.size(); ++i) {
@@ -328,6 +329,7 @@ ExportPresetsFile readExportPresets(const std::string& contents) {
         }
         int first_missing = 0;
         while (read_numbers.count(first_missing) != 0) ++first_missing;
+        first_missing_index = first_missing;
         const std::string missing_section = "[preset." + std::to_string(first_missing) + "]";
 
         for (size_t i = 0; i < presets.size(); ++i) {
@@ -389,6 +391,8 @@ ExportPresetsFile readExportPresets(const std::string& contents) {
     file.reason = std::move(reason);
     file.detail = std::move(detail);
     file.line = line;
+    file.first_missing_index = first_missing_index;
+    for (const auto& header : scanned.headers) file.section_names.push_back(header.name);
     if (!malformed) file.presets = std::move(presets);
     return file;
 }
@@ -484,9 +488,12 @@ Result<json> findExportPreset(const std::string& preset) {
     if (error) return Error::internal("The project root could not be resolved");
     const auto path = root / "export_presets.cfg";
     if (!std::filesystem::exists(path, error) || error) {
-        return Error::notFound(
-            "This project has no export_presets.cfg, so it has no export presets. Add one in the "
-            "editor's Export dialog.");
+        // project_add_export_preset is the route through the surface (#779).
+        return Error(404,
+                     "This project has no export_presets.cfg, so it has no export presets. Add one "
+                     "with project_add_export_preset, or in the editor's Export dialog.",
+                     {{"preset", preset}, {"presets_file_exists", false},
+                      {"use_tool", "project_add_export_preset"}});
     }
     // The same bound the Phase 5 readers apply, so this cannot pull in a file
     // they would have refused.
@@ -524,8 +531,11 @@ Result<json> findExportPreset(const std::string& preset) {
                                         return item.value("name", "") == preset;
                                     });
     if (match == file.presets.end()) {
-        return Error(404, "Export preset not found: " + preset,
-                     {{"preset", preset}, {"available_presets", std::move(available)}});
+        return Error(404,
+                     "Export preset not found: " + preset +
+                         ". project_add_export_preset adds one under this name.",
+                     {{"preset", preset}, {"available_presets", std::move(available)},
+                      {"use_tool", "project_add_export_preset"}});
     }
     if (!accepted(*match)) {
         const auto& why = (*match)["not_detected"];
@@ -542,6 +552,232 @@ Result<json> findExportPreset(const std::string& preset) {
                      std::move(data));
     }
     return *match;
+}
+
+namespace {
+
+constexpr size_t kMaxPresetNameBytes = 256;
+
+// A control character in a value is either a line break, which the tool
+// refuses because it would put a second line in a one-line key, or something
+// no preset name or path has a reason to hold.
+bool hasControlCharacter(const std::string& text) {
+    return std::any_of(text.begin(), text.end(), [](char c) {
+        const auto byte = static_cast<unsigned char>(c);
+        return byte < 0x20 || byte == 0x7f;
+    });
+}
+
+// The two escapes Godot's string writer applies to a value with no control
+// characters in it, which is every value this writes.
+std::string configFileString(const std::string& text) {
+    std::string out = "\"";
+    for (const char c : text) {
+        if (c == '\\') out += "\\\\";
+        else if (c == '"') out += "\\\"";
+        else out += c;
+    }
+    return out + "\"";
+}
+
+Error invalidPresetArgument(const std::string& parameter, std::string message, json extra = {}) {
+    json data = {{"code", "invalid_arguments"}, {"parameter", parameter}, {"retryable", false}};
+    if (extra.is_object()) data.update(extra);
+    return Error(400, std::move(message), std::move(data));
+}
+
+} // namespace
+
+Result<ExportPresetAddition> planExportPresetAddition(const std::optional<std::string>& existing,
+                                                      const std::string& name,
+                                                      const std::string& platform,
+                                                      const std::string& export_path) {
+    if (name.empty()) return invalidPresetArgument("name", "name must not be empty");
+    if (name.size() > kMaxPresetNameBytes) {
+        return invalidPresetArgument("name", "name must be at most " +
+                                                 std::to_string(kMaxPresetNameBytes) + " bytes");
+    }
+    if (hasControlCharacter(name)) {
+        return invalidPresetArgument(
+            "name", "name must not contain a line break or another control character, because "
+                    "export_presets.cfg keeps it on one line");
+    }
+    const auto& platforms = shippedExportPlatforms();
+    if (std::find(platforms.begin(), platforms.end(), platform) == platforms.end()) {
+        // Linux/X11 is a name the engine still reads, and not one it writes.
+        const auto meant = platform == "Linux/X11" ? std::optional<std::string>("Linux")
+                                                   : shippedPlatformFor(platform);
+        json extra = {{"platforms", platforms}};
+        std::string message = "platform must be one of the seven export platforms Godot ships, "
+                              "spelled exactly: " + [&] {
+                                  std::string joined;
+                                  for (const auto& item : platforms) {
+                                      joined += (joined.empty() ? "" : ", ") + item;
+                                  }
+                                  return joined;
+                              }() + ".";
+        if (meant) {
+            extra["did_you_mean"] = *meant;
+            extra["retry_with"] = {{"platform", *meant}};
+            message += " \"" + platform + "\" is \"" + *meant + "\" to Godot.";
+        }
+        return invalidPresetArgument("platform", std::move(message), std::move(extra));
+    }
+    if (hasControlCharacter(export_path)) {
+        return invalidPresetArgument("export_path",
+                                     "export_path must not contain a control character");
+    }
+
+    ExportPresetAddition plan;
+    plan.file_created = !existing.has_value();
+    const std::string before = existing.value_or("");
+    if (existing.has_value()) {
+        const auto file = readExportPresets(before);
+        if (file.malformed) {
+            // Appending to a file the engine answers ERR_PARSE_ERROR for would
+            // still leave a project with no presets.
+            auto data = malformedPresetsData(file);
+            data["code"] = "unprocessable";
+            return Error(422, malformedPresetsMessage(file), std::move(data));
+        }
+        plan.presets_before = file.presets.size();
+        plan.index = file.first_missing_index;
+
+        json stranded = json::array();
+        for (const auto& preset : file.presets) {
+            const auto& why = preset.value("not_detected", json::object());
+            if (why.value("reason", "") == "numbering_gap") stranded.push_back(preset["name"]);
+        }
+        if (!stranded.empty()) {
+            // Filling the gap would also bring back every preset stranded
+            // behind it, and appending after them would strand this one too.
+            return Error(
+                409,
+                "export_presets.cfg has no [preset." + std::to_string(plan.index) +
+                    "], and Godot stops reading at the first number that is missing, so it "
+                    "never reads the presets after it. A preset added here would either be "
+                    "stranded with them or bring them all back, and this call adds one preset. "
+                    "Renumber the sections so they run from 0 with no gap, and the .options "
+                    "sections with them, then add it.",
+                {{"code", "conflict"},
+                 {"reason", "numbering_gap"},
+                 {"missing_index", plan.index},
+                 {"stranded_presets", std::move(stranded)},
+                 {"retryable", false}});
+        }
+        for (const auto& preset : file.presets) {
+            if (preset.value("name", "") != name) continue;
+            // The engine exports the first preset with a name, so a second
+            // one could never be reached. Refused rather than replaced: this
+            // tool only adds.
+            return Error(409, "export_presets.cfg already has a preset named \"" + name + "\"",
+                         {{"code", "already_exists"},
+                          {"preset", name},
+                          {"existing", {{"index", preset.value("index", 0)},
+                                        {"platform", preset.value("platform", "")},
+                                        {"detected", preset.value("detected", true)}}},
+                          {"retryable", false}});
+        }
+        const auto options = "preset." + std::to_string(plan.index) + ".options";
+        if (std::find(file.section_names.begin(), file.section_names.end(), options) !=
+            file.section_names.end()) {
+            // Godot merges a section declared twice, so a leftover options
+            // section would become this preset's options.
+            return Error(409,
+                         "export_presets.cfg already has a [" + options +
+                             "] section with no preset above it, and Godot would read its "
+                             "options as the new preset's. Remove that section first.",
+                         {{"code", "conflict"},
+                          {"reason", "orphan_options_section"},
+                          {"section", "[" + options + "]"},
+                          {"retryable", false}});
+        }
+    }
+
+    // The fewest keys every supported engine loads with no ERROR line. Each
+    // one is in the amendment's table with the reason it is there.
+    const std::string newline = before.find("\r\n") != std::string::npos ? "\r\n" : "\n";
+    const auto index = std::to_string(plan.index);
+    const std::vector<std::string> lines = {
+        "[preset." + index + "]",
+        "",
+        "name=" + configFileString(name),
+        "platform=" + configFileString(platform),
+        "runnable=false",
+        "export_filter=\"all_resources\"",
+        "include_filter=\"\"",
+        "exclude_filter=\"\"",
+        "export_path=" + configFileString(export_path),
+        "",
+        "[preset." + index + ".options]",
+        "",
+        "custom_template/debug=\"\"",
+    };
+    for (const auto& line : lines) plan.section_text += line + newline;
+
+    // Kept byte for byte. The section starts on a line of its own, after a
+    // blank one, whatever the file ended with.
+    std::string separator;
+    if (!before.empty()) {
+        if (before.back() != '\n') separator += newline;
+        const bool blank_last = before.size() >= 2 &&
+                                (strings::endsWith(before, "\n\n") ||
+                                 strings::endsWith(before, "\n\r\n"));
+        if (!blank_last) separator += newline;
+    }
+    plan.contents = before + separator + plan.section_text;
+    return plan;
+}
+
+Result<ExportPresetAddition> planExportPresetForProject(const json& args) {
+    if (!args.is_object() || !args.contains("name") || !args["name"].is_string()) {
+        return invalidPresetArgument("name", "name is a required string");
+    }
+    if (!args.contains("platform") || !args["platform"].is_string()) {
+        return invalidPresetArgument("platform", "platform is a required string");
+    }
+    if (args.contains("export_path") && !args["export_path"].is_string()) {
+        return invalidPresetArgument("export_path", "export_path must be a string");
+    }
+
+    // Stored the way the Export dialog stores a path inside the project:
+    // relative to it, with no res:// in front.
+    std::string export_path;
+    const std::string requested = args.value("export_path", "");
+    if (!requested.empty()) {
+        auto resolved = paths::resolveProjectFileForWrite(requested);
+        if (resolved.isErr()) {
+            return invalidPresetArgument("export_path", "export_path " + resolved.error().message);
+        }
+        std::error_code error;
+        if (std::filesystem::is_directory(resolved.value(), error)) {
+            return invalidPresetArgument(
+                "export_path", "export_path names a directory, and an export writes a file");
+        }
+        export_path = paths::resourcePathOf(resolved.value());
+        if (strings::startsWith(export_path, "res://")) export_path.erase(0, 6);
+    }
+
+    std::error_code error;
+    const auto root = std::filesystem::current_path(error);
+    if (error) return Error::internal("The project root could not be resolved");
+    const auto path = root / "export_presets.cfg";
+    std::optional<std::string> existing;
+    if (std::filesystem::exists(path, error) && !error) {
+        constexpr uintmax_t kMaxPresetFileBytes = 1024u * 1024u;
+        const auto size = std::filesystem::file_size(path, error);
+        if (error) return Error(403, "export_presets.cfg is there and cannot be read");
+        if (size > kMaxPresetFileBytes) {
+            return Error::invalidArgument("export_presets.cfg exceeds the 1 MiB Phase 5 limit");
+        }
+        std::ifstream input(path, std::ios::binary);
+        if (!input) return Error(403, "export_presets.cfg is there and cannot be read");
+        std::ostringstream buffer;
+        buffer << input.rdbuf();
+        existing = buffer.str();
+    }
+    return planExportPresetAddition(existing, args["name"].get<std::string>(),
+                                    args["platform"].get<std::string>(), export_path);
 }
 
 } // namespace didi::offline

@@ -74,7 +74,12 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         // An editor holds unsaved changes the file cannot show, and it answers
         // a built-in setting out of its own defaults where the file only ever
         // carries what has been changed.
-        "project_get_setting", "project_list_autoloads"
+        "project_get_setting", "project_list_autoloads",
+        // project_add_export_preset: this process writes export_presets.cfg in
+        // both modes. An attached editor is then made to read the file again,
+        // because an open editor holds its own list of presets and writes it
+        // back over the file the next time any preset changes (#779).
+        "project_add_export_preset"
     };
     static const std::unordered_set<std::string> live = {
         "scene_instantiate_node", "scene_remove_node", "scene_reparent_node",
@@ -295,6 +300,7 @@ CallToolResult handleCSharpCheckBuild(const json& args, std::shared_ptr<ipc::IIp
 CallToolResult handleShaderCheckCompile(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleProjectListExportPresets(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleProjectExport(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleProjectAddExportPreset(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleGridmapExportMeshLibrary(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleUiHitTest(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleUiListControls(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
@@ -925,6 +931,22 @@ static json outputSchemaForTool(const std::string& name) {
                               {"truncated", boolean_type}},
                              {"execution_mode", "tasks"});
     }
+    if (name == "project_add_export_preset") {
+        return object_schema({{"status", string_type},
+                              {"preset", {{"type", "object"}}},
+                              {"written_to", string_type},
+                              {"file_created", boolean_type},
+                              {"section_written", string_type},
+                              {"preset_count", integer_type},
+                              {"next_step", string_type},
+                              // Whether an attached editor was made to read
+                              // the file again, and why not when it was not.
+                              {"editor_reloaded", boolean_type},
+                              {"editor_reload_error", {{"type", "object"}}},
+                              {"is_live_engine", boolean_type},
+                              {"limitation", string_type}},
+                             {"execution_mode", "status", "preset", "editor_reloaded"});
+    }
     if (name == "project_list_export_presets") {
         return object_schema({{"presets", {{"type", "array"}}},
                               {"preset_count", integer_type},
@@ -1127,6 +1149,7 @@ const std::unordered_map<std::string_view, std::string_view> kToolTitles = {
     {"nav_query_path", "Find a navigation path"},
     {"physics_raycast_query", "Cast a physics ray"},
     {"physics_simulate_step", "Step the physics world"},
+    {"project_add_export_preset", "Add an export preset"},
     {"project_analyze_impact", "Analyse a change's impact"},
     {"project_apply_changes", "Apply a verified change set"},
     {"project_audit_assets", "Audit project assets"},
@@ -2279,6 +2302,23 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
             before = {{"setting", read.value().setting},
                       {"exists", read.value().existed},
                       {"literal", read.value().literal}};
+            return std::nullopt;
+        };
+    } else if (binding.policy_source == "project_add_export_preset") {
+        // The same plan the call makes, from the same file, so a preview
+        // refuses what the call would and shows the exact text it would
+        // append. `before` is the file as it is now.
+        target_probe = [](const json& call_arguments, json& before,
+                          json& subject) -> std::optional<Error> {
+            auto plan = offline::planExportPresetForProject(call_arguments);
+            if (plan.isErr()) return plan.error();
+            subject = {{"path", "res://export_presets.cfg"},
+                       {"preset", call_arguments.value("name", "")}};
+            before = {{"path", "res://export_presets.cfg"},
+                      {"exists", !plan.value().file_created},
+                      {"preset_count", plan.value().presets_before},
+                      {"index", plan.value().index},
+                      {"section_to_append", plan.value().section_text}};
             return std::nullopt;
         };
     }
@@ -4644,6 +4684,25 @@ void ToolRegistry::registerAllDefaultTools() {
             {"timeout_seconds", {{"type", "integer"}, {"minimum", 1}, {"maximum", 900}, {"default", 300}}}
         }}, {"required", {"preset", "output_path"}}};
         t.handler = [this](const json& args) { return handleProjectExport(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "project_add_export_preset";
+        t.description =
+            "Adds one export preset to export_presets.cfg, which project_export needs and a project "
+            "nobody has exported by hand does not have. It only adds: a name already in the file "
+            "is refused. It writes the fewest keys every supported Godot loads cleanly and leaves "
+            "the rest to the editor. With an editor attached, the editor is made to read the file "
+            "again, because an open editor otherwise writes its own list back over it.";
+        t.inputSchema = {{"type", "object"}, {"properties", {
+            {"name", {{"type", "string"}, {"minLength", 1}, {"maxLength", 256}}},
+            {"platform", {{"type", "string"},
+                          {"enum", {"Windows Desktop", "Linux", "macOS", "Android", "iOS", "Web",
+                                    "visionOS"}}}},
+            {"export_path", {{"type", "string"}, {"maxLength", 1024}}}
+        }}, {"required", {"name", "platform"}}};
+        t.handler = [this](const json& args) { return handleProjectAddExportPreset(args, m_ipcClient); };
         registerTool(std::move(t));
     }
     {

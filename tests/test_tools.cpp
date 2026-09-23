@@ -239,6 +239,8 @@ static void test_output_schemas_declare_what_the_handlers_return() {
         {"blackboard_read", didi::json::object()},
         {"blackboard_task_list", didi::json::object()},
         {"project_list_export_presets", didi::json::object()},
+        // Writes export_presets.cfg into this throwaway project.
+        {"project_add_export_preset", {{"name", "Contract"}, {"platform", "Linux"}}},
         {"resource_inspect", {{"resource_path", "res://main.tscn"}}},
         {"script_get_symbols", {{"file_path", "res://main.gd"}}},
         {"script_reflect_class", {{"class_name", "Node2D"}}},
@@ -427,7 +429,7 @@ static void test_tool_registry_default_tools() {
     reg.registerAllDefaultTools();
     auto tools = reg.listTools();
 
-    ASSERT_EQ(tools.size(), 127u);
+    ASSERT_EQ(tools.size(), 128u);
     const std::unordered_set<std::string> legacy_names = {
         "get_scene_hierarchy", "capture_viewport", "analyze_script_diagnostics",
         "patch_script_symbols", "create_visual_test_lab", "query_project_resources",
@@ -439,7 +441,7 @@ static void test_tool_registry_default_tools() {
         if (legacy_names.count(tool.name) == 0) ++canonical_count;
     }
     ASSERT_EQ(legacy_names.size(), 10u);
-    ASSERT_EQ(canonical_count, 117u);
+    ASSERT_EQ(canonical_count, 118u);
 
     // Domain 1: Scene Tree & Node Manipulation
     ASSERT_TRUE(reg.getTool("scene_get_hierarchy") != nullptr);
@@ -572,7 +574,7 @@ static void test_phase7_input_alias_keeps_invoked_entry_with_canonical_contract(
         if (legacy_names.count(tool.name) != 0) continue;
         tool.capability.implemented ? ++implemented : ++unimplemented;
     }
-    ASSERT_EQ(implemented, 114u);
+    ASSERT_EQ(implemented, 115u);
     ASSERT_EQ(unimplemented, 3u);
 }
 
