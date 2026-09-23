@@ -56,7 +56,9 @@ Six amendments are implemented: `runtime_read_output`, `audio_list_buses` and
 `audio_configure_bus`, all recorded below with tri-engine feasibility evidence,
 plus `project_audit_assets`, `project_analyze_impact`,
 `runtime_explore_scene`, `didi_control_room`, `ui_list_controls`,
-`scene_call_method` and `anim_add_library`. One
+`scene_call_method` and `anim_add_library`. One is accepted and not yet
+implemented: `project_add_export_preset`, which makes `project_export`
+reachable on a project nobody has exported by hand. One
 amendment adds no name and changes an existing contract: `scene_close` reads
 real dirty state where the engine can report it. One is withdrawn: raising the engine floor to
 Godot 4.7, refused in favour of runtime capability detection so that 4.5 and 4.6
@@ -65,6 +67,175 @@ August 2026 competitive review and are proposed, not accepted, in
 [Realignment Implementation Plan](REALIGNMENT_IMPLEMENTATION_PLAN.md):
 `runtime_read_output`, `ui_list_controls`, `godot_api_reference`, and an `until`
 parameter on the existing `runtime_step` (a change, not a new name).
+
+### ACCEPTED: `project_add_export_preset`
+
+| Field | Value |
+| :--- | :--- |
+| **Name** | `project_add_export_preset` |
+| **Failing workflow** | *Ship the game.* Reported from vibe session 16 (#779). An agent builds a game through the surface and asks `project_export` for a pack. On a project nobody has exported by hand, `project_list_export_presets` answers `preset_count: 0` and `project_export` refuses: "This project has no export_presets.cfg, so it has no export presets. Add one in the editor's Export dialog." Nothing on the surface can write that file. `script_create` refuses any path that does not end in `.gd`, and `resource_create` any that does not end in `.tres` or `.res`. `mode: "pack"` needs no export templates and still needs a preset. So `project_export` is unreachable on every project the surface built, which is the shape #770 had for `anim_play_track`. |
+| **Execution modes** | Both. The server writes the file itself, with or without a session, the way `project_set_setting`'s offline route does. With no editor attached the result reports `offline_fallback`. With an editor session attached it also has the bridge make the editor re-read the file, because an open editor keeps its own list of presets and writes that list back over the file the next time any preset changes. See **An open editor** below. A game session adds nothing, because a running game holds no presets. |
+| **Safety class** | `create/set`. Dry run, no confirmation token. Additive only (`destructiveHint: false`). A missing file is created. An existing file is appended to, and every byte already in it is kept. A name already in the file is refused rather than replaced, whatever platform its preset is on. There is no remove. The way back is the editor's Export dialog, or deleting the section the call appended. |
+| **Proving test** | Native: `ExportPresetAdd.RequestValidation` covers the name bounds and the refusal of control characters, the seven platform names and the three spellings the engine skips (each refused with the right spelling), and `export_path` containment. `ExportPresetAdd.WritesWhatEveryEngineLoads` compares the text written for a new file byte for byte with the block under **What it writes**. `ExportPresetAdd.AppendKeepsTheFile` requires an existing file to survive as an unchanged prefix, the next number after the unbroken run to be used, and a name holding a quote, a backslash, a bracket and an equals sign to read back unchanged through `project_list_export_presets`. `ExportPresetAdd.Refusals` covers a name in use on a known platform and on an unknown one, a gap in the numbering, and each cause the reader reports for a malformed file, on the dry run as well as the call. `ExportPresetAdd.Registration` requires both modes, a mutation with `dry_run` and no confirmation token, additive and not read-only. Godot integration: before the editor starts, a preset is added to a fixture project with no presets file; `project_list_export_presets` lists it, `project_export` in `pack` mode writes a pack, and the pack runs as the game. With the editor attached, a second preset is added, and a fixture editor plugin (the probe's no-op export platform) makes the editor save its presets. The added preset must still be in the file afterwards, which fails if the re-read is removed. The harness's engine-output gate fails the run on any ERROR or WARNING line, so a written preset that drops a key from the table below fails on its own. |
+| **Reviewer** | Accepted by Shane Wall on 2026-09-24 for #779. It is a mutation, so the security argument is recorded below; nobody else has reviewed it. |
+
+All of the evidence below comes from `tools/vibe/probes/export_preset_engine.py`
+run on 4.5.1, 4.6.2 and 4.7.2 on 2026-09-24, and every row was the same on all
+three unless a table says otherwise. The probe needs no Didi build: it writes
+throwaway projects, exports them with `--export-pack`, runs the pack, and drives
+a headless editor with a probe plugin.
+
+**What it writes.** For a new preset numbered `N`:
+
+```ini
+[preset.N]
+
+name="<name>"
+platform="<platform>"
+runnable=false
+export_filter="all_resources"
+include_filter=""
+exclude_filter=""
+export_path="<export_path>"
+
+[preset.N.options]
+
+custom_template/debug=""
+```
+
+Each line is there because an engine needs it:
+
+| Line | Why it is written |
+| :--- | :--- |
+| `name`, `platform` | The engine finds the platform first and then addresses the preset by name. |
+| `runnable=false` | 4.5.1 and 4.6.2 read `runnable` with no default, so leaving it out prints `Couldn't find the given section "preset.0" and key "runnable", and no default was given` on every load. 4.7.2 reads it only for compatibility, and `false` is the value it ignores. |
+| `export_filter`, `include_filter`, `exclude_filter` | Read with no default on all three lines. Each one left out prints the same ERROR on every load. |
+| `export_path` | Read with a default, so it is optional to the engine. It is written because every line writes it, and it is where the Export dialog puts the file. |
+| `[preset.N.options]` with one key | The engine asks for the keys of this section unconditionally and prints `Cannot get keys from nonexistent section "preset.0.options"` when there is none. A header with nothing under it counts as no section, because `ConfigFile` does not keep an empty one. `custom_template/debug` is declared by all seven platforms on all three lines, and `""` is its default, so the line changes nothing. |
+
+Every line in that table was removed in turn and the file exported. Every
+variant still produced a pack that ran, because the engine fills in what is
+missing, so the ERROR lines are the only symptom. That is why the proving test
+leans on the harness's engine-output gate rather than on the export succeeding.
+The text above loads with no ERROR or WARNING line on any of the three. An
+`--export-pack` run never rewrote the file, and opening the project in an
+editor left it byte for byte as written.
+
+Everything else a preset section can hold is left to the editor, because the
+three lines do not agree on it and each fills in its own defaults when it
+loads:
+
+| What the editor writes when it saves | 4.5.1 | 4.6.2 | 4.7.2 |
+| :--- | :--- | :--- | :--- |
+| The runnable flag | `runnable` in the preset | `runnable` in the preset | a `[runnable_presets]` section, `"Windows Desktop"="<name>"`, and no key in the preset |
+| `advanced_options` | written | not written | not written |
+| The five `patch_delta_*` keys | not written | written | written |
+| Options for a Windows Desktop preset | 35 keys | 35 keys | 35 keys |
+
+A writer that emitted any of those would be writing one line's format into
+all three.
+
+**Platforms.** Seven names, the same on all three lines: `Windows Desktop`,
+`Linux`, `macOS`, `Android`, `iOS`, `Web` and `visionOS`. A preset for each one
+exported a pack that ran, with no export templates installed. The engine
+matches the name exactly and skips a preset whose platform it does not know
+without printing anything, so a misspelled platform is a preset that silently
+does not exist. `windows desktop`, `Windows` (the OS name) and `HTML5` (the
+Godot 3 name) each ended at export with `Invalid export preset name`. `Linux/X11`
+still loads on all three, for files written before 4.3; the tool does not write
+it. The tool takes the seven as an enum, and refuses anything else with the
+nearest correct name.
+
+**Numbering and names.** The engine reads `[preset.0]`, `[preset.1]` and so on,
+and stops at the first number that is missing. A preset after a gap never
+loads. The tool appends at the first free number after the unbroken run, and
+refuses a file that already has a gap, naming the number: filling it would also
+bring back every preset stranded behind it, which the caller did not ask for.
+Two presets with one name both load, and `--export-pack` takes the first. With
+a Linux preset and a Windows Desktop preset of the same name, the Linux one
+exported on all three lines, and the second could not be reached. The tool
+refuses a name in use for that reason, including one on a platform the engine
+does not know.
+
+**An open editor.** This is the measurement that shapes the tool. The editor
+reads `export_presets.cfg` once, when it starts, and from then on writes its own
+list over the file 0.8 seconds after any preset changes (`EditorExport::_save`,
+the same in all three tags). The probe ran a headless editor with a plugin that
+registers a no-op export platform. That is the one public route to the editor's
+own preset objects, and setting a value on one of them makes the editor save
+every preset it holds, so the file afterwards is the editor's memory written
+out:
+
+| What happened before the editor's save | The added preset afterwards |
+| :--- | :--- |
+| A preset appended behind the editor's back, then `EditorFileSystem.scan_sources()`, which is what `editor_reload_project` runs | Gone. |
+| A preset appended, then an export platform registered | Kept. Registering or removing a platform is the one public event that makes the editor read the file again. |
+| A preset appended, then a bare `EditorExportPlatformExtension`, with no subclass and no name, added and removed in one frame through an `EditorPlugin` that is never in the tree | Kept, with no ERROR or WARNING line. |
+
+So a tool that only wrote the file would lose the preset the first time anybody
+changed anything in the Export dialog, with no error anywhere. With an editor
+attached, the tool writes the file and then has the bridge do the last row. The
+editor reads the file again on its next frame, and the tool waits for that
+frame before it answers. What the editor then holds cannot be read back through
+any public API except from a registered platform's own presets, which is how
+the harness proves it rather than the tool. With no editor attached, the result
+says that an editor open on the project without Didi keeps its own list until
+it restarts.
+
+The binds the re-read needs carry the same hash on all three lines, measured
+with `--dump-extension-api` from each binary:
+
+| Method | 4.5.1 | 4.6.2 | 4.7.2 |
+| :--- | :--- | :--- | :--- |
+| `EditorPlugin.add_export_platform` | 3431312373 | 3431312373 | 3431312373 |
+| `EditorPlugin.remove_export_platform` | 3431312373 | 3431312373 | 3431312373 |
+
+`EditorPlugin` and `EditorExportPlatformExtension` are both instantiable on all
+three.
+
+**Not handled.** An edit made in the Export dialog in the 0.8 seconds before the
+call is in the editor's memory and not yet on disk, and the re-read replaces it
+with the file. The save timer is internal to the editor, so the tool cannot wait
+for it. And the re-read has only been driven headless. What an Export dialog
+that is open at that moment shows is for the implementation to check in a GUI
+editor.
+
+**Why not a general text writer.** #779 suggested `project_write_text_file`,
+confined to the project with an allowlist that includes `.cfg`. Measured on all
+three lines, an `override.cfg` beside `project.godot` replaces project settings
+when the project starts, and an `[autoload]` entry in it runs its script. A
+writer that accepts `.cfg` is a route around `project_set_setting`, which
+refuses `autoload/*`, and around `project_set_autoload`. `export_presets.cfg`
+itself carries `ssh_remote_deploy/run_script`, a script the editor runs on
+one-click deploy. This tool writes one option, and it is not that one.
+Localisation `.csv` and data `.json` files stay open under #779, for a separate
+amendment with its own security review.
+
+**What it will not do.** It writes one file, `res://export_presets.cfg`, and
+never a path the caller names. It takes a name, one of the seven platforms, and
+an optional `export_path`, which is confined to the project the same way
+`project_export`'s `output_path` is. It writes no other option, no filters, no
+custom features, nothing to `.godot/export_credentials.cfg`, no encryption or
+signing setting, and never `runnable=true`: one-click deploy is not the failing
+workflow, and 4.7 keeps that flag somewhere else. It does not edit or remove a
+preset. It refuses a presets file that `project_list_export_presets` reports as
+malformed, because appending to a file the engine cannot parse would still
+leave a project with no presets. The name is written with the `ConfigFile`
+string escapes and control characters are refused, so a name cannot open a
+section or add a key.
+
+**What an agent does next.** `project_add_export_preset`, then `project_export`
+with `mode: "pack"` and the same name. No export templates are needed for a
+pack. A release or debug build needs the templates for that platform, and
+`project_export` already says so when they are missing.
+
+**Found on the way.** The probe also showed that Didi's preset reader disagrees
+with the engine. `project_list_export_presets` lists presets the engine never
+loads, the ones after a gap and the ones on a platform it does not know, and
+`project_export`'s dry run previews an export of them that the engine refuses
+(#921). It also reports `runnable: false` for the preset a 4.7 editor recorded
+as runnable (#922). The tool's name and numbering checks read the same file, so
+#921 is fixed first or with it.
 
 ### ACCEPTED (IMPLEMENTED): `anim_add_library`
 
