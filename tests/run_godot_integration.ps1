@@ -165,7 +165,10 @@ if (-not $fixtureRoot.StartsWith($buildRoot + [IO.Path]::DirectorySeparatorChar,
     throw "Refusing to recreate an integration fixture outside the build directory: $fixtureRoot"
 }
 
-Remove-Item -LiteralPath $fixtureRoot -Recurse -Force -ErrorAction SilentlyContinue
+# The step before this one in CI runs an editor too, so the previous fixture's
+# extension copy can still be locked; see remove_test_directory.ps1.
+. (Join-Path $PSScriptRoot 'remove_test_directory.ps1')
+Remove-TestDirectory -Path $fixtureRoot
 Copy-Item -LiteralPath $sourceFixtureRoot -Destination $fixtureRoot -Recurse
 
 # scene_call_method awaits a coroutine through a GDScript helper that ships in
