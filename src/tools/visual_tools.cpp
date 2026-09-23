@@ -343,7 +343,8 @@ CallToolResult handleCreateVisualTestLab(const json& args, std::shared_ptr<ipc::
     if (std::filesystem::exists(disk_path) && !overwrite) {
         return CallToolResult::errorJson(
             409, "Visual test lab already exists; pass overwrite: true to replace it: " +
-            lab_scene_path);
+            lab_scene_path,
+            {{"code", "already_exists"}, {"retry_with", {{"overwrite", true}}}});
     }
 
     std::ostringstream scene_file;

@@ -819,14 +819,16 @@ Result<json> checkPropertiesAgainstType(
     // arrived in 4.6.
     if (engine_verdict.has_value() && engine_verdict->answered && !engine_verdict->known &&
         !allow_unknown_type) {
-        return Error::invalidArgument(
+        return Error(
+            400,
             where + ": " + resource_type + " is not a class in " +
             engine_verdict->engine_version +
             ", which is the engine this session is attached to. Godot cannot load a "
             "resource whose type it does not know, so the file would fail to load rather "
             "than lose a property. Check the spelling with script_reflect_class. If the "
             "type comes from a GDExtension or a class_name script, which neither the "
-            "shipped class reference nor ClassDB lists, pass allow_unknown_type: true.");
+            "shipped class reference nor ClassDB lists, pass allow_unknown_type: true.",
+            json{{"retry_with", {{"allow_unknown_type", true}}}});
     }
     // Which list decided the type, so `checked: true` says what it was checked
     // against. Only when a session is attached: with none there is no second
@@ -1152,7 +1154,8 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
         std::error_code probe_error;
         if (fs::exists(target_p, probe_error) && !probe_error && !overwrite) {
             return CallToolResult::errorJson(
-                409, "Resource already exists; pass overwrite: true to replace it: " + reported_path);
+                409, "Resource already exists; pass overwrite: true to replace it: " + reported_path,
+                {{"code", "already_exists"}, {"retry_with", {{"overwrite", true}}}});
         }
         if (target_p.has_parent_path()) {
             fs::create_directories(target_p.parent_path());

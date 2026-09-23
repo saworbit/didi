@@ -252,6 +252,25 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **A refusal that names the argument that fixes it carries that argument.**
+  Five tools refuse a colliding output with the same sentence and all five read
+  the `overwrite` argument that would make the call succeed. Only
+  `project_export` put it in `retry_with`; the other four left it in the prose,
+  so a client had to read English to find the fix that was a field away on the
+  tool next door. `resource_create`, `script_create` and the visual test lab
+  carry it now, and all five say `already_exists` rather than four saying
+  nothing and one restating the floor's word for a 409.
+  `gridmap_export_mesh_library` needed an envelope before it could carry
+  anything: it answered through `CallToolResult::error`, which pushes the
+  sentence as plain text with no JSON around it, so `applyErrorDataFloor` never
+  saw it and the refusal reached a client as a sentence with no status and
+  nothing to branch on.
+
+  A check now reads the sentences: a message that says `pass <argument>: true`
+  is a promise about a specific argument, and the refusal has to carry it. It
+  found two more the issue had not named, a session on a foreign project asking
+  for `allow_foreign_project` and a resource type this engine does not know
+  asking for `allow_unknown_type`, both of which said it in prose only. #900
 - **`retry_with` has one shape again.** It shipped with #705 as
   `retry_with: {"overwrite": true}`, an object a caller merges into the
   arguments it already has, and `project_export` still answers a colliding

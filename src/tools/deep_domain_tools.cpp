@@ -674,7 +674,7 @@ CallToolResult handleProjectExport(const json& args, std::shared_ptr<ipc::IIpcCl
             409,
             "Export output already exists; pass overwrite: true to replace it: " +
                 asResPath(root.value(), output.value()),
-            {{"code", "conflict"},
+            {{"code", "already_exists"},
              {"tool", "project_export"},
              {"output_path", asResPath(root.value(), output.value())},
              {"retry_with", {{"overwrite", true}}},
@@ -753,7 +753,9 @@ CallToolResult handleGridmapExportMeshLibrary(const json& args, std::shared_ptr<
     }
     std::error_code error;
     if (std::filesystem::exists(output.value(), error) && !args.value("overwrite", false)) {
-        return CallToolResult::error("MeshLibrary output already exists; pass overwrite: true to replace it");
+        return CallToolResult::errorJson(
+            409, "MeshLibrary output already exists; pass overwrite: true to replace it",
+            {{"code", "already_exists"}, {"retry_with", {{"overwrite", true}}}});
     }
     auto timeout = timeoutSeconds(args, 60, 300);
     if (timeout.isErr()) return CallToolResult::fromError(timeout.error());
