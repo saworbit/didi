@@ -3061,9 +3061,7 @@ try {
         (Tool-Request 2633 "anim_add_library" @{ animation_player_path = $animSecond; library_path = $animLibraryProbe; library_name = "moves"; reload_from_disk = $true; dry_run = $true }),
         (Tool-Request 2634 "anim_list_tracks" @{ animation_player_path = $animPlayer }),
         (Tool-Request 2635 "anim_add_library" @{ animation_player_path = $animSecond; library_path = $animLibraryProbe; library_name = "moves"; reload_from_disk = $true }),
-        (Tool-Request 2636 "anim_list_tracks" @{ animation_player_path = $animPlayer }),
-        (Tool-Request 2637 "scene_close" @{ discard_unsaved = $true }),
-        (Tool-Request 2638 "scene_open" @{ scene_path = "res://main.tscn" })
+        (Tool-Request 2636 "anim_list_tracks" @{ animation_player_path = $animPlayer })
     )
     $rawAnimStale = Invoke-Didi -Requests $animStaleRequests -Arguments @("--project", $fixtureRoot)
     $animStale = @($rawAnimStale | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.PSObject.Properties.Name -contains "id" })
@@ -3080,7 +3078,33 @@ try {
     Assert-True ($staleAdded.reloaded_from_disk -eq $true -and @($staleAdded.animations) -contains "moves/hop" -and @($staleAdded.animations) -contains "moves/slide") "reload_from_disk did not add the file's version: $($staleAdded | ConvertTo-Json -Depth 6 -Compress)"
     $staleFirst = @((Tool-Payload $staleById[2636]).animations | ForEach-Object { $_.name })
     Assert-True ($staleFirst.Count -eq 2 -and $staleFirst -contains "hop") "The player already holding the library did not show the reloaded file: $($staleFirst -join ',')"
-    Assert-True (-not $staleById[2638].result.isError) "main.tscn did not reopen after the anim_add_library batches: $($staleById[2638].result.content[0].text)"
+
+    # The same library overwritten through resource_create rather than behind
+    # the editor's back. The caller has confirmed the overwrite, so the write
+    # reloads the editor's copy itself and the player shows the new contents
+    # with no reload_from_disk. Its own --yolo batch, because the overwrite is
+    # confirmation-gated and a batch is built before any token exists.
+    $refreshRequests = @(
+        (@{ jsonrpc = "2.0"; id = 2650; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
+        (Tool-Request 2651 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
+        (Tool-Request 2652 "resource_create" @{ save_path = "res://refresh_anim.tres"; resource_type = "Animation"; properties = @{ length = 0.75 } }),
+        (Tool-Request 2653 "resource_create" @{ save_path = $animLibraryProbe; resource_type = "AnimationLibrary"; overwrite = $true; properties = @{ _data = @{ fresh = @{ type = "ExtResource"; path = "res://refresh_anim.tres" } } } }),
+        (Tool-Request 2654 "anim_list_tracks" @{ animation_player_path = $animPlayer }),
+        (Tool-Request 2657 "resource_create" @{ save_path = "res://refresh_anim.res"; resource_type = "Animation"; properties = @{ length = 0.75 } }),
+        (Tool-Request 2655 "scene_close" @{ discard_unsaved = $true }),
+        (Tool-Request 2656 "scene_open" @{ scene_path = "res://main.tscn" })
+    )
+    $rawRefresh = Invoke-Didi -Requests $refreshRequests -Arguments @("--project", $fixtureRoot, "--yolo")
+    $refreshById = @{}
+    foreach ($response in @($rawRefresh | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.PSObject.Properties.Name -contains "id" })) { $refreshById[[int]$response.id] = $response }
+    $overwritten = Tool-Payload $refreshById[2653]
+    Assert-True ($overwritten.editor_copy_reloaded -eq $true) "resource_create overwrote a library the editor holds and did not reload the editor's copy: $($overwritten | ConvertTo-Json -Depth 6 -Compress)"
+    $refreshedNames = @((Tool-Payload $refreshById[2654]).animations | ForEach-Object { $_.name })
+    Assert-True ($refreshedNames.Count -eq 1 -and $refreshedNames[0] -eq "fresh") "After resource_create overwrote the library, the player still showed the editor's old copy: $($refreshedNames -join ',')"
+    $resText = ($refreshById[2657].result.content | Where-Object { $_.type -eq "text" } | Select-Object -First 1).text
+    Assert-True ($refreshById[2657].result.isError -and $resText -match "refresh_anim\.tres") "resource_create wrote text markup into a .res, which Godot reads as binary: $resText"
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $fixtureRoot "refresh_anim.res"))) "A refused .res write left a file behind."
+    Assert-True (-not $refreshById[2656].result.isError) "main.tscn did not reopen after the anim_add_library batches: $($refreshById[2656].result.content[0].text)"
 
     $previousGodotBin = $env:GODOT_BIN
     try {

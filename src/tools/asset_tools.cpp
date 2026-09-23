@@ -11,6 +11,7 @@
 #include "didi/common/atomic_write.hpp"
 #include "didi/common/engine_version.hpp"
 #include "didi/runtime/session_client.hpp"
+#include <optional>
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -1116,11 +1117,27 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
             character = static_cast<char>(
                 std::tolower(static_cast<unsigned char>(character)));
         }
-        if (extension != ".tres" && extension != ".res") {
+        // .res is Godot's binary resource format, and the loader reads it as
+        // binary whatever it holds. Text markup saved as .res is refused with
+        // "Unrecognized binary resource file", and the editor's filesystem
+        // scan repeats that on every start. Vibe session seventeen found every
+        // .res this tool had ever written was one of those, in the console of
+        // an editor that had been restarted.
+        if (extension == ".res") {
+            const std::string as_tres = save_path.substr(0, save_path.size() - 4) + ".tres";
+            return CallToolResult::errorJson(
+                400,
+                "resource_create writes Godot's text resource format, which Godot reads from "
+                "a .tres file. A .res file is Godot's binary format, so text written into one "
+                "does not load, and the editor reports it as an unrecognized binary resource "
+                "file on every start. Use " + as_tres + ".",
+                json{{"retry_with", {{"save_path", as_tres}}}});
+        }
+        if (extension != ".tres") {
             return CallToolResult::errorJson(
                 400,
                 "resource_create writes Godot text-resource markup, so save_path must end in "
-                ".tres or .res; received \"" + save_path +
+                ".tres; received \"" + save_path +
                 "\". Use script_create for a GDScript file.");
         }
     }
@@ -1234,7 +1251,23 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
         return CallToolResult::error("Failed to write resource file to disk: " +
                                      written.error().message);
     }
-    return CallToolResult::successJson({
+    // An editor that has this file loaded keeps its own copy, and nothing an
+    // unattended editor does re-reads it: not editor_reload_project, not the
+    // editor's own filesystem scan. So every live reader went on answering from
+    // the old copy after an overwrite -- anim_list_tracks listed a library's old
+    // animations, and anim_add_library added the old copy (vibe session
+    // seventeen). The caller overwrote the file on purpose, with a token, so the
+    // editor's copy is reloaded from it in place, which is what the editor does
+    // itself when it notices a change on disk. Absent when no editor answered.
+    std::optional<json> editor_copy_reloaded;
+    if (ipc && ipc->isConnected()) {
+        auto refreshed = ipc->sendRequest("resource.refreshCached", json{{"path", reported_path}}, 5000);
+        if (refreshed.isOk() && refreshed.value().is_object() &&
+            refreshed.value().contains("reloaded") && refreshed.value()["reloaded"].is_boolean()) {
+            editor_copy_reloaded = refreshed.value()["reloaded"];
+        }
+    }
+    json created = {
         {"status", "created_offline"},
         {"save_path", reported_path},
         {"resource_type", resource_type},
@@ -1248,7 +1281,9 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
         // as "the type has these" when the reference could not answer.
         {"property_check", property_check.value()},
         {"sub_resource_property_checks", std::move(sub_property_checks)}
-    });
+    };
+    if (editor_copy_reloaded.has_value()) created["editor_copy_reloaded"] = *editor_copy_reloaded;
+    return CallToolResult::successJson(std::move(created));
 }
 
 CallToolResult handleResourceInspect(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {

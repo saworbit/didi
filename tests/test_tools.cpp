@@ -4043,6 +4043,111 @@ static void test_resource_create_type_guard_asks_the_attached_engine() {
     }
 }
 
+// An editor that answers the class check and, after a write, the request to
+// refresh its copy of the file. `refresh_answers` false makes the refresh fail
+// the way an older bridge without the route does.
+class RefreshClient final : public didi::runtime::IRuntimeSessionClient {
+public:
+    explicit RefreshClient(bool refresh_answers) : m_refreshAnswers(refresh_answers) {
+        m_session.schema_version = 1;
+        m_session.session_id = "0123456789abcdef0123456789abcdef";
+        m_session.pid = 4242;
+        m_session.kind = "editor";
+        m_session.project_path = "C:/project";
+        m_session.protocol_version = "1.3";
+        m_session.engine_version = "Godot Engine v4.5.1.stable.official";
+    }
+
+    bool connect(const std::string&, int) override { return true; }
+    void disconnect() override {}
+    bool isConnected() const override { return true; }
+    didi::Result<didi::json> sendRequest(const std::string& method, const didi::json& params,
+                                         int) override {
+        methods.push_back(method);
+        if (method == "engine.classExists") {
+            didi::json classes = didi::json::array();
+            for (const auto& value : params.value("class_names", didi::json::array())) {
+                classes.push_back({{"name", value}, {"exists", true}});
+            }
+            return didi::json{{"status", "success"}, {"classes", std::move(classes)}};
+        }
+        if (method == "resource.refreshCached") {
+            refreshed_path = params.value("path", std::string());
+            if (!m_refreshAnswers) return didi::Error(501, "Unknown method: resource.refreshCached");
+            return didi::json{{"path", refreshed_path}, {"cached", true}, {"reloaded", true}};
+        }
+        return didi::Error(404, "Unknown method: " + method);
+    }
+    didi::Result<didi::json> listSessions(const std::optional<std::string>&) override {
+        return didi::json{{"sessions", didi::json::array()}};
+    }
+    didi::Result<didi::json> attachSession(const std::string&) override { return didi::json::object(); }
+    didi::Result<didi::json> detachSession() override { return didi::json::object(); }
+    std::optional<didi::runtime::SessionDescriptor> activeSession() const override { return m_session; }
+
+    std::vector<std::string> methods;
+    std::string refreshed_path;
+
+private:
+    bool m_refreshAnswers;
+    didi::runtime::SessionDescriptor m_session;
+};
+
+static void test_resource_create_refuses_a_res_path() {
+    // .res is Godot's binary format and the loader reads it as binary whatever
+    // it holds, so the text this tool writes never loaded from one, and the
+    // editor printed "Unrecognized binary resource file" for it on every start
+    // (vibe session seventeen). Refused, with the .tres spelling to retry.
+    ScopedToolProject project("resource-create-res");
+    const auto refused = didi::mcp::handleResourceCreate(
+        {{"save_path", "res://library.res"}, {"resource_type", "Animation"},
+         {"properties", didi::json::object()}},
+        nullptr);
+    ASSERT_TRUE(refused.isError);
+    const auto envelope = didi::json::parse(refused.content[0].text);
+    ASSERT_EQ(envelope["error"]["code"], 400);
+    ASSERT_EQ(envelope["error"]["data"]["retry_with"]["save_path"], "res://library.tres");
+    ASSERT_TRUE(envelope["error"]["message"].get<std::string>().find("binary") != std::string::npos);
+    ASSERT_TRUE(!std::filesystem::exists("library.res"));
+}
+
+static void test_resource_create_refreshes_the_editor_copy_it_overwrote() {
+    // The editor keeps what it has loaded and does not re-read a file that
+    // changed underneath it, so after an overwrite every live reader answered
+    // from the old copy. The write asks the attached editor to reload its copy
+    // of exactly the file it wrote, and says whether one was reloaded.
+    ScopedToolProject project("resource-create-refresh");
+    const didi::json args = {{"save_path", "res://fade.tres"}, {"resource_type", "Animation"},
+                             {"properties", {{"length", 0.5}}}};
+
+    auto answering = std::make_shared<RefreshClient>(true);
+    const auto written = didi::mcp::handleResourceCreate(args, answering);
+    ASSERT_TRUE(!written.isError);
+    const auto report = didi::json::parse(written.content[0].text);
+    ASSERT_EQ(report["editor_copy_reloaded"], true);
+    ASSERT_EQ(answering->refreshed_path, "res://fade.tres");
+    // Asked after the write, never before it: reloading first would reload the
+    // file this call is about to replace.
+    ASSERT_EQ(answering->methods.back(), "resource.refreshCached");
+
+    // An editor that cannot answer the refresh leaves the field out rather than
+    // reporting a reload that did not happen or a copy that is not there.
+    auto older = std::make_shared<RefreshClient>(false);
+    auto overwrite = args;
+    overwrite["overwrite"] = true;
+    const auto again = didi::mcp::handleResourceCreate(overwrite, older);
+    ASSERT_TRUE(!again.isError);
+    ASSERT_TRUE(!didi::json::parse(again.content[0].text).contains("editor_copy_reloaded"));
+
+    // And with no editor at all, the answer is the offline one it always was.
+    const auto offline = didi::mcp::handleResourceCreate(
+        {{"save_path", "res://other.tres"}, {"resource_type", "Animation"},
+         {"properties", {{"length", 0.5}}}},
+        nullptr);
+    ASSERT_TRUE(!offline.isError);
+    ASSERT_TRUE(!didi::json::parse(offline.content[0].text).contains("editor_copy_reloaded"));
+}
+
 static void test_resource_create_type_guard_keeps_the_reference_when_no_engine_answers() {
     // Two ways for no engine to answer, and neither is the engine saying no.
     // An addon older than the route, and no session at all: both fall back to
@@ -6906,7 +7011,7 @@ static void test_resource_create_refuses_a_target_it_cannot_write() {
         {"save_path", "res://materials/wood"}});
     ASSERT_TRUE(no_extension.isError);
 
-    // What it is for still works, in either accepted spelling.
+    // What it is for still works, whatever the case of the extension.
     const auto material = registry.callTool("resource_create", didi::json{
         {"save_path", "res://materials/wood.tres"},
         {"resource_type", "StandardMaterial3D"}});
@@ -6914,6 +7019,11 @@ static void test_resource_create_refuses_a_target_it_cannot_write() {
     ASSERT_TRUE(readToolTestFile("materials/wood.tres").find("StandardMaterial3D") !=
                 std::string::npos);
     ASSERT_TRUE(!registry.callTool("resource_create", didi::json{
+        {"save_path", "res://materials/stone.TRES"}}).isError);
+    // A .res in any case is Godot's binary format, which text written into it
+    // is not, so it is refused rather than written unloadable (vibe session
+    // seventeen). This row used to require the opposite.
+    ASSERT_TRUE(registry.callTool("resource_create", didi::json{
         {"save_path", "res://materials/stone.RES"}}).isError);
 
     // Containment, which this tool used to check with its own copy of the
@@ -8129,6 +8239,9 @@ struct RegisterToolTests {
                      test_phase7_input_alias_keeps_invoked_entry_with_canonical_contract);
         registerTest("Tools.OfflineWriterOverwriteSchemas",
                      test_offline_writer_schemas_require_explicit_overwrite);
+        registerTest("Tools.ResourceCreateRefusesRes", test_resource_create_refuses_a_res_path);
+        registerTest("Tools.ResourceCreateRefreshesEditorCopy",
+                     test_resource_create_refreshes_the_editor_copy_it_overwrote);
         registerTest("Tools.ResourceCreateOverwriteGuard",
                      test_resource_create_preserves_existing_file_without_overwrite);
     registerTest("resource_create type guard asks the attached engine",
