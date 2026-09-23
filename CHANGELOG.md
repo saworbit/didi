@@ -49,6 +49,65 @@ release changed, which is why it lives here and not in a version section.
 Discovery now exposes 116 canonical tools plus 10 legacy registrations (126 total). 113 canonical tools are implemented and 3 remain unimplemented.
 The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, recorded in [Surface Amendments](docs/SURFACE_AMENDMENTS.md).
 
+## [2.0.1] - 2026-09-23
+
+Correctness work on 2.0.0, and release archives that stand on their own. Most
+of what follows fixes answers that were wrong. Some of those fixes change what
+a client sees: two renamed result fields, one field whose type changed, a patch
+tool that now refuses instead of appending, new refusals for input that used to
+be accepted, and refusals that now carry a different status or `data.code`.
+They are listed under Breaking below. Read that list before upgrading a client
+that branches on any of them. No tool or argument was removed or renamed, and
+about fifty optional arguments and result fields are new.
+
+Each archive now carries a README written for the download, the third-party
+notices for the code compiled into it, and on Windows a build that needs no
+Visual C++ Redistributable.
+
+### Breaking
+
+- **Two result fields are renamed.** `runtime_read_logs` and
+  `runtime_read_output` report `sequence_overflowed` where they reported
+  `exhausted`, and every page carries `has_more` (#598). The offline
+  `scene_get_hierarchy` names an instanced scene in `instance_of` where it used
+  `instance`, so both routes now use the same name (#591).
+- **`mutation_preview.changes[].target` names what the change is about**, such
+  as a path and a symbol, instead of repeating the arguments object. The
+  arguments are still in `mutation_preview.arguments` (#574).
+- **`script_patch_method` refuses a symbol the script does not declare** with
+  `404`, where it appended one and reported the same success as a replacement.
+  `create_if_missing: true` keeps the append (#569). `symbol_type` accepts only
+  `function`, `variable`, `constant`, `signal`, `enum` and `class`, so a value
+  such as `method` that 2.0.0 let through is refused (#570).
+- **Status codes that changed.**
+  - A failure the engine itself reports is `502` with `data.code:
+    "engine_refused"`. It was `503` with `not_connected`, which read as a lost
+    session (#625).
+  - The managed-recovery tools on a server started without `--managed-editor`
+    answer `409`. They answered `501` (#599).
+  - A capture from a headless editor or game answers `409`. It answered `404`
+    (#676, #777).
+  - `signal_connect` to a handler on a script that did not compile answers
+    `409`. It answered `404` (#729).
+  - A script this process may not read answers `403` with `code: "forbidden"`.
+    It answered `400`, or a success carrying a diagnostic (#653).
+  - A file whose name JSON cannot carry answers `500`. It answered `400`
+    (#650).
+- **`data.code` values that changed.** A colliding output says
+  `already_exists` rather than `conflict`, and names the argument to resend
+  under `retry_with`. The bridge's 409 and 422 refusals say which conflict they
+  are rather than `conflict` or `unprocessable`. A command cancelled before it
+  ran says `command_cancelled` rather than the 504 floor's `timeout`, and a
+  command cut off by an ended session says `live_session_ended` with
+  `retryable: false` (#862, #865, #867, #890, #892).
+- **New refusals for input that used to be accepted.** A second `initialize`
+  (`-32600`, #552). An empty string for a required string parameter (#553,
+  #554). Exploring a paused game (`409`). A shader uniform value outside its
+  declared `hint_range` (#620). An edit to a node the edited scene does not
+  own, to an inherited node, or an instance of the scene inside itself (`409`,
+  #588, #589, #590). `script_get_symbols` returns at most 2000 symbols unless
+  `max_symbols` says otherwise, and says when it stopped.
+
 ### Added
 
 - **The fuzz target lists cannot drift apart.** The set of fuzz targets was
@@ -107,8 +166,6 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
   `update-types` filter deliberately: a fix is worth taking whether upstream
   shipped it as a patch or as a major.
 
-### Added
-
 - **A project website.** [saworbit.github.io/didi](https://saworbit.github.io/didi/)
   is rendered from `site/` by a Pages workflow on every push to `main` and
   checked on every pull request: the landing page and the brand assets it
@@ -137,8 +194,6 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
   no longer than it did, and a 4.6 regression is found by the change that
   caused it instead of after the merge.
 
-### Added
-
 - **Every tool publishes a title.** Of the 126 entries `tools/list` returns,
   the number carrying a human-readable title was zero, on either protocol
   revision, so a host that displays one fell back to the identifier and
@@ -163,8 +218,6 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
   `stale_patch`, naming what the board holds and who last wrote it, which is
   the shape a refused task claim already uses. A caller that passes neither
   keeps last-writer-wins.
-
-### Added
 
 - **`runtime_launch` can leave the game running.** The tool is a batch runner:
   it blocks, captures, classifies and terminates the child at the timeout. So a
