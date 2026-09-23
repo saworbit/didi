@@ -28,6 +28,9 @@ A live call's answer carries the ERROR and WARNING lines the engine printed whil
 the call was running, under `engine_diagnostics`: a list of `{level, message,
 function, file, line}`, at most eight, with `engine_diagnostics_omitted` saying
 how many more there were and `engine_diagnostics_note` saying what the list is.
+A message longer than 1024 bytes is cut on a character boundary and marked
+`message_truncated: true`; `function`, `file` and `line` are there when the
+engine named them.
 On a success they sit beside the other fields; on a refusal they are under
 `error.data`. A call during which the engine printed nothing has no such field.
 The lines are the engine's own words and are attributed by time, not by cause:

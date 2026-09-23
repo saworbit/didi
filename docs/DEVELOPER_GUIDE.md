@@ -246,10 +246,17 @@ allowed entry names the request that causes the line on purpose, or the open
 issue for a known defect. A new line means a request made the engine complain:
 find the call (its answer carries the line under `engine_diagnostics`), then fix
 the cause or, when the line is the point of the request, add an entry that says
-which request and why. Never widen a pattern to make a run pass. Lines the host causes -- a CI runner with no GPU or audio device, whose
-engine says so while its drivers start -- are allowed by where in the engine they
-come from (`Where`, matched against the `at:` line) as well as by what they say,
-so the same message from anywhere else is still a finding.
+which request and why. Never widen a pattern to make a run pass.
+
+Lines the host causes -- a CI runner with no GPU or audio device, whose engine
+says so while its drivers start -- are allowed by where in the engine they come
+from (`Where`, matched against the `at:` line) as well as by what they say, so
+the same message from anywhere else is still a finding. The engine's source
+files move between lines: the audio fallback prints from
+`servers/audio_server.cpp` on 4.5 and `servers/audio/audio_server.cpp` from
+4.6, so read a new entry's `at:` line off all three engines before writing its
+`Where`. A developer machine prints none of these, and the first CI run is the
+first place they show.
 
 Two things catch people out running the harness by hand on Windows.
 
