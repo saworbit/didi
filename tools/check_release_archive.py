@@ -30,6 +30,12 @@ For each archive it checks, in order:
   says it is active. Any ERROR or WARNING line, or a library the engine could
   not open, is a finding, and so is a run in which the extension never
   published a session.
+* **An upgrade, per editor.** The same project, its addon folder then deleted
+  and replaced with the archive's, opened again. This is how a user upgrades,
+  and a fresh install cannot see what it costs: until the addon shipped its
+  `.uid` sidecars, replacing the folder printed ten "Missing .uid file"
+  warnings on the next start, on every supported engine (vibe session
+  seventeen).
 
 The editor checks run the host's own binaries, so a Windows machine checks the
 Windows archive; the other two need a Mac or a Linux box with Godot on it.
@@ -94,6 +100,7 @@ PLATFORMS = {
 @dataclass
 class EditorRun:
     godot: str
+    scenario: str = "fresh install"
     plugin_active: bool = False
     sessions_published: int = 0
     problems: list[str] = field(default_factory=list)
@@ -277,6 +284,30 @@ def write_project(root: Path, project: Path) -> None:
     )
 
 
+def upgrade_project(root: Path, project: Path, attempts: int = 15) -> None:
+    """Replace the project's addon with the archive's, the way a user upgrades.
+
+    Deleted and copied, not copied over: whatever the engine wrote into the
+    folder since -- the .uid sidecars it mints, for one -- goes with it, exactly
+    as it does when a person drops the new folder in place of the old.
+    """
+
+    target = project / "addons" / "didi"
+    # The editor that just ran copies a reloadable extension to `~name` and
+    # holds it for a moment after it has been reaped, the same wait
+    # remove_scratch makes. A user upgrading with the editor closed has no such
+    # wait; this one is the check's own doing.
+    for attempt in range(attempts):
+        try:
+            shutil.rmtree(target)
+            break
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(1)
+    shutil.copytree(root / "addons" / "didi", target)
+
+
 def mcp_handshake(server: Path, project: Path) -> tuple[int, list[str]]:
     """Ask the archive's server for its tools. Returns (tool count, findings)."""
 
@@ -450,6 +481,13 @@ def _check_unpacked(archive: Path, godots: Sequence[Path], expected_version: str
         report.editors.append(
             open_in_editor(godot, project, scratch_dir / f"editor{index}" / "sessions")
         )
+        # The same project again, upgraded. The first run left the engine's
+        # cache and the files it wrote into the addon folder behind, which is
+        # the state a real upgrade starts from.
+        upgrade_project(root, project)
+        upgraded = open_in_editor(godot, project, scratch_dir / f"editor{index}" / "sessions-upgrade")
+        upgraded.scenario = "upgrade by replacing the folder"
+        report.editors.append(upgraded)
 
 
 def print_report(report: Report) -> None:
@@ -467,7 +505,7 @@ def print_report(report: Report) -> None:
                   f"{len(run.problems)} problem line(s)")
         if run.timed_out:
             detail += ", timed out"
-        print(f"  {run.godot}: {state} ({detail})")
+        print(f"  {run.godot}, {run.scenario}: {state} ({detail})")
         for line in run.problems[:15]:
             print(f"      {line}")
 

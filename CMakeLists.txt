@@ -299,6 +299,20 @@ set(DIDI_ADDON_MANIFEST_FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi_mark.svg"
     "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi_mark_compact.svg"
     "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi_signature.svg"
+    # The .uid sidecars Godot 4.4 and later keeps beside each script and the
+    # .gdextension. Without them, replacing the addon folder to upgrade
+    # printed ten "Missing .uid file" warnings on the next editor start,
+    # measured on 4.5.1, 4.6.2 and 4.7.2 (vibe session seventeen).
+    "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi.gdextension.uid"
+    "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi_await.gd.uid"
+    "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi_brand.gd.uid"
+    "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi_client_config.gd.uid"
+    "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi_console.gd.uid"
+    "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi_diagnostics.gd.uid"
+    "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi_log.gd.uid"
+    "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi_plugin.gd.uid"
+    "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi_session.gd.uid"
+    "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi_settings.gd.uid"
 )
 set(DIDI_ADDON_STAGE_DIR "${CMAKE_BINARY_DIR}/addons/didi")
 

@@ -118,6 +118,15 @@ The three Phase 7 blockers are unchanged; the newest name is `anim_add_library`,
 
 ### Fixed
 
+- **Upgrading the addon printed ten "Missing .uid file" warnings.** Godot 4.4
+  and later keeps a `.uid` sidecar beside each script and the `.gdextension`,
+  and the addon shipped none, so replacing the `addons/didi` folder to upgrade
+  -- the way the README says to install it -- took away the ones the engine
+  had written, and the next editor start warned about every one. Measured on
+  4.5.1, 4.6.2 and 4.7.2: none on a fresh install, ten on an upgrade, and none
+  on either once the sidecars ship, including a project whose sidecars the
+  engine had minted before. The release check now opens each archive a second
+  time as an upgrade, so this cannot come back unseen.
 - **`resource_create` wrote `.res` files Godot cannot load.** `.res` is
   Godot's binary format and the loader reads it as binary whatever it holds,
   so every `.res` this tool wrote was refused with "Unrecognized binary
