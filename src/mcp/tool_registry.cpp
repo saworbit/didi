@@ -1779,7 +1779,8 @@ std::optional<Error> probeAnimLibraryTarget(const json& arguments,
                   {"library_name", payload.value("library_name", json(nullptr))},
                   {"library_path", payload.value("library_path", json(nullptr))},
                   {"animations_to_add", payload.value("animations", json::array())},
-                  {"animation_count", payload.value("animation_count", json(nullptr))}};
+                  {"animation_count", payload.value("animation_count", json(nullptr))},
+                  {"editor_copy_matches_file", payload.value("editor_copy_matches_file", json(nullptr))}};
     }
     return std::nullopt;
 }
@@ -3568,7 +3569,7 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "anim_list_tracks";
-        t.description = "Lists animations, keyframes, and blend trees in an AnimationPlayer or AnimationTree.";
+        t.description = "Lists the animations an AnimationPlayer holds, by the names anim_play_track takes, with each one's length, loop mode and tracks (type, node path and key times). Reads the edited scene in an editor and the running tree in a game. An AnimationTree is refused.";
         t.inputSchema = {
             {"type", "object"},
             {"properties", {
@@ -3584,7 +3585,7 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "anim_play_track";
-        t.description = "Plays a specific animation keyframe sequence to verify transitions.";
+        t.description = "Plays one animation on an AnimationPlayer in a running game and reports whether it is playing. Game sessions only. Name the animation the way anim_list_tracks or anim_add_library reports it: library/animation, or the bare name for the default library.";
         t.inputSchema = {
             {"type", "object"},
             {"properties", {
@@ -3608,7 +3609,8 @@ void ToolRegistry::registerAllDefaultTools() {
             {"properties", {
                 {"animation_player_path", {{"type", "string"}, {"minLength", 1}, {"maxLength", 1024}}},
                 {"library_path", {{"type", "string"}, {"minLength", 1}, {"maxLength", 1024}}},
-                {"library_name", {{"type", "string"}, {"maxLength", 256}, {"default", ""}}}
+                {"library_name", {{"type", "string"}, {"maxLength", 256}, {"default", ""}}},
+                {"reload_from_disk", {{"type", "boolean"}, {"default", false}}}
             }},
             {"required", json::array({"animation_player_path", "library_path"})},
             {"additionalProperties", false}

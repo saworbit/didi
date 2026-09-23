@@ -60,6 +60,10 @@ void request_validation() {
     }
     // The server's dry-run probe sets this; nothing else can reach it.
     ASSERT_TRUE(parseAnimAddLibraryRequest(with("preview", true)).value().preview);
+    // Off unless asked for: reloading discards changes made to the editor's
+    // copy and not saved.
+    ASSERT_TRUE(!plain.value().reload_from_disk);
+    ASSERT_TRUE(parseAnimAddLibraryRequest(with("reload_from_disk", true)).value().reload_from_disk);
 
     for (const auto& bad : {
              json::object(),
@@ -78,6 +82,8 @@ void request_validation() {
              with("library_name", std::string(257, 'n')),
              with("library_name", std::string("a\0b", 3)),
              with("preview", "yes"),
+             with("reload_from_disk", 1),
+             with("reload_from_disk", "true"),
              with("replace", true),
              with("dry_run", false)}) {
         auto parsed = parseAnimAddLibraryRequest(bad);
@@ -118,7 +124,10 @@ void registration() {
     ASSERT_TRUE(schema["properties"].contains("dry_run"));
     ASSERT_TRUE(!schema["properties"].contains("confirmation_token"));
     ASSERT_TRUE(!schema["properties"].contains("preview"));
-    for (const auto* parameter : {"animation_player_path", "library_path", "library_name"}) {
+    ASSERT_EQ(schema["properties"]["reload_from_disk"]["type"], json("boolean"));
+    ASSERT_EQ(schema["properties"]["reload_from_disk"]["default"], json(false));
+    for (const auto* parameter : {"animation_player_path", "library_path", "library_name",
+                                  "reload_from_disk"}) {
         ASSERT_TRUE(schema["properties"][parameter].contains("description"));
     }
 

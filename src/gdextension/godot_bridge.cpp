@@ -88,13 +88,21 @@ const std::map<std::string, std::string>& bridgeErrorSentences() {
      "under one name only."},
     {"animation_library_name_taken",
      "The player already has a library by that name."},
+    {"animation_library_differs_from_disk",
+     "The editor's copy of this library is not what the file now holds."},
+    {"animation_library_slot",
+     "An AnimationPlayer's libraries are not set as a property."},
     {"animation_library_postcondition_mismatch",
      "The player did not hold the library after the change was committed."},
+    {"animation_library_reload_failed",
+     "The editor's copy of the library could not be reloaded from the file, so nothing was added."},
     {"animation_library_undo_registration_failed",
      "The change could not be registered with the editor's undo history, so it was not made."},
     {"animation_library_unloadable",
      "A file is there, and the engine could not load a resource from it, which is what a file "
      "that does not parse looks like."},
+    {"library_path_case_mismatch",
+     "The path spells the file with different letter case from the file on disk."},
     {"camera_path_does_not_resolve_to_camera3d",
      "That path resolves to a node, but not to a Camera3D."},
     {"camera_postcondition_mismatch",
@@ -2512,6 +2520,47 @@ Result<AttachableScript> loadAttachableScript(GDExtensionObjectPtr node,
 // the real call uses to refuse it, and previewed it as planned anyway: the
 // '..' rule was #571, and these are the ownership, cycle and base-type rules
 // (#588, #589, #590, #603).
+// The slot anim_add_library fills, which scene_set_property cannot write. On
+// 4.5 it is one Dictionary, outside the scalar contract; from 4.6 it is one
+// libraries/<name> property per library, which a player without that library
+// does not have. So the same request was refused as a Dictionary on one engine
+// and as a property that does not exist on the next -- which reads as "this
+// player has no libraries" -- and the 4.5 dry run previewed it as a planned
+// change. None of the three named the tool that works (vibe session
+// seventeen). One refusal now, on every engine, and on the dry run too.
+std::optional<json> refuseAnimationLibrarySlot(GDExtensionObjectPtr node, const std::string& property) {
+    if (property != "libraries" && property.rfind("libraries/", 0) != 0) return std::nullopt;
+    auto mixer = objectIsClass(node, "AnimationMixer");
+    if (mixer.isErr() || !mixer.value()) return std::nullopt;
+    return bridgeError(400, "animation_library_slot",
+                       {{"property_name", property}, {"use_tool", "anim_add_library"}},
+                       "Use anim_add_library: it takes the player, a res:// library file and the "
+                       "name to hold it under, and registers the add with the editor's undo history.");
+}
+
+// The typed tool for an engine method scene_call_method will not call, when
+// there is one. The refusal already said "the typed tools cover those" and named
+// none, so a caller who reached for add_animation_library by hand was left to
+// search the surface for the tool that does it.
+std::string typedToolForEngineMethod(const std::string& method) {
+    static const std::map<std::string, std::string> tools = {
+        {"add_animation_library", "anim_add_library"},
+        {"add_to_group", "scene_add_to_group"},
+        {"connect", "signal_connect"},
+        {"disconnect", "signal_disconnect"},
+        {"emit_signal", "signal_emit"},
+        {"queue_free", "scene_remove_node"},
+        {"remove_from_group", "scene_remove_from_group"},
+        {"reparent", "scene_reparent_node"},
+        {"set_cell", "tilemap_set_cells"},
+        {"set_cell_item", "gridmap_set_cells"},
+        {"set_script", "script_attach_to_node"},
+        {"set_shader_parameter", "shader_set_uniform"},
+    };
+    const auto found = tools.find(method);
+    return found == tools.end() ? std::string() : found->second;
+}
+
 std::optional<json> previewMutationPreconditions(GDExtensionObjectPtr root, GDExtensionObjectPtr node,
                                                  const std::string& described_path,
                                                  const json& mutation) {
@@ -2561,6 +2610,11 @@ std::optional<json> previewMutationPreconditions(GDExtensionObjectPtr root, GDEx
         tool == "script_detach_from_node") {
         if (auto refused = refuseUnsavableEdit(root, node, described_path, SceneEdit::Property)) {
             return refused;
+        }
+        if (tool == "scene_set_property") {
+            if (auto property = string_argument("property_name")) {
+                if (auto refused = refuseAnimationLibrarySlot(node, *property)) return refused;
+            }
         }
         if (tool == "script_attach_to_node") {
             if (auto script_path = string_argument("script_path")) {
@@ -3774,9 +3828,12 @@ json GodotBridge::callScriptMethod(const json& params,
     if (script_value.isErr()) return fail(500, script_value.error().message);
     auto script = objectFromVariant(script_value.value());
     if (script.isErr() || !script.value()) {
+        const auto typed = typedToolForEngineMethod(method_name);
         return fail(422,
                     "The node has no script, so it declares no methods to call. Engine methods "
-                    "are deliberately out of reach here; the typed tools cover those.");
+                    "are deliberately out of reach here; the typed tools cover those." +
+                        (typed.empty() ? std::string()
+                                       : " For " + method_name + ", use " + typed + "."));
     }
     // The editor only creates a script instance for a @tool script. Without
     // one the node carries the script resource, has_method answers true, and
@@ -3823,7 +3880,11 @@ json GodotBridge::callScriptMethod(const json& params,
         return fail(404,
                     "\"" + method_name + "\" is not a method this node's script declares. "
                     "scene_call_method calls project methods only. Declared: " +
-                    declared.dump());
+                    declared.dump() +
+                    (typedToolForEngineMethod(method_name).empty()
+                         ? std::string()
+                         : ". For the engine's " + method_name + ", use " +
+                               typedToolForEngineMethod(method_name) + "."));
     }
 
     const auto declared_arguments = chosen->value("args", json::array());
@@ -6752,6 +6813,112 @@ Result<NameList> readNameList(VariantValue& list, size_t cap) {
     return result;
 }
 
+Result<std::string> projectDirectoryOnDisk();
+
+// How the file a res:// path names is spelled on disk, when that differs from
+// the argument only in letter case. Empty when the spelling matches, or when
+// the file cannot be resolved to one inside the project.
+//
+// A case-insensitive filesystem opens res://MENU.tres for a file stored as
+// res://menu.tres, and the loader then caches a second copy of the resource
+// under the spelling it was given. The scene saved afterwards references the
+// wrong spelling, which a case-sensitive platform and an exported pack cannot
+// open. Godot 4.7.2 says so in its log ("This file will not open when exported
+// to other case-sensitive platforms"); 4.5.1 and 4.6.2 say nothing, measured
+// in vibe session seventeen.
+std::optional<std::string> resPathCaseMismatch(const std::string& res_path) {
+    namespace fs = std::filesystem;
+    auto directory = projectDirectoryOnDisk();
+    if (directory.isErr()) return std::nullopt;
+    std::error_code error;
+    fs::path root;
+    fs::path target;
+    try {
+        root = fs::canonical(paths::projectPathFromUtf8(directory.value()), error);
+        if (error) return std::nullopt;
+        target = fs::canonical(root / paths::projectPathFromUtf8(res_path.substr(6)), error);
+        if (error) return std::nullopt;
+    } catch (const std::exception&) {
+        return std::nullopt;
+    }
+    const auto relative = target.lexically_relative(root);
+    if (relative.empty() || *relative.begin() == "..") return std::nullopt;
+    const std::string spelled = "res://" + paths::projectPathToUtf8(relative);
+    if (spelled == res_path || spelled.size() != res_path.size()) return std::nullopt;
+    // Case only: a symlink would change the path rather than its letters, and
+    // is left alone. Non-ASCII letters are compared byte for byte at the same
+    // length, which is as far as a case fold without a Unicode table goes.
+    for (size_t index = 0; index < spelled.size(); ++index) {
+        const auto a = static_cast<unsigned char>(spelled[index]);
+        const auto b = static_cast<unsigned char>(res_path[index]);
+        if (a == b) continue;
+        if (a >= 0x80 && b >= 0x80) continue;
+        if (std::tolower(a) != std::tolower(b)) return std::nullopt;
+    }
+    return spelled;
+}
+
+// What a library holds, as far as a player would show it: each animation's
+// length and loop mode, and each track's type, path and key count. Two copies
+// of the same file that differ here are two different libraries to a caller.
+// Key times and values are not compared, which bounds the work at the catalog
+// caps anim_list_tracks already applies.
+Result<json> libraryFingerprint(GDExtensionObjectPtr library) {
+    auto list = callObject(library, "AnimationLibrary", "get_animation_list", 3995934104LL);
+    if (list.isErr()) return list.error();
+    auto names = readNameList(list.value(), runtime::kMaxAnimations);
+    if (names.isErr()) return names.error();
+    json animations = json::object();
+    for (const auto& name : names.value().names) {
+        auto key = makeStringName(name);
+        if (key.isErr()) return key.error();
+        auto value = callObject(library, "AnimationLibrary", "get_animation", 2933122410LL, {&key.value()});
+        if (value.isErr()) return value.error();
+        auto animation = objectFromVariant(value.value());
+        if (animation.isErr()) return animation.error();
+        if (!animation.value()) {
+            animations[name] = nullptr;
+            continue;
+        }
+        auto number = [&](const char* method, int64_t hash, GDExtensionVariantType type,
+                          std::vector<const VariantValue*> args = {}) -> json {
+            auto result = callObject(animation.value(), "Animation", method, hash, args);
+            if (result.isErr()) return nullptr;
+            if (type == GDEXTENSION_VARIANT_TYPE_FLOAT) {
+                auto read = scalarFromVariant<double>(result.value(), type);
+                return read.isOk() ? json(read.value()) : json(nullptr);
+            }
+            auto read = scalarFromVariant<int64_t>(result.value(), type);
+            return read.isOk() ? json(read.value()) : json(nullptr);
+        };
+        json entry = {{"length", number("get_length", 1740695150LL, GDEXTENSION_VARIANT_TYPE_FLOAT)},
+                      {"loop_mode", number("get_loop_mode", 1988889481LL, GDEXTENSION_VARIANT_TYPE_INT)}};
+        const json track_count = number("get_track_count", 3905245786LL, GDEXTENSION_VARIANT_TYPE_INT);
+        json tracks = json::array();
+        const int64_t limit = std::min<int64_t>(track_count.is_number_integer() ? track_count.get<int64_t>() : 0,
+                                                static_cast<int64_t>(runtime::kMaxTracksPerAnimation));
+        for (int64_t index = 0; index < limit; ++index) {
+            auto track = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
+            if (track.isErr()) return track.error();
+            std::string path;
+            auto path_value = callObject(animation.value(), "Animation", "track_get_path", 408788394LL,
+                                         {&track.value()});
+            if (path_value.isOk()) {
+                auto text = stringFromVariant(path_value.value(), GDEXTENSION_VARIANT_TYPE_NODE_PATH);
+                if (text.isOk()) path = text.value();
+            }
+            tracks.push_back({number("track_get_type", 3445944217LL, GDEXTENSION_VARIANT_TYPE_INT, {&track.value()}),
+                              path,
+                              number("track_get_key_count", 923996154LL, GDEXTENSION_VARIANT_TYPE_INT,
+                                     {&track.value()})});
+        }
+        entry["track_count"] = track_count;
+        entry["tracks"] = std::move(tracks);
+        animations[name] = std::move(entry);
+    }
+    return json{{"animation_count", names.value().total}, {"animations", std::move(animations)}};
+}
+
 // Gives an AnimationPlayer in the edited scene an AnimationLibrary loaded from
 // a res:// file, through the editor UndoRedo stack (#770). Nothing else on the
 // surface could, so anim_list_tracks and anim_play_track had nothing to find
@@ -6777,6 +6944,13 @@ json animAddLibrary(const json& params, const std::string& session_kind) {
                              std::make_tuple("AnimationMixer", "get_animation_library", 147342321LL),
                              std::make_tuple("AnimationMixer", "get_animation_library_list", 3995934104LL),
                              std::make_tuple("AnimationLibrary", "get_animation_list", 3995934104LL),
+                             std::make_tuple("AnimationLibrary", "get_animation", 2933122410LL),
+                             std::make_tuple("Animation", "get_length", 1740695150LL),
+                             std::make_tuple("Animation", "get_loop_mode", 1988889481LL),
+                             std::make_tuple("Animation", "get_track_count", 3905245786LL),
+                             std::make_tuple("Animation", "track_get_type", 3445944217LL),
+                             std::make_tuple("Animation", "track_get_path", 408788394LL),
+                             std::make_tuple("Animation", "track_get_key_count", 923996154LL),
                              std::make_tuple("Resource", "get_path", 201670096LL),
                              std::make_tuple("ResourceLoader", "exists", 4185558881LL),
                              std::make_tuple("ResourceLoader", "load", 3358495409LL)}) {
@@ -6824,6 +6998,14 @@ json animAddLibrary(const json& params, const std::string& session_kind) {
     if (!exists.value()) {
         return errorJson(404, "No resource at " + request.library_path +
                                   ". Write the AnimationLibrary with resource_create first.");
+    }
+    if (auto spelled = resPathCaseMismatch(request.library_path)) {
+        return bridgeError(400, "library_path_case_mismatch",
+                           {{"library_path", request.library_path}, {"library_path_on_disk", *spelled},
+                            {"retry_with", {{"library_path", *spelled}}}},
+                           "The file is " + *spelled + " on disk. A scene saved with " +
+                               request.library_path + " references a path a case-sensitive "
+                               "platform and an exported pack cannot open.");
     }
     // Through the loader's cache, so the object added is the one the editor
     // already holds for that file and the scene saves a reference to it.
@@ -6900,10 +7082,81 @@ json animAddLibrary(const json& params, const std::string& session_kind) {
                            request.library_path + " is on this player as " + describe_name(name) + ".");
     }
 
+    // Whether the editor's copy is still the file. The editor keeps every
+    // resource it has loaded, and nothing an unattended editor does re-reads a
+    // file that changed underneath it: not editor_reload_project, and not
+    // EditorFileSystem.update_file or scan either, measured in vibe session
+    // seventeen. So a library rewritten by resource_create or by an agent's own
+    // file tools was added as the old copy and reported by its old names, while
+    // the saved scene referenced the file and the game loaded the new one.
+    //
+    // IGNORE_DEEP (3) reads the file and the animation files it references
+    // without touching the cache; REPLACE_DEEP (4) reloads the cached objects
+    // in place, keeping their identity, which is what the editor itself does
+    // when it notices a change. Both measured on 4.5.1, 4.6.2 and 4.7.2.
+    auto ignore_deep = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(3));
+    if (ignore_deep.isErr()) return errorJson(500, ignore_deep.error().message);
+    auto disk_value = callObject(loader.value(), "ResourceLoader", "load", 3358495409LL,
+                                 {&path_value.value(), &hint.value(), &ignore_deep.value()});
+    auto disk = disk_value.isOk() ? objectFromVariant(disk_value.value())
+                                  : Result<GDExtensionObjectPtr>(disk_value.error());
+    if (disk.isErr() || !disk.value()) {
+        return bridgeError(422, "animation_library_unloadable", {{"library_path", request.library_path}},
+                           "The editor holds a copy it loaded earlier, and the file itself no longer "
+                           "loads, so a scene saved with it would not either.");
+    }
+    auto held_print = libraryFingerprint(library.value());
+    auto disk_print = libraryFingerprint(disk.value());
+    if (held_print.isErr()) return errorJson(500, held_print.error().message);
+    if (disk_print.isErr()) return errorJson(500, disk_print.error().message);
+    const bool stale = held_print.value() != disk_print.value();
+    if (stale && !request.reload_from_disk) {
+        const auto names_of = [](const json& print) {
+            json names = json::array();
+            for (auto it = print["animations"].begin(); it != print["animations"].end(); ++it) {
+                names.push_back(it.key());
+            }
+            return names;
+        };
+        const json editor_names = names_of(held_print.value());
+        const json file_names = names_of(disk_print.value());
+        std::string detail = "The editor holds a copy of " + request.library_path +
+                             " that no longer matches the file: ";
+        detail += editor_names == file_names
+                      ? "the same animations, " + editor_names.dump() + ", with different lengths or tracks."
+                      : editor_names.dump() + " in the editor, " + file_names.dump() + " in the file.";
+        detail += " Send reload_from_disk: true to take the file's version; that also updates every "
+                  "player already holding this library, and discards any change made to the editor's "
+                  "copy and not saved.";
+        // Names rather than the whole fingerprint: a library at the catalog
+        // caps would put this refusal over the response limit, and an answer
+        // over the limit costs the caller the route.
+        return bridgeError(409, "animation_library_differs_from_disk",
+                           {{"library_path", request.library_path},
+                            {"editor_copy_animations", editor_names},
+                            {"file_animations", file_names},
+                            {"retry_with", {{"reload_from_disk", true}}}},
+                           detail);
+    }
+    // In a preview the reload does not happen, so the names come from the file
+    // the real call would reload.
+    const GDExtensionObjectPtr named_from = stale && request.preview ? disk.value() : library.value();
+    if (stale && !request.preview) {
+        auto replace_deep = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(4));
+        if (replace_deep.isErr()) return errorJson(500, replace_deep.error().message);
+        auto reloaded = callObject(loader.value(), "ResourceLoader", "load", 3358495409LL,
+                                   {&path_value.value(), &hint.value(), &replace_deep.value()});
+        auto reloaded_object = reloaded.isOk() ? objectFromVariant(reloaded.value())
+                                               : Result<GDExtensionObjectPtr>(reloaded.error());
+        if (reloaded_object.isErr() || reloaded_object.value() != library.value()) {
+            return bridgeError(500, "animation_library_reload_failed", {{"library_path", request.library_path}});
+        }
+    }
+
     // What the player will answer to once the library is on it: a named
     // library's animations are "name/animation", the default library's are
     // their own names. These are the names anim_play_track takes.
-    auto animation_list = callObject(library.value(), "AnimationLibrary", "get_animation_list", 3995934104LL);
+    auto animation_list = callObject(named_from, "AnimationLibrary", "get_animation_list", 3995934104LL);
     if (animation_list.isErr()) return errorJson(500, animation_list.error().message);
     auto contained = readNameList(animation_list.value(), runtime::kMaxAnimations);
     if (contained.isErr()) return errorJson(500, contained.error().message);
@@ -6922,7 +7175,8 @@ json animAddLibrary(const json& params, const std::string& session_kind) {
                            {"library_names", existing.value().names},
                            {"animations", animations},
                            {"animation_count", contained.value().total},
-                           {"animations_truncated", animations_truncated}});
+                           {"animations_truncated", animations_truncated},
+                           {"editor_copy_matches_file", !stale}});
     }
 
     auto name_value = makeStringName(request.library_name);
@@ -6985,6 +7239,10 @@ json animAddLibrary(const json& params, const std::string& session_kind) {
                               {"animations", animations},
                               {"animation_count", contained.value().total},
                               {"animations_truncated", animations_truncated},
+                              // Not part of the undo action: the file is what
+                              // the scene references, and undoing the add
+                              // does not bring an out-of-date copy back.
+                              {"reloaded_from_disk", stale},
                               {"undo_redo_registered", true}});
 }
 
@@ -11832,6 +12090,10 @@ json GodotBridge::execute(const std::string& method, const json& params,
             if (auto refused = refuseUnsavableEdit(root.value(), node.value(),
                                                    params.value("target_node", ""),
                                                    SceneEdit::Property)) {
+                return *refused;
+            }
+            if (auto refused = refuseAnimationLibrarySlot(node.value(),
+                                                          params.value("property_name", ""))) {
                 return *refused;
             }
         } else if (params.contains("mutation")) {

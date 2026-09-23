@@ -27,6 +27,10 @@ struct AnimAddLibraryRequest {
     // Empty is the player's default library, whose animations are addressed by
     // their own names. Any other name prefixes them as "name/animation".
     std::string library_name;
+    // Take the file's contents when the editor's cached copy of the library no
+    // longer matches it. Off by default, because reloading discards anything
+    // changed in the editor's copy and not saved.
+    bool reload_from_disk{false};
     // Set by the server's dry-run probe, never by a client: the published
     // schema does not carry it. Everything is checked and nothing is changed.
     bool preview{false};

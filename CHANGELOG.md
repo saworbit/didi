@@ -69,6 +69,21 @@ The three Phase 7 blockers are unchanged; the newest name is `anim_add_library`,
   library. The scene saved afterwards holds a reference to the library file in
   whichever form the running engine uses. Recorded in
   [Surface Amendments](docs/SURFACE_AMENDMENTS.md).
+
+  Vibe session seventeen then drove it with a real editor on 4.5.1 and
+  4.7.2, and four things came out of that before it shipped. A path in the
+  wrong letter case is refused with the on-disk spelling: Windows opened
+  it, the loader cached a second copy, and the saved scene referenced a
+  path 4.7.2's own log says an export cannot open. A library rewritten
+  after the editor loaded it is refused rather than added as the old copy,
+  because nothing an unattended editor does re-reads it, and
+  `reload_from_disk: true` takes the file's version. `scene_set_property`
+  on an AnimationPlayer's `libraries` gives one refusal on every engine
+  that names `anim_add_library`, where it was a Dictionary refusal on 4.5,
+  a missing property on 4.6 and later, and a clean preview on the 4.5 dry
+  run; `scene_call_method` names the typed tool for an engine method that
+  has one. And `anim_list_tracks` no longer says it reads an
+  `AnimationTree` or blend trees, which it never did.
 - **A release archive can be installed and checked in one command.** The
   release workflow checks an archive's files, links and handshake, but no
   runner has a Godot, and the live harness drives its own fixture addon rather

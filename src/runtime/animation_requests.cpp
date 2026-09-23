@@ -79,7 +79,8 @@ Result<AnimPlayRequest> parseAnimPlayRequest(const json& params) {
 
 Result<AnimAddLibraryRequest> parseAnimAddLibraryRequest(const json& params) {
     if (!params.is_object()) return Error::invalidArgument("Animation params must be an object");
-    if (!onlyKeys(params, {"animation_player_path", "library_path", "library_name", "preview"})) {
+    if (!onlyKeys(params, {"animation_player_path", "library_path", "library_name",
+                           "reload_from_disk", "preview"})) {
         return Error::invalidArgument("Animation request contains an unknown property");
     }
     AnimAddLibraryRequest request;
@@ -117,6 +118,12 @@ Result<AnimAddLibraryRequest> parseAnimAddLibraryRequest(const json& params) {
                     "refuses '/', ':', ',' and '[' in a library name.");
             }
         }
+    }
+    if (params.contains("reload_from_disk")) {
+        if (!params["reload_from_disk"].is_boolean()) {
+            return Error::invalidArgument("reload_from_disk must be a boolean");
+        }
+        request.reload_from_disk = params["reload_from_disk"].get<bool>();
     }
     if (params.contains("preview")) {
         if (!params["preview"].is_boolean()) return Error::invalidArgument("preview must be a boolean");
