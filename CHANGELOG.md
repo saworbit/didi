@@ -41,16 +41,49 @@ release changed, which is why it lives here and not in a version section.
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `113/116`
+**Canonical implementation:** `114/117`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Discovery now exposes 116 canonical tools plus 10 legacy registrations (126 total). 113 canonical tools are implemented and 3 remain unimplemented.
-The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, recorded in [Surface Amendments](docs/SURFACE_AMENDMENTS.md).
+Discovery now exposes 117 canonical tools plus 10 legacy registrations (127 total). 114 canonical tools are implemented and 3 remain unimplemented.
+The three Phase 7 blockers are unchanged; the newest name is `anim_add_library`, recorded in [Surface Amendments](docs/SURFACE_AMENDMENTS.md).
 
 ### Added
 
+- **`anim_add_library` gives an AnimationPlayer an animation (#770).** Nothing
+  on the surface could, so `anim_list_tracks` answered an empty list and
+  `anim_play_track` had nothing to name on any player the surface built.
+  `resource_create` already wrote a correct `Animation` and `AnimationLibrary`,
+  and the last step had no route: `scene_set_property` refuses the `libraries`
+  Dictionary, `scene_call_method` only calls script methods, and the scene file
+  is held by the editor. The new tool loads an `AnimationLibrary` from a
+  `res://` file, adds it to a player in the edited scene through the UndoRedo
+  stack, reads the player back, and reports the names `anim_play_track` takes.
+  It only adds. A name already in use, the same library under a second name, a
+  name the engine refuses and a file that is not an `AnimationLibrary` are each
+  refused by name before the engine prints an error, and a dry run makes the
+  same checks. It is a live editor call rather than a file writer because the
+  engine saves a player's libraries in two shapes across the supported range:
+  4.5.1 writes one Dictionary, and 4.6.2 and 4.7.2 write one property per
+  library. The scene saved afterwards holds a reference to the library file in
+  whichever form the running engine uses. Recorded in
+  [Surface Amendments](docs/SURFACE_AMENDMENTS.md).
+
+  Vibe session seventeen then drove it with a real editor on 4.5.1 and
+  4.7.2, and four things came out of that before it shipped. A path in the
+  wrong letter case is refused with the on-disk spelling: Windows opened
+  it, the loader cached a second copy, and the saved scene referenced a
+  path 4.7.2's own log says an export cannot open. A library rewritten
+  after the editor loaded it is refused rather than added as the old copy,
+  because nothing an unattended editor does re-reads it, and
+  `reload_from_disk: true` takes the file's version. `scene_set_property`
+  on an AnimationPlayer's `libraries` gives one refusal on every engine
+  that names `anim_add_library`, where it was a Dictionary refusal on 4.5,
+  a missing property on 4.6 and later, and a clean preview on the 4.5 dry
+  run; `scene_call_method` names the typed tool for an engine method that
+  has one. And `anim_list_tracks` no longer says it reads an
+  `AnimationTree` or blend trees, which it never did.
 - **A release archive can be installed and checked in one command.** The
   release workflow checks an archive's files, links and handshake, but no
   runner has a Godot, and the live harness drives its own fixture addon rather

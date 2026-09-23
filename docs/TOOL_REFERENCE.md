@@ -1,17 +1,17 @@
 # Didi MCP Tool Reference
 
-Didi exposes 116 canonical tool names plus 10 legacy names (126 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
+Didi exposes 117 canonical tool names plus 10 legacy names (127 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
 
-The `_meta.didi` object returned by `tools/list` is authoritative. A registered tool with `implemented: false` is unavailable and returns an MCP tool error. Every tool carries `legacy`, and the ten legacy registrations carry `legacy: true`; the eight of those that resolve to a differently named tool also carry `canonical` and name it in a closing sentence of their description. Ten of the 126 names are duplicates, and without that an agent has no way to tell which of two identical listings to call, or why error data names a `canonical_tool` it cannot find.
+The `_meta.didi` object returned by `tools/list` is authoritative. A registered tool with `implemented: false` is unavailable and returns an MCP tool error. Every tool carries `legacy`, and the ten legacy registrations carry `legacy: true`; the eight of those that resolve to a differently named tool also carry `canonical` and name it in a closing sentence of their description. Ten of the listed names are duplicates, and without that an agent has no way to tell which of two identical listings to call, or why error data names a `canonical_tool` it cannot find.
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `113/116`
+**Canonical implementation:** `114/117`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `PARTIAL_DELIVERY`. The implementation is 113/116 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+Phase 7 is `PARTIAL_DELIVERY`. The implementation is 114/117 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 ## Status legend
 
@@ -698,6 +698,31 @@ Starts an animation on a running game's AnimationPlayer. Delivered under the Pha
 One `AnimationPlayer.play(name, -1, custom_speed, from_end)` call, then `is_playing` and `current_animation` are reread rather than trusted. The result is `{dispatched: true, animation_name, custom_speed, from_end, playing, outcome: "completed", rollback: "not_available"}`; `dispatched` is not completion, and no key is edited. A mutation with `dry_run` and no confirmation token.
 
 Errors: `400`, `404`, `409` editor session, `500`, `501`, `504` if the call itself fails.
+
+### `anim_add_library` — Live (editor only)
+
+Gives an AnimationPlayer in the edited scene an `AnimationLibrary` loaded from a file. It is the step between writing an animation with `resource_create` and playing it with `anim_play_track`. Added by [Surface Amendment](SURFACE_AMENDMENTS.md) for #770.
+
+- `animation_player_path` (`string`, 1..1024, required). Resolved in the edited scene; anything that is not an AnimationPlayer is `404`, and a player inside an instance the edited scene does not own is `409 node_not_owned`.
+- `library_path` (`string`, 1..1024, required). A normalised `res://` path ending in `.tres` or `.res`, spelled with the file's own letter case. The file is loaded through `ResourceLoader`, and the object must be an `AnimationLibrary`. `resource_create` writes one as an `AnimationLibrary` whose `_data` maps each name to an `Animation`, and lists `_data` under `not_declared_but_written`, because the class reference does not declare storage properties; that is expected.
+- `library_name` (`string`, 0..256, default `""`). `""` is the player's default library, whose animations are played by their own names. Any other name makes them `name/animation`. Godot refuses `/`, `:`, `,` and `[` in a library name, so they are refused here first. Every other name, including spaces, quotes and non-ASCII text, survives a save and reload on all three supported engines.
+- `reload_from_disk` (`boolean`, default false). Take the file's version when the editor's cached copy no longer matches it; see below.
+
+The library goes on the edited scene's UndoRedo stack as `add_animation_library`, with `remove_animation_library` as its undo, and the player is then read back to confirm it holds that library under that name. The result is `{status: "success", animation_player_path, library_name, library_path, library_names, animations, animation_count, animations_truncated, reloaded_from_disk, undo_redo_registered: true, scene_saved: false, limitation}`. `animations` lists the names the player now answers to, which are the names `anim_play_track` takes, capped at 128. `library_names` lists every library the player holds afterwards.
+
+**Case.** On a case-insensitive filesystem `res://MENU.tres` opens a file stored as `res://menu.tres`, the loader caches a second copy under the wrong spelling, and the scene saved afterwards references a path a case-sensitive platform and an exported pack cannot open. Such a path is `400 library_path_case_mismatch`, with the on-disk spelling in `library_path_on_disk` and `retry_with`.
+
+**The editor's copy.** The editor keeps every resource it has loaded, and nothing an unattended editor does re-reads a file that changed underneath it: not `editor_reload_project`, and not the editor's own filesystem scan. So the library is compared with the file first, by each animation's name, length, loop mode and tracks (type, path and key count). When the file was rewritten after the editor loaded it, by `resource_create` or by any other writer, the call is `409 animation_library_differs_from_disk`, naming the animations each copy holds, with `retry_with: {reload_from_disk: true}`. With `reload_from_disk` the editor's copy is reloaded in place from the file before the add, so every player already holding the library shows the file's version too, and the result says `reloaded_from_disk: true`. Reloading discards any change made to the editor's copy and not saved, which is why it is asked for rather than done. Key times and values are not compared.
+
+It only adds. A library name the player already uses is `409 animation_library_name_taken`, with `existing_library_path` when that library came from a file. The same library object under a second name is `409 animation_library_already_added`, because Godot holds one library under one name only. `editor_undo` takes an add back off. The file is referenced, not copied: `editor_save_scene` writes an `ExtResource`, in whichever form the running engine uses (4.5 writes a `libraries` Dictionary, 4.6 and later write one `libraries/<name>` property per library). The library file is shared by every scene that references it, and this tool never edits it.
+
+`dry_run` runs every check against the player and the file and stops before the undo action. The preview's `before` lists the player's `library_names`, the `animations_to_add` and `editor_copy_matches_file`; a preview with `reload_from_disk` reloads nothing and names the animations from the file. No confirmation token.
+
+`anim_play_track` is game only, so the full workflow is `anim_add_library`, then `editor_save_scene`, then `runtime_launch`, then `anim_play_track`.
+
+Errors: `400` malformed request, path or name, or `library_path_case_mismatch`; `404` no player, not an AnimationPlayer, or no file at the path; `409` session kind, `node_not_owned`, `animation_library_name_taken`, `animation_library_already_added`, `animation_library_differs_from_disk`; `422` `not_an_animation_library` (naming the class it found, with a hint when it is a bare `Animation`) or `animation_library_unloadable`; `500` if the editor's copy could not be reloaded (`animation_library_reload_failed`), if the undo action could not be built (`animation_library_undo_registration_failed`, nothing changed), or if the player does not hold the library after the commit (`animation_library_postcondition_mismatch`), in which case the action is undone and `outcome` says `rolled_back`, or `unknown` when the undo failed too; `501` missing bind.
+
+The neighbouring routes point here. `scene_set_property` on an AnimationPlayer's `libraries` (or, from 4.6, `libraries/<name>`) is `400 animation_library_slot` with `use_tool: "anim_add_library"`, on the dry run as well; it used to be a Dictionary refusal on 4.5, a `404` on 4.6 and later, and a clean preview on the 4.5 dry run. `scene_call_method` names the typed tool when it refuses an engine method that has one, `add_animation_library` among them.
 
 ### Reserved physics and navigation schemas — Unimplemented
 

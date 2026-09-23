@@ -124,6 +124,7 @@ where it is. Editor or game.
 - `script_patch_method` rewrites a symbol the script already declares, then runs available diagnostics. A name it does not declare is a 404, not an append: pass `create_if_missing` when adding is what you meant, and read `created` in the result to tell the two apart. `symbol_type` is one of `function`, `variable`, `constant`, `signal`, `enum`, `class`.
 - `shader_get_visual_graph` describes a VisualShader as nodes and links. It is refused on a shader written as code, which is the answer, not a failure.
 - `shader_set_uniform` writes one, in the same JSON spelling `scene_set_property` uses for that type. Check `applied`, and remember the material may be shared with other nodes.
+- To give an `AnimationPlayer` an animation, write the `Animation` and an `AnimationLibrary` whose `_data` maps a name to it with `resource_create`, then call `anim_add_library`. Use the names in its `animations` field with `anim_play_track`: a named library's animations are `library/animation`, and the default library's (`library_name` left empty) are their own names. Save the scene before launching the game, because `anim_play_track` only plays in a running game. Spell `library_path` the way the file is spelled on disk. If you rewrite a library file after the editor has loaded it, the next add refuses with `animation_library_differs_from_disk` and names both versions; send `reload_from_disk: true` to use the file.
 - `shader_list_uniforms` reads a ShaderMaterial's parameters. `value` is the effective value, the material's override where it has one and the shader's declared default otherwise; the two are not distinguished, so do not read a value as proof the material set it. A null value means the engine could not supply one, not that the uniform has none.
 - `editor_render_ghost_preview` is how to show a person where a change would land before making it. It costs nothing to be wrong: the scene is untouched, so there is no undo to run and no file to revert. Clear it with `editor_clear_ghost_previews` when the proposal is settled.
 - `viewport_capture_passes` is how to see depth and orientation rather than guess them. Use it to tell which of two things is nearer or which way a surface faces. Do not read a grey as a distance: the viewport shifts the values by an amount that varies with the engine, so the passes rank things and do not measure them.
@@ -166,7 +167,7 @@ Use `runtime_launch` to start a separate Godot process, optionally headless, for
 
 ### Observe or control an already-running session
 
-Ordinary Didi starts detached and exposes 116 canonical tools plus 10 legacy registrations. On first availability it may select the sole same-project session, or a unique editor among games; same-kind ambiguity stays detached. Verify rather than assume selection:
+Ordinary Didi starts detached and exposes 117 canonical tools plus 10 legacy registrations. On first availability it may select the sole same-project session, or a unique editor among games; same-kind ambiguity stays detached. Verify rather than assume selection:
 
 1. Call `runtime_list_sessions`, preferably with the canonical project path.
 2. Choose the intended `editor` or `game` descriptor and call `runtime_attach_session` if deterministic auto-selection did not choose it.
@@ -183,12 +184,12 @@ Treat `eval_gdscript` as a small read-only expression language. Prefer literals,
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `113/116`
+**Canonical implementation:** `114/117`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `PARTIAL_DELIVERY`. The implementation is 113/116 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and exactly 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version.
+Phase 7 is `PARTIAL_DELIVERY`. The implementation is 114/117 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and exactly 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version.
 
 All 15 feasible Phase 7 names are delivered and callable, including `tilemap_set_cells`, `tilemap_get_used_rect`, and `gridmap_set_cells` in editor sessions. Do not call or advertise the remaining 3 as available; feasibility is not implementation. See [reproducible evidence](PHASE_7_API_FEASIBILITY.md) and the [approved executable plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 

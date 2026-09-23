@@ -127,6 +127,11 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         // Phase 7B animation: the list is a read in either session kind, the
         // play is a game-only transient mutation.
         , "anim_list_tracks", "anim_play_track"
+        // Editor only. The library goes into the edited scene through the
+        // UndoRedo stack; a .tscn written underneath the editor is overwritten
+        // by its next save, and the engine stores a player's libraries in two
+        // different shapes across 4.5 and 4.6 (#770).
+        , "anim_add_library"
         // Phase 7A editor-only viewport controls. Camera edits are registered
         // with UndoRedo; debug hints return the prior state for explicit restore.
         , "viewport_set_camera_transform", "viewport_toggle_debug_draw"
@@ -258,6 +263,7 @@ CallToolResult handleNavBakeMesh(const ResolvedToolBinding& binding, const json&
 CallToolResult handleNavQueryPath(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleAnimListTracks(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleAnimPlayTrack(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleAnimAddLibrary(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 
 CallToolResult handleTilemapSetCells(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleTilemapGetUsedRect(const ResolvedToolBinding& binding, const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
@@ -660,6 +666,7 @@ ResolvedToolBinding resolveAliasBinding(std::string_view invoked_name, const jso
         {"nav_query_path", "nav.queryPath"},
         {"anim_list_tracks", "anim.listTracks"},
         {"anim_play_track", "anim.playTrack"},
+        {"anim_add_library", "anim.addLibrary"},
         {"runtime_inject_input", "runtime.injectInput"},
         {"runtime_get_call_stack", "runtime.getCallStack"},
         {"runtime_read_profiler", "runtime.readProfiler"},
@@ -1085,6 +1092,7 @@ namespace {
 // Canonical names only. A legacy alias resolves to its canonical title below,
 // so the ten aliases cannot drift from the tools they stand for.
 const std::unordered_map<std::string_view, std::string_view> kToolTitles = {
+    {"anim_add_library", "Add an animation library"},
     {"anim_list_tracks", "List animation tracks"},
     {"anim_play_track", "Play an animation"},
     {"asset_reimport", "Reimport assets"},
@@ -1548,6 +1556,7 @@ const std::unordered_map<std::string_view, std::vector<std::string_view>>& edite
         {"signal_emit", {"target_node"}},
         {"signal_connect", {"emitter_node", "target_node"}},
         {"signal_disconnect", {"emitter_node", "target_node"}},
+        {"anim_add_library", {"animation_player_path"}},
     };
     return arguments;
 }
@@ -1720,6 +1729,58 @@ std::optional<Error> probeCallMethodTarget(const json& arguments,
                   {"method_exists", payload.value("method_exists", false)},
                   {"script_is_tool", payload.value("script_is_tool", false)},
                   {"signature", payload.value("signature", json(nullptr))}};
+    }
+    return std::nullopt;
+}
+
+// anim_add_library's refusals are about the file and the player together:
+// whether the path loads an AnimationLibrary, whether the name is taken,
+// whether that library is already on the player. The generic node probe reads
+// `name` and answers none of them, so a dry run would have planned an add the
+// real call refuses. The bridge runs every one of its checks under `preview`
+// and stops before the undo action, and `before` is the player's libraries as
+// the check found them (#770).
+std::optional<Error> probeAnimLibraryTarget(const json& arguments,
+                                            const std::shared_ptr<ipc::IIpcClient>& client,
+                                            json& before, json& subject) {
+    if (!client || !arguments.is_object() || !arguments.contains("animation_player_path") ||
+        !arguments["animation_player_path"].is_string()) {
+        return std::nullopt;
+    }
+    subject = {{"animation_player_path", arguments["animation_player_path"]},
+               {"library_name", arguments.value("library_name", std::string())},
+               {"library_path", arguments.value("library_path", json(nullptr))}};
+    json request = arguments;
+    request["preview"] = true;
+    auto response = client->sendRequest("anim.addLibrary", request,
+                                        ipc::withAcceptAllowance(5000));
+    // A refusal is the failure the real call would hit, with its data, because
+    // data.code is what a caller branches on. A 5xx is the engine failing to
+    // answer, which is not evidence the add would fail, so the preview goes on
+    // unverified rather than refusing a call that might be fine.
+    const auto is_real_refusal = [](int code) { return code >= 400 && code < 500; };
+    if (response.isErr()) {
+        if (is_real_refusal(response.error().code)) return response.error();
+        return std::nullopt;
+    }
+    const auto& payload = response.value();
+    if (payload.is_object() && payload.contains("error")) {
+        const auto& error = payload["error"];
+        const auto code = error.value("code", 500);
+        if (is_real_refusal(code)) {
+            return Error(code, error.value("message", std::string("The engine refused this call")),
+                         error.contains("data") ? error["data"] : json());
+        }
+        return std::nullopt;
+    }
+    if (payload.is_object() && payload.value("preview", false)) {
+        before = {{"animation_player_path", payload.value("animation_player_path", json(nullptr))},
+                  {"library_names", payload.value("library_names", json::array())},
+                  {"library_name", payload.value("library_name", json(nullptr))},
+                  {"library_path", payload.value("library_path", json(nullptr))},
+                  {"animations_to_add", payload.value("animations", json::array())},
+                  {"animation_count", payload.value("animation_count", json(nullptr))},
+                  {"editor_copy_matches_file", payload.value("editor_copy_matches_file", json(nullptr))}};
     }
     return std::nullopt;
 }
@@ -2013,6 +2074,11 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
         target_probe = [client = m_sourceIpcClient](const json& call_arguments, json& before,
                                                     json& subject) {
             return probeCallMethodTarget(call_arguments, client, before, subject);
+        };
+    } else if (binding.policy_source == "anim_add_library" && lease.has_value()) {
+        target_probe = [client = m_sourceIpcClient](const json& call_arguments, json& before,
+                                                    json& subject) {
+            return probeAnimLibraryTarget(call_arguments, client, before, subject);
         };
     } else if (const auto node = nodeTargets().find(binding.policy_source);
                node != nodeTargets().end() && lease.has_value()) {
@@ -3503,7 +3569,7 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "anim_list_tracks";
-        t.description = "Lists animations, keyframes, and blend trees in an AnimationPlayer or AnimationTree.";
+        t.description = "Lists the animations an AnimationPlayer holds, by the names anim_play_track takes, with each one's length, loop mode and tracks (type, node path and key times). Reads the edited scene in an editor and the running tree in a game. An AnimationTree is refused.";
         t.inputSchema = {
             {"type", "object"},
             {"properties", {
@@ -3519,7 +3585,7 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "anim_play_track";
-        t.description = "Plays a specific animation keyframe sequence to verify transitions.";
+        t.description = "Plays one animation on an AnimationPlayer in a running game and reports whether it is playing. Game sessions only. Name the animation the way anim_list_tracks or anim_add_library reports it: library/animation, or the bare name for the default library.";
         t.inputSchema = {
             {"type", "object"},
             {"properties", {
@@ -3531,6 +3597,26 @@ void ToolRegistry::registerAllDefaultTools() {
         };
         t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
             return handleAnimPlayTrack(binding, args, m_ipcClient);
+        };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "anim_add_library";
+        t.description = "Gives an AnimationPlayer in the edited scene an AnimationLibrary loaded from a res:// file, through the editor UndoRedo stack, and reports the animation names the player answers to afterwards. Adds only: a library name the player already uses is refused, not replaced. Save the scene before anim_play_track can play it in a running game.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"animation_player_path", {{"type", "string"}, {"minLength", 1}, {"maxLength", 1024}}},
+                {"library_path", {{"type", "string"}, {"minLength", 1}, {"maxLength", 1024}}},
+                {"library_name", {{"type", "string"}, {"maxLength", 256}, {"default", ""}}},
+                {"reload_from_disk", {{"type", "boolean"}, {"default", false}}}
+            }},
+            {"required", json::array({"animation_player_path", "library_path"})},
+            {"additionalProperties", false}
+        };
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleAnimAddLibrary(binding, args, m_ipcClient);
         };
         registerTool(std::move(t));
     }

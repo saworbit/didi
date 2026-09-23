@@ -94,7 +94,7 @@ FUTURE_PHASE_COMPLETION_FIELDS = (
 # manifest IS supplied the built binary is authoritative and this constant is
 # checked against it, so a stale fallback fails the build jobs rather than
 # silently disagreeing with the software it stands in for.
-CANONICAL_IMPLEMENTATION_COUNTS = (116, 113, 3)
+CANONICAL_IMPLEMENTATION_COUNTS = (117, 114, 3)
 
 # How many names Phase 7 reserved in total. Distinct from the unimplemented
 # count above: they were equal only while no Phase 7 tool had been delivered,
@@ -121,6 +121,14 @@ COUNT_FACTS = {
         ("canonical", r"\b{n} canonical", "canonical tools"),
         ("legacy", r"\b{n} legacy", "legacy names"),
         ("total", r"\b{n} registrations", "total registrations"),
+    ),
+    # The integration guide tells a client author what tools/list returns, and
+    # it was outside this map: its total stayed one behind through the surface
+    # change that added anim_add_library while every checked document moved.
+    "docs/INTEGRATION_GUIDE.md": (
+        ("canonical", r"\b{n} canonical", "canonical tools"),
+        ("legacy", r"\b{n} legacy", "legacy names"),
+        ("total", r"\b{n} in total", "total registrations"),
     ),
     # The sentence describing what this validator locks is itself a count
     # claim, and it drifted through two surface changes without anything

@@ -136,12 +136,12 @@ The native red-team contract covers invalid roots, project-key isolation, lock e
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `113/116`
+**Canonical implementation:** `114/117`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-**Objective:** The implementation remains 113/116 canonical tools, and all 3 Phase 7 names remain registered but unimplemented. All 15 feasible names are delivered. The original objective was atomic 83/83 without adding public tool names.
+**Objective:** The implementation remains 114/117 canonical tools, and all 3 Phase 7 names remain registered but unimplemented. All 15 feasible names are delivered. The original objective was atomic 83/83 without adding public tool names.
 
 **Feasibility result:** The gate completed on 2026-08-29 against Godot 4.5.1 and 4.7.2. Fifteen names (15/18) are implementation-feasible: `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit`, `viewport_set_camera_transform`, `viewport_toggle_debug_draw`, `tilemap_set_cells`, `tilemap_get_used_rect`, `gridmap_set_cells`, `physics_raycast_query`, `nav_query_path`, `anim_list_tracks`, `anim_play_track`, `runtime_inject_input`, and `runtime_read_profiler`.
 
@@ -191,7 +191,7 @@ baseline is carrying an unauthorized second decision.
 
 This decision authorized Task 2. At decision time the implementation was 61/79;
 the delivery slices have since landed and the current status block above is
-authoritative at 113/116. Phase 7 remains `PARTIAL_DELIVERY` because the three
+authoritative at 114/117. Phase 7 remains `PARTIAL_DELIVERY` because the three
 API-blocked contracts stay honestly unimplemented.
 
 **Delivery slices:**
@@ -296,7 +296,8 @@ These are missing capabilities that an AI agent actually requires to complete fu
 - **Import Preset Configuration**: Configure compression modes, 3D normal filters, and mesh collision generation.
 
 ### 4. Animation and UI Authoring
-- **Animation Track Keyframing**: Add, remove, and interpolate keyframes and track lengths in `AnimationPlayer`.
+- **Animation Libraries**: delivered as `anim_add_library` -- an `AnimationLibrary` written with `resource_create` is added to a player in the edited scene through UndoRedo, which is what makes `anim_list_tracks` and `anim_play_track` reachable on a player the surface built (#770).
+- **Animation Track Keyframing**: Add, remove, and interpolate keyframes and track lengths in `AnimationPlayer`. Still open: an animation is authored whole as a resource file today, not edited key by key on a live player.
 - **Control Enumeration**: delivered as `ui_list_controls` -- live Controls with their resolved viewport rectangles, class, visibility, mouse filter and text, in an editor or a running game.
 - **Theme & Layout Inspection**: Inspect Control node anchors, margins, minimum sizes, and theme overrides. Still open: `ui_list_controls` reports the resolved rectangle, not the authoring inputs behind it.
 
