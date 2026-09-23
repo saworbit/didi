@@ -252,6 +252,21 @@ The three Phase 7 blockers are unchanged; the new name is `didi_control_room`, r
 
 ### Fixed
 
+- **Twenty-seven bridge refusals say which conflict they are.** #892 left
+  `godot_bridge.cpp` outside the rule, which was right for that change and
+  wrong as an end state for the part of the file that never moved to
+  `bridgeError`. Its 409s and 422s all reached a caller as `conflict` or
+  `unprocessable`, so "autoload already exists, resend with replace", "the
+  active scene has unsaved changes, save it first", "the ShaderMaterial has no
+  shader assigned" and "there is nothing to undo" were one answer. Four "already
+  there" refusals now share `already_exists` and name the argument to resend
+  with under `retry_with`, and the rest say what they are: a scene that was
+  never saved, a shader written in code rather than built as a graph, a resource
+  that is not a PackedScene, a PackedScene whose dependencies are missing. The
+  guard holds the file to those two statuses and leaves the rest, because
+  `internal_error` is the honest name for a 500 and there are 184 of them. Three
+  of the twenty-seven were found by the guard rather than by reading: they
+  carried a data block already and no code in it. #894
 - **Every refusal above 400 names itself, in all five files that emit one.**
   `tests/test_refusal_codes.py` states the rule the surface runs on: a person
   reads `error.message` and a client branches on `error.data.code`. It

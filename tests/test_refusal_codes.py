@@ -51,6 +51,19 @@ IPC = ROOT / "src" / "gdextension" / "gdextension_ipc.cpp"
 LITERAL_REFUSAL_FILES = (HOOK, ROUTER, IPC)
 ERROR_JSON_FILES = (SANDBOX, RUNTIME_BRIDGE)
 
+# `godot_bridge.cpp` is held to the rule for the two statuses where the floor's
+# name loses something a caller acts on, and not for the rest. A 409 is a state
+# the caller can do something about and a 422 says which of several things was
+# wrong with what it sent, so `conflict` and `unprocessable` were covering four
+# "resend it with this flag" refusals, "save the scene first", "the node has no
+# shader" and "there is nothing to undo" (#894).
+#
+# The 500s are left deliberately. `internal_error` is the honest name for one,
+# there are 184 of them, and naming each would bury the two dozen that matter.
+# 404 and 501 keep `not_found` and `unimplemented`, which say everything there
+# is to say.
+PARTIAL_ERROR_JSON_FILES = ((BRIDGE, (409, 422)),)
+
 # A bare identifier: lower case, at least one underscore, no spaces. The thing
 # a caller should never be shown as an explanation.
 IDENTIFIER = re.compile(r'^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$')
@@ -203,6 +216,14 @@ class HookRefusalsNameThemselves(unittest.TestCase):
                 if not status.isdigit() or int(status) == 400:
                     continue
                 if len(arguments) < 3:
+                    offenders.append(f"{path.name}:{line} ({status})")
+        for path, statuses in PARTIAL_ERROR_JSON_FILES:
+            source = path.read_text(encoding="utf-8")
+            for line, arguments in _error_json_arguments(source):
+                status = arguments[0].strip()
+                if not status.isdigit() or int(status) not in statuses:
+                    continue
+                if len(arguments) < 3 or '"code"' not in arguments[2]:
                     offenders.append(f"{path.name}:{line} ({status})")
         self.assertEqual(
             offenders, [],
