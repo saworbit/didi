@@ -5672,7 +5672,8 @@ json visionFrustumQuery(const json& params, const std::string& session_kind) {
         auto is_camera = objectIsClass(node.value(), "Camera3D");
         if (is_camera.isErr()) return errorJson(500, is_camera.error().message);
         if (!is_camera.value()) {
-            return errorJson(409, "The node at " + request.camera_node + " is not a Camera3D");
+            return errorJson(409, "The node at " + request.camera_node + " is not a Camera3D",
+                                  {{"code", "camera_path_does_not_resolve_to_camera3d"}});
         }
         auto built = frustumFromCamera(node.value(), session_kind);
         if (built.isErr()) return errorJson(built.error().code, built.error().message);
@@ -5871,7 +5872,8 @@ json physicsRaycast(const json& params, const std::string& session_kind) {
     if (state.isErr()) return errorJson(500, state.error().message);
     auto state_object = objectFromVariant(state.value());
     if (state_object.isErr() || !state_object.value()) {
-        return errorJson(409, "The queried world has no direct space state");
+        return errorJson(409, "The queried world has no direct space state",
+                         {{"code", "no_space_state"}});
     }
 
     auto from = makePoint(request.from);
@@ -5996,7 +5998,8 @@ json navQueryPath(const json& params, const std::string& session_kind) {
                           "get_navigation_map", 2944877500LL);
     if (map.isErr()) return errorJson(500, map.error().message);
     if (GodotApi::instance().variant_get_type(map.value().ptr()) != GDEXTENSION_VARIANT_TYPE_RID) {
-        return errorJson(409, "Root viewport world has no navigation map");
+        return errorJson(409, "Root viewport world has no navigation map",
+                         {{"code", "no_navigation_map"}});
     }
     auto server = singleton(server_class);
     if (server.isErr()) return errorJson(501, server.error().message);
@@ -7031,7 +7034,7 @@ json ghostPreviewRender(const json& params) {
         return errorJson(409, "This would leave more than " +
                                   std::to_string(runtime::kMaxLiveGhostShapes) +
                                   " preview shapes on screen; clear some first",
-                         lost(json::object()));
+                         lost({{"code", "ghost_budget_exceeded"}}));
     }
 
     GhostBatch batch;
@@ -9431,7 +9434,8 @@ json GodotBridge::execute(const std::string& method, const json& params,
                         variantTypeName(incoming_type) +
                         ". Writing it would persist a value the engine cannot read back as the "
                         "setting it names.",
-                    {{"setting", setting},
+                    {{"code", "setting_type_mismatch"},
+                     {"setting", setting},
                      {"expected_type", variantTypeName(current_type)},
                      {"given_type", variantTypeName(incoming_type)},
                      {"retryable", false}});
@@ -9546,7 +9550,8 @@ json GodotBridge::execute(const std::string& method, const json& params,
         const bool removing = method == "project.removeAutoload";
         if (removing && !exists.value()) return errorJson(404, "Autoload not found: " + autoload_name);
         if (!removing && exists.value() && !params.value("replace", false)) {
-            return errorJson(409, "Autoload already exists; pass replace: true to update it");
+            return errorJson(409, "Autoload already exists; pass replace: true to update it",
+                                  {{"code", "already_exists"}, {"retry_with", "replace"}});
         }
 
         VariantValue default_value;
@@ -9652,11 +9657,15 @@ json GodotBridge::execute(const std::string& method, const json& params,
                                           {&setting_name.value(), &default_value});
                 if (setting.isErr()) return errorJson(setting.error().code, setting.error().message);
                 if (GodotApi::instance().variant_get_type(setting.value().ptr()) != GDEXTENSION_VARIANT_TYPE_DICTIONARY) {
-                    return errorJson(422, "InputMap setting is not a Dictionary: " + property_name.value());
+                    return errorJson(422, "InputMap setting is not a Dictionary: " + property_name.value(),
+                                          {{"code", "malformed_input_map_entry"}});
                 }
                 auto deadzone_value = callVariant(setting.value(), "get", {&deadzone_key.value()});
                 auto events_value = callVariant(setting.value(), "get", {&events_key.value()});
-                if (deadzone_value.isErr() || events_value.isErr()) return errorJson(422, "InputMap setting is missing deadzone or events");
+                if (deadzone_value.isErr() || events_value.isErr()) {
+                    return errorJson(422, "InputMap setting is missing deadzone or events",
+                                     {{"code", "malformed_input_map_entry"}});
+                }
                 auto deadzone = scalarFromVariant<double>(deadzone_value.value(), GDEXTENSION_VARIANT_TYPE_FLOAT);
                 if (deadzone.isErr()) return errorJson(deadzone.error().code, deadzone.error().message);
                 auto event_count_value = callVariant(events_value.value(), "size");
@@ -9713,14 +9722,16 @@ json GodotBridge::execute(const std::string& method, const json& params,
                         "next load, while UI navigation broke in anything run from it. Use "
                         "project_set_input_action to give the project its own events for this "
                         "name.",
-                    {{"action", action},
+                    {{"code", "engine_default_action"},
+                     {"action", action},
                      {"engine_default", true},
                      {"defined_by_project", false},
                      {"retryable", false}});
             }
         }
         if (!removing && exists.value() && !params.value("replace", false)) {
-            return errorJson(409, "Input action already exists; pass replace: true to update it");
+            return errorJson(409, "Input action already exists; pass replace: true to update it",
+                                  {{"code", "already_exists"}, {"retry_with", "replace"}});
         }
 
         VariantValue default_value;
@@ -9865,7 +9876,8 @@ json GodotBridge::execute(const std::string& method, const json& params,
             requested_script_object = attachable.value().object;
             new_script = std::move(attachable.value().script);
         } else if (!old_object) {
-            return errorJson(409, "Target node has no script to detach");
+            return errorJson(409, "Target node has no script to detach",
+                                  {{"code", "no_script_attached"}});
         }
 
         auto manager = undoManager(editor);
@@ -9905,9 +9917,9 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 failure["error"]["data"] = {{"outcome", "unknown"}, {"rolled_back", false}};
                 return failure;
             }
-            json failure = errorJson(422, reason);
-            failure["error"]["data"] = {{"outcome", "reverted"}, {"rolled_back", true}};
-            return failure;
+            return errorJson(422, reason,
+                             {{"code", "script_assignment_rejected"},
+                              {"outcome", "reverted"}, {"rolled_back", true}});
         }
         return liveSceneMutation({{"status", "success"}, {"target_node", params.value("target_node", "")},
                                   {"script_path", script_path}, {"attached", attaching}, {"detached", !attaching},
@@ -10355,7 +10367,12 @@ json GodotBridge::execute(const std::string& method, const json& params,
         auto membership = scalarFromVariant<GDExtensionBool>(membership_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
         if (membership.isErr()) return errorJson(membership.error().code, membership.error().message);
         const bool adding = method == "scene.addToGroup";
-        if (adding && membership.value()) return errorJson(409, "Target node is already in group: " + group);
+        if (adding && membership.value()) {
+        // No retry_with: the node is in the group, so there is no argument
+        // that would make the call do something different.
+        return errorJson(409, "Target node is already in group: " + group,
+                         {{"code", "already_exists"}});
+    }
         if (!adding && !membership.value()) return errorJson(404, "Target node is not in group: " + group);
         bool original_persistent = params.value("persistent", true);
         if (!adding) {
@@ -10457,12 +10474,16 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 if (!dirty_state_readable) {
                     return errorJson(409, "This Godot build cannot report active-scene dirty state; "
                                           "EditorInterface.get_unsaved_scenes arrives in Godot 4.7. "
-                                          "Pass discard_unsaved: true to close explicitly");
+                                          "Pass discard_unsaved: true to close explicitly",
+                                     {{"code", "dirty_state_unavailable"},
+                                      {"retry_with", "discard_unsaved"}});
                 }
                 if (path.value().empty()) {
                     return errorJson(409, "The active scene has never been saved, so the engine cannot "
                                           "report it as clean; save it with editor_save_scene or pass "
-                                          "discard_unsaved: true to close explicitly");
+                                          "discard_unsaved: true to close explicitly",
+                                     {{"code", "scene_never_saved"},
+                                      {"retry_with", "discard_unsaved"}});
                 }
                 auto unsaved = callObject(editor, "EditorInterface", "get_unsaved_scenes", 1139954409LL);
                 if (unsaved.isErr()) return errorJson(unsaved.error().code, unsaved.error().message);
@@ -10477,7 +10498,9 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 if (unsaved_count.value() > kMaxUnsavedScenesScanned) {
                     return errorJson(409, "The editor reports more unsaved scenes than Didi will scan (" +
                                           std::to_string(unsaved_count.value()) + "), so this scene cannot be "
-                                          "proven clean; pass discard_unsaved: true to close explicitly");
+                                          "proven clean; pass discard_unsaved: true to close explicitly",
+                                     {{"code", "unsaved_scan_limit"},
+                                      {"retry_with", "discard_unsaved"}});
                 }
                 for (int64_t index = 0; index < unsaved_count.value(); ++index) {
                     auto index_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
@@ -10490,7 +10513,9 @@ json GodotBridge::execute(const std::string& method, const json& params,
                     if (entry_path.value() == path.value()) {
                         return errorJson(409, "The active scene has unsaved changes: " + path.value() +
                                               "; save it with editor_save_scene or pass "
-                                              "discard_unsaved: true to discard them");
+                                              "discard_unsaved: true to discard them",
+                                         {{"code", "unsaved_changes"},
+                                          {"retry_with", "discard_unsaved"}});
                     }
                 }
                 verified_clean = true;
@@ -10549,7 +10574,10 @@ json GodotBridge::execute(const std::string& method, const json& params,
                                        {&path.value(), &packed_hint.value(), &cache_mode.value()});
             if (resource.isErr()) return errorJson(resource.error().code, resource.error().message);
             auto packed = objectFromVariant(resource.value());
-            if (packed.isErr() || !packed.value()) return errorJson(422, "Resource is not a loadable PackedScene: " + scene_path);
+            if (packed.isErr() || !packed.value()) {
+                return errorJson(422, "Resource is not a loadable PackedScene: " + scene_path,
+                                 {{"code", "not_a_packed_scene"}});
+            }
             auto class_name = makeString("PackedScene");
             auto class_value = class_name.isOk()
                 ? callObject(packed.value(), "Object", "is_class", 3927539163LL, {&class_name.value()})
@@ -10557,14 +10585,18 @@ json GodotBridge::execute(const std::string& method, const json& params,
             auto is_packed = class_value.isOk()
                 ? scalarFromVariant<GDExtensionBool>(class_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL)
                 : Result<GDExtensionBool>(class_value.error());
-            if (is_packed.isErr() || !is_packed.value()) return errorJson(422, "Resource is not a PackedScene: " + scene_path);
+            if (is_packed.isErr() || !is_packed.value()) {
+                return errorJson(422, "Resource is not a PackedScene: " + scene_path,
+                                 {{"code", "not_a_packed_scene"}});
+            }
             auto opened = open_and_verify();
             if (opened.isErr()) return errorJson(opened.error().code, opened.error().message);
             return liveResult({{"status", "success"}, {"opened", true}, {"scene_path", scene_path}});
         }
 
         if (target_exists.value() && !params.value("overwrite", false)) {
-            return errorJson(409, "Scene target already exists; pass overwrite: true to replace it");
+            return errorJson(409, "Scene target already exists; pass overwrite: true to replace it",
+                                  {{"code", "already_exists"}, {"retry_with", "overwrite"}});
         }
 
         // Only the two writers reach this line, and ResourceSaver cannot create
@@ -11093,7 +11125,8 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 if (text.isOk()) actual_name = text.value();
             }
             return errorJson(409, "Property \"" + property + "\" on " + target_path + " holds " +
-                                      actual_name + " and not a ShaderMaterial");
+                                      actual_name + " and not a ShaderMaterial",
+                             {{"code", "not_a_shader_material"}});
         }
 
         auto shader_value = callObject(material.value(), "ShaderMaterial", "get_shader", 2078273437LL);
@@ -11101,7 +11134,8 @@ json GodotBridge::execute(const std::string& method, const json& params,
         auto shader = objectFromVariant(shader_value.value());
         if (shader.isErr()) return errorJson(500, shader.error().message);
         if (!shader.value()) {
-            return errorJson(409, "The ShaderMaterial on " + target_path + " has no shader assigned");
+            return errorJson(409, "The ShaderMaterial on " + target_path + " has no shader assigned",
+                             {{"code", "no_shader_assigned"}});
         }
 
         json result = {{"target_node", target_path}, {"property_name", property}};
@@ -11135,7 +11169,8 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 // A hand written .gdshader has code and no graph. Returning an
                 // empty node list would read as a graph with nothing in it.
                 return errorJson(409, "The shader on this material is written in code, not built as "
-                                      "a VisualShader graph, so it has no nodes to report");
+                                      "a VisualShader graph, so it has no nodes to report",
+                                 {{"code", "not_a_visual_shader"}});
             }
             // The shader types a VisualShader can hold, in enum order. Named so
             // a caller is not handed a bare number, and skipped entirely when a
@@ -11685,7 +11720,8 @@ json GodotBridge::execute(const std::string& method, const json& params,
             if (resource.isErr()) return errorJson(resource.error().code, resource.error().message);
             auto packed = objectFromVariant(resource.value());
             if (packed.isErr() || !packed.value()) {
-                return errorJson(422, "Resource is not a loadable PackedScene: " + instance_scene_path);
+                return errorJson(422, "Resource is not a loadable PackedScene: " + instance_scene_path,
+                                     {{"code", "not_a_packed_scene"}});
             }
             auto packed_class = makeString("PackedScene");
             auto class_value = packed_class.isOk()
@@ -11699,7 +11735,8 @@ json GodotBridge::execute(const std::string& method, const json& params,
             if (is_packed.isErr() || !is_packed.value()) {
                 return is_packed.isErr()
                     ? errorJson(is_packed.error().code, is_packed.error().message)
-                    : errorJson(422, "Resource is not a PackedScene: " + instance_scene_path);
+                    : errorJson(422, "Resource is not a PackedScene: " + instance_scene_path,
+                                     {{"code", "not_a_packed_scene"}});
             }
             // A scene whose root script or dependency is missing answers false
             // here, and instantiating it anyway returns null and puts the reason
@@ -11714,7 +11751,8 @@ json GodotBridge::execute(const std::string& method, const json& params,
             }
             if (!can_instantiate.value()) {
                 return errorJson(422, "PackedScene cannot be instantiated, so something it depends "
-                                      "on is missing or failed to load: " + instance_scene_path);
+                                      "on is missing or failed to load: " + instance_scene_path,
+                                 {{"code", "packed_scene_dependencies_missing"}});
             }
             // GEN_EDIT_STATE_INSTANCE, which is what the editor's own scene drop
             // uses. It is the difference between a saved instance of the scene
@@ -12129,7 +12167,10 @@ json GodotBridge::execute(const std::string& method, const json& params,
         auto available = callObject(undo_redo.value(), "UndoRedo", is_undo ? "has_undo" : "has_redo", 36873697LL);
         if (available.isErr()) return errorJson(available.error().code, available.error().message);
         auto has_action = scalarFromVariant<GDExtensionBool>(available.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
-        if (has_action.isErr() || !has_action.value()) return errorJson(409, is_undo ? "Nothing to undo" : "Nothing to redo");
+        if (has_action.isErr() || !has_action.value()) {
+        return errorJson(409, is_undo ? "Nothing to undo" : "Nothing to redo",
+                         {{"code", "nothing_to_undo"}});
+    }
         auto executed = callObject(undo_redo.value(), "UndoRedo", is_undo ? "undo" : "redo", 2240911060LL);
         if (executed.isErr()) return errorJson(executed.error().code, executed.error().message);
         return liveResult({{"status", "success"}, {"action", is_undo ? "undo" : "redo"}});
