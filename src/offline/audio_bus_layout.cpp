@@ -143,9 +143,12 @@ Result<json> readAudioBusLayout(const std::string& root_dir) {
         if (key == "name") bus.name = unquote(value);
         else if (key == "send") bus.send = unquote(value);
         else if (key == "volume_db") bus.volume_db = std::atof(value.c_str());
-        else if (key == "mute") bus.mute = value == "true";
-        else if (key == "solo") bus.solo = value == "true";
-        else if (key == "bypass_fx") bus.bypass = value == "true";
+        // The engine reads these through `_set` and converts whatever the value
+        // parsed to, so `mute = 1` is a muted bus. Comparing to the word `true`
+        // reported it as unmuted, measured on 4.5.1 and 4.7.2 (#853).
+        else if (key == "mute") bus.mute = config_file::booleanize(value);
+        else if (key == "solo") bus.solo = config_file::booleanize(value);
+        else if (key == "bypass_fx") bus.bypass = config_file::booleanize(value);
     }
 
     // Bus 0 is Master, and the file is usually silent about it.

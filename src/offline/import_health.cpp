@@ -387,7 +387,9 @@ std::optional<ImportMetadata> parseMetadata(const config_file::Scan& scanned) {
     const auto sections = importSections(scanned);
     ImportMetadata metadata;
     for (const auto& field : sections.remap) {
-        if (field.first == "valid" && field.second == "false") return std::nullopt;
+        // `valid=0` is an invalid import to the engine, which converts the
+        // value rather than comparing it to a word (#853).
+        if (field.first == "valid" && !config_file::booleanize(field.second)) return std::nullopt;
         if (isPathKey(field.first)) {
             const auto output = quotedValue(field.second, true);
             if (!output) return std::nullopt;
