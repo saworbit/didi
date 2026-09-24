@@ -212,7 +212,7 @@ The editor writes the layout itself, 800 to 900 ms after any change and with no
 call, to the file the project setting names. A game run afterwards loaded
 exactly the buses, sends and volumes the editor wrote, in a fresh project, a
 project whose layout was moved, and a project with a layout already in place.
-So the tool writes no file. It waits up to two seconds for the editor's write,
+So the tool writes no file. It waits up to five seconds for the editor's write,
 reads the file back with the offline reader, and reports `layout_written` and
 the `layout_path` the project names. The live harness found that path is not always a
 path: 4.6.2 and 4.7.2 hold `audio/buses/default_bus_layout` as a `uid://`

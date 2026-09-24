@@ -57,7 +57,7 @@ The three Phase 7 blockers are unchanged; the newest name is `audio_add_bus`, re
   `applied: false` because the engine reads a bus that does not exist back as
   `Master`. The new tool appends one bus to the layout the attached editor
   holds, names it and routes it, and the editor writes the project's layout
-  file itself a moment later; the tool waits up to two seconds, reads the
+  file itself a moment later; the tool waits up to five seconds, reads the
   file back, and reports `layout_written`. Godot's `AudioServer` never
   refuses a name or a send, so the tool refuses what the engine would
   otherwise change without a word: a name in use (Godot would make it

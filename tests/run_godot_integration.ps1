@@ -3528,11 +3528,37 @@ try {
     Assert-True ($music.undo_redo_registered -eq $false -and $music.persisted_by_editor -eq $true) "audio_add_bus did not say where the bus is and how to take it back."
     Assert-True ($music.layout_path -eq "res://default_bus_layout.tres") "audio_add_bus named $($music.layout_path) for a project that does not move its layout."
     Assert-True ($music.panel_refreshed -eq $true) "audio_add_bus did not have the Audio panel rebuild."
-    # Read by this process from the file the editor wrote, not claimed.
-    Assert-True ($music.layout_written -eq $true) "The editor had not written Music to the layout within two seconds: $($music.layout_note)"
+    # layout_written is read by the tool from the file the editor wrote, not
+    # claimed, so what is checked here is that it told the truth. A runner
+    # drawing the editor in software took longer than the tool waited over the
+    # first write on 4.5.1, and false is the honest answer to that: it has to
+    # come with a note, and the editor has to write the bus afterwards. true
+    # has to be a file that holds the bus.
+    $busLayoutFile = Join-Path $fixtureRoot "default_bus_layout.tres"
+    $layoutHolds = {
+        param($index, $name, [int]$seconds)
+        $pattern = "bus/$index/name = &""" + [regex]::Escape($name) + '"'
+        $deadline = (Get-Date).AddSeconds($seconds)
+        while ($true) {
+            if ((Test-Path -LiteralPath $busLayoutFile) -and ((Get-Content -Raw -LiteralPath $busLayoutFile) -match $pattern)) { return $true }
+            if ((Get-Date) -ge $deadline) { return $false }
+            Start-Sleep -Milliseconds 200
+        }
+    }
+    $checkLayoutWritten = {
+        param($added, $label)
+        if ($added.layout_written -eq $true) {
+            Assert-True (& $layoutHolds $added.bus $label 0) "audio_add_bus said $label was written to the layout, and the file does not hold it at index $($added.bus)."
+        } else {
+            Assert-True ($added.layout_written -eq $false -and -not [string]::IsNullOrEmpty($added.layout_note)) "audio_add_bus reported layout_written '$($added.layout_written)' for $label without a note saying why."
+            Assert-True (& $layoutHolds $added.bus $label 20) "The editor never wrote $label to the layout: $($added.layout_note)"
+            Write-Warning "The editor wrote $label to the layout after audio_add_bus stopped waiting, which a slow runner does: $($added.layout_note)"
+        }
+    }
+    & $checkLayoutWritten $music "Music"
     $sfx = Tool-Payload $busById[3004]
     Assert-True ($sfx.after.name -eq "SFX" -and $sfx.after.send -eq "Music" -and [math]::Abs([double]$sfx.after.volume_db + 6.0) -lt 0.01) "SFX did not come back sending to Music at -6 dB: $($sfx.after | ConvertTo-Json -Compress)"
-    Assert-True ($sfx.layout_written -eq $true) "The editor had not written SFX to the layout within two seconds."
+    & $checkLayoutWritten $sfx "SFX"
 
     # A separate read, rather than the response that made the change.
     $listed = Tool-Payload $busById[3005]

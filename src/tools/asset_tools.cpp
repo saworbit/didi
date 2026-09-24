@@ -1363,10 +1363,17 @@ CallToolResult handleAudioAddBus(const json& args, std::shared_ptr<ipc::IIpcClie
     // the path the project names. A match needs the name at the index the bus
     // was given, so a stale file that already names the bus elsewhere does not
     // count as the write.
+    //
+    // Five seconds, not two. On a CI runner drawing the editor in software,
+    // with every editor frame taking about 0.6 s, the first write of a new
+    // layout file on 4.5.1 took longer than two seconds, and the tool reported
+    // a bus the editor went on to write as unwritten. The wait ends as soon
+    // as the bus is in the file, so the headroom costs nothing when the
+    // editor is quick.
     const auto name = payload.value("name", std::string());
     const auto index = payload.value("bus", int64_t{-1});
     bool written = false;
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (true) {
         auto layout = offline::readAudioBusLayout(".");
         if (layout.isOk() && layout.value().value("layout_loads", false)) {
@@ -1384,8 +1391,12 @@ CallToolResult handleAudioAddBus(const json& args, std::shared_ptr<ipc::IIpcClie
         payload["layout_note"] =
             "The editor had not written this bus to " +
             payload.value("layout_path", std::string("the project's bus layout")) +
-            " within two seconds. The bus is in the running editor either way, and the editor "
-            "writes the layout on its own schedule rather than on editor_save_scene.";
+            " within five seconds, where it usually takes one. The bus is in the running editor "
+            "either way. A slow editor may still write it. A save that failed does not come back "
+            "on its own: a read-only layout file makes the editor print \"Safe save failed\", "
+            "which runtime_read_output shows. And an editor keeps writing the layout it opened "
+            "the project with until it restarts, even after audio/buses/default_bus_layout names "
+            "another file.";
     }
     return CallToolResult::successJson(std::move(payload));
 }
