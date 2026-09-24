@@ -134,6 +134,16 @@ The three Phase 7 blockers are unchanged; the newest name is `project_add_export
 
 ### Fixed
 
+- **`user://` and `RES://` were read as folders inside the project.** Every
+  writer stripped `res://` and took whatever else it was given as a path
+  relative to the project, so `user://save.gd` named a directory `user:`.
+  On Windows that failed with the operating system's "The filename,
+  directory name, or volume label syntax is incorrect", and on macOS and
+  Linux it would have created the directory. `project_add_export_preset`
+  stored `user:/game.x86_64` and `RES:/builds/game.x86_64` as export paths.
+  A path naming any scheme other than `res://` is refused now, saying
+  which: `user://` is the running game's data directory, outside the
+  project, and Godot's scheme is `res://` in lower case.
 - **`runtime_inject_input` reported an action the game never declared as
   pressed.** Godot dispatches an `InputEventAction` for an unknown action
   without complaint and nothing reacts to it, so a misspelled action came

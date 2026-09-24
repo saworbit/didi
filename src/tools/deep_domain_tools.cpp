@@ -47,6 +47,9 @@ Result<std::filesystem::path> projectRoot() {
 Result<std::filesystem::path> resolveOutputPath(const std::filesystem::path& root,
                                                 const std::string& requested) {
     if (requested.empty()) return Error::invalidArgument("output_path is required");
+    if (const auto problem = paths::foreignSchemeProblem(requested)) {
+        return Error::invalidArgument("output_path " + *problem);
+    }
     std::string relative_text = requested;
     if (strings::startsWith(relative_text, "res://")) relative_text.erase(0, 6);
     std::filesystem::path relative;
