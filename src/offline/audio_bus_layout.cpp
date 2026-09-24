@@ -142,15 +142,12 @@ std::optional<int> busIndex(const std::string& key, std::string& rest) {
 
 } // namespace
 
-Result<json> readAudioBusLayout(const std::string& root_dir) {
-    const auto root = paths::projectPathFromUtf8(root_dir);
-    // A project.godot the engine refuses does not open, so no layout is loaded
-    // from it and a custom path in it names nothing the game runs on (#903).
-    const auto manifest = config_file::scan(readFile(root / "project.godot"));
-    if (auto unloadable = refuseUnloadable(manifest, "reading the bus layout it names")) {
-        return *unloadable;
-    }
-    const auto layout_path = layoutPathFrom(manifest, root_dir);
+namespace {
+
+// The layout at one path, read the way the engine loads it. Shared by the
+// project's own answer and by a caller that knows which file the editor is
+// writing, which is not always the one the project now names.
+Result<json> readLayoutAt(const std::filesystem::path& root, const std::string& layout_path) {
     if (!strings::startsWith(layout_path, "res://")) {
         return json{{"layout_path", layout_path},
                     {"layout_present", false},
@@ -282,6 +279,23 @@ Result<json> readAudioBusLayout(const std::string& root_dir) {
         {"note", "Effect chains are not read offline. Attach the editor for the "
                  "effects on each bus and for any change a script made at runtime."}
     };
+}
+
+} // namespace
+
+Result<json> readAudioBusLayout(const std::string& root_dir) {
+    const auto root = paths::projectPathFromUtf8(root_dir);
+    // A project.godot the engine refuses does not open, so no layout is loaded
+    // from it and a custom path in it names nothing the game runs on (#903).
+    const auto manifest = config_file::scan(readFile(root / "project.godot"));
+    if (auto unloadable = refuseUnloadable(manifest, "reading the bus layout it names")) {
+        return *unloadable;
+    }
+    return readLayoutAt(root, layoutPathFrom(manifest, root_dir));
+}
+
+Result<json> readAudioBusLayoutFile(const std::string& root_dir, const std::string& layout_path) {
+    return readLayoutAt(paths::projectPathFromUtf8(root_dir), layout_path);
 }
 
 } // namespace didi::offline

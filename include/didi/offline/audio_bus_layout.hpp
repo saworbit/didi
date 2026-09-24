@@ -22,4 +22,11 @@ namespace didi::offline {
 // same order Godot uses.
 Result<json> readAudioBusLayout(const std::string& root_dir);
 
+// The layout in one res:// file, read as above, whatever project.godot names.
+// An editor keeps writing the layout it opened the project with until it
+// restarts, so after audio/buses/default_bus_layout changes underneath it the
+// file it is writing is not the one the project names; audio_add_bus reads
+// the one the editor is writing.
+Result<json> readAudioBusLayoutFile(const std::string& root_dir, const std::string& layout_path);
+
 } // namespace didi::offline

@@ -1318,6 +1318,30 @@ CallToolResult handleResourceInspect(const json& args, std::shared_ptr<ipc::IIpc
     return CallToolResult::errorJson(404, "Resource not found: " + resource_path);
 }
 
+namespace {
+
+// Whether the layout file the editor saves to is there and read-only. The
+// editor's autosave replaces the file through a temporary copy, and on Windows
+// that fails on a read-only file with "Safe save failed" in the editor's
+// output and nothing in the file: measured on 4.7.2 in vibe session nineteen,
+// where audio_add_bus reported that the editor writes the layout "on its own
+// schedule" for a save that had already failed. A workspace that checks files
+// out read-only until they are edited, as Perforce does, is in this state
+// until someone opens the file for edit.
+bool layoutFileIsReadOnly(const std::string& layout_path) {
+    if (layout_path.rfind("res://", 0) != 0) return false;
+    std::error_code error;
+    const auto file = std::filesystem::current_path(error) /
+                      paths::projectPathFromUtf8(layout_path.substr(6));
+    if (error) return false;
+    const auto status = std::filesystem::status(file, error);
+    if (error || !std::filesystem::is_regular_file(status)) return false;
+    return (status.permissions() & std::filesystem::perms::owner_write) ==
+           std::filesystem::perms::none;
+}
+
+} // namespace
+
 CallToolResult handleAudioConfigureBus(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     // Live only, and that is the point rather than a gap. Writing the layout
     // file would change what the project loads next time and not what anyone
@@ -1337,7 +1361,24 @@ CallToolResult handleAudioConfigureBus(const json& args, std::shared_ptr<ipc::II
     if (response.isErr()) {
         return CallToolResult::error("Failed to configure the audio bus: " + response.error().message);
     }
-    return CallToolResult::successJson(response.value());
+    auto payload = response.value();
+    if (payload.is_object() && payload.value("persisted_by_editor", false) &&
+        layoutFileIsReadOnly(payload.value("layout_path", std::string()))) {
+        payload["layout_read_only"] = true;
+#ifdef _WIN32
+        // Measured on Windows, where the save fails. A POSIX rename can replace
+        // a read-only file, so there the flag is reported and the claim kept.
+        payload["persisted_by_editor"] = false;
+        payload["limitation"] =
+            "This sets the running engine's audio bus state. The editor's own bus-layout "
+            "autosave would write " + payload.value("layout_path", std::string()) +
+            ", but the file is read-only, so the save fails (the editor prints \"Safe save "
+            "failed\", which runtime_read_output shows) and the change stays in the running "
+            "editor only. Make the file writable, then change any bus and the editor writes "
+            "the layout again. revert_with restores the previous values.";
+#endif
+    }
+    return CallToolResult::successJson(std::move(payload));
 }
 
 CallToolResult handleAudioAddBus(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
@@ -1370,12 +1411,25 @@ CallToolResult handleAudioAddBus(const json& args, std::shared_ptr<ipc::IIpcClie
     // a bus the editor went on to write as unwritten. The wait ends as soon
     // as the bus is in the file, so the headroom costs nothing when the
     // editor is quick.
+    //
+    // The file read is the one the bridge names, which is the layout the editor
+    // opened the project with, not whatever audio/buses/default_bus_layout says
+    // now: an editor keeps writing the file it opened until it restarts.
     const auto name = payload.value("name", std::string());
     const auto index = payload.value("bus", int64_t{-1});
+    const auto layout_path = payload.value("layout_path", std::string("res://default_bus_layout.tres"));
     bool written = false;
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    // On Windows a read-only file is a save that has already failed, so there
+    // is nothing to wait for; elsewhere a rename can still replace it.
+#ifdef _WIN32
+    const bool wait_for_write = !layoutFileIsReadOnly(layout_path);
+#else
+    const bool wait_for_write = true;
+#endif
+    const auto deadline = std::chrono::steady_clock::now() +
+                          (wait_for_write ? std::chrono::seconds(5) : std::chrono::seconds(0));
     while (true) {
-        auto layout = offline::readAudioBusLayout(".");
+        auto layout = offline::readAudioBusLayoutFile(".", layout_path);
         if (layout.isOk() && layout.value().value("layout_loads", false)) {
             for (const auto& bus : layout.value().value("buses", json::array())) {
                 if (bus.value("index", int64_t{-2}) == index && bus.value("name", std::string()) == name) {
@@ -1387,16 +1441,20 @@ CallToolResult handleAudioAddBus(const json& args, std::shared_ptr<ipc::IIpcClie
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
     payload["layout_written"] = written;
-    if (!written) {
+    if (!written && layoutFileIsReadOnly(layout_path)) {
+        payload["layout_read_only"] = true;
         payload["layout_note"] =
-            "The editor had not written this bus to " +
-            payload.value("layout_path", std::string("the project's bus layout")) +
+            layout_path + " is read-only, so the editor's autosave cannot replace it: on "
+            "Windows it prints \"Safe save failed\", which runtime_read_output shows, and the bus "
+            "stays in the running editor only. Make the file writable, where version control "
+            "has it locked by checking it out, then change any bus and the editor writes the "
+            "layout again.";
+    } else if (!written) {
+        payload["layout_note"] =
+            "The editor had not written this bus to " + layout_path +
             " within five seconds, where it usually takes one. The bus is in the running editor "
-            "either way. A slow editor may still write it. A save that failed does not come back "
-            "on its own: a read-only layout file makes the editor print \"Safe save failed\", "
-            "which runtime_read_output shows. And an editor keeps writing the layout it opened "
-            "the project with until it restarts, even after audio/buses/default_bus_layout names "
-            "another file.";
+            "either way, and a slow editor may still write it. If the save failed, the editor "
+            "said why in its output, which runtime_read_output shows.";
     }
     return CallToolResult::successJson(std::move(payload));
 }

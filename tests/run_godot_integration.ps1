@@ -3503,7 +3503,14 @@ try {
         (Tool-Request 3019 "script_attach_to_node" @{ target_node = "/root/SmokeRoot/AudioPanelProbe"; script_path = "res://audio_panel_probe.gd" }),
         (Tool-Request 3020 "scene_call_method" @{ target_node = "/root/SmokeRoot/AudioPanelProbe"; method_name = "panel_bus_names"; arguments = @(); timeout_seconds = 20 }),
         (Tool-Request 3021 "scene_remove_node" @{ target_node = "/root/SmokeRoot/AudioPanelProbe" }),
-        (Tool-Request 3022 "scene_remove_node" @{ target_node = "/root/SmokeRoot/BusProbe" })
+        (Tool-Request 3022 "scene_remove_node" @{ target_node = "/root/SmokeRoot/BusProbe" }),
+        # The setting moved underneath the running editor, which keeps writing
+        # the layout it opened until it restarts, then put back.
+        (Tool-Request 3023 "resource_create" @{ resource_type = "AudioBusLayout"; save_path = "res://moved_bus_layout.tres" }),
+        (Tool-Request 3024 "project_set_setting" @{ setting = "audio/buses/default_bus_layout"; value = "res://moved_bus_layout.tres" }),
+        (Tool-Request 3025 "audio_configure_bus" @{ bus = "Music"; mute = $false }),
+        (Tool-Request 3026 "project_set_setting" @{ setting = "audio/buses/default_bus_layout"; value = "res://default_bus_layout.tres" }),
+        (Tool-Request 3027 "audio_configure_bus" @{ bus = "Music"; mute = $false })
     )
     # --yolo for scene_call_method, the same reason as the preset batch above.
     $rawBusResponses = Invoke-Didi -Requests $busRequests -Arguments @("--project", $fixtureRoot, "--yolo")
@@ -3594,6 +3601,21 @@ try {
     Assert-True ($null -ne $panel -and -not $busById[3020].result.isError) "The Audio panel probe did not run: $($busById[3020].result.content[0].text)"
     Assert-True (@($panel.returned) -contains "Music" -and @($panel.returned) -contains "SFX") "The editor's Audio panel shows $(@($panel.returned) -join ', '), not the buses audio_add_bus added. On 4.5 and 4.6 a stale New Bus there is renamed back by one click."
     Assert-True (-not $busById[3021].result.isError -and -not $busById[3022].result.isError) "An audio_add_bus probe node could not be removed."
+
+    # The editor's Audio panel read audio/buses/default_bus_layout when it was
+    # built and saves the layout there until it restarts. Moving the setting
+    # left it writing the old file while the next start loaded the new, empty
+    # one (vibe session nineteen, 4.7.2).
+    Assert-True (-not $busById[3023].result.isError) "The second bus layout could not be created: $($busById[3023].result.content[0].text)"
+    $moved = Tool-Payload $busById[3024]
+    Assert-True ($moved.requires_editor_restart -eq $true -and $moved.editor_layout_path -eq "res://default_bus_layout.tres") "project_set_setting moved the bus layout underneath the editor without saying it keeps writing the old file: $($busById[3024].result.content[0].text)"
+    $movedConfigure = Tool-Payload $busById[3025]
+    Assert-True ($movedConfigure.layout_path -eq "res://default_bus_layout.tres" -and $movedConfigure.project_layout_path -eq "res://moved_bus_layout.tres") "audio_configure_bus named $($movedConfigure.layout_path) as the file the editor writes after the setting moved, with project_layout_path $($movedConfigure.project_layout_path)."
+    Assert-True ($movedConfigure.limitation -match "restart") "audio_configure_bus did not say the editor writes the layout it opened until it restarts."
+    $restored = Tool-Payload $busById[3026]
+    Assert-True ($restored.status -eq "success" -and $null -eq $restored.requires_editor_restart) "Putting the bus layout setting back still asked for a restart: $($busById[3026].result.content[0].text)"
+    $restoredConfigure = Tool-Payload $busById[3027]
+    Assert-True ($restoredConfigure.layout_path -eq "res://default_bus_layout.tres" -and $null -eq $restoredConfigure.project_layout_path) "audio_configure_bus still reported a moved layout after the setting was put back."
 
     # The file the editor wrote, read as bytes.
     $busLayout = [IO.File]::ReadAllText((Join-Path $fixtureRoot "default_bus_layout.tres"))

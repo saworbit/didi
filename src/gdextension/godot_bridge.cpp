@@ -2367,6 +2367,18 @@ std::string busLayoutPathFrom(const std::optional<std::string>& setting) {
     return value;
 }
 
+// What to add to a bus answer when the project names a different layout file
+// from the one the editor opened. The editor keeps saving to the one it opened
+// until it restarts, and the next start loads the one the project names, so the
+// buses it holds now are not what that start will see.
+std::string busLayoutMovedSentence(const std::string& editor_path, const std::string& project_path) {
+    if (editor_path == project_path) return std::string();
+    return " audio/buses/default_bus_layout has changed since the editor opened the project: "
+           "it now names " + project_path + ", which the editor loads when it next starts, "
+           "and until then the editor keeps writing " + editor_path + ", the layout it opened. "
+           "Restart the editor, or put the setting back, before relying on either file.";
+}
+
 // Whether a PackedScene file is there to read. ResourceLoader.get_dependencies
 // prints an engine ERROR for a path it cannot open, so nothing below asks it
 // about a file this has not seen first.
@@ -4684,6 +4696,18 @@ json injectInput(const json& params, const std::string& session_kind) {
 }
 
 } // namespace
+
+void GodotBridge::rememberStartupBusLayoutSetting() {
+    m_startupBusLayoutSetting = projectSettingString("audio/buses/default_bus_layout");
+    m_startupBusLayoutRemembered = true;
+}
+
+std::optional<std::string> GodotBridge::startupBusLayoutPath() {
+    if (!m_startupBusLayoutRemembered) return std::nullopt;
+    // Resolved when asked rather than at initialization, because a uid is
+    // resolved through ResourceUID, which may not have read its cache yet then.
+    return busLayoutPathFrom(m_startupBusLayoutSetting);
+}
 
 std::optional<std::string> GodotBridge::projectSettingString(const std::string& name) {
     auto settings = singleton("ProjectSettings");
@@ -10240,12 +10264,34 @@ json GodotBridge::execute(const std::string& method, const json& params,
             }
             return errorJson(500, "ProjectSettings.save failed; mutation was rolled back (" + detail + ")");
         }
-        return liveResult({{"status", "success"}, {"setting", setting}, {"persisted", true},
-                           {"removed", remove},
-                           // Whether the engine knew this name before the write. A
-                           // caller that passed create: true gets to see which of the
-                           // two things it did.
-                           {"defined_by_engine", static_cast<bool>(exists.value())}});
+        json result = {{"status", "success"}, {"setting", setting}, {"persisted", true},
+                       {"removed", remove},
+                       // Whether the engine knew this name before the write. A
+                       // caller that passed create: true gets to see which of the
+                       // two things it did.
+                       {"defined_by_engine", static_cast<bool>(exists.value())}};
+        // The editor's Audio panel read this setting when it was built and saves
+        // the bus layout to that file until the editor restarts. Moving it here
+        // left the editor writing the old file while the next start loaded the
+        // new one, which was empty, so every bus the project had was gone from
+        // the editor after a restart. Measured on 4.7.2 in vibe session
+        // nineteen; editor_reload_project is a filesystem scan and does not
+        // change it.
+        if (setting == "audio/buses/default_bus_layout") {
+            const auto editor_path = startupBusLayoutPath();
+            const auto project_path = busLayoutPathFrom(projectSettingString(setting));
+            if (editor_path.has_value() && *editor_path != project_path) {
+                result["requires_editor_restart"] = true;
+                result["editor_layout_path"] = *editor_path;
+                result["limitation"] =
+                    "The attached editor opened the project with " + *editor_path +
+                    " as its bus layout and keeps saving every bus change there until it "
+                    "restarts. The next start loads " + project_path + " instead, and the "
+                    "buses the editor holds now are in the other file, so copy the layout "
+                    "across or restart the editor before changing any bus.";
+            }
+        }
+        return liveResult(std::move(result));
     }
 
     if (method == "project.listAutoloads" || method == "project.setAutoload" ||
@@ -10823,30 +10869,38 @@ json GodotBridge::execute(const std::string& method, const json& params,
         // and present in the copy after a run whose only bus calls are this
         // tool's.
         const bool editor_session = session_kind == "editor";
-        // The file the editor writes, which is the one the project names. A
-        // literal res://default_bus_layout.tres named a file that is never
-        // written in a project that moved its layout (#935).
-        const auto layout_path =
+        // The file the editor writes, which is the one it opened the project
+        // with. A literal res://default_bus_layout.tres named a file that is
+        // never written in a project that moved its layout (#935), and the
+        // setting itself names the wrong one once it has moved underneath a
+        // running editor.
+        const auto project_layout_path =
             busLayoutPathFrom(projectSettingString("audio/buses/default_bus_layout"));
-        return liveResult(
-            {{"status", "success"},
-             {"bus", index},
-             {"applied", std::move(applied)},
-             {"before", before.value()},
-             {"after", after.value()},
-             {"undo_redo_registered", false},
-             {"persisted_by_editor", editor_session},
-             {"layout_path", layout_path},
-             {"limitation",
-              editor_session
-                  ? "This sets the running engine's audio bus state. This tool writes no "
-                    "file, but the editor's own bus-layout autosave picks the change up and "
-                    "writes " + layout_path + " shortly afterwards, so it reaches "
-                    "the project on disk anyway. revert_with restores the previous values."
-                  : "This sets the running game's audio bus state and nothing writes it "
-                    "down. It is gone when the process exits, and the project's bus layout "
-                    "on disk is unchanged. revert_with restores the previous values."},
-             {"revert_with", before.value()}});
+        const auto layout_path = editor_session
+            ? startupBusLayoutPath().value_or(project_layout_path)
+            : project_layout_path;
+        json result = {
+            {"status", "success"},
+            {"bus", index},
+            {"applied", std::move(applied)},
+            {"before", before.value()},
+            {"after", after.value()},
+            {"undo_redo_registered", false},
+            {"persisted_by_editor", editor_session},
+            {"layout_path", layout_path},
+            {"limitation",
+             editor_session
+                 ? "This sets the running engine's audio bus state. This tool writes no "
+                   "file, but the editor's own bus-layout autosave picks the change up and "
+                   "writes " + layout_path + " shortly afterwards, so it reaches "
+                   "the project on disk anyway. revert_with restores the previous values." +
+                       busLayoutMovedSentence(layout_path, project_layout_path)
+                 : "This sets the running game's audio bus state and nothing writes it "
+                   "down. It is gone when the process exits, and the project's bus layout "
+                   "on disk is unchanged. revert_with restores the previous values."},
+            {"revert_with", before.value()}};
+        if (project_layout_path != layout_path) result["project_layout_path"] = project_layout_path;
+        return liveResult(std::move(result));
     }
 
     if (method == "audio.addBus") {
@@ -11121,28 +11175,35 @@ json GodotBridge::execute(const std::string& method, const json& params,
         auto after = readState();
         if (after.isErr()) return errorJson(after.error().code, after.error().message);
 
-        const auto layout_path =
+        // The file the editor writes is the one it opened the project with,
+        // which is the one the project names unless the setting moved while
+        // the editor was running.
+        const auto project_layout_path =
             busLayoutPathFrom(projectSettingString("audio/buses/default_bus_layout"));
-        return liveResult(
-            {{"status", "success"},
-             {"bus", index},
-             {"name", request.name},
-             {"send", request.send},
-             {"after", after.value()},
-             {"bus_count", grown.value()},
-             {"adopted_sends", std::move(adopted)},
-             {"layout_path", layout_path},
-             {"persisted_by_editor", true},
-             {"panel_refreshed", panel_refreshed},
-             {"undo_redo_registered", false},
-             {"limitation",
-              "This adds the bus to the editor's running AudioServer and writes no file. The "
-              "editor's own bus-layout autosave writes " + layout_path + " a moment later. There "
-              "is no undo entry: delete the bus in the editor's Audio panel to take it back."},
-             {"next_step",
-              "Set each AudioStreamPlayer's bus to \"" + request.name + "\" with "
-              "scene_set_property, then editor_save_scene. A player set to a bus before the bus "
-              "exists reads Master and is saved as Master."}});
+        const auto layout_path = startupBusLayoutPath().value_or(project_layout_path);
+        json result = {
+            {"status", "success"},
+            {"bus", index},
+            {"name", request.name},
+            {"send", request.send},
+            {"after", after.value()},
+            {"bus_count", grown.value()},
+            {"adopted_sends", std::move(adopted)},
+            {"layout_path", layout_path},
+            {"persisted_by_editor", true},
+            {"panel_refreshed", panel_refreshed},
+            {"undo_redo_registered", false},
+            {"limitation",
+             "This adds the bus to the editor's running AudioServer and writes no file. The "
+             "editor's own bus-layout autosave writes " + layout_path + " a moment later. There "
+             "is no undo entry: delete the bus in the editor's Audio panel to take it back." +
+                 busLayoutMovedSentence(layout_path, project_layout_path)},
+            {"next_step",
+             "Set each AudioStreamPlayer's bus to \"" + request.name + "\" with "
+             "scene_set_property, then editor_save_scene. A player set to a bus before the bus "
+             "exists reads Master and is saved as Master."}};
+        if (project_layout_path != layout_path) result["project_layout_path"] = project_layout_path;
+        return liveResult(std::move(result));
     }
 
     if (method == "engine.classExists") {
