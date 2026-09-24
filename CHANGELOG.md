@@ -155,6 +155,20 @@ The three Phase 7 blockers are unchanged; the newest name is `audio_add_bus`, re
 
 ### Fixed
 
+- **Three refusals said something other than what they meant.** A
+  `dry_run` of the wrong type, such as `"true"`, was read with a type that
+  threw before any tool code ran, so every mutation on the surface answered
+  JSON-RPC `-32602` "Invalid JSON parameter types", naming no argument, while
+  the safety gate's own `400` for it never ran; it runs now and names
+  `dry_run`. A live-only tool refused because another MCP client holds the
+  bridge carried that in its data, with a recovery saying not to fall back to
+  offline edits, under a sentence saying no editor was attached, to open one,
+  and where the offline alternative is; the sentence now says what the data
+  says and the offline alternative is gone from it. And an empty required
+  string was "at least 1 characters long", which is now "must not be
+  empty", and an empty list "at least 1 entries". Found by vibe session
+  nineteen.
+
 - **`scene_instantiate_node` did not say when an initial property failed to
   land.** Its `properties` are documented as the same contract as
   `scene_set_property`'s `value`, which reads its write back and answers

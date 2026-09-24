@@ -3057,6 +3057,16 @@ static void test_a_length_bound_counts_the_characters_it_publishes() {
     const auto wide_refused = registry.callTool(
         "project_analyze_impact", didi::json{{"target", wide_target + "\xE9\x9F\xB3"}});
     ASSERT_TRUE(wide_refused.isError);
+
+    // The other end of the bound, which every required string on the surface
+    // answers through: "at least 1 characters long" and "at least 1 entries".
+    const auto empty_query = registry.callTool("project_search_text", didi::json{{"query", ""}});
+    ASSERT_TRUE(empty_query.isError);
+    ASSERT_TRUE(empty_query.content[0].text.find("must not be empty") != std::string::npos);
+    ASSERT_TRUE(empty_query.content[0].text.find("1 characters") == std::string::npos);
+    const auto no_paths = registry.callTool("asset_reimport", didi::json{{"paths", didi::json::array()}});
+    ASSERT_TRUE(no_paths.isError);
+    ASSERT_TRUE(no_paths.content[0].text.find("at least 1 entry.") != std::string::npos);
 }
 
 static void test_a_godot_bin_that_cannot_be_used_is_reported() {
@@ -8033,7 +8043,8 @@ static void test_required_strings_refuse_the_empty_string() {
         ASSERT_EQ(error["data"]["code"], "invalid_arguments");
         const auto message = error["message"].get<std::string>();
         ASSERT_TRUE(message.find("is required") == std::string::npos);
-        ASSERT_TRUE(message.find("at least") != std::string::npos);
+        // "must not be empty", which "at least 1 characters long" used to say.
+        ASSERT_TRUE(message.find("must not be empty") != std::string::npos);
     }
     ASSERT_TRUE(!std::filesystem::exists("didi_test_lab.tscn"));
 

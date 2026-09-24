@@ -451,6 +451,31 @@ static void test_mcp_rejects_non_object_arguments() {
     ASSERT_EQ(prompt_response.error->code, didi::mcp::JsonRpcErrorCode::InvalidParams);
 }
 
+// "dry_run": "true" is an easy slip for a model, and the server read the flag
+// with a type that threw before any tool code ran, so the whole call came back
+// as JSON-RPC -32602 "Invalid JSON parameter types", naming no argument, on
+// every mutation on the surface (vibe session nineteen). It is an argument
+// error like any other now: a tool result that names dry_run.
+static void test_a_dry_run_of_the_wrong_type_is_named() {
+    didi::mcp::McpServer server;
+    initializeServer(server);
+    for (const auto& value : {didi::json("true"), didi::json(1), didi::json(nullptr)}) {
+        didi::mcp::JsonRpcRequest request;
+        request.id = 9;
+        request.method = "tools/call";
+        request.params = {{"name", "project_set_setting"},
+                          {"arguments", {{"setting", "application/config/name"},
+                                         {"value", "X"},
+                                         {"dry_run", value}}}};
+        const auto response = server.handleRequest(request);
+        ASSERT_TRUE(!response.error.has_value());
+        const auto text = response.result["content"][0]["text"].get<std::string>();
+        ASSERT_TRUE(response.result["isError"] == true);
+        ASSERT_TRUE(text.find("dry_run") != std::string::npos);
+        ASSERT_TRUE(text.find("Invalid JSON parameter types") == std::string::npos);
+    }
+}
+
 static void test_the_schema_gate_refuses_arguments_that_are_not_an_object() {
     // The gate answered "no complaint" for anything that was not an object, so
     // the one place that reads a published schema reported that a call had
@@ -1609,6 +1634,7 @@ static void test_mcp_answers_an_unknown_tool_with_a_protocol_error() {
 struct RegisterJsonRpcTests {
     RegisterJsonRpcTests() {
         registerTest("JsonRpc.ParseValid", test_jsonrpc_parse_valid);
+        registerTest("JsonRpc.WrongTypeDryRunIsNamed", test_a_dry_run_of_the_wrong_type_is_named);
         registerTest("JsonRpc.ParseNotification", test_jsonrpc_parse_notification);
         registerTest("JsonRpc.ResponseSerialization", test_jsonrpc_response_serialization);
         registerTest("JsonRpc.NullResultSerialization", test_jsonrpc_null_result_serialization);
