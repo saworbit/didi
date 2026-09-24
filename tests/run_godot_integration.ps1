@@ -3334,7 +3334,13 @@ try {
         (Tool-Request 2803 "project_add_export_preset" @{ name = "Harness Pack"; platform = "Linux"; export_path = "build/harness.x86_64" }),
         (Tool-Request 2804 "project_list_export_presets" @{}),
         (Tool-Request 2805 "project_export" @{ preset = "Harness Pack"; output_path = "res://harness.pck"; mode = "pack"; timeout_seconds = 120 }),
-        (Tool-Request 2806 "project_add_export_preset" @{ name = "Harness Pack"; platform = "Web" })
+        (Tool-Request 2806 "project_add_export_preset" @{ name = "Harness Pack"; platform = "Web" }),
+        # Godot trims every argument on its command line, so a name with a
+        # space at either end reached it as a different name. And a release
+        # build needs export templates, which a runner usually lacks.
+        (Tool-Request 2807 "project_add_export_preset" @{ name = " Harness Spaced "; platform = "Linux" }),
+        (Tool-Request 2808 "project_export" @{ preset = " Harness Spaced "; output_path = "res://harness_spaced.pck"; mode = "pack"; timeout_seconds = 120 }),
+        (Tool-Request 2809 "project_export" @{ preset = "Harness Pack"; output_path = "res://build/harness_release.x86_64"; mode = "release"; timeout_seconds = 120 })
     )
     $previousGodotBin = $env:GODOT_BIN
     try {
@@ -3370,7 +3376,21 @@ try {
     Assert-True $presetOfflineById[2806].result.isError "project_add_export_preset replaced a preset name already in the file."
     $presetTaken = ($presetOfflineById[2806].result.content[0].text | ConvertFrom-Json).error
     Assert-True ($presetTaken.code -eq 409 -and $presetTaken.data.code -eq "already_exists") "A name in use was refused as $($presetTaken.code) $($presetTaken.data.code)."
-    Assert-True (@([IO.File]::ReadAllLines((Join-Path $presetRoot "export_presets.cfg")) -match '^\[preset\.\d+\]$').Count -eq 1) "A refused add changed export_presets.cfg."
+    Assert-True (@([IO.File]::ReadAllLines((Join-Path $presetRoot "export_presets.cfg")) -match '^\[preset\.\d+\]$').Count -eq 2) "A refused add changed export_presets.cfg: the file should hold the two presets this batch added."
+
+    $spacedAdded = Tool-Payload $presetOfflineById[2807]
+    Assert-True ($spacedAdded.preset.name -eq " Harness Spaced " -and $spacedAdded.preset.detected -eq $true) "project_add_export_preset did not keep a name with a space at either end: $($presetOfflineById[2807].result.content[0].text)"
+    Assert-True (-not $presetOfflineById[2808].result.isError) "project_export could not export a preset whose name has a space at either end, which Godot's command line trims: $($presetOfflineById[2808].result.content[0].text)"
+    Assert-True ((Tool-Payload $presetOfflineById[2808]).size_bytes -gt 0) "project_export wrote an empty pack for the preset with spaces in its name."
+    # Either this machine has the templates and the build is made, or the
+    # refusal says which ones are missing and that a pack needs none.
+    if ($presetOfflineById[2809].result.isError) {
+        $releaseRefused = ($presetOfflineById[2809].result.content[0].text | ConvertFrom-Json).error
+        Assert-True ($releaseRefused.code -eq 503 -and $releaseRefused.data.code -eq "toolchain_unavailable" -and $releaseRefused.data.reason -eq "export_templates_missing" -and @($releaseRefused.data.missing_templates).Count -gt 0 -and $releaseRefused.data.retry_with.mode -eq "pack") "A release build Godot refused did not say which export templates were missing: $($presetOfflineById[2809].result.content[0].text)"
+    }
+    else {
+        Assert-True ((Tool-Payload $presetOfflineById[2809]).success -eq $true) "A release build reported neither success nor a refusal."
+    }
 
     # The pack is the game. Run on its own, with no project beside it.
     $packRunDirectory = Join-Path $buildRoot "godot_export_preset_pack_run"

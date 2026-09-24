@@ -143,10 +143,31 @@ void request_validation() {
     auto& registry = didi::mcp::ToolRegistry::instance();
     registry.registerAllDefaultTools();
     registry.setIpcClient(nullptr);
-    const auto misspelled = registry.callTool("project_add_export_preset",
-                                              {{"name", "P"}, {"platform", "HTML5"}});
-    ASSERT_TRUE(misspelled.isError);
-    ASSERT_TRUE(misspelled.content[0].text.find("Windows Desktop") != std::string::npos);
+    // The tool's own refusal, with the spelling it meant, rather than the
+    // schema's list of seven: the enum check used to answer first, so the
+    // did_you_mean the planner built never reached a caller. The dry run too.
+    for (const bool dry_run : {false, true}) {
+        json arguments = {{"name", "P"}, {"platform", "HTML5"}};
+        if (dry_run) arguments["dry_run"] = true;
+        const auto misspelled = registry.callTool("project_add_export_preset", arguments);
+        ASSERT_TRUE(misspelled.isError);
+        const auto error = payloadOf(misspelled)["error"];
+        ASSERT_EQ(error["code"], json(400));
+        ASSERT_EQ(error["data"]["parameter"], json("platform"));
+        ASSERT_EQ(error["data"]["did_you_mean"], json("Web"));
+        ASSERT_EQ(error["data"]["retry_with"]["platform"], json("Web"));
+        ASSERT_TRUE(error["message"].get<std::string>().find("Windows Desktop") != std::string::npos);
+    }
+    // A platform nothing is close to still lists the seven, and a wrong type
+    // is still the schema's to refuse.
+    const auto unknown = payloadOf(registry.callTool(
+        "project_add_export_preset", {{"name", "P"}, {"platform", "Nintendo Switch"}}))["error"];
+    ASSERT_EQ(unknown["data"]["parameter"], json("platform"));
+    ASSERT_TRUE(!unknown["data"].contains("did_you_mean"));
+    const auto typed = payloadOf(registry.callTool(
+        "project_add_export_preset", {{"name", "P"}, {"platform", 7}}))["error"];
+    ASSERT_EQ(typed["data"]["code"], json("invalid_arguments"));
+    ASSERT_TRUE(!std::filesystem::exists("export_presets.cfg"));
     // An absolute path in the spelling of the platform running the test: on
     // macOS and Linux, C:/outside.exe is a relative path inside the project.
 #if defined(_WIN32)
@@ -164,6 +185,14 @@ void request_validation() {
     const auto directory = registry.callTool(
         "project_add_export_preset", {{"name", "P"}, {"platform", "Linux"}, {"export_path", "build"}});
     ASSERT_TRUE(directory.isError);
+    // A directory that is not there yet is still a directory. It used to be
+    // stored as sent, and the Export dialog offered a file with no name.
+    for (const auto* folder : {"builds/", "res://builds/", "builds\\"}) {
+        const auto refused = registry.callTool(
+            "project_add_export_preset", {{"name", "P"}, {"platform", "Linux"}, {"export_path", folder}});
+        ASSERT_TRUE(refused.isError);
+        ASSERT_EQ(payloadOf(refused)["error"]["data"]["parameter"], json("export_path"));
+    }
     ASSERT_TRUE(!std::filesystem::exists("export_presets.cfg"));
 
     const auto stored = call({{"name", "P"}, {"platform", "Linux"}, {"export_path", "res://build/p.x86_64"}});
@@ -407,6 +436,117 @@ void registration() {
                 didi::runtime::LiveSessionKindPolicy::editor_only);
 }
 
+// The names a preset can have and project_export still ask Godot for, and what
+// Godot answers when it refuses. Godot trims every argument and decodes %20,
+// takes an argument starting with - as one of its own options when it has one,
+// and prints configuration errors in a block of their own. Each rule was
+// measured on 4.5.1, 4.6.2 and 4.7.2 with
+// tools/vibe/probes/export_preset_writer.py.
+void command_line_names_and_engine_answers() {
+    using didi::offline::presetNameForCommandLine;
+    ASSERT_EQ(presetNameForCommandLine("Plain"), "Plain");
+    ASSERT_EQ(presetNameForCommandLine(" Padded "), "%20Padded%20");
+    ASSERT_EQ(presetNameForCommandLine(" "), "%20");
+    ASSERT_EQ(presetNameForCommandLine("Windows Desktop"), "Windows%20Desktop");
+
+    // Spaces at either end survive now, so the writer takes them. A literal
+    // %20 and a leading - are what cannot arrive as written.
+    ASSERT_TRUE(planExportPresetAddition(std::nullopt, " Padded ", "Linux", "").isOk());
+    ASSERT_TRUE(planExportPresetAddition(std::nullopt, " ", "Linux", "").isOk());
+    for (const std::string name : {"A%20B", "-x", "--headless", "-"}) {
+        const auto refused = planExportPresetAddition(std::nullopt, name, "Linux", "");
+        ASSERT_TRUE(refused.isErr());
+        ASSERT_EQ(refused.error().data["parameter"], json("name"));
+        ASSERT_TRUE(refused.error().message.find("command line") != std::string::npos);
+    }
+    ASSERT_TRUE(planExportPresetAddition(std::nullopt, "A-B %2 x-", "Linux", "").isOk());
+
+    // What 4.6.2 printed for a release build with no templates, verbatim.
+    const std::string desk =
+        "[ DONE ] first_scan_filesystem\r\n\r\n"
+        "ERROR: Cannot export project with preset \"Desk\" due to configuration errors:\r\n"
+        "No export template found at the expected path:\r\n"
+        "C:/Users/User/AppData/Roaming/Godot/export_templates/4.6.2.stable/windows_debug_x86_64.exe\r\n"
+        "No export template found at the expected path:\r\n"
+        "C:/Users/User/AppData/Roaming/Godot/export_templates/4.6.2.stable/windows_release_x86_64.exe\r\n"
+        "\r\n"
+        "   at: _fs_changed (editor/editor_node.cpp:1332)\r\n"
+        "ERROR: Project export for preset \"Desk\" failed.\r\n";
+    const auto templates = didi::offline::exportConfigurationErrors(desk);
+    ASSERT_EQ(templates.missing_templates.size(), 2u);
+    ASSERT_EQ(templates.errors.size(), 2u);
+    ASSERT_TRUE(templates.missing_templates[1].find("windows_release_x86_64.exe") != std::string::npos);
+    ASSERT_EQ(templates.errors[0], "No export template found at the expected path: " +
+                                       templates.missing_templates[0]);
+
+    // Android puts its SDK checks in the same block.
+    const std::string android =
+        "ERROR: Cannot export project with preset \"Droid\" due to configuration errors:\n"
+        "No export template found at the expected path:\n"
+        "C:/t/android_debug.apk\n"
+        "A valid Java SDK path is required in Editor Settings.\n"
+        "Invalid Android SDK path in Editor Settings. Missing 'build-tools' directory!\n"
+        "\n"
+        "   at: _fs_changed (editor/editor_node.cpp:1332)\n";
+    const auto droid = didi::offline::exportConfigurationErrors(android);
+    ASSERT_EQ(droid.errors.size(), 3u);
+    ASSERT_EQ(droid.missing_templates, std::vector<std::string>({"C:/t/android_debug.apk"}));
+    ASSERT_EQ(droid.errors[1], "A valid Java SDK path is required in Editor Settings.");
+    ASSERT_TRUE(didi::offline::exportConfigurationErrors("ERROR: something else\n").errors.empty());
+
+    // The name Godot looked for, which for --headless was the output path.
+    ASSERT_EQ(*didi::offline::invalidPresetNameInEngineOutput(
+                  "ERROR: Invalid export preset name: C:\\p\\o.pck.\r\nThe following"),
+              "C:\\p\\o.pck");
+    ASSERT_EQ(*didi::offline::invalidPresetNameInEngineOutput(
+                  "ERROR: Invalid export preset name: Tail.\n"),
+              "Tail");
+    ASSERT_TRUE(!didi::offline::invalidPresetNameInEngineOutput("nothing\n").has_value());
+
+    // A preset the file has and the command line cannot carry is refused by
+    // project_export and its dry run before Godot starts.
+    ScopedProject project("command-line-names");
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    registry.setIpcClient(nullptr);
+    std::string block = kWindowsBlock;
+    block.replace(block.find("Windows Build"), 13, "A%20B");
+    writeFile("export_presets.cfg", block);
+    for (const bool dry_run : {false, true}) {
+        json arguments = {{"preset", "A%20B"}, {"output_path", "res://out.pck"}, {"mode", "pack"}};
+        if (dry_run) arguments["dry_run"] = true;
+        const auto refused = registry.callTool("project_export", arguments);
+        ASSERT_TRUE(refused.isError);
+        const auto error = payloadOf(refused)["error"];
+        ASSERT_EQ(error["code"], json(422));
+        ASSERT_EQ(error["data"]["reason"], json("name_not_passable"));
+        ASSERT_TRUE(!std::filesystem::exists("out.pck"));
+    }
+}
+
+// A byte-order mark is named as the cause. Godot does not skip one in this
+// file and detects no presets, on 4.5.1, 4.6.2 and 4.7.2, and the cause the
+// reader used to give was a key whose first character nobody can see.
+void a_byte_order_mark_is_named() {
+    const auto file = didi::offline::readExportPresets(std::string("\xEF\xBB\xBF") + kWindowsBlock);
+    ASSERT_TRUE(file.malformed);
+    ASSERT_EQ(file.reason, "byte_order_mark");
+    ASSERT_EQ(file.line, 1);
+
+    ScopedProject project("byte-order-mark");
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    registry.setIpcClient(nullptr);
+    const std::string marked = std::string("\xEF\xBB\xBF") + kWindowsBlock;
+    writeFile("export_presets.cfg", marked);
+    const auto listed = payloadOf(registry.callTool("project_list_export_presets", json::object()));
+    ASSERT_EQ(listed["error"]["data"]["reason"], json("byte_order_mark"));
+    const auto added = payloadOf(registry.callTool(
+        "project_add_export_preset", {{"name", "Second"}, {"platform", "Linux"}}));
+    ASSERT_EQ(added["error"]["data"]["reason"], json("byte_order_mark"));
+    ASSERT_EQ(readFile("export_presets.cfg"), marked);
+}
+
 struct Register {
     Register() {
         registerTest("ExportPresetAdd.RequestValidation", request_validation);
@@ -417,6 +557,9 @@ struct Register {
         registerTest("ExportPresetAdd.AnAttachedEditorIsMadeToReadTheFile",
                      an_attached_editor_is_made_to_read_the_file);
         registerTest("ExportPresetAdd.Registration", registration);
+        registerTest("ExportPresetAdd.CommandLineNamesAndEngineAnswers",
+                     command_line_names_and_engine_answers);
+        registerTest("ExportPresetAdd.AByteOrderMarkIsNamed", a_byte_order_mark_is_named);
     }
 } registrar;
 

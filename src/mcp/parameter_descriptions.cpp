@@ -251,7 +251,10 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
         {"project_add_export_preset.name",
          "The preset's name, which project_export's preset argument then takes. It must not be "
          "a name the file already has, because Godot exports the first preset with a name and "
-         "the second could never be reached. One line, no control characters."},
+         "the second could never be reached. One line, no control characters. No %20 and no - "
+         "at the start either, because project_export asks Godot for the preset by name on its "
+         "command line, where Godot decodes %20 into a space and reads a leading - as one of "
+         "its own options."},
         {"project_add_export_preset.platform",
          "The export platform, spelled exactly as Godot names it. The same seven on every "
          "supported line; Godot skips a preset on any other name without a word."},

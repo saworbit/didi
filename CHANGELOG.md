@@ -134,6 +134,45 @@ The three Phase 7 blockers are unchanged; the newest name is `project_add_export
 
 ### Fixed
 
+- **`project_export` lost a preset name with a space at either end.** Godot
+  trims every argument on its command line and then turns each `%20` back into
+  a space, on 4.5.1, 4.6.2 and 4.7.2. So `" Padded "` reached it as `Padded`,
+  which it did not detect, and a name of spaces alone reached it empty, which
+  started an editor that ran until the export's five-minute timeout. Both
+  names were accepted by `project_add_export_preset` and listed as detected.
+  The name is now sent with each space as `%20`, which Godot decodes back. A
+  name that holds `%20` itself cannot be sent at all and is refused before
+  Godot starts, with `reason: "name_not_passable"`, and
+  `project_add_export_preset` refuses it, and a name starting with `-`, which
+  Godot reads as one of its own options when it has one by that name
+  (`--headless` made the export look for a preset named after its output
+  path). When Godot does look for a different name, the refusal now says so
+  and carries `engine_looked_for`, where it used to say the file had changed
+  while the export ran.
+- **A release build with no export templates was a `500 internal_error`.**
+  `project_add_export_preset`'s `next_step` promised that `project_export`
+  "says so when they are missing", and it answered "Godot refused the export"
+  with the cause left in `engine_output`. Godot's block of configuration
+  errors is now read into `configuration_errors`, and missing templates are
+  `503 toolchain_unavailable` with `reason: "export_templates_missing"`, the
+  paths Godot looked in, the one this build needed named in the message, and
+  `retry_with: {mode: "pack"}`, the same code `csharp_check_build` gives for a
+  missing .NET SDK. Any other configuration error is `422` with
+  `reason: "export_configuration_errors"`.
+- **`project_add_export_preset`'s `did_you_mean` never reached a caller.** The
+  schema's enum check refused `HTML5`, `Windows` or `Linux/X11` first, with
+  the list of seven, so the refusal that names `Web`, `Windows Desktop` or
+  `Linux` with `retry_with` was unreachable. The tool's own refusal now
+  answers first, on the call and the dry run.
+- **A presets file with a byte-order mark was blamed on a key nobody could
+  see.** Godot does not skip the mark in `export_presets.cfg` and detects no
+  presets, and the reader said so as `key_before_section`, quoting a key that
+  started with the invisible mark. It is `reason: "byte_order_mark"` on line 1
+  now, with the remedy. PowerShell 5.1's `Set-Content` writes one.
+- **`project_add_export_preset` stored a directory as `export_path`.**
+  `builds/` was stored as sent when the directory did not exist yet, and the
+  Export dialog then offered to write a file with no name. A path ending in a
+  separator is refused.
 - **Writing an input action broke navigation in the editor's 3D view (#925).**
   `project_set_input_action` and `project_remove_input_action` finished by
   reloading the attached editor's whole `InputMap` from the project. An
