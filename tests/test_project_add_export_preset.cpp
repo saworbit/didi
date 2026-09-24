@@ -147,7 +147,14 @@ void request_validation() {
                                               {{"name", "P"}, {"platform", "HTML5"}});
     ASSERT_TRUE(misspelled.isError);
     ASSERT_TRUE(misspelled.content[0].text.find("Windows Desktop") != std::string::npos);
-    for (const auto* escape : {"../outside.exe", "res://../outside.exe", "C:/outside.exe"}) {
+    // An absolute path in the spelling of the platform running the test: on
+    // macOS and Linux, C:/outside.exe is a relative path inside the project.
+#if defined(_WIN32)
+    const char* const absolute = "C:/outside.exe";
+#else
+    const char* const absolute = "/tmp/outside.exe";
+#endif
+    for (const auto* escape : {"../outside.exe", "res://../outside.exe", absolute}) {
         const auto refused = registry.callTool(
             "project_add_export_preset", {{"name", "P"}, {"platform", "Linux"}, {"export_path", escape}});
         ASSERT_TRUE(refused.isError);
