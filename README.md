@@ -278,3 +278,43 @@ Copy [**`docs/LLM_INSTRUCTIONS.md`**](docs/LLM_INSTRUCTIONS.md) into your agent 
 
 ## 📄 License
 MIT License. See [LICENSE](LICENSE) for details.
+
+---
+
+## 🎩 P.S. There Are Two Didis
+
+> *"We always find something, eh Didi, to give us the impression we exist?"* — Estragon, *Waiting for Godot*, and the first line of Jim's README
+
+Not long after I put Didi out into the world, I went looking for it and found
+[another Didi](https://github.com/JimMikola/Didi), by **Jim Mikola**. Same name.
+Same play. A native C++ GDExtension MCP server for Godot 4.5, MIT-licensed, with
+Beckett on the front page. Jim's first commit is dated 18 June 2026, about two
+months before this repository's.
+
+I nearly fell off my chair. This is a first for me.
+
+The name took me ages. Gogo, Didi, Vladimir, Estragon: each had its turn before
+Didi won, because a project doesn't feel alive to me until it has a name. The
+C++ came from being fed up with how many tokens the other MCP servers burned,
+and 4.5 is where one of my first game projects started. All of it felt like my
+own idea. And there was Jim, two months earlier, standing in the same spot.
+
+What a world we live in. Two people, two months apart, each with an LLM at the
+elbow ([mine is no secret](AI.md)), and both of us named our C++ bridge after the same tramp in a Beckett
+play. Maybe that's plain convergence: start from *Waiting for Godot* and a
+painful token bill, and Didi and C++ are simply where the road goes. Or maybe a
+little of Jim's thinking found its way here through the models, which learn from
+what all of us put online. I can't tell which, and that's rather the point, so
+the tip of the hat goes to Jim, who got there first. Jim, if you ever read this:
+hello! I'm guessing you're as astonished as I was. And if sharing the name ever
+causes you grief, just say so and this one will find another.
+
+A word to the wise for anyone else building with LLMs: your bright original idea
+may already be sitting in someone else's repository, and the model helping you
+may have met it before you did. That's no reason not to build. It's a reason to
+go looking, say hello, and give credit where it's due.
+
+If you'd like the lean take, with a handful of tools and `run_gdscript` served
+over HTTP from inside the editor, go and see Jim's.
+
+— Shane
