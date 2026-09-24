@@ -1467,9 +1467,11 @@ CallToolResult handleAudioListBuses(const json& args, std::shared_ptr<ipc::IIpcC
     // someone is looking for and the layout file cannot show it. The offline
     // read is a fallback, and it says so in the result rather than letting the
     // caller assume they are looking at live state.
+    std::optional<Error> live_failure;
     if (ipc && ipc->isConnected()) {
         auto response = ipc->sendRequest("audio.listBuses", args, ipc::kWaitForDefinitiveResponse);
         if (response.isOk()) return CallToolResult::successJson(response.value());
+        live_failure = response.error();
     }
 
     auto layout = offline::readAudioBusLayout(".");
@@ -1477,6 +1479,16 @@ CallToolResult handleAudioListBuses(const json& args, std::shared_ptr<ipc::IIpcC
     auto payload = layout.value();
     payload["execution_mode"] = "offline_fallback";
     payload["is_live_engine"] = false;
+    // An attached engine that failed the read is not the same answer as no
+    // engine. Every game session failed it until vibe session nineteen, and the
+    // file came back looking like the choice of a caller with nothing attached.
+    if (live_failure) {
+        payload["live_error"] = {{"code", live_failure->code}, {"message", live_failure->message}};
+        payload["live_error_note"] =
+            "An engine is attached and its read failed, so this is the project's layout file "
+            "rather than the running engine's buses. A bus a script changed at runtime is not "
+            "in it.";
+    }
     return CallToolResult::successJson(std::move(payload));
 }
 

@@ -419,6 +419,31 @@ void layout_write_obstacles() {
     registry.setIpcClient(nullptr);
 }
 
+// An attached engine whose read fails is not an engine that is absent. Every
+// game session failed audio.listBuses on a missing EditorInterface, and the
+// tool answered with the layout file as if nothing were attached, which is how
+// that failure stayed hidden.
+void a_failed_live_read_says_so() {
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    ScopedLayoutProject project("config_version=5\n");
+    class FailingEngine final : public didi::ipc::IIpcClient {
+    public:
+        bool connect(const std::string&, int) override { return true; }
+        void disconnect() override {}
+        bool isConnected() const override { return true; }
+        didi::Result<json> sendRequest(const std::string&, const json&, int) override {
+            return didi::Error(500, "Can't retrieve singleton 'EditorInterface' outside of editor.");
+        }
+    };
+    registry.setIpcClient(std::make_shared<FailingEngine>());
+    const auto listed = payloadOfCall("audio_list_buses", json::object());
+    registry.setIpcClient(nullptr);
+    ASSERT_EQ(listed["execution_mode"], json("offline_fallback"));
+    ASSERT_EQ(listed["live_error"]["code"], json(500));
+    ASSERT_TRUE(listed.contains("live_error_note"));
+}
+
 // The layout in a named file, read whatever project.godot names.
 void layout_read_from_a_named_file() {
     ScopedLayoutProject project(
@@ -435,8 +460,39 @@ void layout_read_from_a_named_file() {
     ASSERT_EQ(other.value()["buses"][1]["name"], json("Other"));
 }
 
+// The tool that answers why a game is silent could not ask the game. Both audio
+// reads were editor only while audio_list_buses's documentation described a bus
+// a script muted at runtime and audio_configure_bus carried a sentence for a
+// game session nothing could reach. They are editor or game now, at the tool,
+// at the method and at the hook, and audio_add_bus stays editor only.
+void a_game_answers_for_its_own_mix() {
+    using didi::runtime::LiveSessionKindPolicy;
+    ASSERT_TRUE(didi::runtime::livePolicyForTool("audio_list_buses") == LiveSessionKindPolicy::editor_or_game);
+    ASSERT_TRUE(didi::runtime::livePolicyForTool("audio_configure_bus") == LiveSessionKindPolicy::editor_or_game);
+    ASSERT_TRUE(didi::runtime::livePolicyForTool("audio_add_bus") == LiveSessionKindPolicy::editor_only);
+
+    auto& hook = didi::godot::EditorHook::instance();
+    hook.cancelPendingCommands("test reset");
+    didi::godot::EditorHookTestAccess::setSessionKind(hook, didi::runtime::SessionKind::game);
+    for (const auto* method : {"audio.listBuses", "audio.configureBus"}) {
+        auto answered = didi::godot::EditorHookTestAccess::executeOnMainThread(
+            hook, method, json{{"bus", "Master"}, {"mute", false}});
+        // No engine here, so the call fails further in; what matters is that
+        // the session kind is not the reason.
+        const bool kind_refused = answered.contains("error") && answered["error"].contains("data") &&
+                                  answered["error"]["data"].value("code", std::string()) == "session_kind_rejected";
+        ASSERT_TRUE(!kind_refused);
+    }
+    auto refused = didi::godot::EditorHookTestAccess::executeOnMainThread(
+        hook, "audio.addBus", json{{"name", "Music"}});
+    didi::godot::EditorHookTestAccess::setSessionKind(hook, std::nullopt);
+    ASSERT_EQ(refused["error"]["data"]["code"], json("session_kind_rejected"));
+}
+
 struct Register {
     Register() {
+        registerTest("AudioAddBus.AGameAnswersForItsOwnMix", a_game_answers_for_its_own_mix);
+        registerTest("AudioAddBus.AFailedLiveReadSaysSo", a_failed_live_read_says_so);
         registerTest("AudioAddBus.LayoutWriteObstacles", layout_write_obstacles);
         registerTest("AudioAddBus.LayoutReadFromANamedFile", layout_read_from_a_named_file);
         registerTest("AudioAddBus.RequestValidation", request_validation);

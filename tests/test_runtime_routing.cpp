@@ -2141,7 +2141,12 @@ void test_phase7_method_policy_rejects_wrong_kind_before_dispatch() {
         const char* method;
         didi::runtime::LiveSessionKindPolicy policy;
     };
-    const std::array<MethodPolicyCase, 16> cases = {{
+    const std::array<MethodPolicyCase, 19> cases = {{
+        // A game's own mix is where a bus a script muted is muted; adding a bus
+        // to a running game writes it nowhere (vibe session nineteen).
+        {"audio.listBuses", didi::runtime::LiveSessionKindPolicy::editor_or_game},
+        {"audio.configureBus", didi::runtime::LiveSessionKindPolicy::editor_or_game},
+        {"audio.addBus", didi::runtime::LiveSessionKindPolicy::editor_only},
         {"signal.listConnections", didi::runtime::LiveSessionKindPolicy::editor_only},
         {"signal.connect", didi::runtime::LiveSessionKindPolicy::editor_only},
         {"signal.disconnect", didi::runtime::LiveSessionKindPolicy::editor_only},

@@ -42,7 +42,14 @@ inline LiveSessionKindPolicy livePolicyForTool(std::string_view name) {
         // identifiers stay editor-only.
         name == "viewport_capture_frame" || name == "capture_viewport" ||
         name == "viewport_capture_passes" ||
-        name == "viewport_diff_capture") {
+        name == "viewport_diff_capture" ||
+        // A muted bus is the question audio_list_buses exists to answer, and a
+        // bus a script muted at runtime is muted in the game, not the editor.
+        // Both were refused for a game while their own documentation, and
+        // audio_configure_bus's game sentence, promised one (vibe session
+        // nineteen). audio_add_bus stays editor only: a bus added to a running
+        // game is in no file and gone when the game stops.
+        name == "audio_list_buses" || name == "audio_configure_bus") {
         return LiveSessionKindPolicy::editor_or_game;
     }
     return LiveSessionKindPolicy::editor_only;
@@ -69,7 +76,8 @@ inline LiveSessionKindPolicy livePolicyForMethod(std::string_view method) {
         // that engine is whichever one is attached (#766).
         method == "engine.classExists" ||
         method == "vision.captureViewport" || method == "vision.capturePasses" ||
-        method == "vision.diffViewport") {
+        method == "vision.diffViewport" ||
+        method == "audio.listBuses" || method == "audio.configureBus") {
         return LiveSessionKindPolicy::editor_or_game;
     }
     return LiveSessionKindPolicy::editor_only;

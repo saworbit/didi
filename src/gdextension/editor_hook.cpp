@@ -1613,6 +1613,9 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
                                    // are reads, and the running game is where a
                                    // caller most needs them (#592).
                                    method == "ui.listControls" || method == "ui.hitTest" ||
+                                   // The game's own mix, and the only place a
+                                   // bus a script muted at runtime is muted.
+                                   method == "audio.listBuses" || method == "audio.configureBus" ||
                                    // A ClassDB read. Every session has one, and
                                    // the answer is about the process rather
                                    // than about an open scene (#766).
