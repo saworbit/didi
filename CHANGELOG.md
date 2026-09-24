@@ -155,6 +155,16 @@ The three Phase 7 blockers are unchanged; the newest name is `audio_add_bus`, re
 
 ### Fixed
 
+- **`scene_instantiate_node` did not say when an initial property failed to
+  land.** Its `properties` are documented as the same contract as
+  `scene_set_property`'s `value`, which reads its write back and answers
+  `applied: false` with the engine's constraint. This path never read back, so
+  an `AudioStreamPlayer` created with a `bus` that does not exist reported
+  success, and the saved scene had no `bus` line at all. Each initial
+  property is now read back once the node is in the tree, and one that did
+  not land is listed under `properties_not_applied`. Found by vibe session
+  nineteen.
+
 - **`audio_list_buses` could not ask a running game about its own mix.**
   It is the tool that answers why a game is silent, and a bus a script
   muted while the game runs is muted in the game, but both audio reads were

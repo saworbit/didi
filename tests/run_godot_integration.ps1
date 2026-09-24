@@ -3528,7 +3528,15 @@ try {
         (Tool-Request 3024 "project_set_setting" @{ setting = "audio/buses/default_bus_layout"; value = "res://moved_bus_layout.tres" }),
         (Tool-Request 3025 "audio_configure_bus" @{ bus = "Music"; mute = $false }),
         (Tool-Request 3026 "project_set_setting" @{ setting = "audio/buses/default_bus_layout"; value = "res://default_bus_layout.tres" }),
-        (Tool-Request 3027 "audio_configure_bus" @{ bus = "Music"; mute = $false })
+        (Tool-Request 3027 "audio_configure_bus" @{ bus = "Music"; mute = $false }),
+        # A player created with its bus in one call, the way an agent writes it.
+        # The initial properties were never read back, so a bus that does not
+        # exist reported success and the scene saved no bus (vibe session
+        # nineteen). The control beside it names a bus that exists.
+        (Tool-Request 3028 "scene_instantiate_node" @{ node_type = "AudioStreamPlayer"; parent_path = "/root/SmokeRoot"; name = "InitialNope"; properties = @{ bus = "Nope"; volume_db = -3.0 } }),
+        (Tool-Request 3029 "scene_instantiate_node" @{ node_type = "AudioStreamPlayer"; parent_path = "/root/SmokeRoot"; name = "InitialMusic"; properties = @{ bus = "Music" } }),
+        (Tool-Request 3030 "scene_remove_node" @{ target_node = "/root/SmokeRoot/InitialNope" }),
+        (Tool-Request 3031 "scene_remove_node" @{ target_node = "/root/SmokeRoot/InitialMusic" })
     )
     # --yolo for scene_call_method, the same reason as the preset batch above.
     $rawBusResponses = Invoke-Didi -Requests $busRequests -Arguments @("--project", $fixtureRoot, "--yolo")
@@ -3632,6 +3640,12 @@ try {
     Assert-True ($movedConfigure.limitation -match "restart") "audio_configure_bus did not say the editor writes the layout it opened until it restarts."
     $restored = Tool-Payload $busById[3026]
     Assert-True ($restored.status -eq "success" -and $null -eq $restored.requires_editor_restart) "Putting the bus layout setting back still asked for a restart: $($busById[3026].result.content[0].text)"
+    $initialNope = Tool-Payload $busById[3028]
+    $nopeRows = @($initialNope.properties_not_applied)
+    Assert-True ($initialNope.status -eq "success" -and $nopeRows.Count -eq 1 -and $nopeRows[0].property_name -eq "bus" -and $nopeRows[0].value -eq "Master" -and $nopeRows[0].requested_value -eq "Nope") "scene_instantiate_node did not report the initial bus the engine replaced, or reported a property that landed: $($busById[3028].result.content[0].text)"
+    $initialMusic = Tool-Payload $busById[3029]
+    Assert-True ($initialMusic.status -eq "success" -and $null -eq $initialMusic.properties_not_applied) "scene_instantiate_node reported an initial bus that landed as not applied: $($busById[3029].result.content[0].text)"
+    Assert-True (-not $busById[3030].result.isError -and -not $busById[3031].result.isError) "The initial-property probe players could not be removed."
     $restoredConfigure = Tool-Payload $busById[3027]
     Assert-True ($restoredConfigure.layout_path -eq "res://default_bus_layout.tres" -and $null -eq $restoredConfigure.project_layout_path) "audio_configure_bus still reported a moved layout after the setting was put back."
 
