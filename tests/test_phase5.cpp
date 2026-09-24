@@ -309,6 +309,21 @@ TEST(Phase5, ExportPresetParserKeepsTheThreeEmptyStatesApart) {
     ASSERT_EQ(complete.presets.size(), 1u);
 }
 
+TEST(Phase5, ExportPresetNameIsReadWithItsEscapes) {
+    // ConfigFile.load reads `\t` as a tab and `\/` as a slash on 4.5.1, 4.6.2
+    // and 4.7.2 (tools/vibe/probes/config_string_escapes.py). This reader undid
+    // `\"` and `\\` and no other escape, so a tab in a preset name came back
+    // as two characters (#934).
+    const auto file = readExportPresets(R"x([preset.0]
+name="Tab\there \"q\" back\\slash\/"
+platform="Linux"
+runnable=true
+)x");
+    ASSERT_TRUE(!file.malformed);
+    ASSERT_EQ(file.presets.size(), 1u);
+    ASSERT_EQ(file.presets[0]["name"], "Tab\there \"q\" back\\slash/");
+}
+
 TEST(Phase5, ExportPresetNameDropsTheCommentOnItsLine) {
     // Godot's own project.godot banner documents `param=value ; comment`, and
     // ConfigFile.load gives this preset the name Linux. Carrying the note into

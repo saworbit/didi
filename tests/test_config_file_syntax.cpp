@@ -433,6 +433,129 @@ struct Register {
             throw std::runtime_error("a trailing note was called a load failure");
         }
     });
+
+    registerTest("config_file_syntax.string_value_reads_escapes_the_way_the_engine_does", [] {
+        // Every row was read through ConfigFile.load and through a .tres loaded
+        // into AudioServer on 4.5.1, 4.6.2 and 4.7.2, and the two agreed
+        // (tools/vibe/probes/config_string_escapes.py). Readers took the text
+        // between the quotes, so each of these escapes came back as two
+        // characters and a bus name no tool accepts (#934).
+        struct Case { const char* value; const char* expected; };
+        const Case cases[] = {
+            {R"x(&"a\tb")x", "a\tb"},
+            {R"x(&"a\nb")x", "a\nb"},
+            {R"x(&"a\rb")x", "a\rb"},
+            {R"x(&"a\bb")x", "a\bb"},
+            {R"x(&"a\fb")x", "a\fb"},
+            {R"x(&"a\"b")x", "a\"b"},
+            {R"x(&"a\\b")x", "a\\b"},
+            {R"x(&"a\'b")x", "a'b"},
+            {R"x(&"a\/b")x", "a/b"},
+            // Any other character after a backslash is itself.
+            {R"x(&"a\qb")x", "aqb"},
+            {R"x(&"a\0b")x", "a0b"},
+            {R"x(&"a\ab")x", "aab"},
+            {R"x(&"a\vb")x", "avb"},
+            {R"x(&"a\x41b")x", "ax41b"},
+            // An escape is a byte of what is decoded as UTF-8 when the string
+            // closes, so two escapes make one character and one alone is not.
+            {R"x(&"\u0041")x", "A"},
+            {R"x(&"\u00c3\u00a9")x", "\xC3\xA9"},
+            {R"x(&"\u00f0\u009f\u0098\u0080")x", "\xF0\x9F\x98\x80"},
+            {R"x(&"\u007f")x", "\x7F"},
+            {R"x(&"\u00e9")x", "\xEF\xBF\xBD"},
+            {R"x(&"\u00E9")x", "\xEF\xBF\xBD"},
+            {R"x(&"\u00ff")x", "\xEF\xBF\xBD"},
+            // Above a byte is a space, and so is zero.
+            {R"x(&"\u0100")x", " "},
+            {R"x(&"\u97f3")x", " "},
+            {R"x(&"\U01F600")x", " "},
+            {R"x(&"\U110000")x", " "},
+            {R"x(&"\uD83D\uDE00")x", " "},
+            {R"x(&"a\u0000b")x", "a b"},
+            // One replacement character for each byte that does not begin a
+            // well-formed sequence, carrying on from the byte after it.
+            {R"x(&"\u00e9\u00e9")x", "\xEF\xBF\xBD\xEF\xBF\xBD"},
+            {R"x(&"\u00e9x")x", "\xEF\xBF\xBDx"},
+            {R"x(&"\u00c3")x", "\xEF\xBF\xBD"},
+            {R"x(&"\u00c3x")x", "\xEF\xBF\xBDx"},
+            {R"x(&"a\u0080b")x", "a\xEF\xBF\xBD" "b"},
+            {R"x(&"\u00c0\u0080")x", "\xEF\xBF\xBD\xEF\xBF\xBD"},
+            {R"x(&"\u00ed\u00a0\u0080")x", "\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD"},
+            {R"x(&"\u00f0\u009f\u0098")x", "\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD"},
+            // A byte order mark is dropped where it leads the string only.
+            {R"x(&"\u00ef\u00bb\u00bfX")x", "X"},
+            {R"x(&"X\u00ef\u00bb\u00bfY")x", "X\xEF\xBB\xBFY"},
+            // Raw text is read as written, a tab, a line break and UTF-8 too.
+            {"&\"a\tb\"", "a\tb"},
+            {"&\"a\nb\"", "a\nb"},
+            {"&\"\xC3\x9Cn\xC3\xAF\"", "\xC3\x9Cn\xC3\xAF"},
+            // A String, a StringName and a NodePath are read alike, and the
+            // text around the value is not part of it.
+            {R"x("a\tb")x", "a\tb"},
+            {R"x(@"a\tb")x", "a\tb"},
+            {R"x(  &"a\\"  )x", "a\\"},
+        };
+        for (const auto& item : cases) {
+            const auto read = didi::config_file::stringValue(item.value);
+            if (!read) throw std::runtime_error(std::string("not read as a string: ") + item.value);
+            if (!read->problem.empty()) {
+                throw std::runtime_error(std::string("refused a string the engine reads: ") +
+                                         item.value + " -- " + read->problem);
+            }
+            if (read->text != item.expected) {
+                throw std::runtime_error(std::string("read ") + item.value + " as " + read->text);
+            }
+            if (!didi::config_file::valueProblem(item.value).empty()) {
+                throw std::runtime_error(std::string("valueProblem refused a string that loads: ") +
+                                         item.value);
+            }
+        }
+
+        // Not one string, so not this function's to answer.
+        const char* others[] = {"1", "Music", "&Music", R"x("a" "b")x", R"x("a)x", R"x("a"x)x"};
+        for (const auto* value : others) {
+            if (didi::config_file::stringValue(value)) {
+                throw std::runtime_error(std::string("read a value that is not one string: ") + value);
+            }
+        }
+    });
+
+    registerTest("config_file_syntax.string_escape_the_parser_cannot_read_fails_the_file", [] {
+        // Each of these is err 43 for ConfigFile.load and a .tres that does not
+        // load, on 4.5.1, 4.6.2 and 4.7.2. The tokenizer reads a string
+        // wherever it is, so an array and a constructor's arguments fail the
+        // file the same way, and an array with nothing wrong in it loads.
+        const char* refused[] = {
+            R"x(&"\uZZZZ")x", R"x(&"a\u00e")x", R"x(&"\U1F600")x",
+            R"x(&"\uD83D")x", R"x(&"\uDE00")x", R"x(&"\uD83Dx")x",
+        };
+        for (const auto* value : refused) {
+            const auto read = didi::config_file::stringValue(value);
+            if (!read || read->problem.empty()) {
+                throw std::runtime_error(std::string("read a string the engine refuses: ") + value);
+            }
+            if (didi::config_file::valueProblem(value).empty()) {
+                throw std::runtime_error(std::string("valueProblem accepted: ") + value);
+            }
+        }
+        if (didi::config_file::valueProblem(R"x(["ok", "\uZZZZ"])x").empty()) {
+            throw std::runtime_error("a refused escape inside an array was accepted");
+        }
+        if (didi::config_file::valueProblem(R"x(PackedStringArray("\uD83D"))x").empty()) {
+            throw std::runtime_error("a refused escape inside a constructor was accepted");
+        }
+        if (!didi::config_file::valueProblem(R"x(["ok", "fine"])x").empty()) {
+            throw std::runtime_error("an array that loads was refused");
+        }
+
+        // The whole file, through the question every reader asks.
+        const auto scanned = didi::config_file::scan("[s]\n\nk=&\"\\uZZZZ\"\n");
+        const auto failure = didi::config_file::loadFailure(scanned);
+        if (!failure || failure->key != "k" || failure->line != 3 || failure->value_reason.empty()) {
+            throw std::runtime_error("loadFailure did not name the string the parser refuses");
+        }
+    });
     }
 } registrar;
 

@@ -156,9 +156,11 @@ Result<std::vector<ProjectAutoload>> readProjectAutoloads(
         if (entry.section != "autoload" || entry.key.empty()) continue;
         ProjectAutoload autoload;
         autoload.name = entry.key;
-        auto value = strings::trim(entry.value_text);
-        if (value.size() >= 2 && value.front() == '"' && value.back() == '"') {
-            value = value.substr(1, value.size() - 2);
+        // The string as the parser reads it, escapes undone (#934). The file
+        // has loaded by this point, so the parser accepted every string in it.
+        std::string value = strings::trim(entry.value_text);
+        if (auto decoded = config_file::stringValue(value); decoded && decoded->problem.empty()) {
+            value = std::move(decoded->text);
         }
         // A leading `*` is how the engine spells "enters the tree as a
         // singleton", and it is part of the stored value rather than part of

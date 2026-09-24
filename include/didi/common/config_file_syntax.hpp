@@ -210,4 +210,42 @@ std::optional<LoadFailure> loadFailure(const Scan& scanned);
 // the whole file is ERR_PARSE_ERROR.
 bool booleanize(std::string_view value_text);
 
+// What a quoted value holds, the way Godot's parser reads it.
+//
+// Readers stripped the quotes and kept everything between them, so every escape
+// the engine wrote came back as two characters: a bus Godot saved as
+// `&"Say \"hi\""` was published as `Say \"hi\"`, a name no tool accepts (#934).
+// Measured on 4.5.1, 4.6.2 and 4.7.2 by `tools/vibe/probes/config_string_escapes.py`,
+// reading every spelling through `ConfigFile.load` and through a `.tres` loaded
+// into `AudioServer`, which agreed row for row:
+//
+//   * `\b`, `\t`, `\n`, `\f` and `\r` are control characters. Any other
+//     character after a backslash is itself: `\"`, `\\`, `\'` and `\/`, and
+//     also `\q`, `\0`, `\a` and `\v`, so `\x41` is the three characters `x41`.
+//   * `\u` takes exactly four hex digits and `\U` exactly six, in either case.
+//     A digit that is not hex, a string that closes before the last one, and a
+//     UTF-16 surrogate that is not half of a pair each make the whole file
+//     ERR_PARSE_ERROR. `problem` says which.
+//   * A file is read a byte at a time and each string decoded as UTF-8 when it
+//     closes, so an escape is a byte and not a code point. `\u00c3\u00a9` is
+//     `é` in UTF-8, `\u00e9` on its own is U+FFFD, and an escape above
+//     `\u00ff` is a space, which is what `\u97f3` and a surrogate pair come to.
+//     So is `\u0000`. UTF-8 written raw in the file reads as written.
+//   * That decode replaces each byte that does not begin a well-formed
+//     sequence with U+FFFD and carries on from the next byte, so an overlong
+//     pair is two and a cut four-byte sequence is three. A byte order mark at
+//     the start of the string is dropped, and kept anywhere else.
+//
+// Takes the whole value: `"..."`, a StringName `&"..."` or a NodePath `@"..."`,
+// with nothing after the closing quote. Anything else is not one string and
+// answers nullopt.
+struct StringValue {
+    std::string text;
+    // Why the parser refuses this string, or empty. `text` means nothing when
+    // this is set, because the file it is in does not load.
+    std::string problem;
+};
+
+std::optional<StringValue> stringValue(std::string_view value_text);
+
 } // namespace didi::config_file
