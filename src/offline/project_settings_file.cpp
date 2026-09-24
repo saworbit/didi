@@ -3,6 +3,7 @@
 #include "didi/common/atomic_write.hpp"
 #include "didi/common/config_file_syntax.hpp"
 #include "didi/common/project_path.hpp"
+#include "didi/offline/project_file_lock.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -233,6 +234,11 @@ Result<ProjectSettingWrite> writeProjectSetting(const std::filesystem::path& pro
         if (literal.isErr()) return literal.error();
         report.literal = literal.value();
     }
+
+    // Held from the read to the write, or a second server's write lands between
+    // them and this one replaces it (#929).
+    auto lock = lockProjectFile(project_root, "project.godot");
+    if (lock.isErr()) return lock.error();
 
     const auto path = project_root / "project.godot";
     auto contents = readWholeFile(path);

@@ -1,7 +1,10 @@
 #include "didi/runtime/session_lock.hpp"
 
+#include <functional>
 #include <limits>
+#include <random>
 #include <string>
+#include <thread>
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -88,6 +91,30 @@ Result<std::shared_ptr<RuntimeSessionLock>> RuntimeSessionLock::acquire(
     }
     return std::shared_ptr<RuntimeSessionLock>(new RuntimeSessionLock(path, fd));
 #endif
+}
+
+namespace {
+
+// Waiters that all sleep the same amount wake together and collide again, so
+// the spread is what stops eight threads queueing on one 20 ms boundary for the
+// whole wait.
+int retryDelayMs() {
+    static thread_local std::minstd_rand engine(static_cast<unsigned>(
+        std::hash<std::thread::id>{}(std::this_thread::get_id())));
+    std::uniform_int_distribution<int> spread(4, 24);
+    return spread(engine);
+}
+
+} // namespace
+
+Result<std::shared_ptr<RuntimeSessionLock>> RuntimeSessionLock::acquireWithin(
+    const std::filesystem::path& path, const json& owner, std::chrono::milliseconds wait) {
+    const auto deadline = std::chrono::steady_clock::now() + wait;
+    for (;;) {
+        auto acquired = acquire(path, owner);
+        if (acquired.isOk() || std::chrono::steady_clock::now() >= deadline) return acquired;
+        std::this_thread::sleep_for(std::chrono::milliseconds(retryDelayMs()));
+    }
 }
 
 // The two platforms allow opposite orders, and each order is the safe one

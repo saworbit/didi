@@ -11,9 +11,7 @@
 #include <fstream>
 #include <functional>
 #include <optional>
-#include <random>
 #include <sstream>
-#include <thread>
 #include <unordered_set>
 #include <vector>
 
@@ -36,18 +34,6 @@ constexpr int kBoardFormatVersion = 1;
 // when the holder exits however it exits, and a longer wait cannot turn a dead
 // holder into a hang.
 constexpr auto kLockWait = std::chrono::milliseconds(5000);
-constexpr int kLockRetryMinMs = 4;
-constexpr int kLockRetryMaxMs = 24;
-
-// Waiters that all sleep the same amount wake together and collide again, so
-// the spread is what stops eight threads queueing on one 20 ms boundary for the
-// whole wait.
-int lockRetryDelayMs() {
-    static thread_local std::minstd_rand engine(static_cast<unsigned>(
-        std::hash<std::thread::id>{}(std::this_thread::get_id())));
-    std::uniform_int_distribution<int> spread(kLockRetryMinMs, kLockRetryMaxMs);
-    return spread(engine);
-}
 
 int64_t systemClockMs() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -371,18 +357,8 @@ Result<json> withBoardLock(const std::string& board, Operation operation) {
     const auto file = directory.value() / (board + ".json");
     const auto lock_file = directory.value() / (board + ".lock");
 
-    std::shared_ptr<runtime::RuntimeSessionLock> lock;
-    const auto deadline = std::chrono::steady_clock::now() + kLockWait;
-    for (;;) {
-        auto acquired = runtime::RuntimeSessionLock::acquire(lock_file, json::object());
-        if (acquired.isOk()) {
-            lock = acquired.value();
-            break;
-        }
-        if (std::chrono::steady_clock::now() >= deadline) break;
-        std::this_thread::sleep_for(std::chrono::milliseconds(lockRetryDelayMs()));
-    }
-    if (!lock) {
+    auto lock = runtime::RuntimeSessionLock::acquireWithin(lock_file, json::object(), kLockWait);
+    if (lock.isErr()) {
         // Not "another process": the holder is as often another thread in this
         // one, and a message naming the wrong thing sends the next reader
         // looking in the wrong place.
@@ -1580,7 +1556,10 @@ Result<json> blackboardReadResource(const std::string& board, const std::string&
     if (kind != "state" && kind != "tasks") {
         return Error::invalidArgument("blackboard resource kind must be state or tasks");
     }
-    // Asked before the read, because the read is what would create the file.
+    // Asked under the lock, so the answer is about the file this call reads.
+    // Asked before it, a writer could create the board while this waited, and
+    // the new state came back beside exists: false. Reading never creates the
+    // file, so a board nobody wrote still answers false.
     //
     // A board nobody has ever written answered exactly like a board that exists
     // and is empty, so an agent checking whether a coordination board is there
@@ -1590,8 +1569,9 @@ Result<json> blackboardReadResource(const std::string& board, const std::string&
     // answer (#514). Not a 404: boards are created on demand by the write tools,
     // so reading one that does not exist yet is a legitimate thing to do and the
     // answer is "it is not there", not "you may not ask".
-    const bool board_exists = blackboardFileStamp(board).has_value();
     return withBoardLock(board, [&](const std::filesystem::path& file) -> Result<json> {
+        std::error_code missing;
+        const bool board_exists = std::filesystem::exists(file, missing) && !missing;
         auto loaded = loadBoard(file);
         if (loaded.isErr()) return loaded.error();
         Board board_data = loaded.value();

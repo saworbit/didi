@@ -2,6 +2,7 @@
 
 #include "didi/common/types.hpp"
 
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
@@ -16,6 +17,12 @@ public:
 
     static Result<std::shared_ptr<RuntimeSessionLock>> acquire(
         const std::filesystem::path& path, const json& owner);
+
+    // acquire, tried again until the wait runs out. Returns the last attempt's
+    // error when it does, so a holder that never let go reads as 423 and a lock
+    // file that cannot be opened reads as what it is.
+    static Result<std::shared_ptr<RuntimeSessionLock>> acquireWithin(
+        const std::filesystem::path& path, const json& owner, std::chrono::milliseconds wait);
 
     const std::filesystem::path& path() const { return m_path; }
 

@@ -1,5 +1,7 @@
 #include "didi/offline/project_settings_file.hpp"
+#include "didi/offline/project_file_lock.hpp"
 
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -8,6 +10,8 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
+#include <vector>
 
 #define ASSERT_TRUE(cond) if (!(cond)) throw std::runtime_error("Assertion failed: " #cond);
 #define ASSERT_EQ(a, b) ASSERT_TRUE((a) == (b))
@@ -461,6 +465,56 @@ void refuses_to_rewrite_a_key_the_engine_built_from_two_lines() {
     ASSERT_EQ(project.read(), before);
 }
 
+// Two servers on one project, as threads here because the lock is taken per
+// open file, not per process. Without it the cycles overlapped: a write landed
+// between another's read and its replace and was lost, or on Windows the replace
+// met the other's open file and failed (#929). Every write succeeds and every
+// key is in the file.
+void concurrent_writers_all_land() {
+    ProjectFixture project("concurrent", kBare);
+    constexpr int kWriters = 4;
+    constexpr int kEach = 10;
+    std::atomic<int> failed{0};
+    std::vector<std::thread> writers;
+    for (int writer = 0; writer < kWriters; ++writer) {
+        writers.emplace_back([&project, &failed, writer] {
+            for (int index = 0; index < kEach; ++index) {
+                const auto name = "custom/w" + std::to_string(writer) + "_" + std::to_string(index);
+                if (writeProjectSetting(project.root(), name, index, false).isErr()) ++failed;
+            }
+        });
+    }
+    for (auto& thread : writers) thread.join();
+
+    ASSERT_EQ(failed.load(), 0);
+    const auto contents = project.read();
+    for (int writer = 0; writer < kWriters; ++writer) {
+        for (int index = 0; index < kEach; ++index) {
+            const auto line = "w" + std::to_string(writer) + "_" + std::to_string(index) + "=" +
+                              std::to_string(index) + "\n";
+            ASSERT_TRUE(contents.find(line) != std::string::npos);
+        }
+    }
+}
+
+// A lock held for the whole wait is refused with a code a client can branch on
+// and retryable set, and the file is left alone.
+void a_held_lock_is_refused_as_retryable() {
+    ProjectFixture project("held-lock", kBare);
+    const auto before = project.read();
+    auto held = didi::offline::lockProjectFile(project.root(), "project.godot");
+    ASSERT_TRUE(held.isOk());
+
+    const auto write = writeProjectSetting(project.root(), "application/config/name", "Blocked",
+                                           false);
+    ASSERT_TRUE(write.isErr());
+    ASSERT_EQ(write.error().code, 409);
+    ASSERT_EQ(write.error().data["code"], didi::json("project_file_busy"));
+    ASSERT_EQ(write.error().data["retryable"], didi::json(true));
+    ASSERT_EQ(write.error().data["file"], didi::json("res://project.godot"));
+    ASSERT_EQ(project.read(), before);
+}
+
 struct Register {
     Register() {
         registerTest("project_settings_file.bootstrap_section",
@@ -491,6 +545,9 @@ struct Register {
                      refuses_to_rewrite_a_line_that_holds_another_setting);
         registerTest("project_settings_file.joined_key",
                      refuses_to_rewrite_a_key_the_engine_built_from_two_lines);
+        registerTest("project_settings_file.concurrent_writers", concurrent_writers_all_land);
+        registerTest("project_settings_file.held_lock_is_retryable",
+                     a_held_lock_is_refused_as_retryable);
     }
 } registrar;
 

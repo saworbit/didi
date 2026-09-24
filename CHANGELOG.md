@@ -155,6 +155,23 @@ The three Phase 7 blockers are unchanged; the newest name is `audio_add_bus`, re
 
 ### Fixed
 
+- **Two servers writing one project file could lose an update (#929).**
+  `project_set_setting` offline and `project_add_export_preset` read
+  `project.godot` or `export_presets.cfg`, changed it and wrote it back with
+  no lock, so two agents on one project could interleave: a setting or a
+  preset was reported written and was not in the file, and on Windows most
+  of the overlapping calls failed instead, as a bare string or as a `404`
+  for a file that was there. Each now holds a lock under `.didi/locks` from
+  its read to its write, the way the blackboard holds a board, and a call
+  held off for five seconds is refused `409` with `project_file_busy` and
+  `retryable: true`. A write that fails on the replace now keeps its status
+  code rather than arriving as a bare string.
+
+- **A blackboard resource could say a board did not exist while showing its
+  state (#514).** `exists` was asked before the board's lock was taken, so a
+  read that waited on a writer creating the board came back with the new
+  state and `exists: false`. It is asked under the lock now.
+
 - **Three refusals said something other than what they meant.** A
   `dry_run` of the wrong type, such as `"true"`, was read with a type that
   threw before any tool code ran, so every mutation on the surface answered

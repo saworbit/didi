@@ -1,6 +1,7 @@
 #include "didi/mcp/mcp_server.hpp"
 #include "didi/mcp/resource_registry.hpp"
 #include "didi/offline/blackboard.hpp"
+#include "didi/runtime/session_lock.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -156,6 +157,30 @@ void test_a_board_says_whether_it_exists() {
     auto again = ResourceRegistry::instance().readResource("blackboard://still-never/state");
     ASSERT_TRUE(again.isOk());
     ASSERT_EQ(json::parse(again.value())["exists"].get<bool>(), false);
+}
+
+// exists is asked under the board's lock. It was asked before, so a reader
+// that waited on the lock while a writer created the board came back with the
+// writer's state and exists: false, the one answer the flag exists to prevent.
+void test_exists_is_sampled_under_the_lock() {
+    ProjectFixture fixture("exists-under-lock");
+    const auto board_file = fixture.boardFile("raced");
+    std::filesystem::create_directories(board_file.parent_path());
+    auto held = runtime::RuntimeSessionLock::acquire(board_file.parent_path() / "raced.lock",
+                                                     json::object());
+    ASSERT_TRUE(held.isOk());
+
+    Result<json> read = Error::internal("the reader never ran");
+    std::thread reader([&read] { read = offline::blackboardReadResource("raced", "state"); });
+    // Long enough for the reader to reach the lock and wait on it.
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    std::ofstream(board_file, std::ios::binary) << R"({"version":1,"state":{"seed":1}})";
+    held.value().reset();
+    reader.join();
+
+    ASSERT_TRUE(read.isOk());
+    ASSERT_EQ(read.value()["state"]["seed"].get<int>(), 1);
+    ASSERT_EQ(read.value()["exists"].get<bool>(), true);
 }
 
 // Break caught: three differently malformed URIs came back with the same
@@ -374,6 +399,8 @@ struct Register {
         registerTest("BlackboardResources.EveryBoardIsJson", test_every_board_is_served_as_json);
         registerTest("BlackboardResources.BoardSaysWhetherItExists",
                      test_a_board_says_whether_it_exists);
+        registerTest("BlackboardResources.ExistsIsSampledUnderLock",
+                     test_exists_is_sampled_under_the_lock);
         registerTest("BlackboardResources.UriErrorNamesTheWrongPart",
                      test_a_bad_board_uri_names_the_part_that_is_wrong);
         registerTest("BlackboardResources.ParameterisedShapeIsDiscoverable",

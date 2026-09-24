@@ -7,16 +7,22 @@
 #include "didi/tools/resolved_tool_binding.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 #define ASSERT_TRUE(cond) if (!(cond)) throw std::runtime_error("Assertion failed: " #cond);
 #define ASSERT_EQ(a, b) ASSERT_TRUE((a) == (b))
+
+namespace didi::mcp {
+CallToolResult handleProjectAddExportPreset(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+}
 
 void registerTest(const std::string& name, std::function<void()> fn);
 
@@ -556,6 +562,34 @@ void a_byte_order_mark_is_named() {
     ASSERT_EQ(readFile("export_presets.cfg"), marked);
 }
 
+// Two servers adding presets to one project at once, as threads, since the lock
+// is per open file. Without it one cycle's write replaced another's, so a preset
+// reported created was missing from the file, and on Windows most calls failed
+// on the replace or on the read-back (#929).
+void concurrent_adds_all_land() {
+    ScopedProject project("concurrent");
+    constexpr int kWriters = 4;
+    constexpr int kEach = 6;
+    std::atomic<int> failed{0};
+    std::vector<std::thread> writers;
+    for (int writer = 0; writer < kWriters; ++writer) {
+        writers.emplace_back([&failed, writer] {
+            for (int index = 0; index < kEach; ++index) {
+                const auto name = "P" + std::to_string(writer) + "_" + std::to_string(index);
+                const auto result = didi::mcp::handleProjectAddExportPreset(
+                    {{"name", name}, {"platform", "Linux"}}, nullptr);
+                if (result.isError) ++failed;
+            }
+        });
+    }
+    for (auto& thread : writers) thread.join();
+
+    ASSERT_EQ(failed.load(), 0);
+    const auto file = didi::offline::readExportPresets(readFile("export_presets.cfg"));
+    ASSERT_TRUE(!file.malformed);
+    ASSERT_EQ(file.presets.size(), size_t{kWriters * kEach});
+}
+
 struct Register {
     Register() {
         registerTest("ExportPresetAdd.RequestValidation", request_validation);
@@ -569,6 +603,7 @@ struct Register {
         registerTest("ExportPresetAdd.CommandLineNamesAndEngineAnswers",
                      command_line_names_and_engine_answers);
         registerTest("ExportPresetAdd.AByteOrderMarkIsNamed", a_byte_order_mark_is_named);
+        registerTest("ExportPresetAdd.ConcurrentAddsAllLand", concurrent_adds_all_land);
     }
 } registrar;
 
