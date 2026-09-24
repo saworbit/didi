@@ -178,6 +178,7 @@ set(CORE_SOURCES
     src/runtime/ghost_preview.cpp
     src/runtime/spatial_queries.cpp
     src/runtime/animation_requests.cpp
+    src/runtime/audio_requests.cpp
     src/offline/class_reference.cpp
     src/mcp/mutation_safety.cpp
     src/tools/phase7_live_forward.cpp
@@ -423,6 +424,7 @@ set(TEST_SOURCES
     tests/test_phase7b_spatial.cpp
     tests/test_phase7b_anim.cpp
     tests/test_anim_add_library.cpp
+    tests/test_audio_add_bus.cpp
     tests/test_project_add_export_preset.cpp
     tests/test_engine_diagnostics.cpp
 )

@@ -3473,6 +3473,133 @@ try {
     Assert-True ($presetsSavedByEditor -notmatch "didi/harness_forced_save") "The probe's own preset reached the file."
     Assert-True (-not $presetLiveById[2817].result.isError) "The export preset probe node could not be removed."
 
+    # audio_add_bus, end to end against the live editor (#771). The fixture has
+    # only Master, which is the state the failing workflow starts from: a player
+    # cannot be set to Music until a bus is named Music.
+    $busRequests = @(
+        (@{ jsonrpc = "2.0"; id = 3000; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
+        (Tool-Request 3001 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
+        (Tool-Request 3002 "audio_add_bus" @{ name = "Music"; dry_run = $true }),
+        (Tool-Request 3003 "audio_add_bus" @{ name = "Music" }),
+        (Tool-Request 3004 "audio_add_bus" @{ name = "SFX"; send = "Music"; volume_db = -6.0 }),
+        (Tool-Request 3005 "audio_list_buses" @{}),
+        # Every refusal the engine would otherwise answer by renaming or by
+        # routing to Master without a word.
+        (Tool-Request 3006 "audio_add_bus" @{ name = "Music" }),
+        (Tool-Request 3007 "audio_add_bus" @{ name = "Master" }),
+        (Tool-Request 3008 "audio_add_bus" @{ name = "music" }),
+        (Tool-Request 3009 "audio_add_bus" @{ name = "Voice"; send = "Nope" }),
+        (Tool-Request 3010 "audio_add_bus" @{ name = "Voice"; send = "Voice" }),
+        (Tool-Request 3011 "audio_add_bus" @{ name = "Music"; dry_run = $true }),
+        (Tool-Request 3012 "audio_list_buses" @{}),
+        # The failing workflow's third row, with the control that must still fail.
+        (Tool-Request 3013 "scene_open" @{ scene_path = "res://main.tscn" }),
+        (Tool-Request 3014 "scene_instantiate_node" @{ node_type = "AudioStreamPlayer"; parent_path = "/root/SmokeRoot"; name = "BusProbe" }),
+        (Tool-Request 3015 "scene_set_property" @{ target_node = "/root/SmokeRoot/BusProbe"; property_name = "bus"; value = "Nope" }),
+        (Tool-Request 3016 "scene_set_property" @{ target_node = "/root/SmokeRoot/BusProbe"; property_name = "bus"; value = "Music" }),
+        (Tool-Request 3017 "scene_get_property" @{ target_node = "/root/SmokeRoot/BusProbe"; property_name = "bus" }),
+        # What the editor's own Audio panel shows.
+        (Tool-Request 3018 "scene_instantiate_node" @{ node_type = "Node"; parent_path = "/root/SmokeRoot"; name = "AudioPanelProbe" }),
+        (Tool-Request 3019 "script_attach_to_node" @{ target_node = "/root/SmokeRoot/AudioPanelProbe"; script_path = "res://audio_panel_probe.gd" }),
+        (Tool-Request 3020 "scene_call_method" @{ target_node = "/root/SmokeRoot/AudioPanelProbe"; method_name = "panel_bus_names"; arguments = @(); timeout_seconds = 20 }),
+        (Tool-Request 3021 "scene_remove_node" @{ target_node = "/root/SmokeRoot/AudioPanelProbe" }),
+        (Tool-Request 3022 "scene_remove_node" @{ target_node = "/root/SmokeRoot/BusProbe" })
+    )
+    # --yolo for scene_call_method, the same reason as the preset batch above.
+    $rawBusResponses = Invoke-Didi -Requests $busRequests -Arguments @("--project", $fixtureRoot, "--yolo")
+    $busResponses = @($rawBusResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.PSObject.Properties.Name -contains "id" })
+    Assert-True ($busResponses.Count -eq $busRequests.Count) "Expected $($busRequests.Count) audio_add_bus responses, received $($busResponses.Count)."
+    $busById = @{}
+    foreach ($response in $busResponses) { $busById[[int]$response.id] = $response }
+    $busRefusal = {
+        param($response)
+        if (-not $response.result.isError) { return $null }
+        return ($response.result.content[0].text | ConvertFrom-Json).error
+    }
+
+    $busPreview = Tool-Payload $busById[3002]
+    Assert-True ($busPreview.dry_run -eq $true -and $busPreview.mutation_preview.tool -eq "audio_add_bus") "audio_add_bus did not preview: $($busById[3002].result.content[0].text)"
+    Assert-True ($busPreview.mutation_preview.target_read -eq $true) "The audio_add_bus preview did not ask the editor, so it planned an add it had not checked."
+
+    $music = Tool-Payload $busById[3003]
+    Assert-True ($music.execution_mode -eq "live" -and $music.status -eq "success") "audio_add_bus did not add Music: $($busById[3003].result.content[0].text)"
+    Assert-True ($music.bus -eq $busPreview.mutation_preview.changes[0].before.index_to_add) "The bus was added at $($music.bus), not at the index the preview named."
+    Assert-True ($music.after.name -eq "Music" -and $music.after.send -eq "Master") "The engine read back $($music.after.name) sending to $($music.after.send), not Music sending to Master."
+    Assert-True ($music.undo_redo_registered -eq $false -and $music.persisted_by_editor -eq $true) "audio_add_bus did not say where the bus is and how to take it back."
+    Assert-True ($music.layout_path -eq "res://default_bus_layout.tres") "audio_add_bus named $($music.layout_path) for a project that does not move its layout."
+    Assert-True ($music.panel_refreshed -eq $true) "audio_add_bus did not have the Audio panel rebuild."
+    # layout_written is read by the tool from the file the editor wrote, not
+    # claimed, so what is checked here is that it told the truth. A runner
+    # drawing the editor in software took longer than the tool waited over the
+    # first write on 4.5.1, and false is the honest answer to that: it has to
+    # come with a note, and the editor has to write the bus afterwards. true
+    # has to be a file that holds the bus.
+    $busLayoutFile = Join-Path $fixtureRoot "default_bus_layout.tres"
+    $layoutHolds = {
+        param($index, $name, [int]$seconds)
+        $pattern = "bus/$index/name = &""" + [regex]::Escape($name) + '"'
+        $deadline = (Get-Date).AddSeconds($seconds)
+        while ($true) {
+            if ((Test-Path -LiteralPath $busLayoutFile) -and ((Get-Content -Raw -LiteralPath $busLayoutFile) -match $pattern)) { return $true }
+            if ((Get-Date) -ge $deadline) { return $false }
+            Start-Sleep -Milliseconds 200
+        }
+    }
+    $checkLayoutWritten = {
+        param($added, $label)
+        if ($added.layout_written -eq $true) {
+            Assert-True (& $layoutHolds $added.bus $label 0) "audio_add_bus said $label was written to the layout, and the file does not hold it at index $($added.bus)."
+        } else {
+            Assert-True ($added.layout_written -eq $false -and -not [string]::IsNullOrEmpty($added.layout_note)) "audio_add_bus reported layout_written '$($added.layout_written)' for $label without a note saying why."
+            Assert-True (& $layoutHolds $added.bus $label 20) "The editor never wrote $label to the layout: $($added.layout_note)"
+            Write-Warning "The editor wrote $label to the layout after audio_add_bus stopped waiting, which a slow runner does: $($added.layout_note)"
+        }
+    }
+    & $checkLayoutWritten $music "Music"
+    $sfx = Tool-Payload $busById[3004]
+    Assert-True ($sfx.after.name -eq "SFX" -and $sfx.after.send -eq "Music" -and [math]::Abs([double]$sfx.after.volume_db + 6.0) -lt 0.01) "SFX did not come back sending to Music at -6 dB: $($sfx.after | ConvertTo-Json -Compress)"
+    & $checkLayoutWritten $sfx "SFX"
+
+    # A separate read, rather than the response that made the change.
+    $listed = Tool-Payload $busById[3005]
+    $listedMusic = @($listed.buses | Where-Object { $_.name -eq "Music" })
+    $listedSfx = @($listed.buses | Where-Object { $_.name -eq "SFX" })
+    Assert-True ($listedMusic.Count -eq 1 -and $listedMusic[0].send -eq "Master") "audio_list_buses did not see Music sending to Master."
+    Assert-True ($listedSfx.Count -eq 1 -and $listedSfx[0].send -eq "Music") "audio_list_buses did not see SFX sending to Music."
+
+    $refusals = @(
+        @(3006, 409, "bus_name_in_use", "a second Music"),
+        @(3007, 409, "bus_name_in_use", "a second Master"),
+        @(3008, 409, "bus_name_differs_only_in_case", "music beside Music"),
+        @(3009, 404, "send_bus_not_found", "a send to a bus that does not exist"),
+        @(3010, 400, "invalid_arguments", "a send to the bus itself"),
+        @(3011, 409, "bus_name_in_use", "a dry run of a second Music")
+    )
+    foreach ($refusal in $refusals) {
+        $busError = & $busRefusal $busById[$refusal[0]]
+        Assert-True ($null -ne $busError) "audio_add_bus accepted $($refusal[3])."
+        Assert-True ($busError.code -eq $refusal[1] -and $busError.data.code -eq $refusal[2]) "audio_add_bus refused $($refusal[3]) as $($busError.code) $($busError.data.code), not $($refusal[1]) $($refusal[2])."
+    }
+    Assert-True ((& $busRefusal $busById[3009]).data.buses -contains "Music") "The send refusal did not list the buses there are."
+    # The engine answers a name in use by renaming, so the count is what shows
+    # that none of the refused calls reached it.
+    Assert-True (@((Tool-Payload $busById[3012]).buses).Count -eq @($listed.buses).Count) "A refused audio_add_bus still added a bus: the layout went from $(@($listed.buses).Count) to $(@((Tool-Payload $busById[3012]).buses).Count) buses."
+
+    Assert-True (-not $busById[3014].result.isError) "The AudioStreamPlayer probe could not be added: $($busById[3014].result.content[0].text)"
+    Assert-True ((Tool-Payload $busById[3015]).applied -eq $false) "A player's bus was set to a bus that does not exist, so the control below proves nothing."
+    Assert-True ((Tool-Payload $busById[3016]).applied -eq $true) "A player's bus still could not be set to Music after audio_add_bus added it: $($busById[3016].result.content[0].text)"
+    Assert-True ((Tool-Payload $busById[3017]).value -eq "Music") "The player read back $((Tool-Payload $busById[3017]).value), not Music."
+
+    $panel = Tool-Payload $busById[3020]
+    Assert-True ($null -ne $panel -and -not $busById[3020].result.isError) "The Audio panel probe did not run: $($busById[3020].result.content[0].text)"
+    Assert-True (@($panel.returned) -contains "Music" -and @($panel.returned) -contains "SFX") "The editor's Audio panel shows $(@($panel.returned) -join ', '), not the buses audio_add_bus added. On 4.5 and 4.6 a stale New Bus there is renamed back by one click."
+    Assert-True (-not $busById[3021].result.isError -and -not $busById[3022].result.isError) "An audio_add_bus probe node could not be removed."
+
+    # The file the editor wrote, read as bytes.
+    $busLayout = [IO.File]::ReadAllText((Join-Path $fixtureRoot "default_bus_layout.tres"))
+    Assert-True ($busLayout -match '(?m)^bus/\d+/name = &"Music"$' -and $busLayout -match '(?m)^bus/\d+/name = &"SFX"$') "The editor's layout file does not hold Music and SFX."
+    Assert-True ($busLayout -match '(?m)^bus/\d+/send = &"Music"$') "The editor's layout file does not route SFX to Music."
+
     # Delivered signal tools, end to end through the MCP surface against a live editor.
     Assert-True (-not $byId[20].result.isError) "signal_connect failed against a live editor session: $($byId[20].result.content[0].text)"
     $connectPayload = Tool-Payload $byId[20]

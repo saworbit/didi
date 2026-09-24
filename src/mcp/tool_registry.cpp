@@ -7,6 +7,7 @@
 #include "didi/mcp/control_room.hpp"
 #include "didi/mcp/project_tools.hpp"
 #include "didi/common/logger.hpp"
+#include "didi/runtime/audio_requests.hpp"
 #include "didi/runtime/session_kind_policy.hpp"
 #include "didi/common/project_path.hpp"
 #include "didi/common/scene_node_path.hpp"
@@ -113,6 +114,10 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         // Live only on purpose. Writing the layout file would change what the
         // project loads next time and not what anyone is listening to now.
         , "audio_configure_bus"
+        // Editor only. The bus goes into the layout the editor holds, and the
+        // editor writes the file itself; a file written behind an open editor
+        // would be written over by its next autosave (#771).
+        , "audio_add_bus"
         // Phase 7C. Performance monitors exist only inside a running engine,
         // so there is no offline reading to fall back to.
         , "runtime_read_profiler"
@@ -294,6 +299,7 @@ CallToolResult handleProjectAnalyzeImpact(const json& args, std::shared_ptr<ipc:
 CallToolResult handleProjectRenameReferences(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleAudioListBuses(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleAudioConfigureBus(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleAudioAddBus(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleInstantiateAsset(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleAssetReimport(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleCSharpCheckBuild(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
@@ -587,6 +593,10 @@ Error runtimeSessionMismatchError(const std::string& tool_name, const std::strin
 const char* offlineSiblingFor(std::string_view tool) {
     if (tool == "audio_configure_bus") {
         return "audio_list_buses reads the project's bus layout offline.";
+    }
+    if (tool == "audio_add_bus") {
+        return "audio_list_buses reads the project's bus layout offline. A bus is added only with "
+               "the editor attached, because the editor holds the layout and writes it itself.";
     }
     return nullptr;
 }
@@ -1120,6 +1130,7 @@ const std::unordered_map<std::string_view, std::string_view> kToolTitles = {
     {"anim_list_tracks", "List animation tracks"},
     {"anim_play_track", "Play an animation"},
     {"asset_reimport", "Reimport assets"},
+    {"audio_add_bus", "Add an audio bus"},
     {"audio_configure_bus", "Configure an audio bus"},
     {"audio_list_buses", "List audio buses"},
     {"blackboard_clear", "Clear a blackboard"},
@@ -1819,6 +1830,46 @@ std::optional<Error> probeAnimLibraryTarget(const json& arguments,
     return std::nullopt;
 }
 
+// audio_add_bus's refusals are about the layout the editor holds: a name in use,
+// a name that differs from one only in case, a send to no bus. The rules about
+// the name alone are checked here on every dry run, attached or not, and with
+// an editor attached the bridge runs the rest under `preview` and stops before
+// the add. `before` is the buses as the check found them (#771).
+std::optional<Error> probeAudioBusTarget(const json& arguments,
+                                         const std::shared_ptr<ipc::IIpcClient>& client,
+                                         json& before, json& subject) {
+    auto parsed = runtime::parseAudioAddBusRequest(arguments);
+    if (parsed.isErr()) return parsed.error();
+    subject = {{"name", parsed.value().name}, {"send", parsed.value().send}};
+    if (!client) return std::nullopt;
+    json request = arguments;
+    request["preview"] = true;
+    auto response = client->sendRequest("audio.addBus", request, ipc::withAcceptAllowance(5000));
+    // The same reading of the bridge's answer as probeAnimLibraryTarget: a 4xx
+    // is the refusal the call would meet, and a 5xx is no evidence either way.
+    const auto is_real_refusal = [](int code) { return code >= 400 && code < 500; };
+    if (response.isErr()) {
+        if (is_real_refusal(response.error().code)) return response.error();
+        return std::nullopt;
+    }
+    const auto& payload = response.value();
+    if (payload.is_object() && payload.contains("error")) {
+        const auto& error = payload["error"];
+        const auto code = error.value("code", 500);
+        if (is_real_refusal(code)) {
+            return Error(code, error.value("message", std::string("The engine refused this call")),
+                         error.contains("data") ? error["data"] : json());
+        }
+        return std::nullopt;
+    }
+    if (payload.is_object() && payload.value("preview", false)) {
+        before = {{"buses", payload.value("buses", json::array())},
+                  {"index_to_add", payload.value("index", json(nullptr))},
+                  {"adopted_sends", payload.value("adopted_sends", json::array())}};
+    }
+    return std::nullopt;
+}
+
 std::optional<Error> probeNodeTarget(const std::string& tool, const std::string& argument,
                                      const json& arguments,
                                      const std::shared_ptr<ipc::IIpcClient>& client,
@@ -2122,6 +2173,14 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
         target_probe = [client = m_sourceIpcClient](const json& call_arguments, json& before,
                                                     json& subject) {
             return probeAnimLibraryTarget(call_arguments, client, before, subject);
+        };
+    } else if (binding.policy_source == "audio_add_bus") {
+        // Unlike the probes above this one runs with no lease too, because the
+        // name rules need no engine and a preview of a name the call refuses
+        // is a plan nobody can follow.
+        target_probe = [client = lease.has_value() ? m_sourceIpcClient : nullptr](
+                           const json& call_arguments, json& before, json& subject) {
+            return probeAudioBusTarget(call_arguments, client, before, subject);
         };
     } else if (const auto node = nodeTargets().find(binding.policy_source);
                node != nodeTargets().end() && lease.has_value()) {
@@ -4208,6 +4267,33 @@ void ToolRegistry::registerAllDefaultTools() {
             {"additionalProperties", false}
         };
         t.handler = [this](const json& args) { return handleAudioConfigureBus(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "audio_add_bus";
+        t.description =
+            "Adds one audio bus to the end of the layout in the attached editor, names it and "
+            "routes it, so a game can have the Music and SFX buses a settings menu sets; a fresh "
+            "project has only Master. It only adds: a name in use, or one differing only in "
+            "letter case, is refused, and so is a send to a bus that does not exist, which Godot "
+            "would silently route to Master. The editor writes the project's bus layout file "
+            "itself shortly afterwards, and the result says whether it has. Add the bus before "
+            "setting an AudioStreamPlayer's bus to it.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"name", {{"type", "string"}, {"minLength", 1}, {"maxLength", 256}}},
+                {"send", {{"type", "string"}, {"minLength", 1}, {"maxLength", 256},
+                          {"default", "Master"}}},
+                {"volume_db", {{"type", "number"}, {"minimum", -80}, {"maximum", 24}}},
+                {"mute", {{"type", "boolean"}}},
+                {"solo", {{"type", "boolean"}}}
+            }},
+            {"required", json::array({"name"})},
+            {"additionalProperties", false}
+        };
+        t.handler = [this](const json& args) { return handleAudioAddBus(args, m_ipcClient); };
         registerTool(std::move(t));
     }
     {

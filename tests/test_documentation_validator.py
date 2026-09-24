@@ -87,13 +87,13 @@ class DocumentationValidatorTests(unittest.TestCase):
 
 Current documented release: **1.4.0**.
 
-Didi exposes 118 canonical tools plus 10 legacy names (128 total).
+Didi exposes 119 canonical tools plus 10 legacy names (129 total).
 
-## Protocol Surface (118 Canonical Tools)
+## Protocol Surface (119 Canonical Tools)
 
 Startup requires --project or DIDI_PROJECT_ROOT. Mutations expose dry_run and protected writes use confirmation_token.
 
-Phase 7 status is PARTIAL_DELIVERY after the 2026-08-29 Godot 4.5.1 and Godot 4.7.2 feasibility gate. The implementation remains 115/118 canonical tools, with all 3 Phase 7 names registered but unimplemented. The gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts.
+Phase 7 status is PARTIAL_DELIVERY after the 2026-08-29 Godot 4.5.1 and Godot 4.7.2 feasibility gate. The implementation remains 116/119 canonical tools, with all 3 Phase 7 names registered but unimplemented. The gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts.
 
 [Phase 7 feasibility evidence](docs/PHASE_7_API_FEASIBILITY.md) | [Phase 7 approved executable plan](docs/PHASE_7_IMPLEMENTATION_PLAN.md)
 
@@ -108,7 +108,7 @@ Phase 7 status is PARTIAL_DELIVERY after the 2026-08-29 Godot 4.5.1 and Godot 4.
 
 ## [Unreleased]
 
-Discovery now exposes 118 canonical tools plus 10 legacy registrations (128 total). 115 canonical tools are implemented and 3 remain unimplemented.
+Discovery now exposes 119 canonical tools plus 10 legacy registrations (129 total). 116 canonical tools are implemented and 3 remain unimplemented.
 
 Phase 7 is PARTIAL_DELIVERY: 15/18 names are implementation-feasible and 3/18 are API-blocked under the approved contracts.
 
@@ -137,16 +137,16 @@ Current release: 1.4.0.
             "API_SPECIFICATION.md": "# API Specification\n\n423 Locked. Mutations expose dry_run and confirmation_token. Live IPC includes ui.hitTest.\n",
             "ARCHITECTURE.md": "# Architecture\n",
             "DEVELOPER_GUIDE.md": (
-                "# Developer Guide\n\nPhase 7 is PARTIAL_DELIVERY at 115/118 implemented; "
+                "# Developer Guide\n\nPhase 7 is PARTIAL_DELIVERY at 116/119 implemented; "
                 "15/18 names are implementation-feasible and 3/18 are API-blocked.\n\n"
-                "The validator locks the documented 118 canonical/10 legacy/128 total "
-                "surface and the 115 implemented/3 unimplemented split.\n"
+                "The validator locks the documented 119 canonical/10 legacy/129 total "
+                "surface and the 116 implemented/3 unimplemented split.\n"
             ),
             "INTEGRATION_GUIDE.md": (
-                "# Integration Guide\n\n`tools/list` returns 118 canonical tools and 10 legacy "
-                "registrations, 128 in total.\n"
+                "# Integration Guide\n\n`tools/list` returns 119 canonical tools and 10 legacy "
+                "registrations, 129 in total.\n"
             ),
-            "LLM_INSTRUCTIONS.md": "# LLM Instructions\n\nStart with --project or DIDI_PROJECT_ROOT. Preview with dry_run and use confirmation_token when returned. Phase 7 is PARTIAL_DELIVERY at 115/118 implemented; all 3 names remain unimplemented and API-blocked.\n",
+            "LLM_INSTRUCTIONS.md": "# LLM Instructions\n\nStart with --project or DIDI_PROJECT_ROOT. Preview with dry_run and use confirmation_token when returned. Phase 7 is PARTIAL_DELIVERY at 116/119 implemented; all 3 names remain unimplemented and API-blocked.\n",
             "QUICKSTART.md": "# Quickstart\n\nStart with --project. Preview mutations with dry_run and use confirmation_token when required.\n",
             "RESOURCES_AND_PROMPTS.md": "# Resources And Prompts\n",
             "ROADMAP.md": "# Roadmap\n\n## Phase 6: Enterprise Safety (COMPLETE)\n\n| **13. Phase 5 Deep Domains (6)** | Implemented |\n",
@@ -167,7 +167,7 @@ Current release: 1.4.0.
             "docs/CAPABILITIES.md",
             """# Current Capability Matrix
 
-Didi v1.4.0 registers 118 canonical tool names. 115 are implemented in at least one mode; 3 remain reserved. In other words, 115 canonical tools are implemented. Ten legacy names are registered separately, for exactly 128 tools/list entries.
+Didi v1.4.0 registers 119 canonical tool names. 116 are implemented in at least one mode; 3 remain reserved. In other words, 116 canonical tools are implemented. Ten legacy names are registered separately, for exactly 129 tools/list entries.
 
 Phase 7 is PARTIAL_DELIVERY at 15/18 implementation-feasible and 3/18 API-blocked; all feasible names are delivered and all 3 blockers remain unimplemented.
 
@@ -183,9 +183,9 @@ Startup requires --project or DIDI_PROJECT_ROOT. A second session owner receives
             "docs/TOOL_REFERENCE.md",
             """# Tool Reference
 
-Didi exposes 118 canonical tool names plus 10 legacy names (128 registrations).
+Didi exposes 119 canonical tool names plus 10 legacy names (129 registrations).
 
-Phase 7 is PARTIAL_DELIVERY at 115/118 implemented. All 3 remaining Phase 7 names are unimplemented and API-blocked; 15/18 implementation-feasible names are delivered.
+Phase 7 is PARTIAL_DELIVERY at 116/119 implemented. All 3 remaining Phase 7 names are unimplemented and API-blocked; 15/18 implementation-feasible names are delivered.
 
 Session lock conflicts return 423. Mutations expose dry_run and protected writes use confirmation_token.
 
@@ -312,7 +312,7 @@ Second section.
             if phase == 7:
                 lines.extend(
                     [
-                        "**Objective:** The implementation remains 115/118 canonical tools, with all 3 Phase 7 names registered but unimplemented. The feasibility gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts.",
+                        "**Objective:** The implementation remains 116/119 canonical tools, with all 3 Phase 7 names registered but unimplemented. The feasibility gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts.",
                         "",
                     ]
                 )
@@ -365,7 +365,7 @@ Second section.
             if phase == 7:
                 lines.extend(
                     [
-                        "**Goal:** The implementation remains 115/118 canonical tools, with all 3 Phase 7 names registered but unimplemented; all 15/18 implementation-feasible names are delivered.",
+                        "**Goal:** The implementation remains 116/119 canonical tools, with all 3 Phase 7 names registered but unimplemented; all 15/18 implementation-feasible names are delivered.",
                         "",
                     ]
                 )
@@ -381,7 +381,7 @@ Second section.
     def phase7_current_status_block(self) -> str:
         return """<!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `115/118`
+**Canonical implementation:** `116/119`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
@@ -447,7 +447,7 @@ Second section.
         self.write(
             "README.md",
             readme.replace(
-                "## Protocol Surface (118 Canonical Tools)",
+                "## Protocol Surface (119 Canonical Tools)",
                 "## Protocol Surface (107 Canonical Tools)",
             ),
         )
@@ -472,10 +472,10 @@ Second section.
         )
         cases = {
             "missing": valid_readme.replace(
-                "## Protocol Surface (118 Canonical Tools)",
+                "## Protocol Surface (119 Canonical Tools)",
                 "## Current Surface",
             ),
-            "duplicate": valid_readme + "\n## Protocol Surface (118 Canonical Tools)\n",
+            "duplicate": valid_readme + "\n## Protocol Surface (119 Canonical Tools)\n",
         }
         for scenario, readme in cases.items():
             with self.subTest(scenario=scenario):
@@ -516,8 +516,8 @@ Second section.
         self.write(
             "README.md",
             readme.replace(
-                "## Protocol Surface (118 Canonical Tools)",
-                "```markdown\n## Protocol Surface (118 Canonical Tools)\n```",
+                "## Protocol Surface (119 Canonical Tools)",
+                "```markdown\n## Protocol Surface (119 Canonical Tools)\n```",
             ),
         )
 
@@ -542,8 +542,8 @@ Second section.
                 self.write(
                     "README.md",
                     readme.replace(
-                        "## Protocol Surface (118 Canonical Tools)",
-                        "```markdown\n## Protocol Surface (118 Canonical Tools)"
+                        "## Protocol Surface (119 Canonical Tools)",
+                        "```markdown\n## Protocol Surface (119 Canonical Tools)"
                         + fence_ending,
                     ),
                 )
@@ -851,8 +851,8 @@ Second section.
     def write_manifest(self, **overrides) -> Path:
         """Write a manifest matching the synthetic fixture's documented counts."""
         counts = {
-            "canonical": 118, "legacy": 10,
-            "implemented": 115, "unimplemented": 3, "total": 128,
+            "canonical": 119, "legacy": 10,
+            "implemented": 116, "unimplemented": 3, "total": 129,
         }
         counts.update(overrides)
         required = counts.pop("required", {"signal_connect": ["emitter_node", "signal_name"]})
@@ -945,10 +945,10 @@ Second section.
         # validation until the documentation is updated to match.
         root = self.make_valid_repository()
         errors = VALIDATOR.validate_repository(
-            root, self.write_manifest(implemented=111, unimplemented=7)
+            root, self.write_manifest(implemented=112, unimplemented=7)
         )
         self.assertTrue(
-            any("must state 111 implemented tools" in e for e in errors), errors
+            any("must state 112 implemented tools" in e for e in errors), errors
         )
 
     def test_manifest_drives_the_canonical_count_check(self):
@@ -956,10 +956,10 @@ Second section.
         # manifest rather than the hard-coded fallback tuple.
         root = self.make_valid_repository()
         errors = VALIDATOR.validate_repository(
-            root, self.write_manifest(implemented=111, unimplemented=7)
+            root, self.write_manifest(implemented=112, unimplemented=7)
         )
         self.assertTrue(
-            any("must be 118 canonical, 111 implemented, and 7 remaining" in e for e in errors),
+            any("must be 119 canonical, 112 implemented, and 7 remaining" in e for e in errors),
             errors,
         )
 
@@ -982,7 +982,7 @@ Second section.
         # manifest path checks the binary, the fallback path checks a literal.
         self.assertEqual(
             VALIDATOR.CANONICAL_IMPLEMENTATION_COUNTS,
-            (118, 115, 3),
+            (119, 116, 3),
         )
 
     def test_an_unregistered_python_test_module_is_reported(self):
@@ -1521,11 +1521,11 @@ Second section.
     def test_reports_missing_current_release_fact(self):
         root = self.make_valid_repository()
         readme = (root / "README.md").read_text(encoding="utf-8")
-        self.write("README.md", readme.replace("118 canonical", "77 canonical"))
+        self.write("README.md", readme.replace("119 canonical", "77 canonical"))
 
         errors = VALIDATOR.validate_repository(root)
 
-        self.assertTrue(any("README.md" in error and "118 canonical" in error for error in errors), errors)
+        self.assertTrue(any("README.md" in error and "119 canonical" in error for error in errors), errors)
 
     def test_reports_missing_phase6_safety_fact(self):
         root = self.make_valid_repository()

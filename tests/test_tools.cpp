@@ -429,7 +429,7 @@ static void test_tool_registry_default_tools() {
     reg.registerAllDefaultTools();
     auto tools = reg.listTools();
 
-    ASSERT_EQ(tools.size(), 128u);
+    ASSERT_EQ(tools.size(), 129u);
     const std::unordered_set<std::string> legacy_names = {
         "get_scene_hierarchy", "capture_viewport", "analyze_script_diagnostics",
         "patch_script_symbols", "create_visual_test_lab", "query_project_resources",
@@ -441,7 +441,7 @@ static void test_tool_registry_default_tools() {
         if (legacy_names.count(tool.name) == 0) ++canonical_count;
     }
     ASSERT_EQ(legacy_names.size(), 10u);
-    ASSERT_EQ(canonical_count, 118u);
+    ASSERT_EQ(canonical_count, 119u);
 
     // Domain 1: Scene Tree & Node Manipulation
     ASSERT_TRUE(reg.getTool("scene_get_hierarchy") != nullptr);
@@ -574,7 +574,7 @@ static void test_phase7_input_alias_keeps_invoked_entry_with_canonical_contract(
         if (legacy_names.count(tool.name) != 0) continue;
         tool.capability.implemented ? ++implemented : ++unimplemented;
     }
-    ASSERT_EQ(implemented, 115u);
+    ASSERT_EQ(implemented, 116u);
     ASSERT_EQ(unimplemented, 3u);
 }
 
@@ -1079,6 +1079,52 @@ bus/1/send = &"Master"
 
     const auto report = listBusesOffline();
     ASSERT_EQ(report["layout_loads"], false);
+    ASSERT_EQ(report["bus_count"].get<int>(), 1);
+    ASSERT_EQ(report["buses"][0]["name"], "Master");
+}
+
+static void test_audio_list_buses_follows_a_layout_setting_held_as_a_uid() {
+    // 4.6.2 and 4.7.2 hold audio/buses/default_bus_layout as a uid once the
+    // layout file exists, and the next ProjectSettings.save() writes it to
+    // project.godot that way; the live harness met it on 4.7.2 after its own
+    // project-setting requests (tools/vibe/probes/audio_bus_engine.py,
+    // settings_saved). The reader followed res:// values only and fell back
+    // to the default path for this one, which is the wrong file whenever the
+    // layout has been moved.
+    ScopedToolProject project("audio-buses-uid-setting");
+    writeAuditFile("project.godot",
+        "config_version=5\n\n[audio]\n\nbuses/default_bus_layout=\"uid://c76taw0xshje\"\n");
+    writeAuditFile("custom_bus_layout.tres",
+        "[gd_resource type=\"AudioBusLayout\" format=3 uid=\"uid://c76taw0xshje\"]\n"
+        "\n"
+        "[resource]\n"
+        "bus/1/name = &\"Music\"\n"
+        "bus/1/send = &\"Master\"\n");
+    // The default path holds a different layout, which is what the old
+    // fallback would have read.
+    writeAuditFile("default_bus_layout.tres",
+        "[gd_resource type=\"AudioBusLayout\" format=3]\n\n[resource]\nbus/1/name = &\"Wrong\"\n");
+
+    const auto report = listBusesOffline();
+    ASSERT_EQ(report["layout_path"], "res://custom_bus_layout.tres");
+    ASSERT_EQ(report["layout_loads"], true);
+    ASSERT_EQ(report["bus_count"].get<int>(), 2);
+    ASSERT_EQ(report["buses"][1]["name"], "Music");
+}
+
+static void test_audio_list_buses_answers_master_for_a_uid_no_file_carries() {
+    // A uid that names no file is no layout at all to the engine, which then
+    // runs on Master alone. Falling back to the default path would read a file
+    // the engine never loads.
+    ScopedToolProject project("audio-buses-dangling-uid");
+    writeAuditFile("project.godot",
+        "config_version=5\n\n[audio]\n\nbuses/default_bus_layout=\"uid://nothinghere\"\n");
+    writeAuditFile("default_bus_layout.tres",
+        "[gd_resource type=\"AudioBusLayout\" format=3]\n\n[resource]\nbus/1/name = &\"Wrong\"\n");
+
+    const auto report = listBusesOffline();
+    ASSERT_EQ(report["layout_path"], "uid://nothinghere");
+    ASSERT_EQ(report["layout_present"], false);
     ASSERT_EQ(report["bus_count"].get<int>(), 1);
     ASSERT_EQ(report["buses"][0]["name"], "Master");
 }
@@ -8512,6 +8558,10 @@ struct RegisterToolTests {
                      test_audio_list_buses_reads_escaped_names_the_way_the_engine_does);
         registerTest("Tools.AudioListBusesRefusedEscape",
                      test_audio_list_buses_answers_master_for_an_escape_the_parser_refuses);
+        registerTest("Tools.AudioListBusesUidSetting",
+                     test_audio_list_buses_follows_a_layout_setting_held_as_a_uid);
+        registerTest("Tools.AudioListBusesDanglingUid",
+                     test_audio_list_buses_answers_master_for_a_uid_no_file_carries);
         registerTest("Tools.AudioListBusesEmptyResource",
                      test_audio_list_buses_reads_a_layout_with_no_bus_lines_at_all);
         registerTest("Tools.AudioListBusesMissingLayout",

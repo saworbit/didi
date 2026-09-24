@@ -549,6 +549,19 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
          "to the editor's copy and not saved."},
 
         // -- Audio ------------------------------------------------------------
+        {"audio_add_bus.name",
+         "The new bus's name, which an AudioStreamPlayer's bus property and audio_configure_bus "
+         "then take. It must not be in use, even in another letter case, and must not begin or "
+         "end with a space or hold a control character: Godot keeps all of those, and nobody can "
+         "tell the result apart in the Audio panel."},
+        {"audio_add_bus.send",
+         "The bus this one feeds into. Master unless named. It must be a bus that exists; every "
+         "existing bus comes before the new one, which is the only order in which Godot routes a "
+         "send, so any of them works."},
+        {"audio_add_bus.volume_db",
+         "The new bus's volume in decibels, from -80 to 24. 0 unless given."},
+        {"audio_add_bus.mute", "Whether the new bus starts muted."},
+        {"audio_add_bus.solo", "Whether the new bus starts soloed."},
         {"audio_configure_bus.volume_db",
          "Bus volume in decibels. 0 is unity gain."},
         {"audio_configure_bus.mute",

@@ -56,7 +56,8 @@ Six amendments are implemented: `runtime_read_output`, `audio_list_buses` and
 `audio_configure_bus`, all recorded below with tri-engine feasibility evidence,
 plus `project_audit_assets`, `project_analyze_impact`,
 `runtime_explore_scene`, `didi_control_room`, `ui_list_controls`,
-`scene_call_method`, `anim_add_library` and `project_add_export_preset`. One
+`scene_call_method`, `anim_add_library`, `project_add_export_preset` and
+`audio_add_bus`. One
 amendment adds no name and changes an existing contract: `scene_close` reads
 real dirty state where the engine can report it. One is withdrawn: raising the engine floor to
 Godot 4.7, refused in favour of runtime capability detection so that 4.5 and 4.6
@@ -65,10 +66,8 @@ August 2026 competitive review and are proposed, not accepted, in
 [Realignment Implementation Plan](REALIGNMENT_IMPLEMENTATION_PLAN.md):
 `runtime_read_output`, `ui_list_controls`, `godot_api_reference`, and an `until`
 parameter on the existing `runtime_step` (a change, not a new name).
-`audio_add_bus` is accepted below with its engine evidence, and is not yet
-implemented.
 
-### ACCEPTED: `audio_add_bus`
+### ACCEPTED (IMPLEMENTED): `audio_add_bus`
 
 | Field | Value |
 | :--- | :--- |
@@ -76,7 +75,7 @@ implemented.
 | **Failing workflow** | *Let the player turn the music down.* Reported from vibe session 16 (#771), building a menu. A settings screen sets a `Music` bus and an `SFX` bus, and a fresh project has only `Master`. `audio_list_buses` answers `bus_count: 1`. `audio_configure_bus` with `bus: "Music"` answers 404. `scene_set_property` setting an `AudioStreamPlayer`'s `bus` to `"Music"` answers `applied: false`, because the engine reads back `Master` for a bus that does not exist. Nothing on the surface adds a bus. The one route that works is writing `default_bus_layout.tres` by hand through `resource_create`, which no schema mentions. Reading that file back offline has taken four fixes so far (#836, #837, #844, #853), and two are open (#907, #934). This is the shape #770 had for `anim_play_track` and #779 had for `project_export`: the read and configure halves shipped and the create half did not. |
 | **Execution modes** | `live`. Editor sessions only. With no editor the tool refuses, names `audio_list_buses` for reading the layout, and says that writing the file offline is not supported. A game session is refused: a running game loaded its layout when it started, so a bus added to it is in no file and is gone when it exits, and the failing workflow is authoring. |
 | **Safety class** | `create/set`. Dry run, no confirmation token. Additive only (`destructiveHint: false`). It appends one bus and changes no other. It writes only `AudioServer` bus state, and the editor then writes the layout file itself, to the path the project names. There is no remove. The way back is deleting the bus in the editor's Audio panel. |
-| **Proving test** | Native: `AudioAddBus.RequestValidation` covers the name rules under **Names** below (empty, spaces only, a leading or trailing space, a control character, more than 256 bytes), `send` given as the empty string, `volume_db` outside -80 to 24, and wrong types, each refused before any engine call. `AudioAddBus.Registration` requires `live` only, editor sessions, a mutation with `dry_run` and no confirmation token, additive and not read-only. `AudioAddBus.Gated` covers the offline refusal and the game-session refusal, and requires each to say where to go instead. `AudioAddBus.DryRunReachesNoEngine` requires the preview to make no bridge call. `AudioBusLayout.ReadsEscapedNames`, the #934 fix, reads the layout the probe had the engine save, with a quote, a backslash, a tab and a newline in bus names, and requires the engine's names. Godot integration, on 4.5.1, 4.6.2 and 4.7.2, with the editor attached: add `Music` sending to `Master`, then `SFX` sending to `Music` at -6 dB, and read both back through a separate `audio_list_buses` call rather than the response. Refuse `Music` again, `Master`, `music`, a send to a bus that does not exist and a send to the new bus's own name, and require the bus count to be unchanged after each, which is what catches a silent `Music 2`. Set a player's `bus` to `Music` with `scene_set_property` and require `applied: true`, beside the same call naming `Nope`, the control that must still answer `applied: false`. Wait for the editor's layout file and require the offline `audio_list_buses` to find both buses in it, at the path `audio/buses/default_bus_layout` names. A `@tool` script in the fixture reads the names on the editor's Audio panel, and the harness requires `Music` there. With the panel refresh below removed, that check fails on 4.5.1 and 4.6.2, which is the run that proves it can. The engine-output gate stays clean throughout. |
+| **Proving test** | Native: `AudioAddBus.RequestValidation` covers the name rules under **Names** below (empty, spaces only, a leading or trailing space with the trimmed name in `retry_with`, a control character, more than 256 bytes), `send` given as the empty string with `Master` in `retry_with`, `volume_db` outside -80 to 24, an unknown argument and wrong types, each refused with the argument it names, and accepts every awkward name the engine keeps. `AudioAddBus.Registration` requires `live` only, editor sessions for the tool and for `audio.addBus`, a mutation with `dry_run` and no confirmation token, additive and not idempotent, no `position` and no published `preview`. `AudioAddBus.Gated` covers the offline refusal naming `audio_list_buses`, a bad name refused before it, and a game session refused at the hook with `session_kind_rejected`; `RuntimeRouting` requires the routed refusal to say why there is no offline writer. `AudioAddBus.DryRunReachesNoEngine` requires an offline preview that says it read nothing, and a dry run of a bad name refused rather than previewed. The #934 fix that the read-back depends on landed first, in #941, with `Tools.AudioListBusesEscapedNames`. Godot integration, on 4.5.1, 4.6.2 and 4.7.2, requests 3000 to 3022 with the editor attached: a dry run that asks the editor, then `Music` sending to `Master` and `SFX` sending to `Music` at -6 dB, each with `layout_written`, read back through a separate `audio_list_buses` call rather than the response. `Music` again, `Master`, `music`, a send to `Nope`, a send to the bus itself and a dry run of `Music` again are each refused with their code, and the bus count is unchanged after them, which is what catches a silent `Music 2`. A player's `bus` set to `Nope` still answers `applied: false` and set to `Music` answers `applied: true` and reads back `Music`. `tests/godot_smoke/audio_panel_probe.gd` reads the names on the editor's Audio panel and the harness requires `Music` and `SFX` there; with the `bus_layout_changed` emit removed, that check fails on 4.5.1, which is the run that proves it can. The layout file the editor wrote is read as bytes for both names and the send, and the engine-output gate stays clean throughout. |
 | **Reviewer** | Accepted by Shane Wall on 2026-09-24 for #771. It is a mutation, so the security argument is recorded below; nobody else has reviewed it. |
 
 All of the evidence below comes from `tools/vibe/probes/audio_bus_engine.py`
@@ -213,9 +212,14 @@ The editor writes the layout itself, 800 to 900 ms after any change and with no
 call, to the file the project setting names. A game run afterwards loaded
 exactly the buses, sends and volumes the editor wrote, in a fresh project, a
 project whose layout was moved, and a project with a layout already in place.
-So the tool writes no file. It waits up to two seconds for the editor's write,
+So the tool writes no file. It waits up to five seconds for the editor's write,
 reads the file back with the offline reader, and reports `layout_written` and
-the `layout_path` the project names. `audio_configure_bus` names
+the `layout_path` the project names. The live harness found that path is not always a
+path: 4.6.2 and 4.7.2 hold `audio/buses/default_bus_layout` as a `uid://`
+once the layout file exists, and the next save of the project settings writes
+it to `project.godot` that way, while 4.5.1 keeps `res://` (the probe's
+`settings_saved` variant). So the tool resolves a uid through `ResourceUID`,
+and the offline reader follows it to the resource that carries it. `audio_configure_bus` names
 `res://default_bus_layout.tres` whatever the project says (#935).
 
 On 4.5.1 and 4.6.2 the Audio panel rebuilds when a bus is added and does not
@@ -260,11 +264,12 @@ also needs its own measurement of what an editor open without Didi does with a
 layout written behind it. The probe drove a headless editor, so what a visible
 Audio panel shows is for the implementation to check in a GUI editor.
 
-**Found on the way.** `audio_list_buses` reads a name with a quote, a
+**Found on the way.** `audio_list_buses` read a name with a quote, a
 backslash or a control character with Godot's escapes still in it (#934).
-The proving test reads the editor's layout back offline, so that fix comes
-first or with the tool. `audio_configure_bus` names the wrong file when a
-project has moved its layout (#935).
+The proving test reads the editor's layout back offline, so that was fixed
+first, in #941. `audio_configure_bus` names the wrong file when a project has
+moved its layout (#935); `audio_add_bus` reads the path from the project
+setting instead.
 
 ### ACCEPTED (IMPLEMENTED): `project_add_export_preset`
 
