@@ -122,19 +122,28 @@ std::optional<std::string> checkType(const json& schema, const json& value,
 //
 // The value has already been parsed as JSON by the time this runs, so it is
 // well-formed UTF-8 and counting lead bytes is the whole job.
+// "1 characters" and "1 entries" were the whole surface's answer to an empty
+// string or list, because every required string with a minLength of 1 answered
+// through here. One is singular, and a minimum of one character is a string
+// that must not be empty, which is the sentence a caller needs.
+std::string counted(const json& bound, const char* singular, const char* plural) {
+    return bound.dump() + " " + (bound == json(1) ? singular : plural);
+}
+
 std::optional<std::string> checkBounds(const json& schema, const json& value,
                                        const std::string& where) {
     if (value.is_string()) {
         const auto length = paths::codePointCount(value.get_ref<const std::string&>());
         if (schema.contains("minLength") && schema["minLength"].is_number_integer() &&
             length < schema["minLength"].get<size_t>()) {
-            return where + " must be at least " + schema["minLength"].dump() +
-                   " characters long.";
+            if (schema["minLength"] == json(1)) return where + " must not be empty.";
+            return where + " must be at least " + counted(schema["minLength"], "character", "characters") +
+                   " long.";
         }
         if (schema.contains("maxLength") && schema["maxLength"].is_number_integer() &&
             length > schema["maxLength"].get<size_t>()) {
-            return where + " must be at most " + schema["maxLength"].dump() +
-                   " characters long.";
+            return where + " must be at most " + counted(schema["maxLength"], "character", "characters") +
+                   " long.";
         }
         // JSON Schema patterns are ECMA-262, which is what std::regex parses by
         // default, and they are unanchored. A pattern this cannot compile is a
@@ -165,11 +174,11 @@ std::optional<std::string> checkBounds(const json& schema, const json& value,
     if (value.is_array()) {
         if (schema.contains("minItems") && schema["minItems"].is_number_integer() &&
             value.size() < schema["minItems"].get<size_t>()) {
-            return where + " must have at least " + schema["minItems"].dump() + " entries.";
+            return where + " must have at least " + counted(schema["minItems"], "entry", "entries") + ".";
         }
         if (schema.contains("maxItems") && schema["maxItems"].is_number_integer() &&
             value.size() > schema["maxItems"].get<size_t>()) {
-            return where + " must have at most " + schema["maxItems"].dump() + " entries.";
+            return where + " must have at most " + counted(schema["maxItems"], "entry", "entries") + ".";
         }
         if (schema.contains("uniqueItems") && schema["uniqueItems"].is_boolean() &&
             schema["uniqueItems"].get<bool>()) {

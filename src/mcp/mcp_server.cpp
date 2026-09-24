@@ -795,7 +795,14 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
         // person: offer the decision rather than telling the agent to confirm
         // to itself.
         const bool already_confirmed = arguments.contains("confirmation_token");
-        const bool previewing = arguments.value("dry_run", false);
+        // Read without trusting its type. arguments.value() threw on
+        // "dry_run": "true", and the catch below answered the whole call with
+        // JSON-RPC -32602 "Invalid JSON parameter types", naming nothing, while
+        // MutationSafety has a 400 naming dry_run that never got to run (vibe
+        // session nineteen). A value of the wrong type is left to that check.
+        const bool previewing = arguments.contains("dry_run") &&
+                                arguments["dry_run"].is_boolean() &&
+                                arguments["dry_run"].get<bool>();
 
         // YOLO: the person who launched this process decided not to be asked.
         // Offering an elicitation nobody intends to honour would be theatre, so

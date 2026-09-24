@@ -423,10 +423,17 @@ MutationDecision MutationSafety::evaluate(const ResolvedToolBinding& binding,
         return decision;
     }
     if (has_dry_run && !arguments["dry_run"].is_boolean()) {
-        return errorDecision(binding, 400, "dry_run must be a boolean", context);
+        return errorDecision(binding, 400,
+                             "Argument 'dry_run' must be a boolean, true or false, not " +
+                                 std::string(arguments["dry_run"].type_name()) + ".",
+                             context,
+                             {{"code", "invalid_arguments"}, {"parameter", "dry_run"},
+                              {"retryable", false}});
     }
     if (has_confirmation && !arguments["confirmation_token"].is_string()) {
-        return errorDecision(binding, 400, "confirmation_token must be a string", context);
+        return errorDecision(binding, 400, "confirmation_token must be a string", context,
+                             {{"code", "invalid_arguments"}, {"parameter", "confirmation_token"},
+                              {"retryable", false}});
     }
 
     const bool dry_run = arguments.value("dry_run", false);

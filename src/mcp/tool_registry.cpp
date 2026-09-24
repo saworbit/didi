@@ -2143,6 +2143,19 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
             // sentence now covers the first, which is the common one.
             auto error = liveOnlySessionMissing(binding);
             runtime::annotateRouteObstruction(error);
+            // The data said another client holds the bridge and not to fall
+            // back to offline edits; the sentence above it said no editor is
+            // attached, to open one, and where the offline alternative is. A
+            // caller reads the sentence (vibe session nineteen, a second
+            // server beside the first on one editor).
+            if (error.data.is_object() && error.data.value("bridge_held_by_another_client", false)) {
+                const auto obstruction = error.data.value("route_obstruction", json::object());
+                error.message = std::string(binding.canonical_name) +
+                                " cannot reach the editor on this project: " +
+                                obstruction.value("cause", std::string("another MCP client holds its bridge.")) +
+                                " " + obstruction.value("recovery", std::string());
+                error.data.erase("offline_alternative");
+            }
             return structuredLiveToolError(error, std::nullopt);
         }
     }

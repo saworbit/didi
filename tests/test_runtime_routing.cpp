@@ -1032,6 +1032,36 @@ void test_live_errors_report_the_session_without_its_endpoint() {
     registry.setIpcClient(nullptr);
 }
 
+// A second server beside the first on one editor. The data said another
+// client holds the bridge and not to fall back to offline edits; the sentence
+// above it said no editor was attached, told the caller to open one, and named
+// the offline alternative. A caller acts on the sentence (vibe session
+// nineteen), so the sentence says what the data says.
+void test_a_held_bridge_is_said_in_the_sentence() {
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    auto route = std::make_shared<DescriptorlessSessionFake>();
+    registry.setIpcClient(route);
+    didi::runtime::RouteObstruction held;
+    held.kind = "bridge_held";
+    held.cause = "Another MCP client holds the bridge to this editor.";
+    held.recovery = "Do not fall back to offline file edits on this project.";
+    didi::runtime::recordRouteObstruction(held);
+
+    const auto refused = registry.callTool("audio_add_bus", didi::json{{"name", "Music"}});
+    didi::runtime::clearRouteObstruction();
+    registry.setIpcClient(nullptr);
+    ASSERT_TRUE(refused.isError);
+    const auto value = payload(refused);
+    const auto message = value["error"]["message"].get<std::string>();
+    ASSERT_TRUE(message.find("cannot reach the editor") != std::string::npos);
+    ASSERT_TRUE(message.find("Another MCP client holds the bridge") != std::string::npos);
+    ASSERT_TRUE(message.find("Open the project in the Godot editor") == std::string::npos);
+    ASSERT_TRUE(message.find("audio_list_buses reads") == std::string::npos);
+    ASSERT_EQ(value["error"]["data"]["bridge_held_by_another_client"], true);
+    ASSERT_TRUE(!value["error"]["data"].contains("offline_alternative"));
+}
+
 // A failure with no route still reads as a failure.
 //
 // The deduplication above is conditional on the envelope actually having a
@@ -2985,6 +3015,8 @@ struct RegisterRuntimeRoutingTests {
                      test_live_errors_report_the_session_without_its_endpoint);
         registerTest("RuntimeRouting.FailureWithNoRouteIsStillCoherent",
                      test_a_failure_with_no_route_is_still_coherent);
+        registerTest("RuntimeRouting.HeldBridgeIsSaidInTheSentence",
+                     test_a_held_bridge_is_said_in_the_sentence);
         registerTest("RuntimeRouting.ProvenanceJsonDropsOnlyTheEndpoint",
                      test_provenance_json_drops_only_the_endpoint);
         registerTest("RuntimeRouting.ErrorsAndUnknownOutcomeQuarantine",
