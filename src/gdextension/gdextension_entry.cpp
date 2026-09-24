@@ -111,6 +111,7 @@ static void initialize_didi_module(void *userdata, GDExtensionInitializationLeve
     (void)userdata;
     if (p_level == GDEXTENSION_INITIALIZATION_SCENE) {
         applyProjectLogLevel();
+        GodotBridge::instance().rememberStartupBusLayoutSetting();
         const auto kind = engineIsEditorHint() ? "editor" : "game";
         const auto resolved_project = resolveGodotProjectPath();
         const auto project_path = resolved_project.isOk() ? resolved_project.value() : fallbackCanonicalProjectPath();

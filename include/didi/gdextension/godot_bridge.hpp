@@ -303,6 +303,18 @@ public:
     // extension's own log level (#601).
     std::optional<std::string> projectSettingString(const std::string& name);
 
+    // audio/buses/default_bus_layout as it stood when the engine started. The
+    // editor's Audio panel reads the setting once, when it is built, and saves
+    // the layout to that file until the editor restarts, whatever the setting
+    // says later: measured on 4.7.2 in vibe session nineteen, where a setting
+    // moved underneath the editor left it writing the old file, and the next
+    // start loaded the new one, empty. Remembered at SCENE initialization,
+    // before anything can change it.
+    void rememberStartupBusLayoutSetting();
+    // The res:// file the editor writes the bus layout to, or nothing when the
+    // setting was never remembered (a test, or a bridge that did not start).
+    std::optional<std::string> startupBusLayoutPath();
+
     // Hands Input the events runtime.injectInput held while the tree was
     // paused, so they land in the first frame that processes. Called by
     // runtime.setPaused on the way to running, which the step also takes.
@@ -316,6 +328,8 @@ public:
 
 private:
     GodotBridge() = default;
+    bool m_startupBusLayoutRemembered = false;
+    std::optional<std::string> m_startupBusLayoutSetting;
 };
 
 Result<std::string> resolveGodotProjectPath();

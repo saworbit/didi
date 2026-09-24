@@ -155,6 +155,21 @@ The three Phase 7 blockers are unchanged; the newest name is `audio_add_bus`, re
 
 ### Fixed
 
+- **A bus layout the editor could not write was reported as one it would.**
+  The editor's Audio panel reads `audio/buses/default_bus_layout` once and
+  saves every bus change to that file until it restarts. After the setting
+  moved underneath it, `audio_add_bus` read the file the setting named and
+  reported `layout_written: false` for a bus the editor had written, and
+  both audio writers named the wrong `layout_path`; the next start loaded
+  the new, empty file and every bus was gone. The bridge now remembers the
+  setting as the engine started, both tools name the file the editor writes
+  with `project_layout_path` beside it when the two differ, and
+  `project_set_setting` answers `requires_editor_restart: true` when it moves
+  the setting away from it. A read-only layout file, where the editor prints
+  "Safe save failed", is named as the reason with `layout_read_only`, and on
+  Windows `audio_configure_bus` no longer says the change reaches disk. Both
+  found by vibe session nineteen on 4.7.2.
+
 - **Four handlers counted a published length bound in bytes.** JSON Schema
   counts `maxLength` in characters, and #663 moved `project_search_text` and
   the blackboard's tool readers to characters for that reason. The same bound

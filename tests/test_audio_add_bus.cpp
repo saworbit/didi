@@ -1,14 +1,21 @@
+#include "didi/common/ipc_channel.hpp"
 #include "didi/common/json.hpp"
 #include "didi/gdextension/editor_hook.hpp"
+#include "didi/offline/audio_bus_layout.hpp"
 #include "didi/mcp/mutation_safety.hpp"
 #include "didi/mcp/tool_registry.hpp"
 #include "didi/runtime/audio_requests.hpp"
 #include "didi/runtime/session_kind_policy.hpp"
 #include "didi/tools/resolved_tool_binding.hpp"
 
+#include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <functional>
+#include <memory>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #define ASSERT_TRUE(cond) if (!(cond)) throw std::runtime_error("Assertion failed: " #cond);
 #define ASSERT_EQ(a, b) ASSERT_TRUE((a) == (b))
@@ -295,8 +302,143 @@ void dry_run_reaches_no_engine() {
     }
 }
 
+// An attached editor, answered from a script: the bus the bridge reports and
+// the file it says the editor writes.
+class ScriptedEditor final : public didi::ipc::IIpcClient {
+public:
+    bool connect(const std::string&, int) override { return true; }
+    void disconnect() override {}
+    bool isConnected() const override { return true; }
+    didi::Result<json> sendRequest(const std::string& method, const json&, int) override {
+        methods.push_back(method);
+        return answer;
+    }
+    json answer;
+    std::vector<std::string> methods;
+};
+
+class ScopedLayoutProject {
+public:
+    explicit ScopedLayoutProject(const std::string& project_godot)
+        : original(std::filesystem::current_path()),
+          root(std::filesystem::temp_directory_path() / "didi-audio-layout-obstacles") {
+        clear();
+        std::filesystem::create_directories(root);
+        std::filesystem::current_path(root);
+        std::ofstream("project.godot") << project_godot;
+    }
+    ~ScopedLayoutProject() {
+        std::error_code error;
+        std::filesystem::current_path(original, error);
+        clear();
+    }
+
+private:
+    void clear() {
+        std::error_code error;
+        // A read-only file cannot be removed on Windows until it is writable.
+        for (const auto& entry : std::filesystem::recursive_directory_iterator(root, error)) {
+            std::filesystem::permissions(entry.path(), std::filesystem::perms::owner_write,
+                                         std::filesystem::perm_options::add, error);
+        }
+        std::filesystem::remove_all(root, error);
+    }
+    std::filesystem::path original;
+    std::filesystem::path root;
+};
+
+json payloadOfCall(const char* tool, const json& arguments) {
+    const auto result = didi::mcp::ToolRegistry::instance().callTool(tool, arguments);
+    return json::parse(textOf(result));
+}
+
+// What keeps the editor's own write from arriving, found by vibe session
+// nineteen on 4.7.2. A read-only layout file: the editor printed "Safe save
+// failed", and audio_add_bus waited two seconds and said the editor writes the
+// layout "on its own schedule", while audio_configure_bus said the change
+// reaches the project on disk. And a setting moved underneath the editor, which
+// keeps writing the file it opened: the tool read the file the setting named,
+// reported layout_written: false for a bus the editor had written, and named
+// the wrong file as layout_path.
+void layout_write_obstacles() {
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    auto editor = std::make_shared<ScriptedEditor>();
+    registry.setIpcClient(editor);
+
+    {
+        // The setting names a file the editor did not open. The bridge reports
+        // the one it did, and that is the file read back.
+        ScopedLayoutProject project(
+            "config_version=5\n\n[audio]\n\nbuses/default_bus_layout=\"res://moved.tres\"\n");
+        std::ofstream("opened.tres") << "[gd_resource type=\"AudioBusLayout\" format=3]\n\n"
+                                        "[resource]\nbus/1/name = &\"Music\"\n";
+        editor->answer = {{"status", "success"}, {"bus", 1}, {"name", "Music"},
+                          {"layout_path", "res://opened.tres"},
+                          {"project_layout_path", "res://moved.tres"},
+                          {"persisted_by_editor", true}};
+        const auto added = payloadOfCall("audio_add_bus", {{"name", "Music"}});
+        ASSERT_EQ(added["layout_written"], json(true));
+        ASSERT_EQ(added["layout_path"], json("res://opened.tres"));
+        ASSERT_TRUE(!added.contains("layout_read_only"));
+    }
+    {
+        ScopedLayoutProject project("config_version=5\n");
+        std::ofstream("default_bus_layout.tres") << "[gd_resource type=\"AudioBusLayout\" format=3]\n\n"
+                                                    "[resource]\n";
+        // Every write bit: on Windows the file is read-only only when none is left.
+        std::filesystem::permissions("default_bus_layout.tres",
+                                     std::filesystem::perms::owner_write | std::filesystem::perms::group_write |
+                                         std::filesystem::perms::others_write,
+                                     std::filesystem::perm_options::remove);
+        editor->answer = {{"status", "success"}, {"bus", 1}, {"name", "Music"},
+                          {"layout_path", "res://default_bus_layout.tres"},
+                          {"persisted_by_editor", true}};
+        const auto started = std::chrono::steady_clock::now();
+        const auto added = payloadOfCall("audio_add_bus", {{"name", "Music"}});
+        ASSERT_EQ(added["layout_written"], json(false));
+        ASSERT_EQ(added["layout_read_only"], json(true));
+        ASSERT_TRUE(added["layout_note"].get<std::string>().find("read-only") != std::string::npos);
+        ASSERT_TRUE(added["layout_note"].get<std::string>().find("own schedule") == std::string::npos);
+#ifdef _WIN32
+        // A save that has already failed is not waited on.
+        ASSERT_TRUE(std::chrono::steady_clock::now() - started < std::chrono::seconds(2));
+#endif
+        (void)started;
+
+        editor->answer = {{"status", "success"}, {"bus", 1}, {"persisted_by_editor", true},
+                          {"layout_path", "res://default_bus_layout.tres"},
+                          {"limitation", "reaches the project on disk anyway"}};
+        const auto configured = payloadOfCall("audio_configure_bus", {{"bus", "Music"}, {"mute", true}});
+        ASSERT_EQ(configured["layout_read_only"], json(true));
+#ifdef _WIN32
+        ASSERT_EQ(configured["persisted_by_editor"], json(false));
+        ASSERT_TRUE(configured["limitation"].get<std::string>().find("read-only") != std::string::npos);
+#endif
+    }
+    registry.setIpcClient(nullptr);
+}
+
+// The layout in a named file, read whatever project.godot names.
+void layout_read_from_a_named_file() {
+    ScopedLayoutProject project(
+        "config_version=5\n\n[audio]\n\nbuses/default_bus_layout=\"res://named.tres\"\n");
+    std::ofstream("other.tres") << "[gd_resource type=\"AudioBusLayout\" format=3]\n\n"
+                                   "[resource]\nbus/1/name = &\"Other\"\n";
+    const auto named = didi::offline::readAudioBusLayout(".");
+    ASSERT_TRUE(named.isOk());
+    ASSERT_EQ(named.value()["layout_path"], json("res://named.tres"));
+    ASSERT_EQ(named.value()["layout_present"], json(false));
+    const auto other = didi::offline::readAudioBusLayoutFile(".", "res://other.tres");
+    ASSERT_TRUE(other.isOk());
+    ASSERT_EQ(other.value()["layout_path"], json("res://other.tres"));
+    ASSERT_EQ(other.value()["buses"][1]["name"], json("Other"));
+}
+
 struct Register {
     Register() {
+        registerTest("AudioAddBus.LayoutWriteObstacles", layout_write_obstacles);
+        registerTest("AudioAddBus.LayoutReadFromANamedFile", layout_read_from_a_named_file);
         registerTest("AudioAddBus.RequestValidation", request_validation);
         registerTest("AudioAddBus.NamesAsAPersonSeesThem", names_as_a_person_sees_them);
         registerTest("AudioAddBus.NameChangedByTheEngine", name_changed_by_the_engine);
