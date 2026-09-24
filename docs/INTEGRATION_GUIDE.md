@@ -28,6 +28,7 @@ This guide walks through configuring Didi with popular AI coding assistants and 
    │       ├── didi_await.gd
    │       ├── didi_client_config.gd
    │       ├── didi_diagnostics.gd
+   │       ├── didi_import_watch.gd
    │       ├── didi_log.gd
    │       ├── didi_session.gd
    │       ├── didi_settings.gd

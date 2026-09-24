@@ -3550,6 +3550,152 @@ bool GodotBridge::assetImportSettled(const std::string& resource_path) {
     return assetIsImported(resource_path);
 }
 
+namespace {
+
+// The addon's count of the editor's import passes, made once in an editor
+// session and kept for its life. Main thread only, like every caller.
+std::optional<VariantValue> g_import_watch;
+bool g_import_watch_tried = false;
+// Didi's own reimport_files is on the stack. The frames the editor runs inside
+// that call belong to a pass Didi started, and nothing may be answered from
+// them either.
+int g_reimport_call_depth = 0;
+
+constexpr const char* kImportWatchPath = "res://addons/didi/didi_import_watch.gd";
+
+struct ReimportCallScope {
+    ReimportCallScope() { ++g_reimport_call_depth; }
+    ~ReimportCallScope() { --g_reimport_call_depth; }
+    ReimportCallScope(const ReimportCallScope&) = delete;
+    ReimportCallScope& operator=(const ReimportCallScope&) = delete;
+};
+
+// Whether EditorFileSystem.is_importing exists on this engine, asked once. It
+// binds from 4.7, and a bind lookup that answers null prints an ERROR (#600),
+// so ClassDB.class_has_method is asked first. The bind is 36873697 on 4.7.2.
+bool importingBindAvailable() {
+    static std::optional<bool> cached;
+    if (cached.has_value()) return *cached;
+    auto class_db = singleton("ClassDB");
+    if (class_db.isErr()) return false;
+    auto class_name = makeStringName("EditorFileSystem");
+    auto method_name = makeStringName("is_importing");
+    auto no_inheritance = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(0));
+    if (class_name.isErr() || method_name.isErr() || no_inheritance.isErr()) return false;
+    auto answer = callObject(class_db.value(), "ClassDB", "class_has_method", 3860701026LL,
+                             {&class_name.value(), &method_name.value(), &no_inheritance.value()});
+    if (answer.isErr()) return false;
+    auto declared = scalarFromVariant<GDExtensionBool>(answer.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+    if (declared.isErr()) return false;
+    const bool available = declared.value() != 0 &&
+                           requireMethodBind("EditorFileSystem", "is_importing", 36873697LL).isOk();
+    cached = available;
+    return available;
+}
+
+std::optional<int64_t> importWatchCount(const char* property) {
+    if (!g_import_watch.has_value()) return std::nullopt;
+    auto object = objectFromVariant(*g_import_watch);
+    if (object.isErr() || !object.value()) return std::nullopt;
+    auto name = makeStringName(property);
+    if (name.isErr()) return std::nullopt;
+    auto value = callObject(object.value(), "Object", "get", 2760726917LL, {&name.value()});
+    if (value.isErr()) return std::nullopt;
+    auto count = scalarFromVariant<int64_t>(value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+    if (count.isErr()) return std::nullopt;
+    return count.value();
+}
+
+// Makes the watch the first time it is wanted. A project whose copy of the
+// addon predates the file gets one warning, and keeps the parts the engine can
+// supply without it.
+void ensureImportWatch(VariantValue& filesystem) {
+    if (g_import_watch_tried) return;
+    g_import_watch_tried = true;
+    const auto unavailable = [](const std::string& why) {
+        DIDI_LOG_WARN("GODOT_BRIDGE", "asset_reimport cannot see the editor's own import pass, so "
+                      "it can answer from inside one (#914): ", why);
+    };
+    auto loader = singleton("ResourceLoader");
+    auto path = makeString(kImportWatchPath);
+    auto type_hint = makeString("");
+    auto cache_mode = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(1));
+    if (loader.isErr() || path.isErr() || type_hint.isErr() || cache_mode.isErr()) {
+        return unavailable("ResourceLoader is unavailable.");
+    }
+    // Asked before loading, because loading a file that is not there prints an
+    // ERROR. ResourceLoader.exists is 4185558881 on 4.5.1, 4.6.2 and 4.7.2.
+    auto exists = callObject(loader.value(), "ResourceLoader", "exists", 4185558881LL,
+                             {&path.value(), &type_hint.value()});
+    auto found = exists.isOk() ? scalarFromVariant<GDExtensionBool>(exists.value(), GDEXTENSION_VARIANT_TYPE_BOOL)
+                               : Result<GDExtensionBool>(exists.error());
+    if (found.isErr() || found.value() == 0) {
+        return unavailable(std::string("this project's copy of the addon has no ") + kImportWatchPath +
+                           ". Copy the built addon folder in again.");
+    }
+    auto script = callObject(loader.value(), "ResourceLoader", "load", 3358495409LL,
+                             {&path.value(), &type_hint.value(), &cache_mode.value()});
+    auto script_object = script.isOk() ? objectFromVariant(script.value())
+                                       : Result<GDExtensionObjectPtr>(script.error());
+    if (script_object.isErr() || !script_object.value()) {
+        return unavailable(std::string(kImportWatchPath) + " did not load.");
+    }
+    json empty = json::array();
+    auto no_arguments = makeJsonVariant(empty);
+    auto new_name = makeStringName("new");
+    if (no_arguments.isErr() || new_name.isErr()) return unavailable("the watch could not be made.");
+    auto watcher = callObject(script_object.value(), "Object", "callv", 1260104456LL,
+                              {&new_name.value(), &no_arguments.value()});
+    auto watcher_object = watcher.isOk() ? objectFromVariant(watcher.value())
+                                         : Result<GDExtensionObjectPtr>(watcher.error());
+    if (watcher_object.isErr() || !watcher_object.value()) {
+        return unavailable("the watch could not be made.");
+    }
+    json watch_arguments = json::array();
+    auto watch_array = makeJsonVariant(watch_arguments);
+    auto watch_name = makeStringName("watch");
+    if (watch_array.isErr() || watch_name.isErr() ||
+        callVariant(watch_array.value(), "append", {&filesystem}).isErr() ||
+        callObject(watcher_object.value(), "Object", "callv", 1260104456LL,
+                   {&watch_name.value(), &watch_array.value()}).isErr()) {
+        return unavailable("the watch could not connect to EditorFileSystem.");
+    }
+    g_import_watch = std::move(watcher.value());
+    DIDI_LOG_INFO("GODOT_BRIDGE", "Watching the editor's import passes through ", kImportWatchPath);
+}
+
+} // namespace
+
+ImportPassObservation GodotBridge::observeEditorImportPass() {
+    ImportPassObservation seen;
+    seen.inside_own_call = g_reimport_call_depth > 0;
+    auto editor = editorInterface();
+    if (editor.isErr()) return seen;
+    auto filesystem = callObject(editor.value(), "EditorInterface", "get_resource_filesystem", 780151678LL);
+    if (filesystem.isErr()) return seen;
+    auto object = objectFromVariant(filesystem.value());
+    if (object.isErr() || !object.value()) return seen;
+    ensureImportWatch(filesystem.value());
+    seen.started = importWatchCount("started");
+    seen.finished = importWatchCount("finished");
+    if (importingBindAvailable()) {
+        auto importing = callObject(object.value(), "EditorFileSystem", "is_importing", 36873697LL);
+        if (importing.isOk()) {
+            auto flag = scalarFromVariant<GDExtensionBool>(importing.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+            if (flag.isOk()) seen.importing = flag.value() != 0;
+        }
+    }
+    return seen;
+}
+
+void GodotBridge::releaseImportWatch() {
+    // While the engine still runs: a RefCounted the extension holds at exit is
+    // reported as an ObjectDB leak, and a Variant destroyed after the engine
+    // has gone calls into nothing. Nothing makes it again once released.
+    g_import_watch_tried = true;
+    g_import_watch.reset();
+}
+
 Result<void> GodotBridge::startAssetReimport(const ReimportBatch& batch) {
     auto editor = editorInterface();
     if (editor.isErr()) return editor.error();
@@ -3583,9 +3729,29 @@ Result<void> GodotBridge::startAssetReimport(const ReimportBatch& batch) {
     json path_array = batch.reimported;
     auto godot_paths = makeJsonVariant(path_array);
     if (godot_paths.isErr()) return godot_paths.error();
-    auto started = callObject(object.value(), "EditorFileSystem", "reimport_files", 4015028928LL,
-                              {&godot_paths.value()});
-    if (started.isErr()) return started.error();
+    ensureImportWatch(filesystem.value());
+    const auto passes_before = importWatchCount("started");
+    {
+        ReimportCallScope inside_own_call;
+        auto started = callObject(object.value(), "EditorFileSystem", "reimport_files", 4015028928LL,
+                                  {&godot_paths.value()});
+        if (started.isErr()) return started.error();
+    }
+    // reimport_files refuses to start inside the editor's own pass while its
+    // importing flag is set, prints an ERROR and returns nothing, and the
+    // refused call emits no resources_reimporting of its own. On 4.5 and 4.6,
+    // which bind no is_importing, that silence is the only way to know. It
+    // used to reach the caller as reimported and idle.
+    const auto passes_after = importWatchCount("started");
+    if (passes_before.has_value() && passes_after.has_value() && *passes_after == *passes_before) {
+        return Error(409,
+                     "The editor was in the middle of its own import pass and Godot refused to "
+                     "start another inside it, so nothing was reimported. Retry once the editor "
+                     "is idle; the engine's own line is under engine_diagnostics.",
+                     json{{"code", "editor_import_busy"},
+                          {"outcome", "not_imported"},
+                          {"retryable", true}});
+    }
     return Result<void>::ok();
 }
 

@@ -53,6 +53,9 @@ public:
         return std::chrono::duration_cast<std::chrono::milliseconds>(now - m_startedAt).count();
     }
 
+    // The deadline alone, for a frame that may not observe idle.
+    bool expired(std::chrono::steady_clock::time_point now) const { return now >= m_deadline; }
+
 private:
     std::chrono::steady_clock::time_point m_startedAt;
     std::chrono::steady_clock::time_point m_deadline;
@@ -199,6 +202,9 @@ private:
     json executeOnMainThread(const std::string& method, const json& params);
     void processRuntimeStepFrame();
     void processAssetReimportFrame();
+    // Whether this frame is inside an import pass, the editor's or Didi's own.
+    // See ImportPassObservation.
+    bool editorImportPassOpen();
     // Runs a scene_call_method, and parks it when the method is a coroutine.
     // Returns false when the request is not one of these, so the caller runs
     // the ordinary synchronous path.
@@ -339,6 +345,8 @@ private:
     // Main-thread only. Set while processQueue is dequeuing, so a nested pump
     // triggered from inside a command observes progress without starting work.
     bool m_pumping{false};
+    // Test seam for editorImportPassOpen, which otherwise asks the engine.
+    std::optional<bool> m_importPassOverride;
     std::optional<int64_t> m_pendingQuitExitCode;
     int m_pendingQuitFrames{0};
 
@@ -362,6 +370,7 @@ public:
     static bool hasPendingProfilerRead(EditorHook& hook);
     static bool pumping(const EditorHook& hook);
     static void setPumping(EditorHook& hook, bool pumping);
+    static void setImportPassOpen(EditorHook& hook, std::optional<bool> open);
     static bool hasPendingQuit(const EditorHook& hook);
 };
 

@@ -156,7 +156,13 @@ void EditorHook::processQueue() {
     // progress and nothing else: dequeuing there would run unrelated scene and
     // runtime commands against a tree that is mid-reimport, or one with
     // unrelated nodes hidden for an isolated viewport capture.
-    if (m_pumping) {
+    //
+    // The editor's own import pass re-enters it the same way, from a pass Didi
+    // did not start (#914). Dequeuing there started a second reimport inside
+    // the editor's, which opened a second "reimport" progress task and left the
+    // engine printing three errors, so a frame inside any import pass is
+    // treated as a nested one.
+    if (m_pumping || editorImportPassOpen()) {
         processRuntimeStepFrame();
         processAssetReimportFrame();
         processProfilerFrame();
@@ -974,9 +980,9 @@ void EditorHook::scheduleAssetReimport(
     if (started.isErr()) {
         m_pendingAssetReimport.reset();
         control->markCompleted();
-        fulfillCommand(promise, control,
-                       {{"error", {{"code", started.error().code},
-                                    {"message", started.error().message}}}});
+        json error = {{"code", started.error().code}, {"message", started.error().message}};
+        if (!started.error().data.is_null()) error["data"] = started.error().data;
+        fulfillCommand(promise, control, {{"error", std::move(error)}});
         return;
     }
     DIDI_LOG_INFO("EDITOR_HOOK", "Started bounded asset reimport for ",
@@ -1183,6 +1189,13 @@ void EditorHook::processScriptCallFrame() {
     fulfillCommand(ready->response_promise, ready->control, std::move(response));
 }
 
+bool EditorHook::editorImportPassOpen() {
+    if (m_importPassOverride.has_value()) return *m_importPassOverride;
+    // A game has no EditorFileSystem and runs no import pass.
+    if (m_sessionKind != runtime::SessionKind::editor) return false;
+    return importPassOpen(GodotBridge::instance().observeEditorImportPass());
+}
+
 void EditorHook::processAssetReimportFrame() {
     std::optional<PendingAssetReimport> completed;
     json response;
@@ -1194,13 +1207,31 @@ void EditorHook::processAssetReimportFrame() {
     }
     const auto now = std::chrono::steady_clock::now();
     auto scanning = GodotBridge::instance().isEditorFilesystemScanning();
+    // Nothing is answered from inside an import pass, the editor's or Didi's
+    // own (#914). The scanning flag and the sidecars both settle while the
+    // pass still has its last progress task open and has not yet emitted
+    // resources_reimported, which is what reloads the resources a caller reads
+    // next, and a caller that is answered then sends its next request into the
+    // pass. The deadline still applies: a timeout claims nothing about the work.
+    const bool inside_pass = editorImportPassOpen();
     {
         std::lock_guard<std::recursive_mutex> lock(m_reimportMutex);
         if (!m_pendingAssetReimport.has_value() ||
             m_pendingAssetReimport->control != observed_control) {
             return;
         }
-        if (scanning.isErr()) {
+        if (inside_pass) {
+            if (!m_pendingAssetReimport->progress.expired(now)) return;
+            completed = std::move(m_pendingAssetReimport);
+            m_pendingAssetReimport.reset();
+            response = {{"error", {{"code", 504},
+                                    {"message", "Asset reimport did not finish before timeout: the "
+                                                "editor was still inside an import pass"},
+                                    {"data", {{"code", "reimport_idle_timeout"},
+                                               {"outcome", "unknown_outcome"},
+                                               {"editor_import_pass_open", true},
+                                               {"route_quarantine", false}}}}}};
+        } else if (scanning.isErr()) {
             completed = std::move(m_pendingAssetReimport);
             m_pendingAssetReimport.reset();
             response = {{"error", {{"code", scanning.error().code},
@@ -1810,6 +1841,10 @@ bool EditorHookTestAccess::pumping(const EditorHook& hook) {
 
 void EditorHookTestAccess::setPumping(EditorHook& hook, bool pumping) {
     hook.m_pumping = pumping;
+}
+
+void EditorHookTestAccess::setImportPassOpen(EditorHook& hook, std::optional<bool> open) {
+    hook.m_importPassOverride = open;
 }
 
 bool EditorHookTestAccess::hasPendingQuit(const EditorHook& hook) {

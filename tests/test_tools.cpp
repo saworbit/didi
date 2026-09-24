@@ -5499,8 +5499,81 @@ static void test_reimport_progress_requires_two_idle_frames_and_times_out() {
               didi::godot::ReimportProgressState::Idle);
 
     didi::godot::ReimportProgress timeout(start, std::chrono::milliseconds(100));
+    ASSERT_TRUE(!timeout.expired(start + std::chrono::milliseconds(99)));
+    ASSERT_TRUE(timeout.expired(start + std::chrono::milliseconds(100)));
     ASSERT_EQ(timeout.observe(true, start + std::chrono::milliseconds(100)),
               didi::godot::ReimportProgressState::TimedOut);
+}
+
+static void test_an_import_pass_is_open_from_one_signal_to_the_other() {
+    // Break caught: the tail of the editor's own import pass, after
+    // is_importing() has cleared and before resources_reimported, read as
+    // idle, so a reimport was answered and the next one started inside it (#914).
+    using didi::godot::ImportPassObservation;
+    using didi::godot::importPassOpen;
+    ASSERT_TRUE(!importPassOpen(ImportPassObservation{}));
+
+    ImportPassObservation idle;
+    idle.started = 3;
+    idle.finished = 3;
+    idle.importing = false;
+    ASSERT_TRUE(!importPassOpen(idle));
+
+    ImportPassObservation tail = idle;
+    tail.started = 4;
+    ASSERT_TRUE(importPassOpen(tail));
+    tail.importing.reset();  // 4.5 and 4.6 bind no is_importing
+    ASSERT_TRUE(importPassOpen(tail));
+
+    // The frames before resources_reimporting, which only the 4.7 flag sees.
+    ImportPassObservation before_signal = idle;
+    before_signal.importing = true;
+    ASSERT_TRUE(importPassOpen(before_signal));
+
+    // A watch made after resources_reimporting fired sees finished ahead.
+    ImportPassObservation watched_mid_pass;
+    watched_mid_pass.started = 0;
+    watched_mid_pass.finished = 1;
+    ASSERT_TRUE(!importPassOpen(watched_mid_pass));
+
+    // A project whose copy of the addon has no didi_import_watch.gd.
+    ImportPassObservation no_watch;
+    no_watch.importing = false;
+    ASSERT_TRUE(!importPassOpen(no_watch));
+    no_watch.started = 5;
+    ASSERT_TRUE(!importPassOpen(no_watch));
+
+    ImportPassObservation own_call;
+    own_call.inside_own_call = true;
+    ASSERT_TRUE(importPassOpen(own_call));
+}
+
+static void test_nothing_is_dequeued_inside_an_import_pass() {
+    // Break caught: the editor's own import pass re-enters the main-loop
+    // callback, and a command queued for Didi runs inside it (#914).
+    auto& hook = didi::godot::EditorHook::instance();
+    hook.cancelPendingCommands("test reset");
+    didi::godot::EditorHookTestAccess::setSessionKind(hook, didi::runtime::SessionKind::editor);
+    didi::godot::EditorHookTestAccess::setImportPassOpen(hook, true);
+    // Game-only, so once dequeued it answers from the session policy and
+    // touches no engine.
+    auto queued = didi::godot::EditorHookTestAccess::enqueue(hook, "runtime.injectInput");
+    hook.processQueue();
+    hook.processQueue();
+    const bool held = didi::godot::EditorHookTestAccess::queueDepth(hook) == 1u &&
+                      !queued.control->hasEverStarted() &&
+                      queued.response.wait_for(std::chrono::seconds(0)) != std::future_status::ready;
+    didi::godot::EditorHookTestAccess::setImportPassOpen(hook, false);
+    hook.processQueue();
+    const bool answered =
+        queued.response.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
+    const auto answer = answered ? queued.response.get() : didi::json();
+    didi::godot::EditorHookTestAccess::setImportPassOpen(hook, std::nullopt);
+    didi::godot::EditorHookTestAccess::setSessionKind(hook, std::nullopt);
+    hook.cancelPendingCommands("test reset");
+    ASSERT_TRUE(held);
+    ASSERT_TRUE(answered);
+    ASSERT_EQ(answer["error"]["data"]["code"], "session_kind_rejected");
 }
 
 static void test_a_write_is_applied_when_every_member_landed() {
@@ -8528,6 +8601,10 @@ struct RegisterToolTests {
         registerTest("Tools.AssetReimportPublicValidationAndSchema", test_asset_reimport_public_validation_and_schema);
         registerTest("Tools.ViewportDiffPublicValidationAndSchema", test_viewport_diff_public_validation_and_schema);
         registerTest("EditorHook.ReimportProgress", test_reimport_progress_requires_two_idle_frames_and_times_out);
+        registerTest("EditorHook.ImportPassIsOpenFromOneSignalToTheOther",
+                     test_an_import_pass_is_open_from_one_signal_to_the_other);
+        registerTest("EditorHook.NothingIsDequeuedInsideAnImportPass",
+                     test_nothing_is_dequeued_inside_an_import_pass);
         registerTest("Tools.ShaderWriteAppliedComparesMembers",
                      test_a_write_is_applied_when_every_member_landed);
         registerTest("Tools.WriteThatDidNotLandSaysWhichOfTheTwo",
