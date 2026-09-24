@@ -11,7 +11,10 @@
 #include "didi/common/atomic_write.hpp"
 #include "didi/common/engine_version.hpp"
 #include "didi/runtime/session_client.hpp"
+#include "didi/runtime/audio_requests.hpp"
+#include <chrono>
 #include <optional>
+#include <thread>
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -1335,6 +1338,56 @@ CallToolResult handleAudioConfigureBus(const json& args, std::shared_ptr<ipc::II
         return CallToolResult::error("Failed to configure the audio bus: " + response.error().message);
     }
     return CallToolResult::successJson(response.value());
+}
+
+CallToolResult handleAudioAddBus(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    // The rules the bridge applies, checked before anything is sent, so a name
+    // is refused in the same words whether or not an editor ever sees it.
+    auto parsed = runtime::parseAudioAddBusRequest(args);
+    if (parsed.isErr()) return CallToolResult::fromError(parsed.error());
+    if (!ipc || !ipc->isConnected()) {
+        // Unreachable in practice, as for audio_configure_bus: the registry's
+        // live-route check answers first and names audio_list_buses.
+        return CallToolResult::error(
+            "Godot Editor is offline. A bus is added to the layout the editor holds, which the "
+            "editor then writes to the project, so open the project in the editor to add one. "
+            "audio_list_buses still reads the project layout offline.");
+    }
+    auto response = ipc->sendRequest("audio.addBus", args, ipc::kWaitForDefinitiveResponse);
+    if (response.isErr()) return CallToolResult::fromError(response.error(), "Failed to add the audio bus: ");
+    auto payload = response.value();
+
+    // "Persisted by the editor" is a claim about a file this process can read,
+    // so it is read rather than repeated. The editor's autosave wrote the
+    // layout 0.8 to 0.9 s after a bus was added on 4.5.1, 4.6.2 and 4.7.2, to
+    // the path the project names. A match needs the name at the index the bus
+    // was given, so a stale file that already names the bus elsewhere does not
+    // count as the write.
+    const auto name = payload.value("name", std::string());
+    const auto index = payload.value("bus", int64_t{-1});
+    bool written = false;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (true) {
+        auto layout = offline::readAudioBusLayout(".");
+        if (layout.isOk() && layout.value().value("layout_loads", false)) {
+            for (const auto& bus : layout.value().value("buses", json::array())) {
+                if (bus.value("index", int64_t{-2}) == index && bus.value("name", std::string()) == name) {
+                    written = true;
+                }
+            }
+        }
+        if (written || std::chrono::steady_clock::now() >= deadline) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    payload["layout_written"] = written;
+    if (!written) {
+        payload["layout_note"] =
+            "The editor had not written this bus to " +
+            payload.value("layout_path", std::string("the project's bus layout")) +
+            " within two seconds. The bus is in the running editor either way, and the editor "
+            "writes the layout on its own schedule rather than on editor_save_scene.";
+    }
+    return CallToolResult::successJson(std::move(payload));
 }
 
 CallToolResult handleAudioListBuses(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {

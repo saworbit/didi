@@ -41,16 +41,35 @@ release changed, which is why it lives here and not in a version section.
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `115/118`
+**Canonical implementation:** `116/119`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Discovery now exposes 118 canonical tools plus 10 legacy registrations (128 total). 115 canonical tools are implemented and 3 remain unimplemented.
-The three Phase 7 blockers are unchanged; the newest name is `project_add_export_preset`, recorded in [Surface Amendments](docs/SURFACE_AMENDMENTS.md).
+Discovery now exposes 119 canonical tools plus 10 legacy registrations (129 total). 116 canonical tools are implemented and 3 remain unimplemented.
+The three Phase 7 blockers are unchanged; the newest name is `audio_add_bus`, recorded in [Surface Amendments](docs/SURFACE_AMENDMENTS.md).
 
 ### Added
 
+- **`audio_add_bus` gives a game its Music and SFX buses (#771).** Nothing
+  on the surface could add a bus, so `audio_configure_bus` could only ever
+  configure `Master`, and setting a player's `bus` to `Music` answered
+  `applied: false` because the engine reads a bus that does not exist back as
+  `Master`. The new tool appends one bus to the layout the attached editor
+  holds, names it and routes it, and the editor writes the project's layout
+  file itself a moment later; the tool waits up to two seconds, reads the
+  file back, and reports `layout_written`. Godot's `AudioServer` never
+  refuses a name or a send, so the tool refuses what the engine would
+  otherwise change without a word: a name in use (Godot would make it
+  `Music 2`), one differing only in letter case, a send to no bus or to
+  itself (Godot would route it to Master), an empty name, spaces at either
+  end and control characters. On 4.5.1 and 4.6.2 the editor's Audio panel
+  does not follow a rename, so the new bus's strip said `New Bus`, and one
+  click into it renamed the bus back; the tool has the panel rebuild once the
+  bus is named. Editor sessions only, a dry run that asks the editor, and no
+  undo entry: the way back is the Audio panel. Recorded in
+  [Surface Amendments](docs/SURFACE_AMENDMENTS.md), with the engine probe
+  behind every rule in `tools/vibe/probes/audio_bus_engine.py`.
 - **`project_add_export_preset` makes a game shippable through the surface
   (#779).** `project_export` needs an export preset, and nothing on the
   surface could write one, so on a project nobody had exported by hand it
@@ -133,6 +152,20 @@ The three Phase 7 blockers are unchanged; the newest name is `project_add_export
   use it on the draft.
 
 ### Fixed
+
+- **The bus layout setting was followed only when it was a `res://` path.**
+  Godot 4.6.2 and 4.7.2 hold `audio/buses/default_bus_layout` as a `uid://`
+  once the layout file exists, and the next save of the project settings
+  writes it to `project.godot` that way; 4.5.1 keeps the path. The live
+  harness met it on 4.7.2 after its own project-setting requests.
+  `audio_list_buses` read any other value as the default path, which is the
+  wrong file for a project that moved its layout, and now follows the uid to
+  the resource that carries it, or answers Master alone for a uid no file
+  carries, which is what the engine does.
+  `audio_configure_bus` named `res://default_bus_layout.tres` as the file its
+  change would reach whatever the project said (#935); `layout_path` and its
+  `limitation` now name the file the project names, with a uid resolved
+  through the editor.
 
 - **A bus name with a quote, a backslash or a control character came back
   with Godot's escapes still in it (#934).** The engine keeps any bus name

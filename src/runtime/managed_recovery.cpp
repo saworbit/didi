@@ -66,6 +66,10 @@ bool scenePersistence(const std::string& name) {
                                                        "anim_add_library"};
     return names.count(name) != 0;
 }
+// audio_add_bus is not here although audio_configure_bus is. Both change bus
+// state the editor writes to the layout file on its own schedule, but
+// audio_add_bus waits for that write before it answers, so the checkpoint taken
+// after it already holds the bus.
 bool memoryOnly(const std::string& name) {
     return name == "shader_set_uniform" || name == "audio_configure_bus" || name == "signal_emit" ||
            name == "viewport_toggle_debug_draw";

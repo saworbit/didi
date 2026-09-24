@@ -62,6 +62,10 @@ const std::unordered_set<std::string_view> kMutations = {
     // replaced, because bus state is not in the edited scene and the editor
     // undo stack does not carry it.
     "audio_configure_bus",
+    // Adds a bus and destroys nothing: a name in use is refused rather than
+    // replaced, and the way back is the Audio panel. A dry run and no
+    // confirmation token (#771).
+    "audio_add_bus",
     // The board is shared state between agents. A write is reversible and
     // idempotent for the same arguments, so it gets a dry run and no token.
     "blackboard_write", "blackboard_patch", "blackboard_clear",
@@ -172,7 +176,10 @@ const std::unordered_set<std::string_view> kAdditiveOnly = {
     "anim_add_library",
     // Appends one preset, keeps every byte already in the file, and refuses a
     // name that is there.
-    "project_add_export_preset"
+    "project_add_export_preset",
+    // Appends one bus and refuses a name in use, so it cannot replace one. Not
+    // idempotent either: the second identical call is that refusal.
+    "audio_add_bus"
 };
 
 // Writers that land in the same state when the same call is made twice. This is

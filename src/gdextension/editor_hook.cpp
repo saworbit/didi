@@ -1579,6 +1579,9 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
         "scene.getGroupMembers", "scene.create", "scene.open", "scene.close",
         "scene.packBranch", "runtime.getTree", "runtime.setPaused", "runtime.stop",
         "runtime.evalGdscript", "ui.hitTest", "ui.listControls", "audio.listBuses", "audio.configureBus",
+        // Editor only, by not being in game_admitted below: a bus added to a
+        // running game is in no file and gone when the game stops (#771).
+        "audio.addBus",
         // Admission is deliberately separate from the failure-injection seams.
         // One macro previously controlled both, so the feature could not be
         // admitted to production without also compiling test seams into a

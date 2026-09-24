@@ -16,6 +16,7 @@
 #include "didi/runtime/spatial_queries.hpp"
 #include "didi/runtime/segmentation.hpp"
 #include "didi/runtime/animation_requests.hpp"
+#include "didi/runtime/audio_requests.hpp"
 #include <array>
 #include <algorithm>
 #include <cctype>
@@ -2349,6 +2350,21 @@ Result<std::string> dependencyResourcePath(const std::string& entry) {
         if (strings::startsWith(part, "res://")) return part;
     }
     return std::string();
+}
+
+// The res:// file the editor saves the bus layout to, from the value of
+// audio/buses/default_bus_layout. 4.6.2 and 4.7.2 hold that setting as a uid
+// once the file exists, and write it to project.godot that way on the next
+// ProjectSettings.save(); 4.5.1 keeps the path. Measured by
+// tools/vibe/probes/audio_bus_engine.py. A uid the engine cannot resolve is
+// returned as it is, because it names no file.
+std::string busLayoutPathFrom(const std::optional<std::string>& setting) {
+    const std::string value = setting.value_or("res://default_bus_layout.tres");
+    if (strings::startsWith(value, "uid://")) {
+        auto resolved = dependencyResourcePath(value);
+        if (resolved.isOk() && !resolved.value().empty()) return resolved.value();
+    }
+    return value;
 }
 
 // Whether a PackedScene file is there to read. ResourceLoader.get_dependencies
@@ -10807,6 +10823,11 @@ json GodotBridge::execute(const std::string& method, const json& params,
         // and present in the copy after a run whose only bus calls are this
         // tool's.
         const bool editor_session = session_kind == "editor";
+        // The file the editor writes, which is the one the project names. A
+        // literal res://default_bus_layout.tres named a file that is never
+        // written in a project that moved its layout (#935).
+        const auto layout_path =
+            busLayoutPathFrom(projectSettingString("audio/buses/default_bus_layout"));
         return liveResult(
             {{"status", "success"},
              {"bus", index},
@@ -10815,17 +10836,305 @@ json GodotBridge::execute(const std::string& method, const json& params,
              {"after", after.value()},
              {"undo_redo_registered", false},
              {"persisted_by_editor", editor_session},
-             {"layout_path", "res://default_bus_layout.tres"},
+             {"layout_path", layout_path},
              {"limitation",
               editor_session
                   ? "This sets the running engine's audio bus state. This tool writes no "
                     "file, but the editor's own bus-layout autosave picks the change up and "
-                    "writes res://default_bus_layout.tres shortly afterwards, so it reaches "
+                    "writes " + layout_path + " shortly afterwards, so it reaches "
                     "the project on disk anyway. revert_with restores the previous values."
                   : "This sets the running game's audio bus state and nothing writes it "
                     "down. It is gone when the process exits, and the project's bus layout "
                     "on disk is unchanged. revert_with restores the previous values."},
              {"revert_with", before.value()}});
+    }
+
+    if (method == "audio.addBus") {
+        // One bus appended to the layout the editor holds, named, routed, and
+        // left for the editor's own bus-layout autosave to write down. Every
+        // fact below was measured on 4.5.1, 4.6.2 and 4.7.2 by
+        // tools/vibe/probes/audio_bus_engine.py, and every hash here is the
+        // same on all three (#771).
+        auto parsed = runtime::parseAudioAddBusRequest(params);
+        if (parsed.isErr()) {
+            return errorJson(parsed.error().code, parsed.error().message, parsed.error().data);
+        }
+        const auto& request = parsed.value();
+        for (const auto& bind : {std::make_tuple("AudioServer", "get_bus_count", 3905245786LL),
+                                 std::make_tuple("AudioServer", "get_bus_name", 844755477LL),
+                                 std::make_tuple("AudioServer", "get_bus_send", 659327637LL),
+                                 std::make_tuple("AudioServer", "add_bus", 1025054187LL),
+                                 std::make_tuple("AudioServer", "remove_bus", 1286410249LL),
+                                 std::make_tuple("AudioServer", "set_bus_name", 501894301LL),
+                                 std::make_tuple("AudioServer", "set_bus_send", 3780747571LL),
+                                 std::make_tuple("Object", "emit_signal", 4047867050LL)}) {
+            if (requireMethodBind(std::get<0>(bind), std::get<1>(bind), std::get<2>(bind)).isErr()) {
+                return bridgeError(501, "required_bind_unavailable");
+            }
+        }
+        auto server = singleton("AudioServer");
+        if (server.isErr()) return errorJson(server.error().code, server.error().message);
+
+        const auto indexVariant = [](int64_t index) {
+            return makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
+        };
+        const auto busCount = [&]() -> Result<int64_t> {
+            auto value = callObject(server.value(), "AudioServer", "get_bus_count", 3905245786LL);
+            if (value.isErr()) return value.error();
+            return scalarFromVariant<int64_t>(value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+        };
+        const auto nameOf = [&](int64_t index) -> Result<std::string> {
+            auto at = indexVariant(index);
+            if (at.isErr()) return at.error();
+            auto value = callObject(server.value(), "AudioServer", "get_bus_name", 844755477LL,
+                                    {&at.value()});
+            if (value.isErr()) return value.error();
+            return stringFromVariant(value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+        };
+        const auto sendOf = [&](int64_t index) -> Result<std::string> {
+            auto at = indexVariant(index);
+            if (at.isErr()) return at.error();
+            auto value = callObject(server.value(), "AudioServer", "get_bus_send", 659327637LL,
+                                    {&at.value()});
+            if (value.isErr()) return value.error();
+            auto send = stringFromVariant(value.value(), GDEXTENSION_VARIANT_TYPE_STRING_NAME);
+            if (send.isErr()) send = stringFromVariant(value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+            return send;
+        };
+        // ASCII only. It is there to catch `music` beside `Music`, which the
+        // engine keeps as two buses and `get_bus_index` tells apart by case.
+        const auto folded = [](std::string text) {
+            for (auto& character : text) {
+                if (character >= 'A' && character <= 'Z') character = static_cast<char>(character - 'A' + 'a');
+            }
+            return text;
+        };
+
+        auto count = busCount();
+        if (count.isErr()) return errorJson(count.error().code, count.error().message);
+        std::vector<std::string> names;
+        std::vector<std::string> sends;
+        for (int64_t index = 0; index < count.value(); ++index) {
+            auto name = nameOf(index);
+            if (name.isErr()) return errorJson(name.error().code, name.error().message);
+            auto send = sendOf(index);
+            if (send.isErr()) return errorJson(send.error().code, send.error().message);
+            names.push_back(name.value());
+            sends.push_back(send.value());
+        }
+
+        // The engine never refuses a name. One already in use comes back as
+        // `Music 2`, and `Master` on another bus as `Master 2`, with nothing
+        // printed, so the name the caller asked for would belong to the other
+        // bus. The check is against the engine, not the layout file, because
+        // the editor holds the layout in memory and writes it when it likes.
+        for (const auto& existing : names) {
+            if (existing == request.name) {
+                return errorJson(409, "A bus named \"" + request.name + "\" already exists. Godot "
+                                      "would name the new one \"" + request.name + " 2\" rather "
+                                      "than refuse, so this is refused instead. "
+                                      "audio_configure_bus changes the bus that is there.",
+                                 {{"code", "bus_name_in_use"}, {"name", request.name},
+                                  {"buses", names}, {"retryable", false}});
+            }
+        }
+        for (const auto& existing : names) {
+            if (folded(existing) == folded(request.name)) {
+                return errorJson(409, "\"" + request.name + "\" differs from the existing bus \"" +
+                                      existing + "\" only in letter case. Godot would keep both, "
+                                      "and nobody can tell them apart in the Audio panel.",
+                                 {{"code", "bus_name_differs_only_in_case"}, {"name", request.name},
+                                  {"existing", existing}, {"buses", names}, {"retryable", false}});
+            }
+        }
+
+        // A send the engine cannot use still reads back as set, and the sound
+        // goes to Master with no message: a later bus, a bus that does not
+        // exist, the bus itself and the empty send all did, measured with a
+        // tone on every bus's peak meter. The new bus goes on the end, so every
+        // bus already there comes before it and is a target that works.
+        if (request.send == request.name) {
+            return errorJson(400, "A bus cannot send to itself. Godot would store the send and "
+                                  "route the bus to Master.",
+                             {{"code", "invalid_arguments"}, {"parameter", "send"},
+                              {"retry_with", {{"send", "Master"}}}, {"retryable", false}});
+        }
+        bool send_found = false;
+        std::optional<std::string> send_meant;
+        for (const auto& existing : names) {
+            if (existing == request.send) send_found = true;
+            else if (!send_meant && folded(existing) == folded(request.send)) send_meant = existing;
+        }
+        if (!send_found) {
+            json data = {{"code", "send_bus_not_found"}, {"parameter", "send"},
+                         {"send", request.send}, {"buses", names}, {"retryable", false}};
+            std::string message = "No bus is named \"" + request.send + "\", so there is nothing "
+                                  "to send to. Godot would store the send and route the bus to "
+                                  "Master.";
+            if (send_meant) {
+                data["did_you_mean"] = *send_meant;
+                data["retry_with"] = {{"send", *send_meant}};
+                message += " The bus \"" + *send_meant + "\" differs only in letter case.";
+            }
+            return errorJson(404, message, std::move(data));
+        }
+
+        // A send is kept by name and does not follow a rename, so a project
+        // can already hold one that names no bus. Adding a bus with that name
+        // routes those buses through it, and that changes a mix the caller did
+        // not name.
+        json adopted = json::array();
+        for (size_t index = 0; index < names.size(); ++index) {
+            if (sends[index] == request.name) adopted.push_back(names[index]);
+        }
+
+        if (request.preview) {
+            return liveResult({{"status", "success"},
+                               {"preview", true},
+                               {"index", count.value()},
+                               {"name", request.name},
+                               {"send", request.send},
+                               {"buses", names},
+                               {"adopted_sends", std::move(adopted)}});
+        }
+
+        auto at_end = indexVariant(-1);
+        if (at_end.isErr()) return errorJson(at_end.error().code, at_end.error().message);
+        auto added = callObject(server.value(), "AudioServer", "add_bus", 1025054187LL,
+                                {&at_end.value()});
+        if (added.isErr()) return errorJson(added.error().code, added.error().message);
+        auto grown = busCount();
+        if (grown.isErr()) return errorJson(grown.error().code, grown.error().message);
+        if (grown.value() != count.value() + 1) {
+            return errorJson(500, "AudioServer.add_bus did not add a bus: the layout has " +
+                                      std::to_string(grown.value()) + " buses, expected " +
+                                      std::to_string(count.value() + 1) + ".");
+        }
+        const int64_t index = count.value();
+        auto bus_index = indexVariant(index);
+        if (bus_index.isErr()) return errorJson(bus_index.error().code, bus_index.error().message);
+        const auto removeAdded = [&]() {
+            (void)callObject(server.value(), "AudioServer", "remove_bus", 1286410249LL,
+                             {&bus_index.value()});
+        };
+
+        auto name_variant = makeString(request.name);
+        if (name_variant.isErr()) {
+            removeAdded();
+            return errorJson(name_variant.error().code, name_variant.error().message);
+        }
+        auto named = callObject(server.value(), "AudioServer", "set_bus_name", 501894301LL,
+                                {&bus_index.value(), &name_variant.value()});
+        if (named.isErr()) {
+            removeAdded();
+            return errorJson(named.error().code, named.error().message);
+        }
+        // Read back rather than trusted. Something else in the editor can add a
+        // bus between the check above and this call, and the engine would
+        // answer that with `Music 2` rather than an error.
+        auto kept = nameOf(index);
+        if (kept.isErr() || kept.value() != request.name) {
+            removeAdded();
+            return errorJson(409, "The engine named the new bus \"" +
+                                      (kept.isOk() ? kept.value() : std::string("?")) +
+                                      "\" rather than \"" + request.name + "\", so another bus "
+                                      "took the name meanwhile. The bus was removed again.",
+                             {{"code", "bus_name_in_use"}, {"name", request.name},
+                              {"retryable", true}});
+        }
+
+        auto send_variant = makeStringName(request.send);
+        if (send_variant.isErr()) {
+            removeAdded();
+            return errorJson(send_variant.error().code, send_variant.error().message);
+        }
+        auto routed = callObject(server.value(), "AudioServer", "set_bus_send", 3780747571LL,
+                                 {&bus_index.value(), &send_variant.value()});
+        if (routed.isErr()) {
+            removeAdded();
+            return errorJson(routed.error().code, routed.error().message);
+        }
+        if (request.volume_db) {
+            auto db = makeScalar(GDEXTENSION_VARIANT_TYPE_FLOAT, *request.volume_db);
+            if (db.isOk()) {
+                (void)callObject(server.value(), "AudioServer", "set_bus_volume_db", 1602489585LL,
+                                 {&bus_index.value(), &db.value()});
+            }
+        }
+        for (const auto& [value, method_name] :
+             {std::make_pair(request.mute, "set_bus_mute"), std::make_pair(request.solo, "set_bus_solo")}) {
+            if (!value) continue;
+            auto flag = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, *value);
+            if (flag.isOk()) {
+                (void)callObject(server.value(), "AudioServer", method_name, 300928843LL,
+                                 {&bus_index.value(), &flag.value()});
+            }
+        }
+
+        // On 4.5.1 and 4.6.2 the editor's Audio panel rebuilds when a bus is
+        // added and does not follow a rename, so the new strip says New Bus.
+        // A person who clicks into that name field and away renames the bus
+        // back to New Bus through the panel, and every player set to the name
+        // given here goes to Master. This signal makes the panel rebuild with
+        // the right name on all three lines, and it changed no name, send,
+        // volume or effect when measured.
+        bool panel_refreshed = false;
+        auto signal_name = makeStringName("bus_layout_changed");
+        if (signal_name.isOk()) {
+            std::vector<const VariantValue*> signal_arguments{&signal_name.value()};
+            auto emitted = callObject(server.value(), "Object", "emit_signal", 4047867050LL,
+                                      signal_arguments);
+            panel_refreshed = emitted.isOk();
+        }
+
+        const auto readState = [&]() -> Result<json> {
+            auto name = nameOf(index);
+            if (name.isErr()) return name.error();
+            auto send = sendOf(index);
+            if (send.isErr()) return send.error();
+            auto volume = callObject(server.value(), "AudioServer", "get_bus_volume_db",
+                                     2339986948LL, {&bus_index.value()});
+            if (volume.isErr()) return volume.error();
+            auto db = scalarFromVariant<double>(volume.value(), GDEXTENSION_VARIANT_TYPE_FLOAT);
+            if (db.isErr()) return db.error();
+            const auto flagOf = [&](const char* method_name) -> Result<bool> {
+                auto value = callObject(server.value(), "AudioServer", method_name, 1116898809LL,
+                                        {&bus_index.value()});
+                if (value.isErr()) return value.error();
+                return scalarFromVariant<bool>(value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+            };
+            auto mute = flagOf("is_bus_mute");
+            if (mute.isErr()) return mute.error();
+            auto solo = flagOf("is_bus_solo");
+            if (solo.isErr()) return solo.error();
+            return json{{"index", index}, {"name", name.value()}, {"send", send.value()},
+                        {"volume_db", db.value()}, {"mute", mute.value()}, {"solo", solo.value()}};
+        };
+        auto after = readState();
+        if (after.isErr()) return errorJson(after.error().code, after.error().message);
+
+        const auto layout_path =
+            busLayoutPathFrom(projectSettingString("audio/buses/default_bus_layout"));
+        return liveResult(
+            {{"status", "success"},
+             {"bus", index},
+             {"name", request.name},
+             {"send", request.send},
+             {"after", after.value()},
+             {"bus_count", grown.value()},
+             {"adopted_sends", std::move(adopted)},
+             {"layout_path", layout_path},
+             {"persisted_by_editor", true},
+             {"panel_refreshed", panel_refreshed},
+             {"undo_redo_registered", false},
+             {"limitation",
+              "This adds the bus to the editor's running AudioServer and writes no file. The "
+              "editor's own bus-layout autosave writes " + layout_path + " a moment later. There "
+              "is no undo entry: delete the bus in the editor's Audio panel to take it back."},
+             {"next_step",
+              "Set each AudioStreamPlayer's bus to \"" + request.name + "\" with "
+              "scene_set_property, then editor_save_scene. A player set to a bus before the bus "
+              "exists reads Master and is saved as Master."}});
     }
 
     if (method == "engine.classExists") {

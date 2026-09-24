@@ -1084,6 +1084,16 @@ void test_a_failure_with_no_route_is_still_coherent() {
                 std::string::npos);
     ASSERT_TRUE(audio_value["error"]["data"].contains("offline_alternative"));
 
+    // And the tool that adds a bus, which has the same sibling and one more
+    // thing to say: why it is not also an offline writer (#771).
+    const auto add = registry.callTool("audio_add_bus", didi::json{{"name", "Music"}});
+    ASSERT_TRUE(add.isError);
+    const auto add_value = payload(add);
+    const auto add_message = add_value["error"]["message"].get<std::string>();
+    ASSERT_TRUE(add_message.find("audio_list_buses") != std::string::npos);
+    ASSERT_TRUE(add_message.find("editor holds the layout") != std::string::npos);
+    ASSERT_TRUE(add_value["error"]["data"].contains("offline_alternative"));
+
     registry.setIpcClient(nullptr);
 }
 

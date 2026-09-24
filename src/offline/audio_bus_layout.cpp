@@ -3,9 +3,11 @@
 #include "didi/common/config_file_syntax.hpp"
 #include "didi/common/project_path.hpp"
 #include "didi/offline/project_settings_file.hpp"
+#include "didi/offline/resource_indexer.hpp"
 
 #include <fstream>
 #include <map>
+#include <optional>
 #include <sstream>
 
 namespace didi::offline {
@@ -62,16 +64,37 @@ std::string unquote(const std::string& value) {
 // reached.
 constexpr const char* kDefaultLayoutPath = "res://default_bus_layout.tres";
 
-std::string layoutPathFrom(const config_file::Scan& scanned) {
+// The resource whose header or .uid sidecar carries this uid, the same scan
+// project_get_uid_map answers from. Nothing reads .godot/uid_cache.bin.
+std::optional<std::string> pathForUid(const std::string& root_dir, const std::string& uid) {
+    const auto index = ResourceIndexer::sharedIndex(root_dir);
+    for (const auto& resource : index->query("res://", "", "", true)) {
+        if (resource.uid == uid) return resource.path;
+    }
+    return std::nullopt;
+}
+
+std::string layoutPathFrom(const config_file::Scan& scanned, const std::string& root_dir) {
     std::string path = kDefaultLayoutPath;
     for (const auto& entry : scanned.entries) {
         if (entry.section != "audio" || entry.key != "buses/default_bus_layout") continue;
         const auto value = unquote(std::string(strings::trim(entry.value_text)));
-        // A value that is not a project path is left to the default, which is
-        // what the engine falls back to when it cannot load what it was given.
         // No break: a key the file declares twice is the last one to the
         // engine, so it is the last one here.
-        if (strings::startsWith(value, "res://")) path = value;
+        if (strings::startsWith(value, "res://")) {
+            path = value;
+        } else if (strings::startsWith(value, "uid://")) {
+            // 4.6.2 and 4.7.2 hold this setting as a uid once the layout file
+            // exists, and the next ProjectSettings.save() writes it to
+            // project.godot that way; 4.5.1 keeps the res:// path. Measured by
+            // tools/vibe/probes/audio_bus_engine.py. A uid no project file
+            // carries is left as it is, because it names no file the engine
+            // can load, and that is what the caller is told.
+            const auto resolved = pathForUid(root_dir, value);
+            path = resolved ? *resolved : value;
+        }
+        // Anything else is left to the default, which is what the engine falls
+        // back to when it cannot load what it was given.
     }
     return path;
 }
@@ -127,7 +150,17 @@ Result<json> readAudioBusLayout(const std::string& root_dir) {
     if (auto unloadable = refuseUnloadable(manifest, "reading the bus layout it names")) {
         return *unloadable;
     }
-    const auto layout_path = layoutPathFrom(manifest);
+    const auto layout_path = layoutPathFrom(manifest, root_dir);
+    if (!strings::startsWith(layout_path, "res://")) {
+        return json{{"layout_path", layout_path},
+                    {"layout_present", false},
+                    {"layout_loads", false},
+                    {"buses", json::array({defaultMasterBus()})},
+                    {"bus_count", 1},
+                    {"note", "project.godot names the bus layout by " + layout_path +
+                             ", and no file in the project carries that uid, so there is no "
+                             "layout to load and the project runs on the default Master bus."}};
+    }
 
     auto relative = layout_path;
     if (strings::startsWith(relative, "res://")) relative.erase(0, 6);
