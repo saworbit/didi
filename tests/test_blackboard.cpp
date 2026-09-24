@@ -180,8 +180,18 @@ void test_blackboard_path_rejection() {
 
     BlackboardWriteRequest long_path;
     long_path.value = 1;
-    long_path.path = std::string(kBlackboardMaxPathBytes + 1, 'x');
+    long_path.path = std::string(kBlackboardMaxPathCharacters + 1, 'x');
     ASSERT_TRUE(blackboardWrite(long_path).isErr());
+    // The bound is in characters, as the published maxLength is. 512 of U+97F3
+    // is 1536 bytes and was refused here after the tool reader let it through.
+    BlackboardWriteRequest wide_path;
+    wide_path.value = 1;
+    for (size_t index = 0; index < kBlackboardMaxPathCharacters; ++index) wide_path.path += "\xE9\x9F\xB3";
+    ASSERT_TRUE(blackboardWrite(wide_path).isOk());
+    wide_path.path += "\xE9\x9F\xB3";
+    const auto too_wide = blackboardWrite(wide_path);
+    ASSERT_TRUE(too_wide.isErr());
+    ASSERT_TRUE(too_wide.error().message.find("characters") != std::string::npos);
 
     // Writing through an existing value would silently turn another agent's
     // number into a container.

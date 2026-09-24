@@ -505,9 +505,9 @@ bool taskCarriesTag(const json& task, const std::string& tag) {
 } // namespace
 
 Result<std::vector<std::string>> blackboardSplitPath(const std::string& path) {
-    if (path.size() > kBlackboardMaxPathBytes) {
+    if (paths::codePointCount(path) > kBlackboardMaxPathCharacters) {
         return Error::invalidArgument("path is longer than " +
-                                      std::to_string(kBlackboardMaxPathBytes) + " bytes");
+                                      std::to_string(kBlackboardMaxPathCharacters) + " characters");
     }
     std::vector<std::string> segments;
     std::string current;

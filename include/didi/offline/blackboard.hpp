@@ -15,7 +15,10 @@ namespace didi::offline {
 // bound below exists so that one agent cannot make the board unusable for the
 // next one, and each is reported in the response that hits it.
 inline constexpr size_t kBlackboardMaxBoardNameBytes = 64;
-inline constexpr size_t kBlackboardMaxPathBytes = 512;
+// Characters, as the published maxLength counts them. The tool readers were
+// moved to characters by #663 and this one was not, so a path of 200 CJK
+// characters passed the reader and was refused here as over 512 bytes.
+inline constexpr size_t kBlackboardMaxPathCharacters = 512;
 inline constexpr size_t kBlackboardMaxPathSegments = 32;
 inline constexpr size_t kBlackboardMaxValueBytes = 256 * 1024;
 inline constexpr size_t kBlackboardMaxBoardBytes = 4 * 1024 * 1024;

@@ -107,6 +107,94 @@ void request_validation() {
     ASSERT_EQ(empty_send.error().data["retry_with"]["send"], json("Master"));
 }
 
+// Vibe session nineteen sent audio_add_bus what copy and paste delivers, and
+// the ASCII rules let most of it through: a no-break space and an ideographic
+// space at the ends, a zero width space alone and in front of "Music", U+0085
+// and U+2028, and a byte-order mark the engine's UTF-8 reader then dropped. The
+// Audio panel shows every one of those as a name it cannot be told apart from,
+// or as no name at all.
+void names_as_a_person_sees_them() {
+    const auto refusedWith = [](const std::string& name) {
+        auto parsed = parseAudioAddBusRequest({{"name", name}});
+        ASSERT_TRUE(parsed.isErr());
+        ASSERT_EQ(parsed.error().code, 400);
+        ASSERT_EQ(parsed.error().data["parameter"], json("name"));
+        return parsed.error();
+    };
+    const std::string nbsp = "\xC2\xA0";
+    const std::string ideographic_space = "\xE3\x80\x80";
+    const std::string zero_width_space = "\xE2\x80\x8B";
+    const std::string byte_order_mark = "\xEF\xBB\xBF";
+
+    // At either end, refused with the name it meant and the character named,
+    // because the character is the one thing the caller cannot see.
+    const struct { std::string name; std::string meant; const char* character; } edges[] = {
+        {nbsp + "Voice", "Voice", "U+00A0"},
+        {"Voice" + ideographic_space, "Voice", "U+3000"},
+        {zero_width_space + "Music", "Music", "U+200B"},
+        {byte_order_mark + "Music", "Music", "U+FEFF"},
+        {"Music" + nbsp + " ", "Music", "U+0020"},
+    };
+    for (const auto& edge : edges) {
+        const auto error = refusedWith(edge.name);
+        ASSERT_EQ(error.data["retry_with"]["name"], json(edge.meant));
+        ASSERT_EQ(error.data["character"], json(edge.character));
+    }
+    // A no-break space is a space, not an invisible character, and a zero
+    // width space is invisible; the sentence says which one was sent.
+    ASSERT_TRUE(refusedWith(nbsp + "Voice").message.find("a space (U+00A0)") != std::string::npos);
+    ASSERT_TRUE(refusedWith(zero_width_space + "Music").message.find("an invisible character (U+200B)") !=
+                std::string::npos);
+    // Nothing but blank, which the panel shows as a bus with no name.
+    for (const auto& blank : {zero_width_space, nbsp + ideographic_space, byte_order_mark + " "}) {
+        const auto error = refusedWith(blank);
+        ASSERT_TRUE(!error.data.contains("retry_with"));
+    }
+    // Controls anywhere: C1, the line and paragraph separators, and a
+    // right-to-left override that redraws the rest of the name backwards.
+    for (const auto& control : {std::string("Voice\xC2\x85"), std::string("Vo\xE2\x80\xA8ice"),
+                                std::string("Voice\xE2\x80\xA9"), std::string("a\xE2\x80\xAE" "cisuM")}) {
+        const auto error = refusedWith(control);
+        ASSERT_TRUE(error.message.find("control character") != std::string::npos);
+        ASSERT_TRUE(error.data.contains("character"));
+    }
+    // Still ordinary: a no-break space inside a name, an emoji ending in its
+    // variation selector, and a family emoji held together by zero width
+    // joiners. Only the ends and nothing-but-blank are refused.
+    for (const std::string name : {"Sound" + nbsp + "FX", std::string("Music \xE2\x9D\xA4\xEF\xB8\x8F"),
+                                   std::string("\xF0\x9F\x91\xA8\xE2\x80\x8D\xF0\x9F\x91\xA9\xE2\x80\x8D\xF0\x9F\x91\xA7")}) {
+        ASSERT_TRUE(parseAudioAddBusRequest({{"name", name}}).isOk());
+    }
+
+    // The bound is in characters, the unit the schema's maxLength counts in.
+    // 86 of U+97F3 is 258 bytes and was refused as over a 256-byte bound.
+    std::string wide;
+    for (int index = 0; index < 256; ++index) wide += "\xE9\x9F\xB3";
+    ASSERT_TRUE(parseAudioAddBusRequest({{"name", wide}}).isOk());
+    ASSERT_TRUE(parseAudioAddBusRequest({{"name", "Music"}, {"send", wide}}).isOk());
+    const auto too_wide = refusedWith(wide + "\xE9\x9F\xB3");
+    ASSERT_TRUE(too_wide.message.find("256 characters") != std::string::npos);
+}
+
+// The engine named the bus differently from the name it was given. This said
+// "another bus took the name meanwhile" with retryable: true for a leading
+// byte-order mark the engine had dropped, a name no bus held, so every retry
+// failed the same way. Which case it is decides both the words and the code.
+void name_changed_by_the_engine() {
+    const auto raced = didi::runtime::busNameChangedRefusal("Music", "Music 2", true);
+    ASSERT_EQ(raced.code, 409);
+    ASSERT_EQ(raced.data["code"], json("bus_name_in_use"));
+    ASSERT_EQ(raced.data["retryable"], json(false));
+    ASSERT_TRUE(raced.message.find("audio_configure_bus") != std::string::npos);
+
+    const auto changed = didi::runtime::busNameChangedRefusal("\xEF\xBB\xBF" "Ambience", "Ambience", false);
+    ASSERT_EQ(changed.code, 409);
+    ASSERT_EQ(changed.data["code"], json("bus_name_changed_by_engine"));
+    ASSERT_EQ(changed.data["stored_as"], json("Ambience"));
+    ASSERT_EQ(changed.data["retryable"], json(false));
+    ASSERT_TRUE(changed.message.find("meanwhile") == std::string::npos);
+}
+
 // Live only, editor only, a mutation that adds and never replaces, with a dry
 // run and no token. Being wrong about any of these misleads a host:
 // readOnlyHint decides what runs unasked, destructiveHint what needs a person,
@@ -210,6 +298,8 @@ void dry_run_reaches_no_engine() {
 struct Register {
     Register() {
         registerTest("AudioAddBus.RequestValidation", request_validation);
+        registerTest("AudioAddBus.NamesAsAPersonSeesThem", names_as_a_person_sees_them);
+        registerTest("AudioAddBus.NameChangedByTheEngine", name_changed_by_the_engine);
         registerTest("AudioAddBus.Registration", registration);
         registerTest("AudioAddBus.Gated", gated);
         registerTest("AudioAddBus.DryRunReachesNoEngine", dry_run_reaches_no_engine);

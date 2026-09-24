@@ -3042,6 +3042,21 @@ static void test_a_length_bound_counts_the_characters_it_publishes() {
         registry.callTool("project_search_text", didi::json{{"query", too_long_japanese}});
     ASSERT_TRUE(refused_japanese.isError);
     ASSERT_TRUE(refused_japanese.content[0].text.find("characters long") != std::string::npos);
+
+    // The same bound written again after #663, in bytes, by a handler behind a
+    // schema that says characters. Vibe session nineteen's max_length_units
+    // census found it here and in three other tools; a Godot identifier or node
+    // name may be non-ASCII, so 86 CJK characters were refused as a 256-byte
+    // target.
+    std::string wide_target;
+    for (int index = 0; index < 256; ++index) wide_target += "\xE9\x9F\xB3";
+    const auto wide_accepted =
+        registry.callTool("project_analyze_impact", didi::json{{"target", wide_target}});
+    ASSERT_TRUE(wide_accepted.content[0].text.find("256 bytes") == std::string::npos);
+    ASSERT_TRUE(wide_accepted.content[0].text.find("at most") == std::string::npos);
+    const auto wide_refused = registry.callTool(
+        "project_analyze_impact", didi::json{{"target", wide_target + "\xE9\x9F\xB3"}});
+    ASSERT_TRUE(wide_refused.isError);
 }
 
 static void test_a_godot_bin_that_cannot_be_used_is_reported() {

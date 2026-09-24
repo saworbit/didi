@@ -110,6 +110,15 @@ void request_validation() {
     ASSERT_EQ(planExportPresetAddition(std::nullopt, std::string(257, 'n'), "Linux", "").error().code,
               400);
     ASSERT_TRUE(planExportPresetAddition(std::nullopt, std::string(256, 'n'), "Linux", "").isOk());
+    // Characters, as the schema's maxLength counts them. 256 of U+97F3 is 768
+    // bytes and was refused as over a 256-byte bound under a schema that
+    // published 256 (#663's class, found again by vibe session nineteen).
+    std::string wide;
+    for (int index = 0; index < 256; ++index) wide += "\xE9\x9F\xB3";
+    ASSERT_TRUE(planExportPresetAddition(std::nullopt, wide, "Linux", "").isOk());
+    const auto too_wide = planExportPresetAddition(std::nullopt, wide + "\xE9\x9F\xB3", "Linux", "");
+    ASSERT_TRUE(too_wide.isErr());
+    ASSERT_TRUE(too_wide.error().message.find("256 characters") != std::string::npos);
     for (const std::string name : {std::string("a\nb"), std::string("a\rb"), std::string("a\tb"),
                                    std::string("a\x7f" "b"), std::string("a\0b", 3)}) {
         const auto refused = planExportPresetAddition(std::nullopt, name, "Linux", "");

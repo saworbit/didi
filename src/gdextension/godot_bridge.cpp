@@ -11031,16 +11031,24 @@ json GodotBridge::execute(const std::string& method, const json& params,
         }
         // Read back rather than trusted. Something else in the editor can add a
         // bus between the check above and this call, and the engine would
-        // answer that with `Music 2` rather than an error.
+        // answer that with `Music 2` rather than an error. The engine can also
+        // change a name on its way in: its UTF-8 reader drops a leading
+        // byte-order mark, and this said "another bus took the name meanwhile",
+        // retryable, for a name no bus held, which every retry repeated.
+        // Which of the two it was is read off the layout once the bus is gone.
         auto kept = nameOf(index);
         if (kept.isErr() || kept.value() != request.name) {
             removeAdded();
-            return errorJson(409, "The engine named the new bus \"" +
-                                      (kept.isOk() ? kept.value() : std::string("?")) +
-                                      "\" rather than \"" + request.name + "\", so another bus "
-                                      "took the name meanwhile. The bus was removed again.",
-                             {{"code", "bus_name_in_use"}, {"name", request.name},
-                              {"retryable", true}});
+            bool asked_name_taken = false;
+            if (auto remaining = busCount(); remaining.isOk()) {
+                for (int64_t other = 0; other < remaining.value(); ++other) {
+                    auto other_name = nameOf(other);
+                    if (other_name.isOk() && other_name.value() == request.name) asked_name_taken = true;
+                }
+            }
+            const auto refusal = runtime::busNameChangedRefusal(
+                request.name, kept.isOk() ? kept.value() : std::string("?"), asked_name_taken);
+            return errorJson(refusal.code, refusal.message, refusal.data);
         }
 
         auto send_variant = makeStringName(request.send);

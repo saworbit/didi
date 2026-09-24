@@ -22,7 +22,10 @@
 namespace didi::offline {
 namespace {
 
-constexpr size_t kMaxTargetBytes = 256;
+// Characters, as the published maxLength counts them: Godot identifiers and
+// node names may be non-ASCII, and 86 CJK characters were refused as over a
+// 256-byte bound the schema never stated (#663's class).
+constexpr size_t kMaxTargetCharacters = 256;
 constexpr size_t kMaxDetailBytes = 200;
 
 struct Impact {
@@ -1034,8 +1037,8 @@ Result<json> analyzeImpact(const std::string& root_dir, const ProjectImpactOptio
     if (target.empty()) {
         return Error::invalidArgument("target must name a symbol, a signal, or a res:// path");
     }
-    if (target.size() > kMaxTargetBytes) {
-        return Error::invalidArgument("target must be at most 256 bytes");
+    if (paths::codePointCount(target) > kMaxTargetCharacters) {
+        return Error::invalidArgument("target must be at most 256 characters");
     }
     const bool file_target = looksLikeFileTarget(target);
     if (file_target && !isValidFileTarget(target)) {
