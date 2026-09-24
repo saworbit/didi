@@ -155,6 +155,30 @@ The three Phase 7 blockers are unchanged; the newest name is `audio_add_bus`, re
 
 ### Fixed
 
+- **`asset_reimport` no longer answers, or starts, inside the editor's own
+  import pass (#914).** The editor runs its main loop from inside an import
+  pass, because its progress dialog does, so Didi's frame callback ran in the
+  middle of one. A reimport that asked for a scan was answered there, once the
+  sidecars were on disk but before the editor had emitted
+  `resources_reimported`, and the caller's next `asset_reimport` then started
+  inside the pass. Godot opened a second "reimport" progress task over the
+  first and printed three errors, on every live harness run on all three
+  engines. `is_importing()` could not have caught it: the editor clears that
+  flag and then opens a second progress task, and on Godot 4.7.2 it reads
+  `false` in exactly those frames. `resources_reimporting` and
+  `resources_reimported` bracket the whole pass, so the addon's new
+  `didi_import_watch.gd` counts them, because an extension cannot receive a
+  signal. While a pass is open Didi takes nothing new off its queue, and a
+  pending reimport is answered only once the pass has closed; a timeout still
+  ends one. If Godot refuses a reimport because the editor is already
+  importing, it now answers `409` with `editor_import_busy` and
+  `retryable: true`. It used to report the paths reimported and idle.
+  `tools/vibe/probes/import_config_engine.py` reproduces all of this from
+  GDScript alone in a windowed editor. A headless one cannot show it, because
+  it pumps nothing inside the pass. A project whose copy of the addon
+  predates the file logs one warning and keeps the old behaviour, so copy the
+  built addon folder in again.
+
 - **Two servers writing one project file could lose an update (#929).**
   `project_set_setting` offline and `project_add_export_preset` read
   `project.godot` or `export_presets.cfg`, changed it and wrote it back with

@@ -181,6 +181,15 @@ if (-not (Test-Path -LiteralPath $awaitHelperSource)) {
 }
 Copy-Item -LiteralPath $awaitHelperSource -Destination (Join-Path $fixtureRoot (Join-Path "addons" (Join-Path "didi" "didi_await.gd"))) -Force
 
+# asset_reimport waits out the editor's own import pass by counting two
+# EditorFileSystem signals through another addon helper, which the fixture
+# needs for the same reason (#914).
+$importWatchSource = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot (Join-Path ".." (Join-Path "addons" (Join-Path "didi" "didi_import_watch.gd")))))
+if (-not (Test-Path -LiteralPath $importWatchSource)) {
+    throw "The import pass watch the integration needs is missing: $importWatchSource"
+}
+Copy-Item -LiteralPath $importWatchSource -Destination (Join-Path $fixtureRoot (Join-Path "addons" (Join-Path "didi" "didi_import_watch.gd"))) -Force
+
 # The addon script ships with a .uid sidecar, which makes it the one resource
 # the project files and the running engine are both certain to know. Read it
 # rather than hard-coding it, so a regenerated fixture does not silently turn
@@ -5159,7 +5168,6 @@ try {
         @{ Pattern = 'Identifier "SignalProbeState" not declared|Failed to load script "res://signal_uses_autoload\.gd"'; Cause = "signal_uses_autoload.gd does not compile, on purpose, for target_script_not_compiled" },
         @{ Pattern = "corrupt_asset\.png|IHDR: CRC error|ERR_FILE_CORRUPT"; Cause = "request 2700 imports a PNG with a wrong CRC on every chunk" },
         @{ Pattern = "Inconsistent redo history"; Cause = "known defect #913: editor_undo and editor_redo step the scene's UndoRedo directly" },
-        @{ Pattern = "Task 'reimport' already exists|Condition `"!tasks\.has\(p_task\)`" is true"; Cause = "known defect #914: request 403 reimports while the editor's own import pass from request 402 is still open" },
         @{ Pattern = "didi_output_canary_warning"; Cause = "the runtime fixture prints a warning canary for runtime_read_output" },
         # The host, not a request. A CI runner has no GPU and no audio device,
         # and the engine says so while its drivers start, before any request is

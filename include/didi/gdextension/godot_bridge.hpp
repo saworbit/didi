@@ -48,6 +48,47 @@ namespace godot {
 [[nodiscard]] json notAppliedReport(const json& observed, const json& old_value, int hint,
                                     const std::string& hint_string);
 
+// What the extension can see of the editor's own import pass.
+//
+// EditorFileSystem.reimport_files pumps the main loop from inside itself: its
+// progress dialog calls Main::iteration on every step, so the frame callback
+// runs in the middle of the pass, and so does anything it answers or starts.
+// The pass clears its importing flag, then opens a second progress task, and
+// only then emits resources_reimported. A reimport started in those frames
+// opens a second "reimport" task on top of the first, and an answer sent from
+// them says the work is done before the editor has reloaded the resources
+// (#914). is_importing() already reads false there. The windowed-editor rows
+// of tools/vibe/probes/import_config_engine.py measure all of this on 4.5.1,
+// 4.6.2 and 4.7.2. A headless editor pumps nothing inside the pass, so only a
+// windowed one shows it.
+//
+// resources_reimporting and resources_reimported bracket the whole pass, tail
+// included. An extension cannot receive a signal, so the addon's
+// didi_import_watch.gd counts them. is_importing() binds from 4.7 and covers
+// the frames before resources_reimporting, which the counts cannot see. Each
+// part is absent where the engine or the project's copy of the addon cannot
+// supply it.
+struct ImportPassObservation {
+    // Didi's own reimport_files is on the stack.
+    bool inside_own_call{false};
+    // EditorFileSystem.is_importing, where the engine binds it.
+    std::optional<bool> importing;
+    // resources_reimporting and resources_reimported, as the addon counted them.
+    std::optional<int64_t> started;
+    std::optional<int64_t> finished;
+};
+
+// Open while any part says so. One function emits both signals with nothing
+// between them that returns, so a pass is open exactly while started is ahead.
+// A watch that began mid-pass sees finished ahead instead, which reads as
+// closed rather than as a pass that never ends.
+[[nodiscard]] inline bool importPassOpen(const ImportPassObservation& seen) {
+    if (seen.inside_own_call) return true;
+    if (seen.importing.value_or(false)) return true;
+    return seen.started.has_value() && seen.finished.has_value() &&
+           *seen.started > *seen.finished;
+}
+
 // A shader uniform's declared hint_range, as the engine spells it.
 //
 // Godot puts the range a shader author wrote in the uniform's PropertyInfo as
@@ -224,6 +265,11 @@ public:
     Result<void> startAssetReimport(const ReimportBatch& batch);
     Result<ReimportBatch> beginAssetReimport(const std::vector<std::string>& paths);
     Result<bool> isEditorFilesystemScanning();
+    // The editor's own import pass as this session can see it. Makes the
+    // addon's watch the first time an editor session asks.
+    ImportPassObservation observeEditorImportPass();
+    // Lets the watch go. Called as the extension deinitializes.
+    void releaseImportWatch();
 
     // A coroutine started by scene_call_method and not finished yet.
     //

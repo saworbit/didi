@@ -49,6 +49,7 @@ The `README.md` inside the archive has the notes for that platform. On macOS, cl
    │       ├── didi_await.gd
    │       ├── didi_client_config.gd
    │       ├── didi_diagnostics.gd
+   │       ├── didi_import_watch.gd
    │       ├── didi_log.gd
    │       ├── didi_session.gd
    │       ├── didi_settings.gd
