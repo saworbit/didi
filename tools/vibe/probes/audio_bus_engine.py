@@ -489,6 +489,21 @@ func _run() -> void:
 	await _wait(0.5)
 	raw("add_music.panel", _strips())
 	_snap("1_after_add_music")
+	if variant == "settings_saved":
+		# What a ProjectSettings.save() does to the layout setting once the
+		# layout file exists. The live harness found a 4.7.2 project.godot
+		# holding it as a uid:// after its project-setting requests.
+		step("save the project settings once the layout file exists")
+		row("saved.setting_before_save", ProjectSettings.get_setting("audio/buses/default_bus_layout"))
+		row("saved.save_result", ProjectSettings.save())
+		row("saved.setting_after_save", ProjectSettings.get_setting("audio/buses/default_bus_layout"))
+		var kept := PackedStringArray()
+		for line in FileAccess.get_file_as_string("res://project.godot").split("\n"):
+			if line == "[audio]" or line.contains("default_bus_layout"):
+				kept.append(line)
+		row("saved.project_godot_lines", kept)
+		_finish()
+		return
 	if variant != "fresh":
 		_finish()
 		return
@@ -735,6 +750,7 @@ def editor(godot: str, version: str, work: Path, record: Record, engine: str) ->
         ("fresh", None, None),
         ("relocated", "res://custom_bus_layout.tres", None),
         ("existing", None, "saved_layout.tres"),
+        ("settings_saved", None, None),
     ]
     for variant, setting, seed in variants:
         project = work / f"editor_{variant}"
