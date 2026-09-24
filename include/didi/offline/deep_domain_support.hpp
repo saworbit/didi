@@ -106,7 +106,7 @@ struct ExportPresetsFile {
     // parsed. Zero with malformed false is a project with no export presets,
     // which is the same fact as having no file at all.
     size_t section_count{0};
-    // Which of the six causes set `malformed`, as a stable token, and a
+    // Which of the seven causes set `malformed`, as a stable token, and a
     // sentence saying what was found. One refusal covered all six, and for two
     // of them the line was computed and thrown away, so "somewhere in this
     // file" was the whole search on a file where `[preset.0.options]` alone
@@ -150,6 +150,43 @@ std::optional<std::string> shippedPlatformFor(const std::string& written);
 // The names Godot lists after "Invalid export preset name" when an export asks
 // for a preset it did not detect. Empty when the output holds no such list.
 std::vector<std::string> detectedPresetsInEngineOutput(const std::string& output);
+
+// The name Godot says it could not find, from "Invalid export preset name: X.",
+// or nothing when the output holds no such line. It is the name Godot read off
+// its command line, which is not always the one it was handed.
+std::optional<std::string> invalidPresetNameInEngineOutput(const std::string& output);
+
+// A preset name as project_export hands it to Godot on its command line.
+//
+// Godot trims the whitespace from both ends of every argument, and then turns
+// each %20 in it back into a space. So " Padded " arrived as "Padded", which it
+// did not detect, and a name of spaces alone arrived empty, which started an
+// editor that ran until the export timed out. A space sent as %20 survives both
+// steps and comes back as the space. Measured on 4.5.1, 4.6.2 and 4.7.2 with
+// tools/vibe/probes/export_preset_writer.py.
+std::string presetNameForCommandLine(const std::string& name);
+
+// Why Godot could never be asked for this preset on its command line, or
+// nothing when it can. A literal %20 is turned into a space, and nothing on
+// that command line escapes a percent sign.
+std::optional<std::string> presetNameCommandLineProblem(const std::string& name);
+
+// What Godot printed under "Cannot export project with preset ... due to
+// configuration errors", one entry per problem. A missing export template is
+// two lines in the output, the sentence and then the path, and is one entry
+// here; its path is also in `missing_templates`. Empty when there is no such
+// block.
+struct ExportConfigurationErrors {
+    std::vector<std::string> errors;
+    std::vector<std::string> missing_templates;
+};
+ExportConfigurationErrors exportConfigurationErrors(const std::string& output);
+
+// project_add_export_preset's refusal of a platform it does not write, with the
+// spelling Godot uses when the one given is close to it. Nothing when
+// `platform` is absent, not a string, or one of the seven. The registry asks
+// this before the schema's own enum refusal, which can only list the seven.
+std::optional<Error> exportPlatformRefusal(const json& args);
 
 // The record for the preset project_export would hand to Godot, or the refusal
 // it gives instead. Reads export_presets.cfg beneath the current project root.

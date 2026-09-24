@@ -2004,6 +2004,15 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
     // handler comes through this function, including the dry-run preview and a
     // confirmed mutation, so nothing gets a second door (#397).
     if (auto invalid = validateAgainstSchema(tool->inputSchema, arguments)) {
+        // The schema's enum can only list the seven platforms. The tool knows
+        // which one "HTML5" or "Linux/X11" meant, and that answer, with its
+        // did_you_mean and retry_with, never reached a caller because this
+        // check refused first.
+        if (binding.canonical_name == "project_add_export_preset") {
+            if (auto refused = offline::exportPlatformRefusal(arguments)) {
+                return CallToolResult::fromError(*refused);
+            }
+        }
         return invalidArgumentsError(binding, *invalid);
     }
     const bool recovery_tool = name == "runtime_checkpoint" || name == "runtime_recovery_status" || name == "runtime_restore_checkpoint" || name == "runtime_recover_editor";

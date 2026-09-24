@@ -780,13 +780,72 @@ CallToolResult handleProjectExport(const json& args, std::shared_ptr<ipc::IIpcCl
     if (error) return CallToolResult::error("Failed to create export output directory");
     const std::string flag = mode == "pack" ? "--export-pack" :
                              mode == "debug" ? "--export-debug" : "--export-release";
+    // The name is encoded because Godot trims every argument and decodes %20,
+    // so a name with a space at either end reached it as a different name and
+    // a name of spaces alone as none at all.
     auto run = runGodot(root.value(), offline::isolatedGodotArguments(
-        {"--path", paths::projectPathToUtf8(root.value()), flag, preset,
-         paths::projectPathToUtf8(output.value())}), timeout.value());
+        {"--path", paths::projectPathToUtf8(root.value()), flag,
+         offline::presetNameForCommandLine(preset), paths::projectPathToUtf8(output.value())}),
+        timeout.value());
     if (run.isErr()) return CallToolResult::error("Failed to launch Godot export: " + run.error().message);
     if (run.value().timed_out) return CallToolResult::error("Project export timed out; output status is unknown");
     if (run.value().exit_code != 0) {
         const auto engine_output = withoutTerminalEscapes(run.value().output);
+        // Godot checked the preset and refused it, and said why in a block of
+        // its own. Missing export templates is the usual one: a release or
+        // debug build of any platform needs them and a pack does not. That is
+        // a toolchain this machine lacks, as a missing .NET SDK is for
+        // csharp_check_build, and it came back as 500 internal_error with the
+        // cause left in engine_output, while project_add_export_preset's
+        // next_step promised this tool would say so.
+        const auto configuration = offline::exportConfigurationErrors(engine_output);
+        if (!configuration.errors.empty()) {
+            json data = {{"preset", preset},
+                         {"platform", platform},
+                         {"mode", mode},
+                         {"configuration_errors", configuration.errors},
+                         {"exit_code", run.value().exit_code},
+                         {"engine_output", engine_output},
+                         {"output_truncated", run.value().output_truncated},
+                         {"retryable", false}};
+            const auto others = configuration.errors.size() - configuration.missing_templates.size();
+            if (!configuration.missing_templates.empty()) {
+                // Godot checks the debug and the release template together and
+                // lists debug first, so the one this build needs is named.
+                const auto& templates = configuration.missing_templates;
+                const auto needed = std::find_if(templates.begin(), templates.end(),
+                                                 [&](const std::string& path) {
+                                                     return path.find(mode) != std::string::npos;
+                                                 });
+                const auto& named = needed != templates.end() ? *needed : templates.front();
+                data["code"] = "toolchain_unavailable";
+                data["reason"] = "export_templates_missing";
+                data["missing_templates"] = configuration.missing_templates;
+                data["retry_with"] = {{"mode", "pack"}};
+                return CallToolResult::errorJson(
+                    503,
+                    "Godot has no export templates for " + platform + " where it looks for them, "
+                        "so it cannot make a " + mode + " build: " + named +
+                        ". Install the export templates for this Godot version from the editor's "
+                        "Export dialog (Manage Export Templates), or export with mode \"pack\", "
+                        "which needs none." +
+                        (others > 0 ? " Godot also reported " + std::to_string(others) +
+                                          " other configuration error(s), in configuration_errors."
+                                    : std::string()),
+                    std::move(data));
+            }
+            data["code"] = "unprocessable";
+            data["reason"] = "export_configuration_errors";
+            return CallToolResult::errorJson(
+                422,
+                "Godot refused to export \"" + preset + "\" because of configuration errors, the "
+                    "ones its Export dialog shows: " + configuration.errors.front() +
+                    (configuration.errors.size() > 1
+                         ? " configuration_errors lists all " +
+                               std::to_string(configuration.errors.size()) + "."
+                         : std::string()),
+                std::move(data));
+        }
         // The one refusal whose cause is known: the engine did not detect the
         // preset. The file check above already refuses every case it can
         // prove, so what reaches here is a platform Godot does not ship and
@@ -794,27 +853,46 @@ CallToolResult handleProjectExport(const json& args, std::shared_ptr<ipc::IIpcCl
         // than a fault in Didi, and it used to come back as 500 internal_error
         // (#921).
         if (engine_output.find("Invalid export preset name") != std::string::npos) {
+            // Godot names the preset it looked for, which is the one it read
+            // off its command line. When that is not the one it was handed, the
+            // name did not survive the command line, and "the file changed
+            // while the export ran" was the wrong story: a name starting with -
+            // is taken as one of Godot's own options when it has one by that
+            // name, and the output path is then read as the preset.
+            const auto looked_for = offline::invalidPresetNameInEngineOutput(engine_output);
+            const bool name_lost = looked_for && *looked_for != preset;
+            std::string cause;
+            if (name_lost) {
+                cause = "Godot looked for a preset named \"" + *looked_for +
+                        "\" instead, so the name did not survive its command line." +
+                        (preset.front() == '-'
+                             ? std::string(" Godot reads an argument that starts with - as one "
+                                           "of its own options when it has one by that name. "
+                                           "Rename the preset in the editor's Export dialog.")
+                             : std::string());
+            } else if (platform_shipped) {
+                cause = "The file declared it where Godot reads it when the export was checked, "
+                        "so export_presets.cfg changed while the export ran.";
+            } else {
+                cause = "Godot ships no export platform named \"" + platform +
+                        "\", and no editor plugin or GDExtension in this project registered one.";
+            }
+            json data = {{"code", "not_found"},
+                         {"reason", "not_detected_by_engine"},
+                         {"preset", preset},
+                         {"platform", platform},
+                         {"mode", mode},
+                         {"detected_presets", offline::detectedPresetsInEngineOutput(engine_output)},
+                         {"exit_code", run.value().exit_code},
+                         {"engine_output", engine_output},
+                         {"output_truncated", run.value().output_truncated},
+                         {"retryable", false}};
+            if (name_lost) data["engine_looked_for"] = *looked_for;
             return CallToolResult::errorJson(
                 404,
-                "Godot did not detect the export preset \"" + preset + "\". " +
-                    (platform_shipped
-                         ? std::string("The file declared it where Godot reads it when the export "
-                                       "was checked, so export_presets.cfg changed while the "
-                                       "export ran.")
-                         : "Godot ships no export platform named \"" + platform +
-                               "\", and no editor plugin or GDExtension in this project "
-                               "registered one.") +
+                "Godot did not detect the export preset \"" + preset + "\". " + cause +
                     " detected_presets is the list Godot printed.",
-                json{{"code", "not_found"},
-                     {"reason", "not_detected_by_engine"},
-                     {"preset", preset},
-                     {"platform", platform},
-                     {"mode", mode},
-                     {"detected_presets", offline::detectedPresetsInEngineOutput(engine_output)},
-                     {"exit_code", run.value().exit_code},
-                     {"engine_output", engine_output},
-                     {"output_truncated", run.value().output_truncated},
-                     {"retryable", false}});
+                std::move(data));
         }
         // The console transcript as data under a key, with the escapes gone,
         // rather than four kilobytes concatenated into a message (#651).

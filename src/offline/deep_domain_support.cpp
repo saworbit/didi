@@ -187,6 +187,18 @@ ExportPresetsFile readExportPresets(const std::string& contents) {
     // with it. Skipping those lines read a file whose presets are not what it
     // appears to say as a file that parsed (#812), and the key rule underneath
     // both is #813.
+    // Godot does not skip a UTF-8 byte-order mark here: the mark joins the
+    // first section header, the header becomes part of a key, and 4.5.1, 4.6.2
+    // and 4.7.2 all detect no presets. It is what PowerShell 5.1's Set-Content
+    // and older editors write, and the cause below it named a key the reader
+    // could not see.
+    if (contents.rfind("\xEF\xBB\xBF", 0) == 0) {
+        note("byte_order_mark",
+             "export_presets.cfg starts with a UTF-8 byte-order mark, and Godot does not skip "
+             "one in this file: it reads the first section header as part of a key and detects "
+             "no presets at all. Save the file as UTF-8 without a byte-order mark.",
+             1);
+    }
     const auto scanned = config_file::scan(contents);
     // A file that ends inside a value is ERR_PARSE_ERROR for the engine and
     // none of it loads, so nothing read above it describes an export.
@@ -482,6 +494,69 @@ std::vector<std::string> detectedPresetsInEngineOutput(const std::string& output
     return names;
 }
 
+std::optional<std::string> invalidPresetNameInEngineOutput(const std::string& output) {
+    static const std::string marker = "Invalid export preset name: ";
+    std::istringstream lines(output);
+    std::string line;
+    while (std::getline(lines, line)) {
+        const auto at = line.find(marker);
+        if (at == std::string::npos) continue;
+        auto name = strings::trim(line.substr(at + marker.size()));
+        // Godot ends the sentence with a full stop after the name.
+        if (!name.empty() && name.back() == '.') name.pop_back();
+        return name;
+    }
+    return std::nullopt;
+}
+
+std::string presetNameForCommandLine(const std::string& name) {
+    return strings::replaceAll(name, " ", "%20");
+}
+
+std::optional<std::string> presetNameCommandLineProblem(const std::string& name) {
+    if (name.find("%20") != std::string::npos) {
+        return "Godot turns %20 on its command line into a space, and nothing there escapes a "
+               "percent sign, so it would look for a different name";
+    }
+    return std::nullopt;
+}
+
+ExportConfigurationErrors exportConfigurationErrors(const std::string& output) {
+    // ERROR: Cannot export project with preset "Desk" due to configuration errors:
+    // No export template found at the expected path:
+    // C:/Users/.../export_templates/4.6.2.stable/windows_debug_x86_64.exe
+    // No export template found at the expected path:
+    // C:/Users/.../export_templates/4.6.2.stable/windows_release_x86_64.exe
+    //
+    //    at: _fs_changed (editor/editor_node.cpp:1332)
+    //
+    // The same block on 4.5.1, 4.6.2 and 4.7.2. Android adds its SDK checks to
+    // it, one line each.
+    static const std::string template_sentence = "No export template found at the expected path:";
+    ExportConfigurationErrors found;
+    std::istringstream lines(output);
+    std::string line;
+    bool listing = false;
+    bool path_next = false;
+    while (std::getline(lines, line)) {
+        const auto text = strings::trim(line);
+        if (!listing) {
+            listing = text.find("due to configuration errors:") != std::string::npos;
+            continue;
+        }
+        if (text.empty() || text.rfind("at:", 0) == 0) break;
+        if (path_next) {
+            path_next = false;
+            found.missing_templates.push_back(text);
+            found.errors.back() += " " + text;
+            continue;
+        }
+        found.errors.push_back(text);
+        path_next = text == template_sentence;
+    }
+    return found;
+}
+
 Result<json> findExportPreset(const std::string& preset) {
     std::error_code error;
     const auto root = std::filesystem::current_path(error);
@@ -551,6 +626,18 @@ Result<json> findExportPreset(const std::string& preset) {
                          why.value("detail", ""),
                      std::move(data));
     }
+    // Detected, and still not a name the export can ask for. Refused before
+    // Godot starts, like the causes above, because what Godot answers to it is
+    // a different preset or none.
+    if (const auto problem = presetNameCommandLineProblem(preset)) {
+        return Error(422,
+                     "Godot cannot be asked for the export preset \"" + preset +
+                         "\" on its command line, which is how project_export runs it: " +
+                         *problem + ". Rename the preset in the editor's Export dialog.",
+                     {{"preset", preset},
+                      {"reason", "name_not_passable"},
+                      {"detected_presets", std::move(detected)}});
+    }
     return *match;
 }
 
@@ -586,7 +673,39 @@ Error invalidPresetArgument(const std::string& parameter, std::string message, j
     return Error(400, std::move(message), std::move(data));
 }
 
+std::optional<Error> platformRefusal(const std::string& platform) {
+    const auto& platforms = shippedExportPlatforms();
+    if (std::find(platforms.begin(), platforms.end(), platform) != platforms.end()) {
+        return std::nullopt;
+    }
+    // Linux/X11 is a name the engine still reads, and not one it writes.
+    const auto meant = platform == "Linux/X11" ? std::optional<std::string>("Linux")
+                                               : shippedPlatformFor(platform);
+    json extra = {{"platforms", platforms}};
+    std::string message = "platform must be one of the seven export platforms Godot ships, "
+                          "spelled exactly: " + [&] {
+                              std::string joined;
+                              for (const auto& item : platforms) {
+                                  joined += (joined.empty() ? "" : ", ") + item;
+                              }
+                              return joined;
+                          }() + ".";
+    if (meant) {
+        extra["did_you_mean"] = *meant;
+        extra["retry_with"] = {{"platform", *meant}};
+        message += " \"" + platform + "\" is \"" + *meant + "\" to Godot.";
+    }
+    return invalidPresetArgument("platform", std::move(message), std::move(extra));
+}
+
 } // namespace
+
+std::optional<Error> exportPlatformRefusal(const json& args) {
+    if (!args.is_object() || !args.contains("platform") || !args["platform"].is_string()) {
+        return std::nullopt;
+    }
+    return platformRefusal(args["platform"].get<std::string>());
+}
 
 Result<ExportPresetAddition> planExportPresetAddition(const std::optional<std::string>& existing,
                                                       const std::string& name,
@@ -602,27 +721,24 @@ Result<ExportPresetAddition> planExportPresetAddition(const std::optional<std::s
             "name", "name must not contain a line break or another control character, because "
                     "export_presets.cfg keeps it on one line");
     }
-    const auto& platforms = shippedExportPlatforms();
-    if (std::find(platforms.begin(), platforms.end(), platform) == platforms.end()) {
-        // Linux/X11 is a name the engine still reads, and not one it writes.
-        const auto meant = platform == "Linux/X11" ? std::optional<std::string>("Linux")
-                                                   : shippedPlatformFor(platform);
-        json extra = {{"platforms", platforms}};
-        std::string message = "platform must be one of the seven export platforms Godot ships, "
-                              "spelled exactly: " + [&] {
-                                  std::string joined;
-                                  for (const auto& item : platforms) {
-                                      joined += (joined.empty() ? "" : ", ") + item;
-                                  }
-                                  return joined;
-                              }() + ".";
-        if (meant) {
-            extra["did_you_mean"] = *meant;
-            extra["retry_with"] = {{"platform", *meant}};
-            message += " \"" + platform + "\" is \"" + *meant + "\" to Godot.";
-        }
-        return invalidPresetArgument("platform", std::move(message), std::move(extra));
+    // project_export hands the name to Godot on its command line, and these
+    // are the names that do not arrive as written. Godot takes an argument
+    // that starts with - as one of its own options when it has one by that
+    // name: --headless, -e and --verbose all were, and the export then asked
+    // for a preset named after its output path.
+    if (const auto problem = presetNameCommandLineProblem(name)) {
+        return invalidPresetArgument(
+            "name", "name must not contain %20, because project_export asks Godot for the preset "
+                    "by name on its command line: " + *problem + ".");
     }
+    if (name.front() == '-') {
+        return invalidPresetArgument(
+            "name", "name must not start with -, because project_export asks Godot for the "
+                    "preset by name on its command line, and Godot reads an argument that starts "
+                    "with - as one of its own options when it has one by that name, such as "
+                    "--headless, -e or --verbose.");
+    }
+    if (auto refused = platformRefusal(platform)) return *refused;
     if (hasControlCharacter(export_path)) {
         return invalidPresetArgument("export_path",
                                      "export_path must not contain a control character");
@@ -745,6 +861,15 @@ Result<ExportPresetAddition> planExportPresetForProject(const json& args) {
     std::string export_path;
     const std::string requested = args.value("export_path", "");
     if (!requested.empty()) {
+        // A directory that does not exist yet is still a directory. "builds/"
+        // was stored as it was sent, and the Export dialog then offered to
+        // write a file with no name.
+        if (requested.back() == '/' || requested.back() == '\\') {
+            return invalidPresetArgument(
+                "export_path", "export_path ends with a separator, so it names a directory, and "
+                               "an export writes a file. Add the file name, such as "
+                               "builds/game.exe.");
+        }
         auto resolved = paths::resolveProjectFileForWrite(requested);
         if (resolved.isErr()) {
             return invalidPresetArgument("export_path", "export_path " + resolved.error().message);
