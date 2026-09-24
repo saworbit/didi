@@ -63,7 +63,9 @@ The three Phase 7 blockers are unchanged; the newest name is `audio_add_bus`, re
   otherwise change without a word: a name in use (Godot would make it
   `Music 2`), one differing only in letter case, a send to no bus or to
   itself (Godot would route it to Master), an empty name, spaces at either
-  end and control characters. On 4.5.1 and 4.6.2 the editor's Audio panel
+  end and control characters, judged by what the Audio panel shows rather
+  than by ASCII, so a no-break space, a zero width space, a byte-order mark
+  and U+0085 are refused as their ASCII cousins are. On 4.5.1 and 4.6.2 the editor's Audio panel
   does not follow a rename, so the new bus's strip said `New Bus`, and one
   click into it renamed the bus back; the tool has the panel rebuild once the
   bus is named. Editor sessions only, a dry run that asks the editor, and no
@@ -152,6 +154,17 @@ The three Phase 7 blockers are unchanged; the newest name is `audio_add_bus`, re
   use it on the draft.
 
 ### Fixed
+
+- **Four handlers counted a published length bound in bytes.** JSON Schema
+  counts `maxLength` in characters, and #663 moved `project_search_text` and
+  the blackboard's tool readers to characters for that reason. The same bound
+  was written in bytes again afterwards: `project_add_export_preset`'s `name`,
+  `project_analyze_impact`'s `target`, the blackboard's own path check under
+  its readers, which answered first, and `audio_add_bus`'s `name` and `send`.
+  A client that validated against the schema sent 86 CJK characters and was
+  refused as over 256 bytes, in a unit the schema never stated. All five count
+  characters now, and `tools/vibe/probes/max_length_units.py` asks every
+  offline string bound the same question at once.
 
 - **The bus layout setting was followed only when it was a `res://` path.**
   Godot 4.6.2 and 4.7.2 hold `audio/buses/default_bus_layout` as a `uid://`

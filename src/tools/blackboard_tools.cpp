@@ -82,7 +82,7 @@ CallToolResult handleBlackboardWrite(const json& args, std::shared_ptr<ipc::IIpc
 
     offline::BlackboardWriteRequest request;
     request.board = reader.string("board", "default", offline::kBlackboardMaxBoardNameBytes);
-    request.path = reader.string("path", {}, offline::kBlackboardMaxPathBytes);
+    request.path = reader.string("path", {}, offline::kBlackboardMaxPathCharacters);
     if (!reader.ok()) return CallToolResult::error(reader.failure);
     if (request.path.empty()) return CallToolResult::error("path is required");
     if (!args.contains("value")) return CallToolResult::error("value is required");
@@ -113,7 +113,7 @@ CallToolResult handleBlackboardRead(const json& args, std::shared_ptr<ipc::IIpcC
 
     offline::BlackboardReadRequest request;
     request.board = reader.string("board", "default", offline::kBlackboardMaxBoardNameBytes);
-    request.path = reader.string("path", {}, offline::kBlackboardMaxPathBytes);
+    request.path = reader.string("path", {}, offline::kBlackboardMaxPathCharacters);
     request.deep = reader.boolean("deep", true);
     request.include_metadata = reader.boolean("include_metadata", false);
     if (!reader.ok()) return CallToolResult::error(reader.failure);
@@ -156,7 +156,7 @@ CallToolResult handleBlackboardListKeys(const json& args, std::shared_ptr<ipc::I
 
     offline::BlackboardListKeysRequest request;
     request.board = reader.string("board", "default", offline::kBlackboardMaxBoardNameBytes);
-    request.prefix = reader.string("prefix", {}, offline::kBlackboardMaxPathBytes);
+    request.prefix = reader.string("prefix", {}, offline::kBlackboardMaxPathCharacters);
     request.max_keys = static_cast<size_t>(
         reader.integer("max_keys", 500, 1, static_cast<int64_t>(offline::kBlackboardMaxKeys)));
     request.include_metadata = reader.boolean("include_metadata", false);
@@ -172,7 +172,7 @@ CallToolResult handleBlackboardClear(const json& args, std::shared_ptr<ipc::IIpc
 
     offline::BlackboardClearRequest request;
     request.board = reader.string("board", "default", offline::kBlackboardMaxBoardNameBytes);
-    request.path = reader.string("path", {}, offline::kBlackboardMaxPathBytes);
+    request.path = reader.string("path", {}, offline::kBlackboardMaxPathCharacters);
     if (args.contains("author") && !args["author"].is_null()) {
         request.author = reader.string("author", {}, 128);
     }

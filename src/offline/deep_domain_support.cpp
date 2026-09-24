@@ -644,7 +644,10 @@ Result<json> findExportPreset(const std::string& preset) {
 
 namespace {
 
-constexpr size_t kMaxPresetNameBytes = 256;
+// Characters, the unit the published schema's maxLength counts in. A bound in
+// bytes refused 86 CJK characters under a schema that allowed 256 (#663's
+// class, found again by vibe session nineteen).
+constexpr size_t kMaxPresetNameCharacters = 256;
 
 // A control character in a value is either a line break, which the tool
 // refuses because it would put a second line in a one-line key, or something
@@ -713,9 +716,10 @@ Result<ExportPresetAddition> planExportPresetAddition(const std::optional<std::s
                                                       const std::string& platform,
                                                       const std::string& export_path) {
     if (name.empty()) return invalidPresetArgument("name", "name must not be empty");
-    if (name.size() > kMaxPresetNameBytes) {
+    if (paths::codePointCount(name) > kMaxPresetNameCharacters) {
         return invalidPresetArgument("name", "name must be at most " +
-                                                 std::to_string(kMaxPresetNameBytes) + " bytes");
+                                                 std::to_string(kMaxPresetNameCharacters) +
+                                                 " characters");
     }
     if (hasControlCharacter(name)) {
         return invalidPresetArgument(
