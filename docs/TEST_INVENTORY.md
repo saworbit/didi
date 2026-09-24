@@ -10,14 +10,14 @@ Every number here is derived from the suites themselves rather than written down
 
 | Measure | Count |
 | --- | ---: |
-| Automated tests | **1276** |
+| Automated tests | **1280** |
 | Live-harness assertions | 1267 |
 
 The badge in the [README](../README.md) shows the automated test total. Harness assertions are counted separately because they are assertions inside one live scenario, not independently runnable cases; adding them together would flatter the number.
 
 ## Native C++ suite (`didi_tests`)
 
-**852 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
+**856 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
 
 | Suite | Tests |
 | --- | ---: |
@@ -25,7 +25,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `AudioAddBus` | 10 |
 | `Base64` | 1 |
 | `Blackboard` | 13 |
-| `BlackboardResources` | 8 |
+| `BlackboardResources` | 9 |
 | `BlackboardTasks` | 8 |
 | `CaptureCache` | 3 |
 | `Checkpoints` | 13 |
@@ -34,7 +34,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `EditorHook` | 5 |
 | `EngineDiagnostics` | 7 |
 | `ErrorData` | 3 |
-| `ExportPresetAdd` | 9 |
+| `ExportPresetAdd` | 10 |
 | `ExpressionSandbox` | 7 |
 | `GDScript` | 24 |
 | `Hierarchy` | 9 |
@@ -83,7 +83,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `phase7b_spatial` | 8 |
 | `phase7c_input` | 6 |
 | `phase7c_profiler` | 10 |
-| `project_settings_file` | 16 |
+| `project_settings_file` | 18 |
 | `resource_create` | 5 |
 | `resource_references` | 15 |
 | `tool_annotations` | 10 |

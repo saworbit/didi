@@ -200,6 +200,7 @@ set(CORE_SOURCES
     src/offline/project_text_scan.cpp
     src/offline/project_search.cpp
     src/offline/project_settings_file.cpp
+    src/offline/project_file_lock.cpp
     src/offline/test_runner.cpp
     src/offline/process_runner.cpp
     src/offline/deep_domain_support.cpp

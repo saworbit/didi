@@ -5,6 +5,7 @@
 #include "didi/common/atomic_write.hpp"
 #include "didi/offline/deep_domain_support.hpp"
 #include "didi/offline/process_runner.hpp"
+#include "didi/offline/project_file_lock.hpp"
 #include "didi/offline/test_runner.hpp"
 #include "didi/common/engine_version.hpp"
 #include "didi/runtime/session_client.hpp"
@@ -657,12 +658,17 @@ CallToolResult handleProjectListExportPresets(const json& args, std::shared_ptr<
 CallToolResult handleProjectAddExportPreset(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     auto root = projectRoot();
     if (root.isErr()) return CallToolResult::fromError(root.error());
+    // Held from the plan's read of the file to the read-back, so a second
+    // server's preset cannot land in between and be replaced by this one's
+    // copy of the file, and the read-back cannot meet its replace (#929).
+    auto lock = offline::lockProjectFile(root.value(), "export_presets.cfg");
+    if (lock.isErr()) return CallToolResult::fromError(lock.error());
     auto plan = offline::planExportPresetForProject(args);
     if (plan.isErr()) return CallToolResult::fromError(plan.error());
     const auto path = root.value() / "export_presets.cfg";
     auto written = files::writeFileAtomically(path, plan.value().contents);
     if (written.isErr()) {
-        return CallToolResult::error("Failed to write export_presets.cfg: " + written.error().message);
+        return CallToolResult::fromError(written.error(), "Failed to write export_presets.cfg: ");
     }
 
     // Read back through the reader project_list_export_presets and
@@ -690,6 +696,9 @@ CallToolResult handleProjectAddExportPreset(const json& args, std::shared_ptr<ip
          "project_export with preset \"" + name + "\" and mode \"pack\" writes a .pck and needs "
          "no export templates. A release or debug build needs the export templates for " +
              record->value("platform", "") + ", and project_export says so when they are missing."}};
+    // The file is settled. The editor's re-read below can take seconds, and
+    // another writer need not wait for it.
+    lock.value().reset();
 
     // Adding and removing an export platform is the one public event that
     // makes the editor read the file again, and it does so on its next frame.
