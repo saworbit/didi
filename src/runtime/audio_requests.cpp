@@ -134,8 +134,14 @@ Result<AudioAddBusRequest> parseAudioAddBusRequest(const json& params) {
         const size_t end = points[last - 1].offset + points[last - 1].length;
         const std::string trimmed = request.name.substr(begin, end - begin);
         const char32_t edge = first > 0 ? points[0].value : points.back().value;
+        // A no-break or ideographic space is drawn as a space, not as nothing,
+        // and the sentence says which of the two the caller sent.
+        const bool white_space = edge == 0x20 || edge == 0xA0 || edge == 0x1680 ||
+                                 (edge >= 0x2000 && edge <= 0x200A) || edge == 0x202F ||
+                                 edge == 0x205F || edge == 0x3000;
         const std::string what = edge == 0x20 ? std::string("a space")
-                                              : "an invisible character (" + codePointName(edge) + ")";
+                                 : white_space ? "a space (" + codePointName(edge) + ")"
+                                               : "an invisible character (" + codePointName(edge) + ")";
         return invalid("name",
                        "name may not begin or end with a space or an invisible character, and it "
                        "has " + what + " there. Godot keeps it, so \"" + request.name +

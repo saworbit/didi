@@ -140,6 +140,11 @@ void names_as_a_person_sees_them() {
         ASSERT_EQ(error.data["retry_with"]["name"], json(edge.meant));
         ASSERT_EQ(error.data["character"], json(edge.character));
     }
+    // A no-break space is a space, not an invisible character, and a zero
+    // width space is invisible; the sentence says which one was sent.
+    ASSERT_TRUE(refusedWith(nbsp + "Voice").message.find("a space (U+00A0)") != std::string::npos);
+    ASSERT_TRUE(refusedWith(zero_width_space + "Music").message.find("an invisible character (U+200B)") !=
+                std::string::npos);
     // Nothing but blank, which the panel shows as a bus with no name.
     for (const auto& blank : {zero_width_space, nbsp + ideographic_space, byte_order_mark + " "}) {
         const auto error = refusedWith(blank);
