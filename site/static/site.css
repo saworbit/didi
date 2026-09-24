@@ -147,11 +147,10 @@ li::marker { color: var(--slate); }
 .tag .dot { color: var(--slate); }
 .stats {
   list-style: none; margin: 0 0 48px; padding: 0; display: grid;
-  grid-template-columns: repeat(5, 1fr); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+  grid-template-columns: repeat(5, 1fr); border: 1px solid var(--line);
 }
-.stats li { padding: 20px 22px 18px 0; border-right: 1px solid var(--line); margin: 0; }
+.stats li { padding: 20px 22px 18px; border-right: 1px solid var(--line); margin: 0; }
 .stats li:last-child { border-right: 0; }
-.stats li:not(:first-child) { padding-left: 22px; }
 .stats b { display: block; font-size: 30px; line-height: 1; letter-spacing: -.03em; color: var(--ink); font-weight: 600; }
 .stats span { display: block; margin-top: 8px; font-family: var(--mono); font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
 
@@ -338,7 +337,6 @@ footer nav a:hover { color: var(--ink); }
   .stats { grid-template-columns: repeat(3, 1fr); }
   .stats li:nth-child(3) { border-right: 0; }
   .stats li:nth-child(n+4) { border-top: 1px solid var(--line); }
-  .stats li:nth-child(4) { padding-left: 0; }
   .grid.three, .steps, .docs { grid-template-columns: repeat(2, 1fr); }
   .lights { grid-template-columns: repeat(2, 1fr); }
   .honest, .brand-row, .console-note { grid-template-columns: 1fr; }
@@ -362,9 +360,9 @@ footer nav a:hover { color: var(--ink); }
   .menu { display: inline-flex; margin-left: auto; }
   .theme { margin-left: 0; }
   .stats { grid-template-columns: 1fr 1fr; }
-  .stats li { border-right: 0; padding-left: 0; }
+  .stats li { border-right: 0; padding: 18px 16px 16px; }
   .stats li:nth-child(odd) { border-right: 1px solid var(--line); }
-  .stats li:nth-child(even) { padding-left: 18px; }
+  .stats li:last-child { border-right: 0; }
   .stats li:nth-child(n+3) { border-top: 1px solid var(--line); }
   .grid.two, .grid.three, .steps, .docs, .lights, .approw { grid-template-columns: 1fr; }
   .lockcard { flex-direction: column; align-items: flex-start; gap: 26px; }
