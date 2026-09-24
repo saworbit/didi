@@ -91,6 +91,8 @@ twice.
 | `probes/export_preset_writer.py` | `project_add_export_preset` asked what an agent sends instead of what the harness sends, with the engine as the witness for every row the tool accepts: seventeen name spellings each exported as a pack through `project_export`, seventeen `export_path` forms and what was stored, the seven platforms and five near misses, a release and a debug build with no templates against the `next_step` that promised a refusal, files the tool did not write (CRLF, a byte-order mark, no final newline), two servers adding at once, and the schema's `maxLength` against the handler's bytes. `--live SANDBOX` adds with an editor attached and then makes the editor write its own list. Needs `--godot`; no Didi editor for the offline rows. |
 | `probes/audio_bus_engine.py` | What adding an audio bus does, asked of the engine alone, before a tool adds one (#771). The binds; what `set_bus_name` keeps for a name in use, `Master`, a case variant, the empty name and fifteen awkward names, each saved and loaded again; every send read back and then heard, with a tone and every bus's peak meter, silence and a muted middle bus as the controls; a player's `bus` around a bus that does not exist yet; `add_bus` at every position; and a headless editor after a bus is added: when and where it writes the layout, what its Audio panel shows, what a click on a stale name does, which refresh fixes it, and which undo history an action lands in, with the project then run as a game. A fourth editor project saves the project settings once the layout exists, which is how 4.6 and 4.7 come to write the layout setting as a `uid://`. Needs no Didi build. Pass `--godot` once per engine line; they run side by side. The evidence for the `audio_add_bus` amendment, and for #934 and #935. |
 | `probes/config_string_escapes.py` | What a quoted string in a Godot text file holds, asked of the parser before a reader undoes its escapes (#934). Fifty-one spellings, each read through `ConfigFile.load` and through a `.tres` bus layout loaded into `AudioServer`: every backslash escape the parser might know, `\u` and `\U` with good, short and malformed hex, surrogate pairs and halves, escaped bytes that do and do not make UTF-8, a byte order mark, raw control characters, and a bad escape inside an array and a constructor. Prints each value's type and code points and every engine line. Needs no Didi build; the files are written byte for byte, and in the rows built with `esc()` a `%` stands for the backslash, so no tool on the way can decode an escape before it reaches the engine. |
+| `probes/audio_bus_surface.py` | `audio_add_bus` and its neighbours asked what an agent sends, a day after the tool shipped (#942), with every row printed as what the fix made true against what came back, so a build without the fixes prints DIFF where each finding was. Names a person cannot tell apart in the Audio panel (a no-break space, an ideographic space, a zero width space, a byte-order mark, U+0085, U+2028, a right-to-left override) and the length bound in characters; a player created with its `bus` in one call; a read-only layout file and the layout setting moved under a running editor; a second server on the same editor; `dry_run` of the wrong type; and, with `--godot`, a detached game's own mix. Needs a live editor on a throwaway sandbox, because a bus cannot be removed through the surface. |
+| `probes/max_length_units.py` | Every offline string parameter with a `maxLength`, filled to the bound with a three-byte character and called with the smallest arguments the schema allows. The schema says that argument is valid, so a refusal about its length is the finding: a bound counted in bytes under a schema that counts characters, #663's class. Its first run, in session nineteen, found three: the export preset name session eighteen had measured, `project_analyze_impact`'s `target`, and the blackboard's path check under the readers #663 fixed. Prints how many rows were refused for another reason first, so a length check behind another refusal is not claimed, and how many live-only parameters it did not ask. |
 | `probes/input_action_in_game.py` | #927's "takes effect when a game starts", walked: an action written with the editor attached, a game launched, the action pressed in it, beside an action nobody declared as the control. The two answered identically until session eighteen, so the row meant to prove the action arrived could not have said otherwise. Needs a live editor on a `--fixtures` sandbox. |
 | `probes/reimport_overlap.py` | The harness's import sequence replayed against a live editor, printing each answer's `engine_diagnostics`: a never-seen PNG, the same PNG again at once. Pins #914 to the second call. |
 | `editor_log.py` | The editor's own console, read by every probe. `Session` finds the `editor.log` that `sandbox.py --launch` writes beside the project, reports what the editor printed before the session began, prints every new ERROR or WARNING under the call that caused it, and keeps them on `session.engine_lines`; `session.engine_summary()` groups them by call. Pass `editor_log=False` to turn it off. |
@@ -1139,6 +1141,62 @@ blackboard (session thirteen), and the answer on Windows was half the calls
 failing with errors that do not say "retry", and on one run an update that
 was reported written and is not in the file (#929).
 
+**A rule written for ASCII is a rule about bytes.** `audio_add_bus` refused a
+leading space, spaces alone and control characters, and every one of those
+rules tested bytes below 0x80. A no-break space, an ideographic space, a zero
+width space in front of an existing name, U+0085 and U+2028 all went through,
+and the Audio panel shows each as a name nobody can tell from another, or as no
+name. The question a name rule answers is what a person sees, so send it what
+copy and paste delivers, not only what a keyboard does. And send the invisible
+ones to the engine as well as to the rule: the byte-order mark reached the
+engine, whose UTF-8 reader dropped it, and the read-back then reported a race
+that had not happened (#948 is the same loss for every other string).
+
+**A class fixed once is a census waiting to be written.** #663 moved one tool's
+length bound from bytes to characters. Session eighteen measured the same
+mismatch in `project_add_export_preset` and filed nothing, and session nineteen
+met it in `audio_add_bus`, the newest tool on the surface. One census,
+`max_length_units.py`, found two more, one of them under readers #663 had
+already fixed, where the core check answered first. When a finding is a
+class, the fix that closes it is the census that finds the next one, kept
+where the next session will run it.
+
+**A fallback can hide the failure that sent the call there.** Both audio reads
+were admitted to a game session and still failed in every game, because the
+bridge fetched `EditorInterface` before dispatching them. `audio_list_buses`
+answered from the layout file, `offline_fallback`, as if nothing were attached,
+and a probe that only checked "did it answer" would have passed. The harness
+row asked which session answered, and that is what caught it. Wherever a tool
+falls back, ask the answer who it came from.
+
+**Some settings are read once.** The editor's Audio panel reads
+`audio/buses/default_bus_layout` when it is built and saves every bus change to
+that file until the editor restarts; `editor_reload_project` is a filesystem
+scan and does not change it. Moving the setting under a running editor left it
+writing the old file while the next start loaded the new, empty one. Export
+presets and autoloads are the same shape, and their tools already say so.
+Before trusting a setting write, ask when the editor reads that setting.
+
+**CI is the slow machine, and it is a user.** `audio_add_bus` waited two
+seconds for the editor's layout write, which lands in 0.9 on this box. On the
+Windows 4.5.1 runner, drawing the editor in software with every main-thread
+command waiting about 0.6 s for a frame, the first write took longer, the tool
+answered `layout_written: false`, and the gate refused #942. False was the
+honest answer, and the harness had asserted the runner's speed rather than
+the tool's honesty. The wait is five seconds now, and the harness checks that
+true is a file holding the bus and false comes with a note and is followed by
+the write.
+
+**Asked and green this session.** Five adds pipelined in one burst run in
+order, about 1.3 s each, with every layout written. Two servers adding the same
+names at once: the second is refused as held, and the editor holds each name
+once. A name of 86 CJK characters and one of 65 emoji are added, written by
+the editor and read back offline at the right index. Every schema type error
+names its argument. And `scene_instantiate_node`'s new read-back
+reports nothing for floats, vectors, rotations, colours in both spellings, text
+and booleans across ten node types, and exactly the four values the engine
+keeps its own answer for.
+
 ## Sessions so far
 
 | Date | Scope | Server | Findings |
@@ -1177,6 +1235,8 @@ was reported written and is not in the file (#929).
 | 2026-09-23 | One new tool driven end to end rather than the surface swept: `anim_add_library` (#770) on 4.5.1 and 4.7.2, through a menu, a library, a saved scene and a running game, then every way to be wrong with it. Then, prompted by an editor console Shane pasted, the engine's own output read for the first time: in the vibe client, in every live answer, and as a gate in the live harness. | `2.0.1+4298f13bde58`, then the stack #912, #915, #916, #917 | Fixed before merge: a wrong-case path saved into the scene, a rewritten library added as the editor's stale copy, a neighbour route that refused three different ways on three engines, `anim_list_tracks` claiming an `AnimationTree`, `asset_reimport` calling a failed import imported, a harness fixture PNG that had never tested a successful import, three refusals the engine printed errors ahead of, `resource_create` writing unloadable `.res`, an overwrite leaving the editor's copy stale, and the addon shipping no `.uid` sidecars. Filed: #913 (the editor's undo manager left inconsistent by `editor_undo`) and #914 (a reimport colliding with the editor's own import pass). Every library name the engine accepts was saved and reloaded on three engines and survives. |
 
 | 2026-09-24 | The week's new export surface driven with what an agent sends rather than what the harness sends: `project_add_export_preset` (#926) and the preset reader (#924), every accepted row exported by the engine, then the editor made to write its own list over them. Then #927's input-action story walked into a running game, two servers writing one project at once, and the path forms every writer shares. | `2.0.1+4bcb964ef4e7` | Fixed before merge, as a stack: preset names Godot's command line trims or decodes (a whitespace-only name hung the export for five minutes), a release build with no templates answered `500`, `did_you_mean` shadowed by the schema's enum, a byte-order mark blamed on an invisible key, a directory stored as `export_path`, `runtime_inject_input` reporting an undeclared action as pressed, and `user://` and `RES://` read as folders by every writer. Filed: #929, two servers writing one project file fail half their calls on Windows with errors that do not say retry, and one run lost an update there too; and #932, an `export_path` whose folder Godot will not create when it exports to it. Green: the live reload, the editor's own rewrite, all seven platforms as a pack, and quotes, backslashes, brackets and emoji in a name. |
+
+| 2026-09-24 | One new tool driven end to end, a day after it shipped: `audio_add_bus` (#942) and the audio surface around it, on 4.7.2 then all three lines, with the engine as the witness. A settings menu's buses, then every way to be wrong with a name, a send and a value, then the states around the tool: a read-only layout, the layout setting moved under the editor, two servers, a running game. Then a census of every string bound on the surface in the unit its schema states. | `2.0.1+2685890453bf`, then the stack #943 to #947 | Fixed before merge, as a stack: names a person cannot tell apart accepted by ASCII rules, and a byte-order mark read back as a race, retryable (#943); length bounds in bytes under schemas in characters in four tools, found by `max_length_units.py` (#943); a moved layout setting that left the tools naming the wrong file and a read-only layout reported as written (#944); both audio reads refused for a game, and then failing in every game behind an `EditorInterface` lookup that `audio_list_buses` hid by falling back (#945); `scene_instantiate_node` never reading its initial properties back (#946); `dry_run` of the wrong type answered as JSON-RPC -32602, a held bridge described in its sentence as no editor, and "at least 1 characters" (#947). And one found by CI: #942's two-second wait for the layout write, too short for a software-rendered runner, fixed in #942 before it merged. Filed: #948, every string sent to the engine losing a leading byte-order mark and anything after a NUL, with `applied: true`; and #949, a live-only tool's argument rules running after the no-editor refusal, with a test asserting the opposite. |
 
 Add a row per session. The table is the reason this directory exists: a finding
 that keeps coming back in a new place is a design problem, and only the log
