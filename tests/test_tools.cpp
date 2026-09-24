@@ -1008,6 +1008,81 @@ static void test_audio_list_buses_names_a_master_the_file_half_declares() {
     ASSERT_EQ(report["buses"][1]["send"], "");
 }
 
+static void test_audio_list_buses_reads_escaped_names_the_way_the_engine_does() {
+    // The engine keeps any bus name and saves it with the string escapes.
+    // These are the lines 4.5.1, 4.6.2 and 4.7.2 each wrote, byte for byte, for
+    // these names in tools/vibe/probes/audio_bus_engine.py. Reading the text
+    // between the quotes published every escape as part of the name, so
+    // `Say "hi"` came back as `Say \"hi\"`, and a send to it named a bus that
+    // does not exist (#934).
+    ScopedToolProject project("audio-buses-escaped-names");
+    writeAuditFile("project.godot", "config_version=5\n");
+    writeAuditFile("default_bus_layout.tres", R"x([gd_resource type="AudioBusLayout" format=3]
+
+[resource]
+bus/1/name = &"Say \"hi\""
+bus/1/solo = false
+bus/1/mute = false
+bus/1/bypass_fx = false
+bus/1/volume_db = 0.0
+bus/1/send = &"Master"
+bus/2/name = &"back\\slash"
+bus/2/solo = false
+bus/2/mute = false
+bus/2/bypass_fx = false
+bus/2/volume_db = 0.0
+bus/2/send = &"Say \"hi\""
+bus/3/name = &"&\"x\""
+bus/3/solo = false
+bus/3/mute = false
+bus/3/bypass_fx = false
+bus/3/volume_db = 0.0
+bus/3/send = &"Master"
+bus/4/name = &"tab\there"
+bus/4/solo = false
+bus/4/mute = false
+bus/4/bypass_fx = false
+bus/4/volume_db = 0.0
+bus/4/send = &"Master"
+bus/5/name = &"new\nline"
+bus/5/solo = false
+bus/5/mute = false
+bus/5/bypass_fx = false
+bus/5/volume_db = 0.0
+bus/5/send = &"Master"
+)x");
+
+    const auto report = listBusesOffline();
+    ASSERT_EQ(report["layout_loads"], true);
+    ASSERT_EQ(report["bus_count"].get<int>(), 6);
+    ASSERT_EQ(report["buses"][1]["name"], "Say \"hi\"");
+    ASSERT_EQ(report["buses"][2]["name"], "back\\slash");
+    ASSERT_EQ(report["buses"][2]["send"], "Say \"hi\"");
+    ASSERT_EQ(report["buses"][3]["name"], "&\"x\"");
+    ASSERT_EQ(report["buses"][4]["name"], "tab\there");
+    ASSERT_EQ(report["buses"][5]["name"], "new\nline");
+}
+
+static void test_audio_list_buses_answers_master_for_an_escape_the_parser_refuses() {
+    // A lead surrogate escape with no trail after it is ERR_PARSE_ERROR for the
+    // whole layout on 4.5.1, 4.6.2 and 4.7.2, and the project runs on Master
+    // alone (tools/vibe/probes/config_string_escapes.py). Undoing escapes must
+    // not turn that file into one that reads.
+    ScopedToolProject project("audio-buses-refused-escape");
+    writeAuditFile("project.godot", "config_version=5\n");
+    writeAuditFile("default_bus_layout.tres", R"x([gd_resource type="AudioBusLayout" format=3]
+
+[resource]
+bus/1/name = &"\uD83D"
+bus/1/send = &"Master"
+)x");
+
+    const auto report = listBusesOffline();
+    ASSERT_EQ(report["layout_loads"], false);
+    ASSERT_EQ(report["bus_count"].get<int>(), 1);
+    ASSERT_EQ(report["buses"][0]["name"], "Master");
+}
+
 static void test_audio_list_buses_reads_a_layout_with_no_bus_lines_at_all() {
     // What a project whose only bus is Master writes: the resource block and
     // nothing under it. Loading that back gives one bus named Master, measured
@@ -2615,6 +2690,29 @@ static void test_autoloads_are_listed_offline_the_way_the_engine_registers_them(
     ASSERT_EQ(answer["autoloads"][1]["name"], "Plain");
     ASSERT_EQ(answer["autoloads"][1]["singleton"], false);
     ASSERT_EQ(answer["autoloads"][2]["name"], "SpacedName");
+}
+
+static void test_autoload_paths_are_read_with_their_escapes() {
+    // `\/` is a slash to Godot's parser on 4.5.1, 4.6.2 and 4.7.2
+    // (tools/vibe/probes/config_string_escapes.py), so this is the autoload
+    // res://good.gd. Taking the text between the quotes kept the backslashes
+    // and listed a path no file has (#934).
+    ScopedToolProject project("offline-autoloads-escaped");
+    writeAuditFile("project.godot", R"x(config_version=5
+
+[autoload]
+
+Good="*res:\/\/good.gd"
+)x");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    const auto listed = registry.callTool("project_list_autoloads", didi::json::object());
+    ASSERT_TRUE(!listed.isError);
+    const auto answer = didi::json::parse(listed.content[0].text);
+    ASSERT_EQ(answer["autoloads"].size(), 1u);
+    ASSERT_EQ(answer["autoloads"][0]["path"], "res://good.gd");
+    ASSERT_EQ(answer["autoloads"][0]["singleton"], true);
 }
 
 static void test_an_unloadable_manifest_is_refused_rather_than_read_offline() {
@@ -8410,6 +8508,10 @@ struct RegisterToolTests {
                      test_audio_list_buses_keeps_an_index_the_layout_skips);
         registerTest("Tools.AudioListBusesHalfDeclaredMaster",
                      test_audio_list_buses_names_a_master_the_file_half_declares);
+        registerTest("Tools.AudioListBusesEscapedNames",
+                     test_audio_list_buses_reads_escaped_names_the_way_the_engine_does);
+        registerTest("Tools.AudioListBusesRefusedEscape",
+                     test_audio_list_buses_answers_master_for_an_escape_the_parser_refuses);
         registerTest("Tools.AudioListBusesEmptyResource",
                      test_audio_list_buses_reads_a_layout_with_no_bus_lines_at_all);
         registerTest("Tools.AudioListBusesMissingLayout",
@@ -8426,6 +8528,8 @@ struct RegisterToolTests {
                      test_an_offline_setting_read_says_what_its_404_is_not_claiming);
         registerTest("Tools.OfflineAutoloadList",
                      test_autoloads_are_listed_offline_the_way_the_engine_registers_them);
+        registerTest("Tools.ProjectListAutoloadsEscapedPath",
+                     test_autoload_paths_are_read_with_their_escapes);
         registerTest("Tools.OfflineSettingUnloadableManifest",
                      test_an_unloadable_manifest_is_refused_rather_than_read_offline);
         registerTest("Tools.ExportPresetRefusalCauses",

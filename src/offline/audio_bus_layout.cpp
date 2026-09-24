@@ -30,13 +30,20 @@ std::string readFile(const std::filesystem::path& path) {
 // `AudioServer.get_bus_index` and answers 404 for it, and
 // `AudioStreamPlayer.bus` silently keeps Master when the name is unknown
 // (#844). Measured on 4.5.1 and 4.7.2, against layouts the engine saved.
+//
+// The quotes are not the only thing to undo. The engine keeps any name it is
+// given and saves it with the string escapes, so `Say "hi"` is written
+// `&"Say \"hi\""` and a name holding a tab is written with `\t`. Taking the
+// text between the quotes published those escapes as part of the name, which
+// is #844 again one layer in (#934). The string rule is the parser's, in
+// config_file::stringValue. A value the parser refuses never gets here,
+// because loadFailure has already reported the layout as one Godot does not
+// load; anything that is not a string is returned as written.
 std::string unquote(const std::string& value) {
-    std::string text = value;
-    if (!text.empty() && text.front() == '&') text.erase(0, 1);
-    if (text.size() >= 2 && text.front() == '"' && text.back() == '"') {
-        return text.substr(1, text.size() - 2);
+    if (auto decoded = config_file::stringValue(value); decoded && decoded->problem.empty()) {
+        return std::move(decoded->text);
     }
-    return text;
+    return std::string(strings::trim(value));
 }
 
 // Where Godot is told to find the bus layout, or the default it uses when the

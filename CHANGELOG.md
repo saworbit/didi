@@ -134,6 +134,24 @@ The three Phase 7 blockers are unchanged; the newest name is `project_add_export
 
 ### Fixed
 
+- **A bus name with a quote, a backslash or a control character came back
+  with Godot's escapes still in it (#934).** The engine keeps any bus name
+  it is given and saves it with the string escapes, so `Say "hi"` is written
+  `&"Say \"hi\""`. `audio_list_buses` read offline by stripping the quotes and
+  kept the rest, so it published `Say \"hi\"`, a literal `\t` for a tab and a
+  literal `\n` for a line break: names `audio_configure_bus` answers 404 for,
+  and that set an `AudioStreamPlayer` back to Master. The same was true of a
+  send naming one of them. Every quoted value is now read with one rule, the
+  parser's, measured on 4.5.1, 4.6.2 and 4.7.2 through `ConfigFile` and
+  through a `.tres` loaded into `AudioServer`: `\b`, `\t`, `\n`, `\f` and
+  `\r` are control characters and any other character after a backslash is
+  itself; a `\u` or `\U` escape is one byte of what the string is decoded as
+  when it closes, not one character, so a lone escape above ASCII is U+FFFD
+  or a space; and a `\u` without its four hex digits, or half a surrogate
+  pair, makes the whole file fail to load, which the readers now report as a
+  file that does not load. The export preset reader, which undid `\"` and
+  `\\` and nothing else, and the offline autoload list, which undid nothing,
+  read with the same rule.
 - **`user://` and `RES://` were read as folders inside the project.** Every
   writer stripped `res://` and took whatever else it was given as a path
   relative to the project, so `user://save.gd` named a directory `user:`.

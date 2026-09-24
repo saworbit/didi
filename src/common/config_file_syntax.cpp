@@ -1,5 +1,6 @@
 #include "didi/common/config_file_syntax.hpp"
 
+#include <cstdint>
 #include <cstdlib>
 
 #include <cctype>
@@ -9,6 +10,163 @@ namespace {
 
 bool isSpace(char character) {
     return std::isspace(static_cast<unsigned char>(character)) != 0;
+}
+
+int hexValue(char character) {
+    if (character >= '0' && character <= '9') return character - '0';
+    if (character >= 'a' && character <= 'f') return character - 'a' + 10;
+    if (character >= 'A' && character <= 'F') return character - 'A' + 10;
+    return -1;
+}
+
+// The UTF-8 decode Godot runs on a string when its closing quote is read. A
+// byte that does not begin a well-formed sequence becomes U+FFFD and the decode
+// carries on from the byte after it, rather than from the end of the sequence
+// it started: an overlong pair is two replacement characters, the three bytes
+// of a UTF-16 surrogate are three, and a four-byte sequence cut short after its
+// third byte is three. A byte order mark is dropped only where it leads the
+// string. Measured on 4.5.1, 4.6.2 and 4.7.2 with each byte written as an
+// escape, which is the one way a file can put an arbitrary byte in a string.
+std::string decodeUtf8TheWayGodotDoes(const std::string& bytes) {
+    static constexpr char kReplacement[] = "\xEF\xBF\xBD";
+    std::string out;
+    out.reserve(bytes.size());
+    size_t at = 0;
+    if (bytes.size() >= 3 && bytes.compare(0, 3, "\xEF\xBB\xBF") == 0) at = 3;
+    while (at < bytes.size()) {
+        const auto lead = static_cast<unsigned char>(bytes[at]);
+        if (lead < 0x80) {
+            out += bytes[at++];
+            continue;
+        }
+        size_t length = 0;
+        uint32_t code = 0;
+        if ((lead & 0xE0) == 0xC0) {
+            length = 2;
+            code = lead & 0x1F;
+        } else if ((lead & 0xF0) == 0xE0) {
+            length = 3;
+            code = lead & 0x0F;
+        } else if ((lead & 0xF8) == 0xF0) {
+            length = 4;
+            code = lead & 0x07;
+        }
+        bool valid = length != 0 && at + length <= bytes.size();
+        for (size_t i = 1; valid && i < length; ++i) {
+            const auto next = static_cast<unsigned char>(bytes[at + i]);
+            if ((next & 0xC0) != 0x80) {
+                valid = false;
+            } else {
+                code = (code << 6) | (next & 0x3F);
+            }
+        }
+        if (valid) {
+            static constexpr uint32_t kSmallest[] = {0, 0, 0x80, 0x800, 0x10000};
+            valid = code >= kSmallest[length] && code <= 0x10FFFF &&
+                    !(code >= 0xD800 && code <= 0xDFFF);
+        }
+        if (valid) {
+            out.append(bytes, at, length);
+            at += length;
+        } else {
+            out += kReplacement;
+            ++at;
+        }
+    }
+    return out;
+}
+
+// One quoted string, read from just past its opening quote. See stringValue in
+// the header for every rule, each measured on the three lines.
+struct DecodedString {
+    std::string text;
+    std::string problem;
+    size_t end{0};        // just past the closing quote, or the end of the text
+    bool closed{false};
+};
+
+DecodedString decodeString(std::string_view text, size_t at) {
+    DecodedString decoded;
+    const auto refuse = [&decoded](const char* reason) {
+        if (decoded.problem.empty()) decoded.problem = reason;
+    };
+    constexpr const char* kUnpairedLead =
+        "the string has a UTF-16 lead surrogate escape with no trail surrogate escape after it";
+    // The file's bytes and the escaped units, before the decode that runs when
+    // the string closes.
+    std::string bytes;
+    uint32_t lead = 0;
+    while (at < text.size()) {
+        const char character = text[at++];
+        if (character == '"') {
+            decoded.closed = true;
+            break;
+        }
+        if (character != '\\') {
+            if (lead != 0) refuse(kUnpairedLead);
+            bytes += character;
+            continue;
+        }
+        // A backslash at the very end is an unterminated value, which is
+        // Scan::complete's answer rather than this one.
+        if (at >= text.size()) break;
+        const char next = text[at++];
+        uint32_t unit = static_cast<unsigned char>(next);
+        switch (next) {
+            case 'b': unit = 0x08; break;
+            case 't': unit = 0x09; break;
+            case 'n': unit = 0x0A; break;
+            case 'f': unit = 0x0C; break;
+            case 'r': unit = 0x0D; break;
+            case 'u':
+            case 'U': {
+                const int digits = next == 'U' ? 6 : 4;
+                unit = 0;
+                for (int i = 0; i < digits && at < text.size(); ++i) {
+                    const int value = hexValue(text[at]);
+                    if (value < 0) {
+                        // Not consumed, so a closing quote that came too soon
+                        // still closes the string.
+                        refuse(next == 'U'
+                                   ? "the string has a \\U escape without six hex digits after it"
+                                   : "the string has a \\u escape without four hex digits after it");
+                        break;
+                    }
+                    unit = (unit << 4) | static_cast<uint32_t>(value);
+                    ++at;
+                }
+                break;
+            }
+            default:
+                // Any other character is itself: \" \\ \' and \/, and \q, \0,
+                // \a and \v with it. A multi-byte character after the
+                // backslash contributes its first byte here and the rest as
+                // ordinary bytes, which is how the parser reads it too.
+                break;
+        }
+        if ((unit & 0xFFFFFC00u) == 0xD800u) {
+            if (lead != 0) refuse(kUnpairedLead);
+            lead = unit;
+            continue;
+        }
+        if ((unit & 0xFFFFFC00u) == 0xDC00u) {
+            if (lead == 0) {
+                refuse("the string has a UTF-16 trail surrogate escape with no lead surrogate "
+                       "escape before it");
+                continue;
+            }
+            unit = (lead << 10) + unit - ((0xD800u << 10) + 0xDC00u - 0x10000u);
+            lead = 0;
+        }
+        if (lead != 0) refuse(kUnpairedLead);
+        // An escape is one byte of what the closing decode reads. Anything
+        // that does not fit in a byte becomes a space, and so does zero.
+        bytes += (unit == 0 || unit > 0xFF) ? ' ' : static_cast<char>(unit);
+    }
+    if (decoded.closed && lead != 0) refuse(kUnpairedLead);
+    decoded.end = at;
+    if (decoded.problem.empty()) decoded.text = decodeUtf8TheWayGodotDoes(bytes);
+    return decoded;
 }
 
 bool isIdentifierStart(char character) {
@@ -269,20 +427,13 @@ struct ValueWalk {
         if (problem.empty()) problem = std::move(reason);
     }
 
-    // `at` is on the opening quote.
+    // `at` is on the opening quote. The parser reads a string's escapes as it
+    // goes, so one it cannot read is err 43 for the whole file wherever the
+    // string is, a constructor's arguments included.
     void skipString() {
-        ++at;
-        while (at < text.size()) {
-            if (text[at] == '\\') {
-                at += 2;
-                continue;
-            }
-            if (text[at] == '"') {
-                ++at;
-                return;
-            }
-            ++at;
-        }
+        const auto decoded = decodeString(text, at + 1);
+        if (!decoded.problem.empty()) refuse(decoded.problem);
+        at = decoded.end;
     }
 
     // `at` is on the opening bracket. Strings inside are skipped whole so a
@@ -608,6 +759,18 @@ bool booleanize(std::string_view value_text) {
     const double number = std::strtod(owned.c_str(), &end);
     if (end != owned.c_str() && *end == '\0') return number != 0.0;
     return true;
+}
+
+std::optional<StringValue> stringValue(std::string_view value_text) {
+    const auto text = trimmedView(value_text);
+    size_t quote = 0;
+    if (!text.empty() && (text.front() == '&' || text.front() == '@')) quote = 1;
+    if (quote >= text.size() || text[quote] != '"') return std::nullopt;
+    auto decoded = decodeString(text, quote + 1);
+    // One string and nothing after it. `"a" "b"` is not a value this answers
+    // for, and neither is a string the text ends inside.
+    if (!decoded.closed || decoded.end != text.size()) return std::nullopt;
+    return StringValue{std::move(decoded.text), std::move(decoded.problem)};
 }
 
 } // namespace didi::config_file

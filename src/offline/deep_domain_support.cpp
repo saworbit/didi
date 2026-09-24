@@ -24,14 +24,15 @@ namespace {
 
 constexpr size_t kMaxDiagnostics = 1000;
 
-std::string unquote(std::string value) {
-    value = strings::trim(value);
-    if (value.size() >= 2 && value.front() == '"' && value.back() == '"') {
-        value = value.substr(1, value.size() - 2);
-        value = strings::replaceAll(value, "\\\"", "\"");
-        value = strings::replaceAll(value, "\\\\", "\\");
+// A preset field as the engine reads it. This undid `\"` and `\\` and no other
+// escape, so a `\t` in a name came back as two characters; the rule is the
+// parser's, shared with every other reader (#934). A string the parser refuses
+// has already made the file `unloadable_value`, and is returned as written.
+std::string unquote(const std::string& value) {
+    if (auto decoded = config_file::stringValue(value); decoded && decoded->problem.empty()) {
+        return std::move(decoded->text);
     }
-    return value;
+    return std::string(strings::trim(value));
 }
 
 } // namespace
