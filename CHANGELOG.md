@@ -155,6 +155,20 @@ The three Phase 7 blockers are unchanged; the newest name is `audio_add_bus`, re
 
 ### Fixed
 
+- **`audio_list_buses` could not ask a running game about its own mix.**
+  It is the tool that answers why a game is silent, and a bus a script
+  muted while the game runs is muted in the game, but both audio reads were
+  editor only: a game session got "Tool is unavailable for the selected
+  session kind" while the tool's own documentation described that case and
+  `audio_configure_bus` carried a sentence for a game session nothing could
+  reach. Both answer a game now: the two methods also had to move ahead of
+  the bridge's `EditorInterface` lookup, which a game does not have.
+  `audio_list_buses` had hidden that failure by answering from the layout
+  file, and an attached engine whose read fails now puts `live_error` on
+  that answer. `audio_add_bus` stays editor only, and the refusal for a tool
+  asked of the wrong kind of session now says which kind it needs. Found by
+  vibe session nineteen.
+
 - **A bus layout the editor could not write was reported as one it would.**
   The editor's Audio panel reads `audio/buses/default_bus_layout` once and
   saves every bus change to that file until it restarts. After the setting

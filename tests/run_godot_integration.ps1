@@ -743,6 +743,15 @@ try {
         # where a caller needs it, right before injecting a click (#592).
         # Scoped below the fixture's 10,001-node stress subtree, which both UI
         # walks stop at by design.
+        # The game's own mix. audio_list_buses is the tool that answers why a
+        # game is silent, and both audio reads refused a game session while
+        # their documentation described one (vibe session nineteen). The change
+        # is put back; audio_add_bus stays editor only.
+        (Tool-Request 2485 "audio_list_buses" @{}),
+        (Tool-Request 2486 "audio_configure_bus" @{ bus = "Master"; mute = $true }),
+        (Tool-Request 2487 "audio_list_buses" @{}),
+        (Tool-Request 2488 "audio_configure_bus" @{ bus = "Master"; mute = $false }),
+        (Tool-Request 2489 "audio_add_bus" @{ name = "GameOnly" }),
         (Tool-Request 2490 "ui_list_controls" @{ root_path = "/root/RuntimeRoot/Spatial"; max_results = 32 }),
         (Tool-Request 2491 "ui_hit_test" @{ point = @{ x = 10; y = 10 }; root_path = "/root/RuntimeRoot/Spatial"; max_results = 16 }),
         (Tool-Request 2492 "ui_hit_test" @{ point = @{ x = 500; y = 500 }; root_path = "/root/RuntimeRoot/Spatial"; max_results = 16 }),
@@ -1396,6 +1405,15 @@ try {
     $pausableAfter = (Tool-Payload $runtimeById[2476]).value
     Assert-True ($pausableAfter -eq ($pausableBefore + 2)) "A node that pauses observed $($pausableAfter - $pausableBefore) held events in the stepped frame, expected 2."
     Assert-True ((Tool-Payload $runtimeById[2477]).value -eq ($cancelBefore + 1)) "is_action_just_pressed did not see the held press in the stepped frame."
+    $gameMix = Tool-Payload $runtimeById[2485]
+    Assert-True ($gameMix.execution_mode -eq "live" -and $gameMix.session.kind -eq "game" -and @($gameMix.buses).Count -ge 1) "audio_list_buses did not answer for the game's own mix: $($runtimeById[2485].result.content[0].text)"
+    $gameMute = Tool-Payload $runtimeById[2486]
+    Assert-True ($gameMute.status -eq "success" -and $gameMute.persisted_by_editor -eq $false -and $gameMute.limitation -match "gone when the process exits") "audio_configure_bus in a game did not say the change is the game's alone: $($runtimeById[2486].result.content[0].text)"
+    $gameMuted = @((Tool-Payload $runtimeById[2487]).buses | Where-Object { $_.index -eq 0 })
+    Assert-True ($gameMuted.Count -eq 1 -and $gameMuted[0].mute -eq $true) "The game did not read back the Master bus it was asked to mute."
+    Assert-True (-not $runtimeById[2488].result.isError) "The game's Master bus could not be unmuted again."
+    $gameAdd = $runtimeById[2489]
+    Assert-True ($gameAdd.result.isError -and $gameAdd.result.content[0].text -match "needs an editor session") "audio_add_bus in a game did not say it needs an editor session: $($gameAdd.result.content[0].text)"
     $gameButtonPath = "/root/RuntimeRoot/Spatial/AnimTarget/GameButton"
     $gameControls = @((Tool-Payload $runtimeById[2490]).controls | Where-Object { $_.node_path -eq $gameButtonPath })
     Assert-True ($gameControls.Count -eq 1) "ui_list_controls in the game did not list the fixture button."

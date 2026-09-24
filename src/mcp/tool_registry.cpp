@@ -2115,11 +2115,17 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
                 json allowed = policy == runtime::LiveSessionKindPolicy::editor_only
                                    ? json::array({"editor"})
                                    : json::array({"game"});
+                // The sentence the bridge's own refusal uses, naming both kinds,
+                // rather than one that says a kind is wrong and not which.
+                const std::string sentence =
+                    std::string(name) + " needs " +
+                    (policy == runtime::LiveSessionKindPolicy::editor_only ? "an editor" : "a game") +
+                    " session, and a " + selected->kind + " session is selected.";
                 json envelope = {
                     {"execution_mode", "live"},
                     {"session", selected->toProvenanceJson()},
                     {"error", {{"code", 409},
-                               {"message", "Tool is unavailable for the selected session kind"},
+                               {"message", sentence},
                                {"data", {{"tool", name},
                                          {"selected_session_kind", selected->kind},
                                          {"allowed_session_kinds", std::move(allowed)}}}}}

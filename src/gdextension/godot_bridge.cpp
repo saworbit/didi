@@ -8158,6 +8158,276 @@ json GodotBridge::execute(const std::string& method, const json& params,
         return liveResult({{"path", path}, {"cached", true},
                            {"reloaded", object.isOk() && object.value() != nullptr}});
     }
+    // The audio reads answer an editor or a game, and a game has no
+    // EditorInterface, so they run before the lookup below. Behind it every
+    // game request failed on "Can't retrieve singleton 'EditorInterface'
+    // outside of editor" and audio_list_buses fell back to reading the file
+    // (vibe session nineteen).
+    if (method == "audio.listBuses") {
+        // Every method hash below is identical on Godot 4.5.1, 4.6.2 and 4.7.2,
+        // checked by dumping extension_api.json from each, so this needs no
+        // per-version branch. AudioServer is a core singleton and is present
+        // whether or not an editor scene is open.
+        auto server = singleton("AudioServer");
+        if (server.isErr()) return errorJson(server.error().code, server.error().message);
+
+        auto count_value = callObject(server.value(), "AudioServer", "get_bus_count", 3905245786LL);
+        if (count_value.isErr()) return errorJson(count_value.error().code, count_value.error().message);
+        auto count = scalarFromVariant<int64_t>(count_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+        if (count.isErr()) return errorJson(count.error().code, count.error().message);
+
+        json buses = json::array();
+        for (int64_t index = 0; index < count.value(); ++index) {
+            auto bus_index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
+            if (bus_index.isErr()) return errorJson(bus_index.error().code, bus_index.error().message);
+
+            auto name_value = callObject(server.value(), "AudioServer", "get_bus_name", 844755477LL,
+                                         {&bus_index.value()});
+            if (name_value.isErr()) return errorJson(name_value.error().code, name_value.error().message);
+            auto name = stringFromVariant(name_value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+            if (name.isErr()) return errorJson(name.error().code, name.error().message);
+
+            auto volume_value = callObject(server.value(), "AudioServer", "get_bus_volume_db",
+                                           2339986948LL, {&bus_index.value()});
+            if (volume_value.isErr()) return errorJson(volume_value.error().code, volume_value.error().message);
+            auto volume = scalarFromVariant<double>(volume_value.value(), GDEXTENSION_VARIANT_TYPE_FLOAT);
+            if (volume.isErr()) return errorJson(volume.error().code, volume.error().message);
+
+            const auto boolOf = [&](const char* method_name, int64_t hash) -> Result<bool> {
+                auto value = callObject(server.value(), "AudioServer", method_name, hash,
+                                        {&bus_index.value()});
+                if (value.isErr()) return value.error();
+                return scalarFromVariant<bool>(value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+            };
+            auto mute = boolOf("is_bus_mute", 1116898809LL);
+            if (mute.isErr()) return errorJson(mute.error().code, mute.error().message);
+            auto solo = boolOf("is_bus_solo", 1116898809LL);
+            if (solo.isErr()) return errorJson(solo.error().code, solo.error().message);
+            auto bypass = boolOf("is_bus_bypassing_effects", 1116898809LL);
+            if (bypass.isErr()) return errorJson(bypass.error().code, bypass.error().message);
+
+            auto send_value = callObject(server.value(), "AudioServer", "get_bus_send", 659327637LL,
+                                         {&bus_index.value()});
+            if (send_value.isErr()) return errorJson(send_value.error().code, send_value.error().message);
+            auto send = stringFromVariant(send_value.value(), GDEXTENSION_VARIANT_TYPE_STRING_NAME);
+            if (send.isErr()) {
+                send = stringFromVariant(send_value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+                if (send.isErr()) return errorJson(send.error().code, send.error().message);
+            }
+
+            auto effect_count_value = callObject(server.value(), "AudioServer",
+                                                 "get_bus_effect_count", 3744713108LL,
+                                                 {&bus_index.value()});
+            if (effect_count_value.isErr()) {
+                return errorJson(effect_count_value.error().code, effect_count_value.error().message);
+            }
+            auto effect_count =
+                scalarFromVariant<int64_t>(effect_count_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+            if (effect_count.isErr()) return errorJson(effect_count.error().code, effect_count.error().message);
+
+            // The effect chain is the part the offline layout file cannot
+            // report, so it is the reason to attach an editor at all.
+            json effects = json::array();
+            for (int64_t slot = 0; slot < effect_count.value(); ++slot) {
+                auto slot_index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, slot);
+                if (slot_index.isErr()) return errorJson(slot_index.error().code, slot_index.error().message);
+                auto effect = callObject(server.value(), "AudioServer", "get_bus_effect", 726064442LL,
+                                         {&bus_index.value(), &slot_index.value()});
+                if (effect.isErr()) return errorJson(effect.error().code, effect.error().message);
+                auto class_value = callVariant(effect.value(), "get_class");
+                std::string class_name = "AudioEffect";
+                if (class_value.isOk()) {
+                    auto text = stringFromVariant(class_value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+                    if (text.isOk()) class_name = text.value();
+                }
+                effects.push_back({{"slot", slot}, {"class", class_name}});
+            }
+
+            buses.push_back({{"index", index},
+                             {"name", name.value()},
+                             {"volume_db", volume.value()},
+                             {"mute", mute.value()},
+                             {"solo", solo.value()},
+                             {"bypass_effects", bypass.value()},
+                             {"send", send.value()},
+                             {"effects", std::move(effects)}});
+        }
+
+        return liveResult({{"status", "success"},
+                           {"bus_count", count.value()},
+                           {"buses", std::move(buses)}});
+    }
+
+    if (method == "audio.configureBus") {
+        auto server = singleton("AudioServer");
+        if (server.isErr()) return errorJson(server.error().code, server.error().message);
+
+        auto count_value = callObject(server.value(), "AudioServer", "get_bus_count", 3905245786LL);
+        if (count_value.isErr()) return errorJson(count_value.error().code, count_value.error().message);
+        auto count = scalarFromVariant<int64_t>(count_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+        if (count.isErr()) return errorJson(count.error().code, count.error().message);
+
+        // A bus can be named or numbered. Names are what a person uses and what
+        // the layout file records; indices are what AudioServer takes. Resolving
+        // a name through the engine rather than through the layout file means a
+        // bus added at runtime is still addressable.
+        int64_t index = -1;
+        const json bus_field = params.contains("bus") ? params["bus"] : json();
+        if (bus_field.is_string()) {
+            const auto wanted = bus_field.get<std::string>();
+            auto name_variant = makeString(wanted);
+            if (name_variant.isErr()) return errorJson(name_variant.error().code, name_variant.error().message);
+            auto found = callObject(server.value(), "AudioServer", "get_bus_index", 2458036349LL,
+                                    {&name_variant.value()});
+            if (found.isErr()) return errorJson(found.error().code, found.error().message);
+            auto resolved = scalarFromVariant<int64_t>(found.value(), GDEXTENSION_VARIANT_TYPE_INT);
+            if (resolved.isErr()) return errorJson(resolved.error().code, resolved.error().message);
+            index = resolved.value();
+            if (index < 0) return errorJson(404, "No audio bus is named " + wanted);
+        } else if (bus_field.is_number_integer()) {
+            index = bus_field.get<int64_t>();
+        } else {
+            return errorJson(400, "bus must be a bus name or a bus index");
+        }
+        if (index < 0 || index >= count.value()) {
+            return errorJson(404, "Audio bus index " + std::to_string(index) +
+                                      " is out of range; this project has " +
+                                      std::to_string(count.value()) + " buses");
+        }
+
+        auto bus_index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
+        if (bus_index.isErr()) return errorJson(bus_index.error().code, bus_index.error().message);
+
+        const auto readState = [&]() -> Result<json> {
+            auto name_value = callObject(server.value(), "AudioServer", "get_bus_name", 844755477LL,
+                                         {&bus_index.value()});
+            if (name_value.isErr()) return name_value.error();
+            auto name = stringFromVariant(name_value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+            if (name.isErr()) return name.error();
+            auto volume_value = callObject(server.value(), "AudioServer", "get_bus_volume_db",
+                                           2339986948LL, {&bus_index.value()});
+            if (volume_value.isErr()) return volume_value.error();
+            auto volume = scalarFromVariant<double>(volume_value.value(), GDEXTENSION_VARIANT_TYPE_FLOAT);
+            if (volume.isErr()) return volume.error();
+            auto mute_value = callObject(server.value(), "AudioServer", "is_bus_mute", 1116898809LL,
+                                         {&bus_index.value()});
+            if (mute_value.isErr()) return mute_value.error();
+            auto mute = scalarFromVariant<bool>(mute_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+            if (mute.isErr()) return mute.error();
+            auto solo_value = callObject(server.value(), "AudioServer", "is_bus_solo", 1116898809LL,
+                                         {&bus_index.value()});
+            if (solo_value.isErr()) return solo_value.error();
+            auto solo = scalarFromVariant<bool>(solo_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+            if (solo.isErr()) return solo.error();
+            return json{{"index", index},
+                        {"name", name.value()},
+                        {"volume_db", volume.value()},
+                        {"mute", mute.value()},
+                        {"solo", solo.value()}};
+        };
+
+        // Read before anything is written. These values are the only way back,
+        // because bus state is not part of the edited scene and the editor undo
+        // stack does not carry it.
+        auto before = readState();
+        if (before.isErr()) return errorJson(before.error().code, before.error().message);
+
+        json applied = json::array();
+        if (params.contains("volume_db")) {
+            const auto& value = params["volume_db"];
+            if (!value.is_number()) return errorJson(400, "volume_db must be a number");
+            const double db = value.get<double>();
+            // The engine bus editor spans -80 to 24 decibels. Outside that a
+            // caller is either confusing decibels with a linear gain or has
+            // slipped a digit, and clamping silently would hide both.
+            if (!(db >= -80.0 && db <= 24.0)) {
+                return errorJson(400, "volume_db must be between -80 and 24 decibels");
+            }
+            auto db_variant = makeScalar(GDEXTENSION_VARIANT_TYPE_FLOAT, db);
+            if (db_variant.isErr()) return errorJson(db_variant.error().code, db_variant.error().message);
+            auto set = callObject(server.value(), "AudioServer", "set_bus_volume_db", 1602489585LL,
+                                  {&bus_index.value(), &db_variant.value()});
+            if (set.isErr()) return errorJson(set.error().code, set.error().message);
+            applied.push_back("volume_db");
+        }
+
+        const auto applyFlag = [&](const char* field, const char* method_name,
+                                   int64_t hash) -> Result<bool> {
+            if (!params.contains(field)) return false;
+            const auto& value = params[field];
+            if (!value.is_boolean()) {
+                return Error::invalidArgument(std::string(field) + " must be a boolean");
+            }
+            auto flag = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, value.get<bool>());
+            if (flag.isErr()) return flag.error();
+            auto set = callObject(server.value(), "AudioServer", method_name, hash,
+                                  {&bus_index.value(), &flag.value()});
+            if (set.isErr()) return set.error();
+            return true;
+        };
+        auto muted = applyFlag("mute", "set_bus_mute", 300928843LL);
+        if (muted.isErr()) return errorJson(muted.error().code, muted.error().message);
+        if (muted.value()) applied.push_back("mute");
+        auto soloed = applyFlag("solo", "set_bus_solo", 300928843LL);
+        if (soloed.isErr()) return errorJson(soloed.error().code, soloed.error().message);
+        if (soloed.value()) applied.push_back("solo");
+
+        if (applied.empty()) {
+            return errorJson(400, "Give at least one of volume_db, mute or solo to change");
+        }
+
+        auto after = readState();
+        if (after.isErr()) return errorJson(after.error().code, after.error().message);
+
+        // Where the change ends up, which is not where this handler leaves it.
+        //
+        // undo_redo_registered: false beside a revert_with block is the shape of
+        // "this lives in memory, here is how to put it back", and in an attached
+        // editor that is not the whole story. The editor's own bus-layout
+        // autosave notices the AudioServer change and writes
+        // res://default_bus_layout.tres a moment later with no call from here,
+        // so a tracked project file appears in the working tree carrying
+        // whatever value was tried last. A caller sweeping bus volumes to find
+        // a mix reasonably believed nothing had been committed (#622).
+        //
+        // Confirmed on 4.5.1: the file is absent from the integration fixture
+        // and present in the copy after a run whose only bus calls are this
+        // tool's.
+        const bool editor_session = session_kind == "editor";
+        // The file the editor writes, which is the one it opened the project
+        // with. A literal res://default_bus_layout.tres named a file that is
+        // never written in a project that moved its layout (#935), and the
+        // setting itself names the wrong one once it has moved underneath a
+        // running editor.
+        const auto project_layout_path =
+            busLayoutPathFrom(projectSettingString("audio/buses/default_bus_layout"));
+        const auto layout_path = editor_session
+            ? startupBusLayoutPath().value_or(project_layout_path)
+            : project_layout_path;
+        json result = {
+            {"status", "success"},
+            {"bus", index},
+            {"applied", std::move(applied)},
+            {"before", before.value()},
+            {"after", after.value()},
+            {"undo_redo_registered", false},
+            {"persisted_by_editor", editor_session},
+            {"layout_path", layout_path},
+            {"limitation",
+             editor_session
+                 ? "This sets the running engine's audio bus state. This tool writes no "
+                   "file, but the editor's own bus-layout autosave picks the change up and "
+                   "writes " + layout_path + " shortly afterwards, so it reaches "
+                   "the project on disk anyway. revert_with restores the previous values." +
+                       busLayoutMovedSentence(layout_path, project_layout_path)
+                 : "This sets the running game's audio bus state and nothing writes it "
+                   "down. It is gone when the process exits, and the project's bus layout "
+                   "on disk is unchanged. revert_with restores the previous values."},
+            {"revert_with", before.value()}};
+        if (project_layout_path != layout_path) result["project_layout_path"] = project_layout_path;
+        return liveResult(std::move(result));
+    }
+
     auto editor_result = editorInterface();
     if (editor_result.isErr()) return errorJson(editor_result.error().code, editor_result.error().message);
     auto editor = editor_result.value();
@@ -10733,176 +11003,6 @@ json GodotBridge::execute(const std::string& method, const json& params,
                                   {"undo_redo_registered", true}});
     }
 
-    if (method == "audio.configureBus") {
-        auto server = singleton("AudioServer");
-        if (server.isErr()) return errorJson(server.error().code, server.error().message);
-
-        auto count_value = callObject(server.value(), "AudioServer", "get_bus_count", 3905245786LL);
-        if (count_value.isErr()) return errorJson(count_value.error().code, count_value.error().message);
-        auto count = scalarFromVariant<int64_t>(count_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
-        if (count.isErr()) return errorJson(count.error().code, count.error().message);
-
-        // A bus can be named or numbered. Names are what a person uses and what
-        // the layout file records; indices are what AudioServer takes. Resolving
-        // a name through the engine rather than through the layout file means a
-        // bus added at runtime is still addressable.
-        int64_t index = -1;
-        const json bus_field = params.contains("bus") ? params["bus"] : json();
-        if (bus_field.is_string()) {
-            const auto wanted = bus_field.get<std::string>();
-            auto name_variant = makeString(wanted);
-            if (name_variant.isErr()) return errorJson(name_variant.error().code, name_variant.error().message);
-            auto found = callObject(server.value(), "AudioServer", "get_bus_index", 2458036349LL,
-                                    {&name_variant.value()});
-            if (found.isErr()) return errorJson(found.error().code, found.error().message);
-            auto resolved = scalarFromVariant<int64_t>(found.value(), GDEXTENSION_VARIANT_TYPE_INT);
-            if (resolved.isErr()) return errorJson(resolved.error().code, resolved.error().message);
-            index = resolved.value();
-            if (index < 0) return errorJson(404, "No audio bus is named " + wanted);
-        } else if (bus_field.is_number_integer()) {
-            index = bus_field.get<int64_t>();
-        } else {
-            return errorJson(400, "bus must be a bus name or a bus index");
-        }
-        if (index < 0 || index >= count.value()) {
-            return errorJson(404, "Audio bus index " + std::to_string(index) +
-                                      " is out of range; this project has " +
-                                      std::to_string(count.value()) + " buses");
-        }
-
-        auto bus_index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
-        if (bus_index.isErr()) return errorJson(bus_index.error().code, bus_index.error().message);
-
-        const auto readState = [&]() -> Result<json> {
-            auto name_value = callObject(server.value(), "AudioServer", "get_bus_name", 844755477LL,
-                                         {&bus_index.value()});
-            if (name_value.isErr()) return name_value.error();
-            auto name = stringFromVariant(name_value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
-            if (name.isErr()) return name.error();
-            auto volume_value = callObject(server.value(), "AudioServer", "get_bus_volume_db",
-                                           2339986948LL, {&bus_index.value()});
-            if (volume_value.isErr()) return volume_value.error();
-            auto volume = scalarFromVariant<double>(volume_value.value(), GDEXTENSION_VARIANT_TYPE_FLOAT);
-            if (volume.isErr()) return volume.error();
-            auto mute_value = callObject(server.value(), "AudioServer", "is_bus_mute", 1116898809LL,
-                                         {&bus_index.value()});
-            if (mute_value.isErr()) return mute_value.error();
-            auto mute = scalarFromVariant<bool>(mute_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
-            if (mute.isErr()) return mute.error();
-            auto solo_value = callObject(server.value(), "AudioServer", "is_bus_solo", 1116898809LL,
-                                         {&bus_index.value()});
-            if (solo_value.isErr()) return solo_value.error();
-            auto solo = scalarFromVariant<bool>(solo_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
-            if (solo.isErr()) return solo.error();
-            return json{{"index", index},
-                        {"name", name.value()},
-                        {"volume_db", volume.value()},
-                        {"mute", mute.value()},
-                        {"solo", solo.value()}};
-        };
-
-        // Read before anything is written. These values are the only way back,
-        // because bus state is not part of the edited scene and the editor undo
-        // stack does not carry it.
-        auto before = readState();
-        if (before.isErr()) return errorJson(before.error().code, before.error().message);
-
-        json applied = json::array();
-        if (params.contains("volume_db")) {
-            const auto& value = params["volume_db"];
-            if (!value.is_number()) return errorJson(400, "volume_db must be a number");
-            const double db = value.get<double>();
-            // The engine bus editor spans -80 to 24 decibels. Outside that a
-            // caller is either confusing decibels with a linear gain or has
-            // slipped a digit, and clamping silently would hide both.
-            if (!(db >= -80.0 && db <= 24.0)) {
-                return errorJson(400, "volume_db must be between -80 and 24 decibels");
-            }
-            auto db_variant = makeScalar(GDEXTENSION_VARIANT_TYPE_FLOAT, db);
-            if (db_variant.isErr()) return errorJson(db_variant.error().code, db_variant.error().message);
-            auto set = callObject(server.value(), "AudioServer", "set_bus_volume_db", 1602489585LL,
-                                  {&bus_index.value(), &db_variant.value()});
-            if (set.isErr()) return errorJson(set.error().code, set.error().message);
-            applied.push_back("volume_db");
-        }
-
-        const auto applyFlag = [&](const char* field, const char* method_name,
-                                   int64_t hash) -> Result<bool> {
-            if (!params.contains(field)) return false;
-            const auto& value = params[field];
-            if (!value.is_boolean()) {
-                return Error::invalidArgument(std::string(field) + " must be a boolean");
-            }
-            auto flag = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, value.get<bool>());
-            if (flag.isErr()) return flag.error();
-            auto set = callObject(server.value(), "AudioServer", method_name, hash,
-                                  {&bus_index.value(), &flag.value()});
-            if (set.isErr()) return set.error();
-            return true;
-        };
-        auto muted = applyFlag("mute", "set_bus_mute", 300928843LL);
-        if (muted.isErr()) return errorJson(muted.error().code, muted.error().message);
-        if (muted.value()) applied.push_back("mute");
-        auto soloed = applyFlag("solo", "set_bus_solo", 300928843LL);
-        if (soloed.isErr()) return errorJson(soloed.error().code, soloed.error().message);
-        if (soloed.value()) applied.push_back("solo");
-
-        if (applied.empty()) {
-            return errorJson(400, "Give at least one of volume_db, mute or solo to change");
-        }
-
-        auto after = readState();
-        if (after.isErr()) return errorJson(after.error().code, after.error().message);
-
-        // Where the change ends up, which is not where this handler leaves it.
-        //
-        // undo_redo_registered: false beside a revert_with block is the shape of
-        // "this lives in memory, here is how to put it back", and in an attached
-        // editor that is not the whole story. The editor's own bus-layout
-        // autosave notices the AudioServer change and writes
-        // res://default_bus_layout.tres a moment later with no call from here,
-        // so a tracked project file appears in the working tree carrying
-        // whatever value was tried last. A caller sweeping bus volumes to find
-        // a mix reasonably believed nothing had been committed (#622).
-        //
-        // Confirmed on 4.5.1: the file is absent from the integration fixture
-        // and present in the copy after a run whose only bus calls are this
-        // tool's.
-        const bool editor_session = session_kind == "editor";
-        // The file the editor writes, which is the one it opened the project
-        // with. A literal res://default_bus_layout.tres named a file that is
-        // never written in a project that moved its layout (#935), and the
-        // setting itself names the wrong one once it has moved underneath a
-        // running editor.
-        const auto project_layout_path =
-            busLayoutPathFrom(projectSettingString("audio/buses/default_bus_layout"));
-        const auto layout_path = editor_session
-            ? startupBusLayoutPath().value_or(project_layout_path)
-            : project_layout_path;
-        json result = {
-            {"status", "success"},
-            {"bus", index},
-            {"applied", std::move(applied)},
-            {"before", before.value()},
-            {"after", after.value()},
-            {"undo_redo_registered", false},
-            {"persisted_by_editor", editor_session},
-            {"layout_path", layout_path},
-            {"limitation",
-             editor_session
-                 ? "This sets the running engine's audio bus state. This tool writes no "
-                   "file, but the editor's own bus-layout autosave picks the change up and "
-                   "writes " + layout_path + " shortly afterwards, so it reaches "
-                   "the project on disk anyway. revert_with restores the previous values." +
-                       busLayoutMovedSentence(layout_path, project_layout_path)
-                 : "This sets the running game's audio bus state and nothing writes it "
-                   "down. It is gone when the process exits, and the project's bus layout "
-                   "on disk is unchanged. revert_with restores the previous values."},
-            {"revert_with", before.value()}};
-        if (project_layout_path != layout_path) result["project_layout_path"] = project_layout_path;
-        return liveResult(std::move(result));
-    }
-
     if (method == "audio.addBus") {
         // One bus appended to the layout the editor holds, named, routed, and
         // left for the editor's own bus-layout autosave to write down. Every
@@ -11253,101 +11353,6 @@ json GodotBridge::execute(const std::string& method, const json& params,
             classes.push_back({{"name", name}, {"exists", known.value() != 0}});
         }
         return liveResult({{"status", "success"}, {"classes", std::move(classes)}});
-    }
-
-    if (method == "audio.listBuses") {
-        // Every method hash below is identical on Godot 4.5.1, 4.6.2 and 4.7.2,
-        // checked by dumping extension_api.json from each, so this needs no
-        // per-version branch. AudioServer is a core singleton and is present
-        // whether or not an editor scene is open.
-        auto server = singleton("AudioServer");
-        if (server.isErr()) return errorJson(server.error().code, server.error().message);
-
-        auto count_value = callObject(server.value(), "AudioServer", "get_bus_count", 3905245786LL);
-        if (count_value.isErr()) return errorJson(count_value.error().code, count_value.error().message);
-        auto count = scalarFromVariant<int64_t>(count_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
-        if (count.isErr()) return errorJson(count.error().code, count.error().message);
-
-        json buses = json::array();
-        for (int64_t index = 0; index < count.value(); ++index) {
-            auto bus_index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
-            if (bus_index.isErr()) return errorJson(bus_index.error().code, bus_index.error().message);
-
-            auto name_value = callObject(server.value(), "AudioServer", "get_bus_name", 844755477LL,
-                                         {&bus_index.value()});
-            if (name_value.isErr()) return errorJson(name_value.error().code, name_value.error().message);
-            auto name = stringFromVariant(name_value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
-            if (name.isErr()) return errorJson(name.error().code, name.error().message);
-
-            auto volume_value = callObject(server.value(), "AudioServer", "get_bus_volume_db",
-                                           2339986948LL, {&bus_index.value()});
-            if (volume_value.isErr()) return errorJson(volume_value.error().code, volume_value.error().message);
-            auto volume = scalarFromVariant<double>(volume_value.value(), GDEXTENSION_VARIANT_TYPE_FLOAT);
-            if (volume.isErr()) return errorJson(volume.error().code, volume.error().message);
-
-            const auto boolOf = [&](const char* method_name, int64_t hash) -> Result<bool> {
-                auto value = callObject(server.value(), "AudioServer", method_name, hash,
-                                        {&bus_index.value()});
-                if (value.isErr()) return value.error();
-                return scalarFromVariant<bool>(value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
-            };
-            auto mute = boolOf("is_bus_mute", 1116898809LL);
-            if (mute.isErr()) return errorJson(mute.error().code, mute.error().message);
-            auto solo = boolOf("is_bus_solo", 1116898809LL);
-            if (solo.isErr()) return errorJson(solo.error().code, solo.error().message);
-            auto bypass = boolOf("is_bus_bypassing_effects", 1116898809LL);
-            if (bypass.isErr()) return errorJson(bypass.error().code, bypass.error().message);
-
-            auto send_value = callObject(server.value(), "AudioServer", "get_bus_send", 659327637LL,
-                                         {&bus_index.value()});
-            if (send_value.isErr()) return errorJson(send_value.error().code, send_value.error().message);
-            auto send = stringFromVariant(send_value.value(), GDEXTENSION_VARIANT_TYPE_STRING_NAME);
-            if (send.isErr()) {
-                send = stringFromVariant(send_value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
-                if (send.isErr()) return errorJson(send.error().code, send.error().message);
-            }
-
-            auto effect_count_value = callObject(server.value(), "AudioServer",
-                                                 "get_bus_effect_count", 3744713108LL,
-                                                 {&bus_index.value()});
-            if (effect_count_value.isErr()) {
-                return errorJson(effect_count_value.error().code, effect_count_value.error().message);
-            }
-            auto effect_count =
-                scalarFromVariant<int64_t>(effect_count_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
-            if (effect_count.isErr()) return errorJson(effect_count.error().code, effect_count.error().message);
-
-            // The effect chain is the part the offline layout file cannot
-            // report, so it is the reason to attach an editor at all.
-            json effects = json::array();
-            for (int64_t slot = 0; slot < effect_count.value(); ++slot) {
-                auto slot_index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, slot);
-                if (slot_index.isErr()) return errorJson(slot_index.error().code, slot_index.error().message);
-                auto effect = callObject(server.value(), "AudioServer", "get_bus_effect", 726064442LL,
-                                         {&bus_index.value(), &slot_index.value()});
-                if (effect.isErr()) return errorJson(effect.error().code, effect.error().message);
-                auto class_value = callVariant(effect.value(), "get_class");
-                std::string class_name = "AudioEffect";
-                if (class_value.isOk()) {
-                    auto text = stringFromVariant(class_value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
-                    if (text.isOk()) class_name = text.value();
-                }
-                effects.push_back({{"slot", slot}, {"class", class_name}});
-            }
-
-            buses.push_back({{"index", index},
-                             {"name", name.value()},
-                             {"volume_db", volume.value()},
-                             {"mute", mute.value()},
-                             {"solo", solo.value()},
-                             {"bypass_effects", bypass.value()},
-                             {"send", send.value()},
-                             {"effects", std::move(effects)}});
-        }
-
-        return liveResult({{"status", "success"},
-                           {"bus_count", count.value()},
-                           {"buses", std::move(buses)}});
     }
 
     if (method == "scene.listGroups" || method == "scene.addToGroup" ||
