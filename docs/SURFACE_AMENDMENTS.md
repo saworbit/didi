@@ -65,6 +65,206 @@ August 2026 competitive review and are proposed, not accepted, in
 [Realignment Implementation Plan](REALIGNMENT_IMPLEMENTATION_PLAN.md):
 `runtime_read_output`, `ui_list_controls`, `godot_api_reference`, and an `until`
 parameter on the existing `runtime_step` (a change, not a new name).
+`audio_add_bus` is proposed below with its engine evidence, and is not yet
+accepted.
+
+### PROPOSED: `audio_add_bus`
+
+| Field | Value |
+| :--- | :--- |
+| **Name** | `audio_add_bus` |
+| **Failing workflow** | *Let the player turn the music down.* Reported from vibe session 16 (#771), building a menu. A settings screen sets a `Music` bus and an `SFX` bus, and a fresh project has only `Master`. `audio_list_buses` answers `bus_count: 1`. `audio_configure_bus` with `bus: "Music"` answers 404. `scene_set_property` setting an `AudioStreamPlayer`'s `bus` to `"Music"` answers `applied: false`, because the engine reads back `Master` for a bus that does not exist. Nothing on the surface adds a bus. The one route that works is writing `default_bus_layout.tres` by hand through `resource_create`, which no schema mentions. Reading that file back offline has taken four fixes so far (#836, #837, #844, #853), and two are open (#907, #934). This is the shape #770 had for `anim_play_track` and #779 had for `project_export`: the read and configure halves shipped and the create half did not. |
+| **Execution modes** | `live`. Editor sessions only. With no editor the tool refuses, names `audio_list_buses` for reading the layout, and says that writing the file offline is not supported. A game session is refused: a running game loaded its layout when it started, so a bus added to it is in no file and is gone when it exits, and the failing workflow is authoring. |
+| **Safety class** | `create/set`. Dry run, no confirmation token. Additive only (`destructiveHint: false`). It appends one bus and changes no other. It writes only `AudioServer` bus state, and the editor then writes the layout file itself, to the path the project names. There is no remove. The way back is deleting the bus in the editor's Audio panel. |
+| **Proving test** | Native: `AudioAddBus.RequestValidation` covers the name rules under **Names** below (empty, spaces only, a leading or trailing space, a control character, more than 256 bytes), `send` given as the empty string, `volume_db` outside -80 to 24, and wrong types, each refused before any engine call. `AudioAddBus.Registration` requires `live` only, editor sessions, a mutation with `dry_run` and no confirmation token, additive and not read-only. `AudioAddBus.Gated` covers the offline refusal and the game-session refusal, and requires each to say where to go instead. `AudioAddBus.DryRunReachesNoEngine` requires the preview to make no bridge call. `AudioBusLayout.ReadsEscapedNames`, the #934 fix, reads the layout the probe had the engine save, with a quote, a backslash, a tab and a newline in bus names, and requires the engine's names. Godot integration, on 4.5.1, 4.6.2 and 4.7.2, with the editor attached: add `Music` sending to `Master`, then `SFX` sending to `Music` at -6 dB, and read both back through a separate `audio_list_buses` call rather than the response. Refuse `Music` again, `Master`, `music`, a send to a bus that does not exist and a send to the new bus's own name, and require the bus count to be unchanged after each, which is what catches a silent `Music 2`. Set a player's `bus` to `Music` with `scene_set_property` and require `applied: true`, beside the same call naming `Nope`, the control that must still answer `applied: false`. Wait for the editor's layout file and require the offline `audio_list_buses` to find both buses in it, at the path `audio/buses/default_bus_layout` names. A `@tool` script in the fixture reads the names on the editor's Audio panel, and the harness requires `Music` there. With the panel refresh below removed, that check fails on 4.5.1 and 4.6.2, which is the run that proves it can. The engine-output gate stays clean throughout. |
+| **Reviewer** | Proposed, not yet accepted. It is a mutation, so the security argument is recorded below. |
+
+All of the evidence below comes from `tools/vibe/probes/audio_bus_engine.py`
+run on 4.5.1, 4.6.2 and 4.7.2 on 2026-09-24. Every row was the same on all
+three unless a table says otherwise. The probe needs no Didi build: it runs a
+`SceneTree` script against `AudioServer`, plays a tone and reads the peak
+meters, then drives a headless editor with a probe plugin and runs the project
+as a game afterwards.
+
+**The binds.** Measured with `--dump-extension-api` from each binary:
+
+| Method | 4.5.1 | 4.6.2 | 4.7.2 |
+| :--- | :--- | :--- | :--- |
+| `AudioServer.add_bus` | 1025054187 | 1025054187 | 1025054187 |
+| `AudioServer.set_bus_name` | 501894301 | 501894301 | 501894301 |
+| `AudioServer.set_bus_send` | 3780747571 | 3780747571 | 3780747571 |
+| `AudioServer.remove_bus` | 1286410249 | 1286410249 | 1286410249 |
+| `Object.emit_signal` | 4047867050 | 4047867050 | 4047867050 |
+| `ProjectSettings.get_setting` | 223050753 | 223050753 | 223050753 |
+
+The four `AudioServer` methods are new to the bridge. `remove_bus` is only for
+taking back a bus the engine named differently, below. `emit_signal` and
+`get_setting` are already bound, as are the readers `audio_list_buses` uses
+and the volume, mute and solo setters `audio_configure_bus` uses.
+
+**A new bus.** `add_bus(-1)` appends a bus named `New Bus` (the next one is
+`New Bus 2`) at 0 dB, unmuted, with an empty send, and emits
+`bus_layout_changed`. `set_bus_name` emits `bus_renamed` and not
+`bus_layout_changed`. `get_bus_name` returns a `String` and `get_bus_send` a
+`StringName`.
+
+**Names.** `set_bus_name` never fails. It changes what it was given instead:
+
+| Asked | What the engine kept |
+| :--- | :--- |
+| `Music`, when another bus is `Music` | `Music 2`, with no error or warning |
+| `Master`, on another bus | `Master 2` |
+| `music`, when another bus is `Music` | `music`, a second bus. `get_bus_index` matches case exactly, so `music` does not find `Music` |
+| the empty string | the empty string |
+| `Main`, on bus 0 | `Master`. Bus 0 cannot be renamed, and nothing says so |
+
+Every other name the probe tried was kept exactly, found by `get_bus_index`,
+and came back unchanged through a layout the engine saved and loaded again:
+spaces inside, a leading space, a trailing space, spaces only, a double quote,
+a backslash, `/`, `:`, `=`, `[bus]`, a literal `&"x"`, non-ASCII, a tab, a
+newline, digits only, and 300 letters. So every rule below is Didi's, and each
+one is there because of a row above:
+
+- A name in use is refused, compared exactly against the running engine. The
+  engine would otherwise rename the new bus, and the name the caller asked for
+  would belong to the other one. The tool then reads the name back, and if the
+  engine changed it anyway, it removes the bus it added and refuses.
+- A name that differs from one in use only in letter case is refused, naming
+  the bus it collides with. The engine keeps both, and a person cannot tell
+  them apart in the Audio panel.
+- The empty name, spaces only, a leading or trailing space, and a control
+  character are refused. `Music ` with a trailing space is a second bus that
+  nobody can tell from `Music`, and a control character has no reason to be in
+  a name, which is the rule `project_add_export_preset` applies to preset
+  names.
+- At most 256 bytes, the bound preset names have. The engine kept 300 letters,
+  so the bound is Didi's.
+- Anything else is accepted exactly as given, quotes and backslashes included,
+  because the engine keeps and saves them. Reading such a name back offline
+  needs #934.
+
+**Sends.** A send is stored by name and read back exactly as it was set,
+whatever it names. Where the sound goes is a different question, and the probe
+answered it with a looping tone on one bus and every bus's peak meter:
+
+| Buses and sends | The tone plays on | `get_bus_send` reads | Heard on |
+| :--- | :--- | :--- | :--- |
+| nothing playing (control) | | | no bus |
+| Music to Master | Master (control) | | Master only |
+| Music to Master | Music | `Master` | Music, Master |
+| SFX to Music, an earlier bus | SFX | `Music` | SFX, Music, Master |
+| SFX to Music, with Music muted | SFX | `Music` | SFX only |
+| Music to SFX, a later bus | Music | `SFX` | Music, Master. SFX is silent |
+| Music to `Nope`, which does not exist | Music | `Nope` | Music, Master |
+| Music to itself | Music | `Music` | Music, Master |
+| Music to the empty string | Music | the empty string | Music, Master |
+
+The muted row is the one that proves a working send passes through the bus it
+names rather than straight to Master. Every send that cannot work reads back
+as set, and the sound goes to Master with no message. The tool appends, so
+every bus already there comes before the new one and is a valid target. It
+refuses a send that names no bus in the engine, which includes the new bus's
+own name, and defaults to `Master`. The empty send routes exactly as `Master`
+does. The tool refuses it with `retry_with: {"send": "Master"}`, so there is
+one spelling.
+
+A send does not follow a rename either. With `SFX` sending to `Music`,
+renaming `Music` to `Tunes` left `SFX` sending to `Music`, a bus that no
+longer existed, and removing `Tunes` left it there too. So a project can
+already hold a send to a name no bus has, and adding a bus with that name
+makes those buses route through the new one. The result lists them as
+`adopted_sends`, because the caller changed the mix of buses it did not name.
+
+**Where the bus goes.** There is no position argument. `add_bus(1)` inserts at
+index 1. `add_bus(0)` also inserts at 1, because Master stays at 0, and says
+nothing. `add_bus(3)` on three buses and `add_bus(99)` both append. `add_bus(-5)`
+adds nothing and prints `ERROR: Index p_pos = -5 is out of bounds`. Appending
+keeps every existing send valid and makes every existing bus a valid target
+for the new one. Reordering is `move_bus`, which is a different tool and not
+the failing workflow.
+
+**A player's bus.** Measured on one `AudioStreamPlayer`:
+
+| When | `bus` reads |
+| :--- | :--- |
+| set to `Later` before any bus has that name | `Master` |
+| the same player, after a bus named `Later` is added | `Later` |
+| after that bus is renamed | `Master` |
+| after it is named `Later` again | `Later` |
+| after it is removed | `Master` |
+
+A scene packed and saved while the bus did not exist has no `bus` line at all,
+so the assignment is lost on save. Saved after the bus was added, it has
+`bus = &"Later"`. That is the `applied: false` in #771. So the order an agent
+needs is: add the bus, then set each player's `bus`, then save. The tool's
+description says so.
+
+**An open editor.**
+
+| | 4.5.1 | 4.6.2 | 4.7.2 |
+| :--- | :--- | :--- | :--- |
+| The layout file is written, after a bus is added | 0.8 to 0.9 s | 0.8 to 0.9 s | 0.9 s |
+| The file written when `audio/buses/default_bus_layout` names another one | that one | that one | that one |
+| The Audio panel after `add_bus` then `set_bus_name` | `New Bus` | `New Bus` | the name |
+| A click into that name field and away | renames the bus `New Bus` | renames the bus `New Bus` | nothing |
+| The panel after `AudioServer.emit_signal("bus_layout_changed")` | the name | the name | the name |
+
+The editor writes the layout itself, 800 to 900 ms after any change and with no
+call, to the file the project setting names. A game run afterwards loaded
+exactly the buses, sends and volumes the editor wrote, in a fresh project, a
+project whose layout was moved, and a project with a layout already in place.
+So the tool writes no file. It waits up to two seconds for the editor's write,
+reads the file back with the offline reader, and reports `layout_written` and
+the `layout_path` the project names. `audio_configure_bus` names
+`res://default_bus_layout.tres` whatever the project says (#935).
+
+On 4.5.1 and 4.6.2 the Audio panel rebuilds when a bus is added and does not
+follow a rename, so the new strip shows `New Bus`. A person who clicks into
+that name field and away renames the bus to `New Bus` through the panel's own
+rename, and every player set to the name the agent gave goes back to Master.
+Emitting `bus_layout_changed` on `AudioServer` after the name and send are set
+makes the panel rebuild with the right name on all three lines. It changed no
+name, send, volume or effect, measured with a reverb on the bus, and the same
+click then did nothing. `set_bus_count` with the current count also rebuilds
+the panel, and does more than a signal does. Apart from the `add_bus(-5)` row
+above, no step printed an ERROR or WARNING line on any engine, in the editor
+or in the game.
+
+**Undo.** An action created through `EditorUndoRedoManager` on `AudioServer`
+lands in history 0, the editor's global history, on all three lines, not in
+the edited scene's history. That corrects the reason recorded for
+`audio_configure_bus` below, which says such an entry would go in the scene
+undo stack. The tool still registers none. `editor_undo` and `editor_redo` step
+the edited scene's history, so an entry in the global one is out of their
+reach, and `undo_redo_registered: true` would be a claim Didi's own undo tools
+cannot honour while #913 is open against them. The result says
+`undo_redo_registered: false` and names the Audio panel as the way back.
+
+**What it will not do.** It adds one bus at the end. It does not rename, move
+or remove a bus, add an effect, or change any other bus. It takes no path and
+writes no file. It refuses offline and in a game session. Names and sends are
+checked against the running engine rather than the layout file, because the
+editor holds the layout in memory and writes it on its own schedule.
+
+**Security.** It writes through `AudioServer` alone and emits one of its
+signals. It takes no path, expression or script, and bounds the name. The editor writes the layout
+to the file the project already names. The tool does not choose it.
+
+**What an agent does next.** `audio_add_bus` for each bus, then
+`scene_set_property` on each player's `bus`, then `editor_save_scene`.
+`audio_configure_bus` then finds the new bus by name.
+
+**Not handled.** Adding a bus offline waits on #929: the tools that rewrite a
+project file take no lock, and a third one should not arrive without it. It
+also needs its own measurement of what an editor open without Didi does with a
+layout written behind it. The probe drove a headless editor, so what a visible
+Audio panel shows is for the implementation to check in a GUI editor.
+
+**Found on the way.** `audio_list_buses` reads a name with a quote, a
+backslash or a control character with Godot's escapes still in it (#934).
+The proving test reads the editor's layout back offline, so that fix comes
+first or with the tool. `audio_configure_bus` names the wrong file when a
+project has moved its layout (#935).
 
 ### ACCEPTED (IMPLEMENTED): `project_add_export_preset`
 
