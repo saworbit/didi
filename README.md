@@ -300,7 +300,7 @@ and 4.5 is where one of my first game projects started. All of it felt like my
 own idea. And there was Jim, two months earlier, standing in the same spot.
 
 What a world we live in. Two people, two months apart, each with an LLM at the
-elbow, and both of us named our C++ bridge after the same tramp in a Beckett
+elbow ([mine is no secret](AI.md)), and both of us named our C++ bridge after the same tramp in a Beckett
 play. Maybe that's plain convergence: start from *Waiting for Godot* and a
 painful token bill, and Didi and C++ are simply where the road goes. Or maybe a
 little of Jim's thinking found its way here through the models, which learn from
