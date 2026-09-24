@@ -7,6 +7,7 @@
 #include <cwctype>
 #include <filesystem>
 #include <iomanip>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -198,6 +199,38 @@ inline std::string projectEndpointKey(const std::filesystem::path& project_root)
 // res://./ok.gd through the same root, and the resolve-and-compare check behind
 // it never ran (#534). Composing a path from a directory and a relative name is
 // the ordinary way to build one.
+// Why a path that names a scheme other than res:// is not a project path, or
+// nothing when it names none. Everything after res:// was read as a path
+// relative to the project, so user://save.gd became the directory "user:" --
+// an error from the operating system on Windows, where a colon cannot be in a
+// name, and a directory really called "user:" on macOS and Linux -- and
+// RES://x.gd became "RES:", which Godot never reads, because its scheme is
+// lower case. A scheme is letters before "://" with no separator ahead of it.
+inline std::optional<std::string> foreignSchemeProblem(const std::string& path) {
+    const auto at = path.find("://");
+    if (at == std::string::npos || at == 0) return std::nullopt;
+    const auto scheme = path.substr(0, at);
+    const bool letters = std::all_of(scheme.begin(), scheme.end(), [](unsigned char c) {
+        return std::isalnum(c) != 0 || c == '+' || c == '-' || c == '.';
+    });
+    if (!letters) return std::nullopt;
+    std::string lowered = scheme;
+    std::transform(lowered.begin(), lowered.end(), lowered.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (lowered == "res" && scheme != "res") {
+        return "must spell its scheme res://, in lower case: Godot does not read " + scheme +
+               "://, and the rest of the path would have been written under a directory named " +
+               scheme + ":";
+    }
+    if (lowered == "res") return std::nullopt;
+    if (lowered == "user") {
+        return "names user://, which is the running game's own data directory, outside the "
+               "project. Name a file in the project, as res:// or relative to it";
+    }
+    return "names " + scheme + "://, and a file in the project is named as res:// or relative "
+           "to it";
+}
+
 inline Result<std::filesystem::path> resolveProjectFileForWrite(const std::string& file_path) {
     if (file_path.empty()) return Error::invalidArgument("file path is empty");
     // A NUL truncates the path at the filesystem boundary, so a name whose
@@ -210,6 +243,9 @@ inline Result<std::filesystem::path> resolveProjectFileForWrite(const std::strin
         if (character < 0x20 || character == 0x7F) {
             return Error::invalidArgument("file path cannot contain control characters");
         }
+    }
+    if (const auto problem = foreignSchemeProblem(file_path)) {
+        return Error::invalidArgument("file path " + *problem);
     }
     std::string relative_value = file_path;
     if (strings::startsWith(relative_value, "res://")) relative_value.erase(0, 6);

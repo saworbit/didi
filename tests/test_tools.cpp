@@ -7062,6 +7062,52 @@ static void test_resource_create_refuses_a_target_it_cannot_write() {
     registry.setIpcClient(nullptr);
 }
 
+static void test_writers_refuse_a_scheme_that_is_not_res() {
+    // Every writer stripped res:// and read anything else as a path inside the
+    // project, so user://save.tres named a directory "user:" and RES:// one
+    // named "RES:". Windows refused with its own "volume label syntax" error;
+    // macOS and Linux would have created the directory. Found by vibe session
+    // eighteen through project_add_export_preset, which stored both as export
+    // paths.
+    using didi::paths::foreignSchemeProblem;
+    ASSERT_TRUE(!foreignSchemeProblem("res://a/b.tres").has_value());
+    ASSERT_TRUE(!foreignSchemeProblem("a/b.tres").has_value());
+    ASSERT_TRUE(!foreignSchemeProblem("dir/x://y").has_value());
+    ASSERT_TRUE(foreignSchemeProblem("user://save.tres")->find("user://") != std::string::npos);
+    ASSERT_TRUE(foreignSchemeProblem("RES://a.tres")->find("lower case") != std::string::npos);
+    ASSERT_TRUE(foreignSchemeProblem("Res://a.tres").has_value());
+    ASSERT_TRUE(foreignSchemeProblem("uid://abc").has_value());
+
+    ScopedToolProject project("foreign-scheme");
+    writeAuditFile("project.godot", "config_version=5\n");
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    registry.setIpcClient(nullptr);
+    for (const char* path : {"user://save.tres", "RES://save.tres", "Res://save.tres"}) {
+        const auto refused = registry.callTool("resource_create", didi::json{
+            {"save_path", path}, {"resource_type", "Resource"}});
+        ASSERT_TRUE(refused.isError);
+        ASSERT_TRUE(refused.content[0].text.find("://") != std::string::npos);
+    }
+    const auto script = registry.callTool("script_create", didi::json{
+        {"script_path", "user://save.gd"}, {"source_text", "extends Node\n"}});
+    ASSERT_TRUE(script.isError);
+    ASSERT_TRUE(script.content[0].text.find("user://") != std::string::npos);
+    const auto exported = registry.callTool("project_export", didi::json{
+        {"preset", "P"}, {"output_path", "user://game.pck"}, {"mode", "pack"}});
+    ASSERT_TRUE(exported.isError);
+    ASSERT_TRUE(exported.content[0].text.find("user://") != std::string::npos);
+    const auto preset = registry.callTool("project_add_export_preset", didi::json{
+        {"name", "P"}, {"platform", "Linux"}, {"export_path", "user://game.x86_64"}});
+    ASSERT_TRUE(preset.isError);
+    ASSERT_EQ(didi::json::parse(preset.content[0].text)["error"]["data"]["parameter"],
+              didi::json("export_path"));
+    for (const char* made : {"user:", "RES:", "Res:", "export_presets.cfg"}) {
+        std::error_code error;
+        ASSERT_TRUE(!std::filesystem::exists(made, error));
+    }
+}
+
 static void test_rename_updates_serialized_references_and_reports_the_code() {
     // The case from the report: an agent renames a variable in Player.gd, and
     // forgets the signal connection in HUD.tscn and the animation track in
@@ -8497,6 +8543,8 @@ struct RegisterToolTests {
                      test_writers_drop_the_shared_index_so_the_next_read_sees_them);
         registerTest("Tools.ResourceCreatePathGuard",
                      test_resource_create_refuses_a_target_it_cannot_write);
+        registerTest("Tools.WritersRefuseASchemeThatIsNotRes",
+                     test_writers_refuse_a_scheme_that_is_not_res);
         registerTest("Tools.RenameSerializedReferences",
                      test_rename_updates_serialized_references_and_reports_the_code);
         registerTest("Tools.RenameKeepsWhatItIsNotRenaming",
