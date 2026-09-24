@@ -2783,6 +2783,15 @@ try {
         (Tool-Request 2415 "scene_call_method" @{ target_node = "/root/SmokeRoot/PlainProbe"; method_name = "add_numbers"; arguments = @(2, 3) }),
         # A node with no script at all declares nothing to call.
         (Tool-Request 2416 "scene_call_method" @{ target_node = "/root/SmokeRoot/Container"; method_name = "add_numbers"; arguments = @(2, 3) }),
+        # Writing an input action leaves the editor's own InputMap alone. It
+        # used to reload the whole map, which erased the 3D viewport's
+        # navigation actions on 4.5.1 and pulled the project's actions into the
+        # editor on 4.6.2 and 4.7.2 (#925). The probe method reads the map
+        # from inside the editor, after a write, and the write is then undone.
+        (Tool-Request 2430 "project_set_input_action" @{ action = "harness_input_map_probe"; events = @(@{ type = "key"; physical_keycode = 69 }) }),
+        (Tool-Request 2431 "scene_call_method" @{ target_node = "/root/SmokeRoot/CallProbe"; method_name = "editor_input_actions"; arguments = @() }),
+        (Tool-Request 2432 "project_remove_input_action" @{ action = "harness_input_map_probe" }),
+        (Tool-Request 2433 "scene_call_method" @{ target_node = "/root/SmokeRoot/CallProbe"; method_name = "editor_input_actions"; arguments = @() }),
         (Tool-Request 2417 "scene_remove_node" @{ target_node = "/root/SmokeRoot/CallProbe" }),
         (Tool-Request 2418 "scene_remove_node" @{ target_node = "/root/SmokeRoot/PlainProbe" })
     )
@@ -2872,6 +2881,19 @@ try {
         Assert-True $callById[$refusal.Id].result.isError "scene_call_method accepted $($refusal.What)."
         $refusalText = ($callById[$refusal.Id].result.content | Where-Object { $_.type -eq "text" } | Select-Object -First 1).text
         Assert-True ($refusalText -match $refusal.Match) "The refusal of $($refusal.What) did not say why: $refusalText"
+    }
+
+    # The editor's InputMap after an input action was written, and after it was
+    # removed: the 3D viewport's own actions are still there, and the project's
+    # action never arrives, which is how Godot's own Project Settings dialog
+    # leaves it (#925).
+    $inputWrite = Tool-Payload $callById[2430]
+    Assert-True ($inputWrite.persisted -eq $true -and $inputWrite.runtime_reloaded -eq $false -and $inputWrite.takes_effect -match "game starts") "project_set_input_action did not say where the action takes effect: $($inputWrite | ConvertTo-Json -Compress -Depth 5)"
+    Assert-True (-not $callById[2432].result.isError) "The harness input action could not be removed: $($callById[2432].result.content[0].text)"
+    foreach ($read in @(@{ Id = 2431; After = "an input action was written" }, @{ Id = 2433; After = "an input action was removed" })) {
+        $editorActions = @((Tool-Payload $callById[$read.Id]).returned)
+        Assert-True ($editorActions -contains "spatial_editor/viewport_pan_modifier_1" -and $editorActions -contains "spatial_editor/viewport_zoom_modifier_1") "After $($read.After), the editor's InputMap had lost the 3D viewport's navigation actions: $($editorActions -join ', ')"
+        Assert-True ($editorActions -notcontains "harness_input_map_probe") "After $($read.After), the editor's InputMap held the project's action, which the editor never loads."
     }
 
     # The gate, with confirmations on. An ordinary call must not execute; it

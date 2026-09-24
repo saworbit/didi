@@ -10487,10 +10487,18 @@ json GodotBridge::execute(const std::string& method, const json& params,
             replacement = std::move(dictionary.value());
         }
 
-        auto input_map = singleton("InputMap");
-        if (input_map.isErr()) return errorJson(input_map.error().code, input_map.error().message);
-        auto reload_bind = requireMethodBind("InputMap", "load_from_project_settings", 3218959716LL);
-        if (reload_bind.isErr()) return errorJson(reload_bind.error().code, reload_bind.error().message);
+        // The editor's own InputMap is left as it is. An editor never loads a
+        // project's input actions into its map -- the project's actions are
+        // absent from it at startup on 4.5.1, 4.6.2 and 4.7.2 -- and Godot's
+        // Project Settings dialog writes ProjectSettings and nothing else. This
+        // used to finish with InputMap.load_from_project_settings(), which on
+        // 4.5.1 erased the 3D viewport's own navigation actions, so every mouse
+        // move over it printed "The InputMap action ... doesn't exist" and
+        // Shift-pan stopped working until a restart; on 4.6.2 and 4.7.2 it kept
+        // those and pulled the project's twenty actions, its ui_* overrides
+        // included, into the editor's map (#925). Measured with
+        // tools/vibe/probes/input_map_reload.py. A game loads the project's
+        // actions when it starts, which is where they take effect.
         auto applied = callObject(project_settings.value(), "ProjectSettings", "set_setting", 402577236LL,
                                   {&setting_name.value(), &replacement.value()});
         if (applied.isErr()) return errorJson(applied.error().code, applied.error().message);
@@ -10500,18 +10508,9 @@ json GodotBridge::execute(const std::string& method, const json& params,
             : Result<int64_t>(saved.error());
         if (save_code.isErr() || save_code.value() != 0) {
             auto rollback = restoreProjectSetting(project_settings.value(), setting_name.value(), previous.value());
-            callObject(input_map.value(), "InputMap", "load_from_project_settings", 3218959716LL);
             if (rollback.isErr()) return errorJson(500, "InputMap save failed and rollback failed: " + rollback.error().message);
             return errorJson(500, "ProjectSettings.save failed; InputMap mutation was rolled back");
         }
-        auto reloaded = callObject(input_map.value(), "InputMap", "load_from_project_settings", 3218959716LL);
-        // The setting is already on disk by this point, and rolling back after a
-        // successful save means a second write that can fail the same way.
-        // Returning a bare error here told the caller nothing had happened, so a
-        // retry with replace:false came back with "already exists" and the agent
-        // concluded the write had failed. The durable fact is that it persisted.
-        // Report that, and report separately that the live InputMap did not
-        // pick it up.
         if (removing) {
             // The remove path never filled these in, so it echoed the defaults
             // rather than what the action had. Read them off the value that was
@@ -10542,11 +10541,14 @@ json GodotBridge::execute(const std::string& method, const json& params,
         }
         json result = {{"status", "success"}, {"action", action}, {"deadzone", deadzone},
                        {"event_count", event_count}, {"removed", removing}, {"persisted", true},
-                       {"runtime_reloaded", reloaded.isOk()}};
-        if (reloaded.isErr()) {
-            result["warning"] = "The input action was saved to project.godot but the live "
-                                "InputMap did not reload: " + reloaded.error().message;
-        }
+                       // Kept for callers that read it, and false because the
+                       // editor's InputMap is no longer reloaded (#925).
+                       {"runtime_reloaded", false},
+                       {"takes_effect",
+                        "when a game starts, which loads the project's input actions. The "
+                        "editor does not load them into its own InputMap, so this editor "
+                        "session is unchanged, the same as after an edit in Godot's Project "
+                        "Settings dialog."}};
         return liveResult(result);
     }
 

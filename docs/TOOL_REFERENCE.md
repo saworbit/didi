@@ -1366,7 +1366,7 @@ The modifiers are `shift_pressed`, `alt_pressed`, `ctrl_pressed` and `meta_press
 
 A refusal names the `events` entry it is about and the property or type that is wrong, the way every other argument refusal on this surface does.
 
-Key events may use `keycode`, `physical_keycode`, or `unicode` and optional `shift`, `alt`, `ctrl`, and `meta`. Writes construct real `InputEvent` resources, persist them, and call `InputMap.load_from_project_settings()`.
+Key events may use `keycode`, `physical_keycode`, or `unicode` and optional `shift`, `alt`, `ctrl`, and `meta`. Writes construct real `InputEvent` resources and persist them to `project.godot`. The attached editor's own `InputMap` is left alone, the same as after an edit in Godot's Project Settings dialog: an editor never loads a project's input actions into its map, and the change takes effect when a game starts, which the result says in `takes_effect`. `runtime_reloaded` is always `false`. It used to report a reload of the editor's whole map, which on Godot 4.5 erased the 3D viewport's navigation actions and on 4.6 and 4.7 pulled the project's actions into the editor (#925).
 
 ### General project settings
 

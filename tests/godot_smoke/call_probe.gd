@@ -31,5 +31,19 @@ func bake(full: bool, dry_run: bool) -> bool:
 	return full and not dry_run
 
 
+## Which of these actions the editor's own InputMap holds right now. The first
+## two are the 3D viewport's navigation actions, which the editor registers for
+## itself; the last is one the harness writes with project_set_input_action
+## just before asking. The editor never loads a project's actions into its own
+## map, and a tool that writes one must leave the map that way (#925).
+func editor_input_actions() -> Array:
+	var present := []
+	for action in ["spatial_editor/viewport_pan_modifier_1",
+			"spatial_editor/viewport_zoom_modifier_1", "harness_input_map_probe"]:
+		if InputMap.has_action(action):
+			present.append(action)
+	return present
+
+
 func _private_helper() -> String:
 	return "never reachable"

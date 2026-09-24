@@ -134,6 +134,21 @@ The three Phase 7 blockers are unchanged; the newest name is `project_add_export
 
 ### Fixed
 
+- **Writing an input action broke navigation in the editor's 3D view (#925).**
+  `project_set_input_action` and `project_remove_input_action` finished by
+  reloading the attached editor's whole `InputMap` from the project. An
+  editor never loads a project's actions into its own map, and the reload
+  did the wrong thing on every supported line. On 4.5.1 it erased the 3D
+  viewport's navigation actions, so every mouse move over the viewport
+  printed `The InputMap action "spatial_editor/viewport_pan_modifier_1"
+  doesn't exist` and Shift-pan stopped working until the editor restarted.
+  On 4.6.2 and 4.7.2 it kept those and pulled the project's twenty actions,
+  its `ui_*` overrides included, into the editor's map. The editor's map is
+  now left alone, the way Godot's own Project Settings dialog leaves it,
+  and the result says the change takes effect when a game starts.
+  `runtime_reloaded` is kept and is always `false`. Measured with
+  `tools/vibe/probes/input_map_reload.py`, and the live harness now reads the
+  editor's map after a write and after a removal.
 - **`project_list_export_presets` listed presets Godot never loads, and
   `project_export` tried to export them (#921).** Godot reads `[preset.0]`,
   `[preset.1]` and so on and stops at the first number that is missing, and it
