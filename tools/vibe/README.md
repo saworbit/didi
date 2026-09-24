@@ -88,6 +88,8 @@ twice.
 | `probes/editor_resource_cache.py` | What makes a live editor re-read a resource file that changed underneath it. Rewrites a library a player holds, then tries nothing, `editor_reload_project`, `EditorFileSystem.update_file`, `scan` and `CACHE_MODE_REPLACE` in turn. Only the last one works; that measurement is why `anim_add_library` compares the editor's copy with the file and `resource_create` reloads what it overwrote. |
 | `probes/input_map_reload.py` | What `InputMap.load_from_project_settings()` does to a running editor, which is what `project_set_input_action` used to call (#925). A headless editor reports which actions its map holds at startup, after a targeted add and erase, and after the reload: the 3D viewport's navigation actions, `ui_accept`, and an action the project declares. Needs no Didi build. Pass `--godot` once per engine line. |
 | `probes/export_preset_engine.py` | What an export preset has to be, asked of the engine alone, before a tool writes one (#779). Hand-written presets with each key the engine reads removed in turn, exported with `--export-pack` and the pack run as a game; every platform name a caller might write; a numbering gap, a first preset numbered 1, a zero-padded section and a duplicate name; a headless editor made to save its presets after a preset is written behind its back, after `scan_sources`, after a platform is registered, and after a bare extension platform is added and removed; and an `override.cfg`. Needs no Didi build. Pass `--godot` once per engine line. The evidence for the `project_add_export_preset` amendment, and for #921 and #922. |
+| `probes/export_preset_writer.py` | `project_add_export_preset` asked what an agent sends instead of what the harness sends, with the engine as the witness for every row the tool accepts: seventeen name spellings each exported as a pack through `project_export`, seventeen `export_path` forms and what was stored, the seven platforms and five near misses, a release and a debug build with no templates against the `next_step` that promised a refusal, files the tool did not write (CRLF, a byte-order mark, no final newline), two servers adding at once, and the schema's `maxLength` against the handler's bytes. `--live SANDBOX` adds with an editor attached and then makes the editor write its own list. Needs `--godot`; no Didi editor for the offline rows. |
+| `probes/input_action_in_game.py` | #927's "takes effect when a game starts", walked: an action written with the editor attached, a game launched, the action pressed in it, beside an action nobody declared as the control. The two answered identically until session eighteen, so the row meant to prove the action arrived could not have said otherwise. Needs a live editor on a `--fixtures` sandbox. |
 | `probes/reimport_overlap.py` | The harness's import sequence replayed against a live editor, printing each answer's `engine_diagnostics`: a never-seen PNG, the same PNG again at once. Pins #914 to the second call. |
 | `editor_log.py` | The editor's own console, read by every probe. `Session` finds the `editor.log` that `sandbox.py --launch` writes beside the project, reports what the editor printed before the session began, prints every new ERROR or WARNING under the call that caused it, and keeps them on `session.engine_lines`; `session.engine_summary()` groups them by call. Pass `editor_log=False` to turn it off. |
 | `fixtures/write_csharp_fixture.py` | A `.csproj` with one error and one warning in it. Kept out of `sandbox.py` because a C# project changes what Godot does with the directory. |
@@ -1113,6 +1115,28 @@ all of them caused by this session's own deliberately bad input, and one of
 them is a finding in its own right -- Godot printed `Time should be greater
 than zero` for the write the response reported only as `applied: false`.
 
+**A tool that hands its argument to another program has two parsers.**
+Session eighteen's biggest finding was not in Didi's reading of a preset name
+but in Godot's: `project_export` puts the name on Godot's command line, and
+Godot trims every argument and decodes `%20` before it looks the name up.
+The writer and the reader agreed with each other perfectly, and the tool's
+own read-back said every name was fine, because it was read with the same
+reader it was written for. Only exporting every accepted row through the
+engine found the three names that do not survive the trip. Whenever a tool's
+answer is "stored", ask the program that will consume what was stored.
+
+**A success row needs a control that must fail.** #927 said an input action
+takes effect when a game starts, and pressing the new action in a game came
+back `completed`. So did pressing an action nobody declared: the row that
+looked like proof could not have said anything else. Put the row that must be
+refused beside the row that must succeed, in the same probe, and read both.
+
+**Two writers is a state, not an edge case.** Two servers on one project is
+what two agents are. Nothing in the surface had been asked it since the
+blackboard (session thirteen), and the answer on Windows was half the calls
+failing with errors that do not say "retry", and on one run an update that
+was reported written and is not in the file (#929).
+
 ## Sessions so far
 
 | Date | Scope | Server | Findings |
@@ -1149,6 +1173,8 @@ than zero` for the write the response reported only as `applied: false`.
 | 2026-09-19 | The other half of a game, and somebody else's game. A menu built end to end -- anchors, a theme override, a Button wired to a handler, an `AnimationPlayer`, an audio bus -- then Godot's own `dodge_the_creeps` opened as a project to maintain: read it, search it, rename across a scene and a script, audit it. Then the detached game loop #733 asked for, now that it shipped, and the first measurement of what a call costs the caller. | `2.0.0+6b2627d77c88`, and the same on the runners | #764-#784 and #786, twenty-two findings. #764 and #765 reproduce byte for byte on Windows, macOS and Ubuntu, and so do all four rows of the menu arc. Two split on platform, which is what diagnosed both: #773 is Windows only (two binaries for one program) and #782 and #786 are POSIX only (a 3000 ms attach deadline, and a child nothing reaps). Four drafts were cut or rewritten against `docs/`, which is the session's main method lesson. |
 
 | 2026-09-23 | One new tool driven end to end rather than the surface swept: `anim_add_library` (#770) on 4.5.1 and 4.7.2, through a menu, a library, a saved scene and a running game, then every way to be wrong with it. Then, prompted by an editor console Shane pasted, the engine's own output read for the first time: in the vibe client, in every live answer, and as a gate in the live harness. | `2.0.1+4298f13bde58`, then the stack #912, #915, #916, #917 | Fixed before merge: a wrong-case path saved into the scene, a rewritten library added as the editor's stale copy, a neighbour route that refused three different ways on three engines, `anim_list_tracks` claiming an `AnimationTree`, `asset_reimport` calling a failed import imported, a harness fixture PNG that had never tested a successful import, three refusals the engine printed errors ahead of, `resource_create` writing unloadable `.res`, an overwrite leaving the editor's copy stale, and the addon shipping no `.uid` sidecars. Filed: #913 (the editor's undo manager left inconsistent by `editor_undo`) and #914 (a reimport colliding with the editor's own import pass). Every library name the engine accepts was saved and reloaded on three engines and survives. |
+
+| 2026-09-24 | The week's new export surface driven with what an agent sends rather than what the harness sends: `project_add_export_preset` (#926) and the preset reader (#924), every accepted row exported by the engine, then the editor made to write its own list over them. Then #927's input-action story walked into a running game, two servers writing one project at once, and the path forms every writer shares. | `2.0.1+4bcb964ef4e7` | Fixed before merge, as a stack: preset names Godot's command line trims or decodes (a whitespace-only name hung the export for five minutes), a release build with no templates answered `500`, `did_you_mean` shadowed by the schema's enum, a byte-order mark blamed on an invisible key, a directory stored as `export_path`, `runtime_inject_input` reporting an undeclared action as pressed, and `user://` and `RES://` read as folders by every writer. Filed: #929, two servers writing one project file fail half their calls on Windows with errors that do not say retry, and one run lost an update there too; and #932, an `export_path` whose folder Godot will not create when it exports to it. Green: the live reload, the editor's own rewrite, all seven platforms as a pack, and quotes, backslashes, brackets and emoji in a name. |
 
 Add a row per session. The table is the reason this directory exists: a finding
 that keeps coming back in a new place is a design problem, and only the log
