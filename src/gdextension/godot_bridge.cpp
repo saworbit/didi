@@ -12946,6 +12946,21 @@ json GodotBridge::execute(const std::string& method, const json& params,
             GodotApi::instance().object_destroy(node);
             return errorJson(400, "properties must be a JSON object");
         }
+        // What each initial property was set to, as the engine's own Variant,
+        // and what it held before, so the node can be read back once it is in
+        // the tree. scene_set_property has read its write back since it
+        // learned that a commit is not a change; this path never did, so a
+        // player created with a bus that does not exist reported success and
+        // was saved with no bus at all (vibe session nineteen).
+        struct InitialProperty {
+            std::string name;
+            json requested;
+            json written;
+            json before;
+            int hint{0};
+            std::string hint_string;
+        };
+        std::vector<InitialProperty> initial_written;
         for (auto it = initial_properties.begin(); it != initial_properties.end(); ++it) {
             auto has_property = objectHasProperty(node, it.key());
             if (has_property.isErr() || !has_property.value()) {
@@ -12994,6 +13009,21 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 GodotApi::instance().object_destroy(node);
                 return errorJson(set.error().code, set.error().message);
             }
+            InitialProperty record;
+            record.name = it.key();
+            record.requested = it.value();
+            // Against the Variant that was sent, not the JSON it came from, for
+            // the reason scene_set_property gives: {r,g,b} comes back with four
+            // keys and a Vector2 in single precision.
+            auto written_json = variantToJson(property_value.value(), 0, true);
+            record.written = written_json.isOk() ? written_json.value() : it.value();
+            auto before_json = variantToJson(current_value.value());
+            record.before = before_json.isOk() ? before_json.value() : json();
+            if (declared.isOk() && declared.value().has_value()) {
+                record.hint = declared.value()->hint;
+                record.hint_string = declared.value()->hint_string;
+            }
+            initial_written.push_back(std::move(record));
         }
         auto manager = undoManager(editor);
         if (manager.isErr()) { GodotApi::instance().object_destroy(node); return errorJson(manager.error().code, manager.error().message); }
@@ -13049,6 +13079,27 @@ json GodotBridge::execute(const std::string& method, const json& params,
                                          ? actual_path.value()
                                          : logical_parent.value() + "/" + logical_name},
                        {"undo_redo_registered", true}};
+        // Read back now the node is in the tree, which is what the scene saves.
+        // Only a property that did not land is reported, in scene_set_property's
+        // words, so a call where every one landed costs nothing extra.
+        json not_applied = json::array();
+        for (const auto& record : initial_written) {
+            auto name = makeStringName(record.name);
+            if (name.isErr()) continue;
+            auto observed = callObject(node, "Object", "get", 2760726917LL, {&name.value()});
+            if (observed.isErr()) continue;
+            auto observed_json = variantToJson(observed.value());
+            if (observed_json.isErr() || jsonValuesEquivalent(observed_json.value(), record.written)) {
+                continue;
+            }
+            json entry = notAppliedReport(observed_json.value(), record.before, record.hint,
+                                          record.hint_string);
+            entry["property_name"] = record.name;
+            entry["requested_value"] = record.requested;
+            entry["value"] = observed_json.value();
+            not_applied.push_back(std::move(entry));
+        }
+        if (!not_applied.empty()) result["properties_not_applied"] = std::move(not_applied);
         // Say when the engine did not use the name it was given.
         //
         // Godot forbids . : @ / % and " in a node name and substitutes rather
