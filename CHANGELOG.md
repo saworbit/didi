@@ -134,6 +134,16 @@ The three Phase 7 blockers are unchanged; the newest name is `project_add_export
 
 ### Fixed
 
+- **`runtime_inject_input` reported an action the game never declared as
+  pressed.** Godot dispatches an `InputEventAction` for an unknown action
+  without complaint and nothing reacts to it, so a misspelled action came
+  back `outcome: "completed"` with `dispatched_event_count: 1`, exactly like
+  a real one, while `runtime_explore_scene` refused the same batch for that
+  reason. It is refused now with `reason: "undefined_input_action"` and
+  `undefined_actions`, and nothing in the batch is sent. It is also the
+  state of a game started before `project_set_input_action` wrote the
+  action, which the refusal names, since #925 made that the documented
+  way an action takes effect.
 - **`project_export` lost a preset name with a space at either end.** Godot
   trims every argument on its command line and then turns each `%20` back into
   a space, on 4.5.1, 4.6.2 and 4.7.2. So `" Padded "` reached it as `Padded`,

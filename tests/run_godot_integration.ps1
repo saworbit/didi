@@ -714,6 +714,14 @@ try {
             @{ type = "action"; action_name = "ui_accept"; pressed = $true },
             @{ type = "joypad_button"; button_index = 22; pressed = $true; device = 0 }
         ) }),
+        # An action the game does not declare, beside one it does. It used to
+        # be dispatched and reported completed, the same as a real one; the
+        # whole batch is refused now, and the counter read by 398 proves the
+        # declared press did not go out either.
+        (Tool-Request 399 "runtime_inject_input" @{ events = @(
+            @{ type = "action"; action_name = "ui_accept"; pressed = $true },
+            @{ type = "action"; action_name = "harness_never_declared"; pressed = $true }
+        ) }),
         (Tool-Request 398 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot"; max_depth = 1 }),
         # A click with no position lands at the viewport origin, and a caller
         # who found a control's rect through ui_list_controls had no way to
@@ -1165,6 +1173,9 @@ try {
     Assert-True ($null -ne $inputPreview.mutation_preview -and $inputPreview.mutation_preview.tool -eq "inject_input_event") "inject_input_event dry_run did not return a preview under the invoked name."
     Assert-True $runtimeById[396].result.isError "runtime_inject_input accepted a key event with no key identity."
     Assert-True $runtimeById[397].result.isError "runtime_inject_input accepted a joypad button outside 0..21."
+    Assert-True $runtimeById[399].result.isError "runtime_inject_input reported an action the game does not declare as injected."
+    $undeclared = ($runtimeById[399].result.content[0].text | ConvertFrom-Json).error
+    Assert-True ($undeclared.code -eq 400 -and $undeclared.data.reason -eq "undefined_input_action" -and (@($undeclared.data.undefined_actions) -join ",") -eq "harness_never_declared") "runtime_inject_input did not name the undeclared action: $($runtimeById[399].result.content[0].text)"
     $inputFinal = Runtime-InputCounter (Tool-Payload $runtimeById[398])
     Assert-True ($inputFinal -eq $inputAfter) "A rejected batch or a dry run still dispatched input; the counter moved from $inputAfter to $inputFinal."
 

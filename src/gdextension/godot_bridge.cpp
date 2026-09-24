@@ -4583,6 +4583,42 @@ json injectInput(const json& params, const std::string& session_kind) {
     auto bind = requireMethodBind("Input", "parse_input_event", kInputParseInputEventHash);
     if (bind.isErr()) return errorJson(501, "Input.parse_input_event is unavailable: " + bind.error().message);
 
+    // An action the game's InputMap does not define is refused before
+    // anything is dispatched or queued. Godot dispatches an InputEventAction
+    // naming one without complaint and nothing reacts to it, so the call
+    // answered "completed" for a misspelled action exactly as for a real one,
+    // and runtime_explore_scene already refused the same batch for this
+    // reason. It is also the state a game is in when an action was written
+    // with project_set_input_action after the game started.
+    json action_names = json::array();
+    for (const auto& spec : parsed.value()) {
+        if (spec.kind == runtime::InjectedInputEvent::Kind::action) {
+            action_names.push_back(spec.action_name);
+        }
+    }
+    if (!action_names.empty()) {
+        const auto checked = inputMapMissingActions({{"actions", action_names}}, session_kind);
+        if (checked.contains("error")) return checked;
+        const auto undefined = checked.value("missing", json::array());
+        if (!undefined.empty()) {
+            std::string listed;
+            for (const auto& name : undefined) {
+                listed += (listed.empty() ? "\"" : ", \"") + name.get<std::string>() + "\"";
+            }
+            return errorJson(
+                400,
+                "The game's InputMap does not define " + listed +
+                    ", so an event pressing it would be dispatched and nothing would react to "
+                    "it. No event in this batch was sent. An action added with "
+                    "project_set_input_action takes effect when a game starts, so a game that "
+                    "was already running does not have it until it is restarted.",
+                {{"code", "invalid_arguments"},
+                 {"reason", "undefined_input_action"},
+                 {"undefined_actions", undefined},
+                 {"retryable", false}});
+        }
+    }
+
     std::vector<VariantValue> events;
     events.reserve(parsed.value().size());
     json event_types = json::array();
