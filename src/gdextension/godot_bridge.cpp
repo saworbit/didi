@@ -7988,6 +7988,59 @@ json GodotBridge::execute(const std::string& method, const json& params,
     if (method == "anim.listTracks") return animListTracks(params, session_kind);
     if (method == "anim.playTrack") return animPlayTrack(params, session_kind);
     if (method == "anim.addLibrary") return animAddLibrary(params, session_kind);
+    if (method == "export.reloadPresets") {
+        // project_add_export_preset asks this after it has written
+        // export_presets.cfg. The editor reads that file once, when it starts,
+        // and writes its own list back over it 0.8 s after any preset changes,
+        // so a preset written underneath it is lost with no error anywhere.
+        // Registering or removing an export platform is the one public event
+        // that makes it read the file again: EditorExport marks its presets
+        // for reload and reloads them on its next process frame. A bare
+        // EditorExportPlatformExtension, added and removed in one frame through
+        // an EditorPlugin that is never in the tree, does that and prints
+        // nothing. Measured on 4.5.1, 4.6.2 and 4.7.2 with
+        // tools/vibe/probes/export_preset_engine.py; both binds are 3431312373
+        // on all three.
+        //
+        // "request" does it. "confirm" does nothing: the server sends it only
+        // once "request" has been answered, and this bridge serves requests
+        // from its frame callback, so it is answered on a later frame, after
+        // the editor has processed and read the file.
+        if (session_kind != "editor") return bridgeError(409, "session_kind_rejected");
+        const std::string step = params.value("step", "");
+        if (step == "confirm") return liveResult({{"frame_passed", true}});
+        if (step != "request") return errorJson(400, "step must be request or confirm");
+        for (const char* bind : {"add_export_platform", "remove_export_platform"}) {
+            if (requireMethodBind("EditorPlugin", bind, 3431312373LL).isErr()) {
+                return bridgeError(501, "required_bind_unavailable");
+            }
+        }
+        NativeName platform_class("EditorExportPlatformExtension");
+        auto platform = constructObject(platform_class.ptr());
+        if (!platform) return bridgeError(501, "export_platform_unavailable");
+        // The Variant holds the platform's only reference, so it is freed when
+        // this returns, after the editor has let go of it.
+        auto platform_value = makeObject(platform);
+        if (platform_value.isErr()) return errorJson(500, platform_value.error().message);
+        NativeName plugin_class("EditorPlugin");
+        auto plugin = constructObject(plugin_class.ptr());
+        if (!plugin) return errorJson(500, "Godot ClassDB could not construct an EditorPlugin");
+        auto added = callObject(plugin, "EditorPlugin", "add_export_platform", 3431312373LL,
+                                {&platform_value.value()});
+        auto removed = added.isOk()
+                           ? callObject(plugin, "EditorPlugin", "remove_export_platform",
+                                        3431312373LL, {&platform_value.value()})
+                           : Result<VariantValue>(added.error());
+        GodotApi::instance().object_destroy(plugin);
+        if (added.isErr()) return errorJson(500, added.error().message);
+        if (removed.isErr()) {
+            // Added and not removed would leave a platform with no name in the
+            // editor's list, so this is reported rather than passed over.
+            return errorJson(500, "The export platform was registered and could not be removed: " +
+                                      removed.error().message);
+        }
+        return liveResult({{"reload_requested", true}});
+    }
     if (method == "resource.refreshCached") {
         // resource_create asks this after it has overwritten a file. The editor
         // keeps what it has loaded and does not re-read a file that changed

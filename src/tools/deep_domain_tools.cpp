@@ -2,6 +2,7 @@
 #include "didi/tools/phase7_live_forward.hpp"
 #include "didi/common/ipc_channel.hpp"
 #include "didi/common/project_path.hpp"
+#include "didi/common/atomic_write.hpp"
 #include "didi/offline/deep_domain_support.hpp"
 #include "didi/offline/process_runner.hpp"
 #include "didi/offline/test_runner.hpp"
@@ -639,6 +640,92 @@ CallToolResult handleProjectListExportPresets(const json& args, std::shared_ptr<
                                        {"execution_mode", "offline_fallback"},
                                        {"sensitive_options_omitted", true},
                                        {"presets_file_exists", true}});
+}
+
+// Adds one export preset, which is what makes project_export reachable on a
+// project nobody has exported by hand (#779).
+//
+// This process writes the file whether or not an editor is attached. An open
+// editor reads the file once, when it starts, and writes its own list back
+// over it the next time any preset changes, so a preset written underneath it
+// is lost with no error anywhere. With an editor attached, the bridge is asked
+// to make it read the file again. The measurements behind every choice here
+// are in the project_add_export_preset amendment in docs/SURFACE_AMENDMENTS.md.
+CallToolResult handleProjectAddExportPreset(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    auto root = projectRoot();
+    if (root.isErr()) return CallToolResult::fromError(root.error());
+    auto plan = offline::planExportPresetForProject(args);
+    if (plan.isErr()) return CallToolResult::fromError(plan.error());
+    const auto path = root.value() / "export_presets.cfg";
+    auto written = files::writeFileAtomically(path, plan.value().contents);
+    if (written.isErr()) {
+        return CallToolResult::error("Failed to write export_presets.cfg: " + written.error().message);
+    }
+
+    // Read back through the reader project_list_export_presets and
+    // project_export use, so the answer is what those two will now say.
+    auto contents = readBounded(path, kMaxPresetFile);
+    if (contents.isErr()) return CallToolResult::fromError(contents.error());
+    const auto file = offline::readExportPresets(contents.value());
+    const std::string name = args["name"].get<std::string>();
+    const auto record = std::find_if(file.presets.begin(), file.presets.end(),
+                                     [&](const json& item) { return item.value("name", "") == name; });
+    if (file.malformed || record == file.presets.end() || !record->value("detected", false)) {
+        return CallToolResult::errorJson(
+            500, "export_presets.cfg was written and does not read back with this preset detected",
+            {{"code", "internal_error"}, {"preset", name}, {"written_to", "res://export_presets.cfg"}});
+    }
+
+    json payload = {
+        {"status", "created"},
+        {"preset", *record},
+        {"written_to", "res://export_presets.cfg"},
+        {"file_created", plan.value().file_created},
+        {"section_written", plan.value().section_text},
+        {"preset_count", file.presets.size()},
+        {"next_step",
+         "project_export with preset \"" + name + "\" and mode \"pack\" writes a .pck and needs "
+         "no export templates. A release or debug build needs the export templates for " +
+             record->value("platform", "") + ", and project_export says so when they are missing."}};
+
+    // Adding and removing an export platform is the one public event that
+    // makes the editor read the file again, and it does so on its next frame.
+    // The second request is the wait for that frame: the bridge serves
+    // requests from its frame callback, and a request sent only after the
+    // first one was answered cannot be served in the same frame.
+    bool reloaded = false;
+    if (ipc && ipc->isConnected()) {
+        const auto failure = [](const Result<json>& response) -> std::optional<json> {
+            if (response.isErr()) {
+                return json{{"code", response.error().code}, {"message", response.error().message}};
+            }
+            if (response.value().is_object() && response.value().contains("error")) {
+                return response.value()["error"];
+            }
+            return std::nullopt;
+        };
+        auto requested = ipc->sendRequest("export.reloadPresets", json{{"step", "request"}}, 5000);
+        auto problem = failure(requested);
+        if (!problem) {
+            auto confirmed = ipc->sendRequest("export.reloadPresets", json{{"step", "confirm"}}, 5000);
+            problem = failure(confirmed);
+            if (!problem) reloaded = confirmed.value().value("frame_passed", false);
+        }
+        if (problem) payload["editor_reload_error"] = *problem;
+    }
+    payload["editor_reloaded"] = reloaded;
+    payload["execution_mode"] = reloaded ? "live" : "offline_fallback";
+    payload["is_live_engine"] = reloaded;
+    if (!reloaded) {
+        payload["limitation"] =
+            "No attached editor was told about this preset. A Godot editor open on this project "
+            "reads export_presets.cfg only when it starts, and writes its own list of presets "
+            "back over the file the next time any preset changes in its Export dialog, which "
+            "would remove this one. Restart any such editor, or attach Didi to it and add the "
+            "preset again, before using its Export dialog. project_export is not affected: it "
+            "starts its own Godot, which reads the file.";
+    }
+    return CallToolResult::successJson(std::move(payload));
 }
 
 CallToolResult handleProjectExport(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {

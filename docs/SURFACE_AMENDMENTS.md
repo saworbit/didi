@@ -56,9 +56,7 @@ Six amendments are implemented: `runtime_read_output`, `audio_list_buses` and
 `audio_configure_bus`, all recorded below with tri-engine feasibility evidence,
 plus `project_audit_assets`, `project_analyze_impact`,
 `runtime_explore_scene`, `didi_control_room`, `ui_list_controls`,
-`scene_call_method` and `anim_add_library`. One is accepted and not yet
-implemented: `project_add_export_preset`, which makes `project_export`
-reachable on a project nobody has exported by hand. One
+`scene_call_method`, `anim_add_library` and `project_add_export_preset`. One
 amendment adds no name and changes an existing contract: `scene_close` reads
 real dirty state where the engine can report it. One is withdrawn: raising the engine floor to
 Godot 4.7, refused in favour of runtime capability detection so that 4.5 and 4.6
@@ -68,15 +66,15 @@ August 2026 competitive review and are proposed, not accepted, in
 `runtime_read_output`, `ui_list_controls`, `godot_api_reference`, and an `until`
 parameter on the existing `runtime_step` (a change, not a new name).
 
-### ACCEPTED: `project_add_export_preset`
+### ACCEPTED (IMPLEMENTED): `project_add_export_preset`
 
 | Field | Value |
 | :--- | :--- |
 | **Name** | `project_add_export_preset` |
 | **Failing workflow** | *Ship the game.* Reported from vibe session 16 (#779). An agent builds a game through the surface and asks `project_export` for a pack. On a project nobody has exported by hand, `project_list_export_presets` answers `preset_count: 0` and `project_export` refuses: "This project has no export_presets.cfg, so it has no export presets. Add one in the editor's Export dialog." Nothing on the surface can write that file. `script_create` refuses any path that does not end in `.gd`, and `resource_create` any that does not end in `.tres` or `.res`. `mode: "pack"` needs no export templates and still needs a preset. So `project_export` is unreachable on every project the surface built, which is the shape #770 had for `anim_play_track`. |
-| **Execution modes** | Both. The server writes the file itself, with or without a session, the way `project_set_setting`'s offline route does. With no editor attached the result reports `offline_fallback`. With an editor session attached it also has the bridge make the editor re-read the file, because an open editor keeps its own list of presets and writes that list back over the file the next time any preset changes. See **An open editor** below. A game session adds nothing, because a running game holds no presets. |
+| **Execution modes** | Both. The server writes the file itself, with or without a session, the way `project_set_setting`'s offline route does. With no editor attached the result reports `offline_fallback`. With an editor session attached it also has the bridge make the editor re-read the file, because an open editor keeps its own list of presets and writes that list back over the file the next time any preset changes. See **An open editor** below. A game session is refused, as it is for every project writer, because a running game holds no presets. |
 | **Safety class** | `create/set`. Dry run, no confirmation token. Additive only (`destructiveHint: false`). A missing file is created. An existing file is appended to, and every byte already in it is kept. A name already in the file is refused rather than replaced, whatever platform its preset is on. There is no remove. The way back is the editor's Export dialog, or deleting the section the call appended. |
-| **Proving test** | Native: `ExportPresetAdd.RequestValidation` covers the name bounds and the refusal of control characters, the seven platform names and the three spellings the engine skips (each refused with the right spelling), and `export_path` containment. `ExportPresetAdd.WritesWhatEveryEngineLoads` compares the text written for a new file byte for byte with the block under **What it writes**. `ExportPresetAdd.AppendKeepsTheFile` requires an existing file to survive as an unchanged prefix, the next number after the unbroken run to be used, and a name holding a quote, a backslash, a bracket and an equals sign to read back unchanged through `project_list_export_presets`. `ExportPresetAdd.Refusals` covers a name in use on a known platform and on an unknown one, a gap in the numbering, and each cause the reader reports for a malformed file, on the dry run as well as the call. `ExportPresetAdd.Registration` requires both modes, a mutation with `dry_run` and no confirmation token, additive and not read-only. Godot integration: before the editor starts, a preset is added to a fixture project with no presets file; `project_list_export_presets` lists it, `project_export` in `pack` mode writes a pack, and the pack runs as the game. With the editor attached, a second preset is added, and a fixture editor plugin (the probe's no-op export platform) makes the editor save its presets. The added preset must still be in the file afterwards, which fails if the re-read is removed. The harness's engine-output gate fails the run on any ERROR or WARNING line, so a written preset that drops a key from the table below fails on its own. |
+| **Proving test** | Native: `ExportPresetAdd.RequestValidation` covers the name bounds and the refusal of control characters, the seven platform names and the three spellings the engine skips (each refused with the right spelling), and `export_path` containment. `ExportPresetAdd.WritesWhatEveryEngineLoads` compares the text written for a new file byte for byte with the block under **What it writes**. `ExportPresetAdd.AppendKeepsTheFile` requires an existing file to survive as an unchanged prefix, the next number after the unbroken run to be used, and a name holding a quote, a backslash, a bracket and an equals sign to read back unchanged through `project_list_export_presets`. `ExportPresetAdd.Refusals` covers a name in use on a known platform and on an unknown one, a gap in the numbering, an options section with no preset above it, and four of the causes the reader reports for a malformed file, on the dry run as well as the call, and requires the file to be unchanged after each. `ExportPresetAdd.DryRunWritesNothing` requires the preview to show the exact section and write no file. `ExportPresetAdd.AnAttachedEditorIsMadeToReadTheFile` requires the bridge to be asked for the re-read and then for the frame after it, and a refusal from the editor to leave the file written and say why. `ExportPresetAdd.Registration` requires both modes, a mutation with `dry_run` and no confirmation token, additive and not read-only. Godot integration, on 4.5.1, 4.6.2 and 4.7.2: requests 2800 to 2806 add a preset to a project of its own with no presets file and no editor, list it, export it with `project_export` in `pack` mode, and refuse the same name again; the pack is then run as the game with `--main-pack` and has to print its marker and no engine error. Requests 2820 to 2823 ask for a preset with the editor attached on the smoke project, whose presets file has the gap #921 added, and require the call and its dry run to refuse it and leave the file alone. The harness then closes the gap, and requests 2810 to 2817 add the preset, attach a `@tool` script that makes the editor save its presets, and require the preset to be in what the editor wrote. With the bridge's re-read replaced by an answer that does nothing, that last check fails with "the editor wrote its presets and dropped the one project_add_export_preset added", which is the run that proves it can. |
 | **Reviewer** | Accepted by Shane Wall on 2026-09-24 for #779. It is a mutation, so the security argument is recorded below; nobody else has reviewed it. |
 
 All of the evidence below comes from `tools/vibe/probes/export_preset_engine.py`
@@ -143,8 +141,10 @@ without printing anything, so a misspelled platform is a preset that silently
 does not exist. `windows desktop`, `Windows` (the OS name) and `HTML5` (the
 Godot 3 name) each ended at export with `Invalid export preset name`. `Linux/X11`
 still loads on all three, for files written before 4.3; the tool does not write
-it. The tool takes the seven as an enum, and refuses anything else with the
-nearest correct name.
+it. The seven are an enum in the tool's schema, so a client offers exactly
+those, and the schema check refuses anything else with the list before the
+tool runs. The tool's own check, which names the nearest one, stands behind
+it.
 
 **Numbering and names.** The engine reads `[preset.0]`, `[preset.1]` and so on,
 and stops at the first number that is missing. A preset after a gap never
@@ -192,6 +192,16 @@ with `--dump-extension-api` from each binary:
 
 `EditorPlugin` and `EditorExportPlatformExtension` are both instantiable on all
 three.
+
+**How the harness sees the editor's list.** The probe's plugin reached the
+editor's own presets through a platform it registered, which needs a preset
+of that platform in the file. The harness needs no such preset. Setting any
+value on an `EditorExportPreset` starts the editor's save timer, and the save
+writes the editor's list whichever preset asked, so a preset made by a bare
+`EditorExportPlatformExtension` that was never registered forces the save and
+is in no list itself. Measured on all three lines: a comment line added to the
+file beforehand is gone afterwards, which proves the save, and nothing of the
+forcing preset is written.
 
 **Not handled.** An edit made in the Export dialog in the 0.8 seconds before the
 call is in the editor's memory and not yet on disk, and the re-read replaces it

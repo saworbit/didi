@@ -423,6 +423,7 @@ set(TEST_SOURCES
     tests/test_phase7b_spatial.cpp
     tests/test_phase7b_anim.cpp
     tests/test_anim_add_library.cpp
+    tests/test_project_add_export_preset.cpp
     tests/test_engine_diagnostics.cpp
 )
 

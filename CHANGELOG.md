@@ -41,16 +41,32 @@ release changed, which is why it lives here and not in a version section.
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `114/117`
+**Canonical implementation:** `115/118`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Discovery now exposes 117 canonical tools plus 10 legacy registrations (127 total). 114 canonical tools are implemented and 3 remain unimplemented.
-The three Phase 7 blockers are unchanged; the newest name is `anim_add_library`, recorded in [Surface Amendments](docs/SURFACE_AMENDMENTS.md).
+Discovery now exposes 118 canonical tools plus 10 legacy registrations (128 total). 115 canonical tools are implemented and 3 remain unimplemented.
+The three Phase 7 blockers are unchanged; the newest name is `project_add_export_preset`, recorded in [Surface Amendments](docs/SURFACE_AMENDMENTS.md).
 
 ### Added
 
+- **`project_add_export_preset` makes a game shippable through the surface
+  (#779).** `project_export` needs an export preset, and nothing on the
+  surface could write one, so on a project nobody had exported by hand it
+  answered "Add one in the editor's Export dialog". The new tool adds one
+  preset to `export_presets.cfg`: the fewest keys that 4.5.1, 4.6.2 and 4.7.2
+  all load without an ERROR line, appended to whatever the file already holds
+  with every byte of it kept. It only adds, and refuses a name in the file, a
+  gap in the numbering and a file Godot cannot parse, at the dry run as well
+  as on the call. An open editor reads the file only when it starts and
+  writes its own list back over it the next time any preset changes, so with
+  an editor attached the tool also makes the editor read the file again, and
+  the live harness proves it by making the editor save and finding the
+  preset in what it wrote. `project_export`'s refusal for a project with no
+  presets now names the tool. The measurements are in the amendment in
+  [Surface Amendments](docs/SURFACE_AMENDMENTS.md) and in
+  `tools/vibe/probes/export_preset_engine.py`.
 - **Every live answer carries what the engine printed while it ran.** Godot
   writes its ERROR and WARNING lines to its console, and until now nothing a
   caller or a test received ever mentioned them, so a call could answer success

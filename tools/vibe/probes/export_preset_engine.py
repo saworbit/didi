@@ -359,6 +359,20 @@ func _run() -> void:
 		await _wait(1.5)
 		if await _force_save(probe, 4):
 			_snap("4_editor_save_after_bare_platform_added_and_removed")
+		# The same save forced with nothing registered and no preset of the
+		# probe's own in the file: a preset made by a bare platform that was
+		# never added. Setting a value on any EditorExportPreset starts the
+		# editor's save timer, and the save writes the editor's list, which
+		# this preset is not in. The marker line is a comment, which the
+		# editor's own writer does not keep, so its absence proves the save.
+		var text := FileAccess.get_file_as_string(CFG) + "\n; didi-unsaved-marker\n"
+		var marked := FileAccess.open(CFG, FileAccess.WRITE)
+		marked.store_string(text)
+		marked.close()
+		var loose := EditorExportPlatformExtension.new().create_preset()
+		loose.set("didi/loose_preset_value", true)
+		await _wait(2.0)
+		_snap("5_editor_save_forced_by_a_preset_from_an_unregistered_platform")
 	remove_export_platform(probe)
 	await _wait(1.0)
 	print("DIDI_PROBE_DONE")
