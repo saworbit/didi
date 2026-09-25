@@ -103,6 +103,47 @@ class ElasticIngressTests(unittest.TestCase):
         reply = self.call("not_a_tool", {}, "safe-v1")
         self.assertEqual(reply["error"]["code"], -32602)
 
+    def test_profile_is_per_request_and_failure_does_not_poison_followups(self):
+        frames = []
+        for identifier, depth, profile in ((1, "2", "safe-v1"), (2, "2", None),
+                                           (3, "2", "future"), (4, 2, None)):
+            meta = {'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+                    'io.modelcontextprotocol/clientCapabilities': {}}
+            if profile is not None:
+                meta[KEY] = profile
+            frames.append({'jsonrpc': '2.0', 'id': identifier, 'method': 'tools/call',
+                           'params': {'name': 'scene_get_hierarchy',
+                                      'arguments': {'root_path': 'res://main.tscn', 'max_depth': depth},
+                                      '_meta': meta}})
+        process = subprocess.run(
+            [str(self.binary), '--project', str(ROOT / 'tests/godot_smoke')],
+            input=''.join(json.dumps(frame) + '\n' for frame in frames),
+            capture_output=True, text=True, encoding='utf-8', timeout=20)
+        self.assertEqual(process.returncode, 0, process.stderr)
+        replies = [json.loads(line) for line in process.stdout.splitlines()]
+        self.assertEqual([reply['id'] for reply in replies], [1, 2, 3, 4])
+        self.assertEqual(replies[0]['result']['isError'], not self.enabled)
+        self.assertTrue(replies[1]['result']['isError'])
+        self.assertEqual(self.error_data(replies[2])['reason'],
+                         'unsupported_profile' if self.enabled else 'feature_disabled')
+        self.assertFalse(replies[3]['result']['isError'], replies[3])
+        if self.enabled:
+            self.assertEqual(replies[0]['result'], replies[3]['result'])
+
+    def test_wire_integer_boundaries_keep_the_schema_authoritative(self):
+        for value, accepted in (("0", True), ("64", True), ("01", True),
+                                ("65", False), ("-1", False), ("+1", False),
+                                (" 1", False), ("1.0", False), ("1e0", False),
+                                ("１", False), (True, False), (None, False)):
+            with self.subTest(value=value):
+                reply = self.call('scene_get_hierarchy',
+                                  {'root_path': 'res://main.tscn', 'max_depth': value}, 'safe-v1')
+                self.assertEqual(reply['result']['isError'], not (self.enabled and accepted), reply)
+                if self.enabled and not accepted:
+                    data = self.error_data(reply)
+                    self.assertEqual(data['code'], 'invalid_arguments')
+                    self.assertFalse(data['retryable'])
+
     def test_advertisement_is_limited_to_reviewed_tools(self):
         names = {name for name, tool in self.tools.items()
                  if "argumentNormalization" in tool["_meta"]["didi"]}

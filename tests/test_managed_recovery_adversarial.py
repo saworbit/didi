@@ -6,7 +6,11 @@ import threading
 import time
 import unittest
 
-import test_managed_recovery_live as live
+# Both unittest discovery (-t tests) and explicit tests.<module> runs are supported.
+if __package__:
+    from . import test_managed_recovery_live as live
+else:
+    import test_managed_recovery_live as live
 
 
 class ManagedRecoveryAdversarial(live.ManagedRecoveryLive):

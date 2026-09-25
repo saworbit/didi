@@ -46,6 +46,11 @@ except ImportError:
 
 _executable = _binary.resolve
 
+try:
+    from stdio_process import stop as stop_stdio_process
+except ImportError:
+    from tests.stdio_process import stop as stop_stdio_process
+
 
 class ElicitationConfirmationTests(unittest.TestCase):
     @classmethod
@@ -76,7 +81,7 @@ class ElicitationConfirmationTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        cls.process.kill()
+        stop_stdio_process(cls.process)
 
     @classmethod
     def _request(cls, method, params):

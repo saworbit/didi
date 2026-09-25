@@ -1,6 +1,8 @@
 """Executable contract for opt-in managed recovery. Set DIDI_TEST_BINARY to exercise a build."""
 import json
 import os
+from pathlib import Path
+import sys
 import subprocess
 import unittest
 
@@ -21,6 +23,18 @@ class ManagedRecoverySurface(unittest.TestCase):
             result = subprocess.run([os.environ['DIDI_TEST_BINARY'], option, 'missing'], capture_output=True, text=True)
             self.assertEqual(result.returncode, 2)
             self.assertIn('must be supplied together', result.stderr)
+
+
+class RecoveryHarnessImports(unittest.TestCase):
+    def test_adversarial_fixture_imports_in_both_unittest_modes(self):
+        root = Path(__file__).resolve().parents[1]
+        for module, directory in (("tests.test_managed_recovery_adversarial", root),
+                                  ("test_managed_recovery_adversarial", root / "tests")):
+            with self.subTest(module=module):
+                result = subprocess.run(
+                    [sys.executable, "-c", "import importlib; importlib.import_module(" + repr(module) + ")"],
+                    cwd=directory, capture_output=True, text=True, timeout=10)
+                self.assertEqual(result.returncode, 0, result.stderr)
 
 
 if __name__ == '__main__':

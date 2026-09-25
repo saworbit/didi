@@ -93,6 +93,11 @@ except ImportError:
 
 _executable = _binary.resolve
 
+try:
+    from stdio_process import stop as stop_stdio_process
+except ImportError:
+    from tests.stdio_process import stop as stop_stdio_process
+
 
 class ToolOutputSchemaContractTests(unittest.TestCase):
     @classmethod
@@ -115,9 +120,8 @@ class ToolOutputSchemaContractTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        cls.process.kill()
-        cls.scratch_process.kill()
-        cls.scratch_process.wait()
+        stop_stdio_process(cls.process)
+        stop_stdio_process(cls.scratch_process)
         cls.scratch_directory.cleanup()
 
     @classmethod
@@ -237,7 +241,7 @@ class OfflineDispatchContractTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        cls.process.kill()
+        stop_stdio_process(cls.process)
 
     @classmethod
     def _request(cls, method, params, identifier):
@@ -309,8 +313,7 @@ class OfflineDispatchContractTests(unittest.TestCase):
                 Path(directory.name, "export_presets.cfg").read_text(encoding="utf-8"),
             )
         finally:
-            process.kill()
-            process.wait()
+            stop_stdio_process(process)
             directory.cleanup()
 
 
