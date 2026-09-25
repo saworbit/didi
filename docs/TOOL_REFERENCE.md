@@ -13,6 +13,13 @@ The `_meta.didi` object returned by `tools/list` is authoritative. A registered 
 
 Phase 7 is `PARTIAL_DELIVERY`. The implementation is 116/119 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
+The current source/Unreleased connection guide is returned in
+`initialize` and `server/discover` as `result.instructions`. It routes common
+tasks to these canonical tools and requires parameter inspection and node
+discovery before invocation. It does not replace this reference or live
+`tools/list` metadata. See [LLM Operating Instructions](LLM_INSTRUCTIONS.md)
+for the expanded workflow and host fallback.
+
 ## Status legend
 
 | Status | Meaning |

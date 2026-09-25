@@ -39,6 +39,11 @@ OFF, and disabling normalization does not revert it.
 
 ## Evidence
 
+This draft preserves the original experiment's evidence below. The later
+[exploratory report](EXPLORATORY_MCP_INSTRUCTIONS.md) records both Release profiles
+and the fixture cleanup that resolved the ResourceWarnings noted here. Use
+that report for the later run; client-adoption gates remain unchanged.
+
 - Enabled and disabled builds and all 15 focused normalization checks passed.
 - Full native suite on `5e41c7d` plus these changes: 862 passed, zero failed.
 - Final Python suite after adding live coverage: 436 run, 11 skipped, successful;

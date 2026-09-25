@@ -4,6 +4,12 @@ This page describes what the current Didi build can execute. The runtime respons
 
 Didi must start with `--project <root>` or `DIDI_PROJECT_ROOT`; the selected canonical directory must contain `project.godot`. Missing or invalid project selection fails before MCP initialization, as does an unknown or malformed launch option.
 
+The current source/Unreleased handshake and `server/discover` also return
+`result.instructions`: a static routing and execution guide for the host's
+model. It adds no tools and does not assert current connectivity. Continue to
+use runtime metadata below to decide what can execute. See the
+[protocol contract](API_SPECIFICATION.md#server-operational-instructions).
+
 ## Reading capability metadata
 
 Every tool and resource definition includes `_meta.didi`:

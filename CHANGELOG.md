@@ -51,6 +51,18 @@ The three Phase 7 blockers are unchanged; the newest name is `audio_add_bus`, re
 
 ### Added
 
+- **Operational guidance in the MCP handshake.** `InitializeResult.instructions`
+  now carries a compact guide to tool routing, schema inspection, node discovery,
+  mutation previews and unsupported workflows with file/headless fallbacks.
+  `server/discover` uses the same guide. Host integration is documented in the
+  [API specification](docs/API_SPECIFICATION.md#server-operational-instructions);
+  this adds no tools or availability guarantees.
+- **End-to-end protocol and normalization coverage.** Ten Python tests extend
+  handshake recovery, pipelining, concurrent-client isolation, routing, numeric
+  boundaries and harness cleanup. Existing CI steps run the new modules. The
+  [exploratory report](docs/EXPLORATORY_MCP_INSTRUCTIONS.md) records both build
+  profiles, Godot 4.5.1/4.7.2 integration, live recovery and existing limitations.
+
 - **Experimental argument normalization, disabled by default.** Builds with
   `DIDI_ELASTIC_INGRESS=ON` let explicitly opted-in calls normalize selected
   numeric limits and 2D coordinates on three existing read-only tools. Canonical
@@ -161,6 +173,11 @@ The three Phase 7 blockers are unchanged; the newest name is `audio_add_bus`, re
   use it on the draft.
 
 ### Fixed
+
+- **Recovery test imports and stdio fixture cleanup.** The adversarial recovery
+  suite now works through both discovery and explicit `tests.<module>` invocation.
+  YOLO, elicitation and output-schema fixtures reap their owned subprocesses and
+  close pipes through bounded cleanup, eliminating the observed ResourceWarnings.
 
 - **Windows test-session timeout completion.** Require verified captured process
   handles to signal before reporting `TreeExited`; job accounting alone can reach

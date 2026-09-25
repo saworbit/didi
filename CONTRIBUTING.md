@@ -108,13 +108,23 @@ add noise to the log and change nothing about who is responsible.
    # From the repository root, on any platform
    DIDI_TEST_BINARY=/absolute/path/to/build/didi python -m unittest discover -s tests -t tests
    ```
-   Expect `Ran 388 tests ... OK (skipped=6)` in about 40 seconds.
+   Install `requirements-dev.txt` in the Python environment used for testing.
+   Current suite counts come from [Test Inventory](docs/TEST_INVENTORY.md);
+   expected skips depend on the build and opt-in live-test environment. A
+   skipped Godot test is not evidence that its live scenario passed.
+
+   In PowerShell, set the server path separately:
+   ```powershell
+   $env:DIDI_TEST_BINARY = (Resolve-Path build/Release/didi.exe).Path
+   python -m unittest discover -s tests -t tests
+   ```
 
    Two things are worth stating, because both cost time and neither is
    guessable. `-t tests` is what makes discovery work: `tests/` has no
    `__init__.py`, so `discover -s tests -t .` refuses the directory, and
-   pointing the top level at `tests/` also puts it on `sys.path`, which is what
-   the one bare sibling import in the suite needs. And `DIDI_TEST_BINARY` must
+   pointing the top level at `tests/` also puts its helpers on `sys.path`.
+   Explicit `python -m unittest tests.<module>` invocations are supported too;
+   shared helpers must import in both modes. `DIDI_TEST_BINARY` must
    be an **absolute** path, because it is handed straight to `subprocess.run`;
    a relative `build/didi` fails `CreateProcess` on Windows with a traceback
    that names neither the path nor the variable.
@@ -123,6 +133,17 @@ add noise to the log and change nothing about who is responsible.
    Python suites want the **server**, `didi`. `tools/test_inventory.py` wants
    the **test** binary, `didi_tests`. Pointing either at the other hangs or
    reports nothing.
+
+   Tests that launch stdio children must bound their waits, reap the process
+   and close its pipes before removing fixtures. Reuse `tests/stdio_process.py`
+   for simple test-owned stdio processes; the managed-recovery harness retains
+   its stronger job/process-tree cleanup. New real-wire tests should use
+   temporary projects and isolated `DIDI_SESSION_DIR` values.
+
+   Add new `test_*.py` modules to an appropriate existing explicit CI unittest
+   invocation as well as keeping them discoverable. The documentation validator
+   checks workflow references. See [Developer Guide](docs/DEVELOPER_GUIDE.md)
+   for the handshake, normalization and opt-in recovery checks.
 
 5. **Validate Documentation**:
    ```bash

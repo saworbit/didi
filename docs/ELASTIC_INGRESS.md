@@ -95,7 +95,7 @@ regression in a disposable managed project:
 ```powershell
 $env:DIDI_TEST_BINARY = (Resolve-Path out/elastic-validation/Debug/didi.exe).Path
 $env:DIDI_RECOVERY_GODOT = 'C:\Godot\Godot_v4.6.2-stable_win64_console.exe'
-python -m unittest discover -s tests -p test_managed_recovery_live.py -k elastic_ingress
+python -m unittest discover -s tests -t tests -p test_managed_recovery_live.py -k elastic_ingress
 ```
 
 The test opens a two-control scene, compares canonical and normalized live
