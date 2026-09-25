@@ -175,6 +175,15 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **`editor_undo` and `editor_redo` no longer leave the editor's history inconsistent
+  (#913).** They stepped the scene's `UndoRedo` directly, which moved it under the
+  stacks `EditorUndoRedoManager` keeps beside it. The editor printed
+  `Inconsistent redo history` four times a harness run, and on 4.7 a scene undone
+  past its save read as saved, which is what `scene_close` asks before it decides
+  whether a close needs `discard_unsaved`. Both now run the editor's own Undo and
+  Redo from its Scene menu, as Ctrl+Z does, and say which history moved in
+  `history`. The rollback a failed postcondition makes goes the same way.
+
 - **Windows test-session timeout completion.** Require verified captured process
   handles to signal before reporting `TreeExited`; job accounting alone can reach
   zero before child teardown finishes. Report uncertainty when full lifetime

@@ -1932,6 +1932,10 @@ try {
         # methods, so a redo has to put them back the same way the first apply
         # did; the file this save writes is the one the assertions read.
         (Tool-Request 2504 "editor_undo" @{}),
+        # That undo went past the save, so the scene now differs from its file.
+        # The editor has to say so: stepping the scene's UndoRedo directly left
+        # its own history behind, and it answered that the scene was saved (#913).
+        (@{ jsonrpc = "2.0"; id = 2508; method = "resources/read"; params = @{ uri = "godot://editor/state" } } | ConvertTo-Json -Compress),
         (Tool-Request 2505 "editor_redo" @{}),
         (Tool-Request 2506 "editor_save_scene" @{}),
         (Tool-Request 2507 "scene_close" @{ discard_unsaved = $true }),
@@ -4298,6 +4302,11 @@ try {
     Assert-True ((Tool-Payload $byId[2502]).status -eq "success") "A branch with children could not be duplicated: $($byId[2502].result.content[0].text)"
     Assert-True ((Tool-Payload $byId[2503]).status -eq "saved") "The scene holding the duplicated branch could not be saved."
     Assert-True (-not $byId[2504].result.isError) "The duplicate could not be undone."
+    Assert-True ((Tool-Payload $byId[2504]).history -eq "scene") "Undoing the duplicate did not say it moved the scene's history: $((Tool-Payload $byId[2504]) | ConvertTo-Json -Compress)"
+    if ($dirtyStateReadable) {
+        $stateAfterUndo = $byId[2508].result.contents[0].text | ConvertFrom-Json
+        Assert-True (@($stateAfterUndo.unsaved_scenes) -contains "res://duplicate_probe.tscn") "A scene undone past its save read as saved: $($stateAfterUndo.unsaved_scenes | ConvertTo-Json -Compress)"
+    }
     Assert-True (-not $byId[2505].result.isError) "The duplicate could not be redone."
     Assert-True ((Tool-Payload $byId[2506]).status -eq "saved") "The redone duplicate could not be saved."
     $duplicateProbe = Get-Content -LiteralPath (Join-Path $fixtureRoot "duplicate_probe.tscn") -Raw
@@ -5299,7 +5308,6 @@ try {
         @{ Pattern = "Couldn't save project\.godot"; Cause = "requests 201, 203 and 205 deny the project file to prove rollback" },
         @{ Pattern = 'Identifier "SignalProbeState" not declared|Failed to load script "res://signal_uses_autoload\.gd"'; Cause = "signal_uses_autoload.gd does not compile, on purpose, for target_script_not_compiled" },
         @{ Pattern = "corrupt_asset\.png|IHDR: CRC error|ERR_FILE_CORRUPT"; Cause = "request 2700 imports a PNG with a wrong CRC on every chunk" },
-        @{ Pattern = "Inconsistent redo history"; Cause = "known defect #913: editor_undo and editor_redo step the scene's UndoRedo directly" },
         @{ Pattern = "didi_output_canary_warning"; Cause = "the runtime fixture prints a warning canary for runtime_read_output" },
         # The host, not a request. A CI runner has no GPU and no audio device,
         # and the engine says so while its drivers start, before any request is
