@@ -2631,6 +2631,49 @@ static void test_runnable_is_read_the_way_the_engine_reads_it() {
     ASSERT_EQ(refused.reason, std::string("unloadable_value"));
 }
 
+static void test_runnable_is_read_from_the_section_godot_4_7_writes() {
+    // #922: a 4.7 editor keeps the flag in [runnable_presets], one preset per
+    // platform, and writes no runnable key in the preset, so every preset it had
+    // saved read runnable: false. The order below is EditorExport::load_config's
+    // on 4.7.2: the section, then each preset in index order, where a preset's
+    // own runnable=true takes its platform over.
+    const auto runnable_of = [](const didi::offline::ExportPresetsFile& file, const char* name) {
+        for (const auto& preset : file.presets) {
+            if (preset["name"] == name) return preset["runnable"].get<bool>();
+        }
+        throw std::runtime_error(std::string("no preset named ") + name);
+    };
+
+    const auto saved = didi::offline::readExportPresets(
+        "[runnable_presets]\n\n\"Windows Desktop\"=\"HandWritten\"\n\"Linux\"=\"Penguin\"\n\n"
+        "[preset.0]\nname=\"Other\"\nplatform=\"Windows Desktop\"\n\n"
+        "[preset.1]\nname=\"HandWritten\"\nplatform=\"Windows Desktop\"\n\n"
+        "[preset.2]\nname=\"Web\"\nplatform=\"Web\"\n\n"
+        "[preset.3]\nname=\"Penguin\"\nplatform=\"Linux/X11\"\n");
+    ASSERT_TRUE(!saved.malformed);
+    ASSERT_TRUE(runnable_of(saved, "HandWritten"));
+    ASSERT_TRUE(!runnable_of(saved, "Other"));
+    ASSERT_TRUE(!runnable_of(saved, "Web"));
+    // The platform's name before 4.3 is still Linux to the engine.
+    ASSERT_TRUE(runnable_of(saved, "Penguin"));
+
+    // A later preset that carries runnable=true takes the platform over; an
+    // explicit runnable=false does nothing to the one the section names.
+    const auto both = didi::offline::readExportPresets(
+        "[runnable_presets]\n\n\"Windows Desktop\"=\"First\"\n\n"
+        "[preset.0]\nname=\"First\"\nplatform=\"Windows Desktop\"\nrunnable=false\n\n"
+        "[preset.1]\nname=\"Second\"\nplatform=\"Windows Desktop\"\nrunnable=true\n");
+    ASSERT_TRUE(!runnable_of(both, "First"));
+    ASSERT_TRUE(runnable_of(both, "Second"));
+
+    const auto named_only = didi::offline::readExportPresets(
+        "[runnable_presets]\n\n\"Windows Desktop\"=\"First\"\n\n"
+        "[preset.0]\nname=\"First\"\nplatform=\"Windows Desktop\"\nrunnable=false\n\n"
+        "[preset.1]\nname=\"Second\"\nplatform=\"Windows Desktop\"\n");
+    ASSERT_TRUE(runnable_of(named_only, "First"));
+    ASSERT_TRUE(!runnable_of(named_only, "Second"));
+}
+
 static void test_the_first_cause_is_the_one_reported() {
     // Two faults in one file. The reader stops at the first, because everything
     // after a value the parser will not start is behind an ERR_PARSE_ERROR and
@@ -8811,6 +8854,8 @@ struct RegisterToolTests {
                      test_an_unparseable_presets_file_says_which_of_the_six_causes_it_is);
         registerTest("Tools.ExportPresetRunnableBooleanizes",
                      test_runnable_is_read_the_way_the_engine_reads_it);
+        registerTest("Tools.RunnableIsReadFromTheGodot47Section",
+                     test_runnable_is_read_from_the_section_godot_4_7_writes);
         registerTest("Tools.ExportPresetFirstCauseWins",
                      test_the_first_cause_is_the_one_reported);
         registerTest("Tools.ExportPresetParsedCarriesNoCause",

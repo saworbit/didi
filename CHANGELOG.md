@@ -175,6 +175,14 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **`project_list_export_presets` reads the runnable preset a Godot 4.7 editor saved (#922).**
+  A 4.7 editor keeps the flag in a `[runnable_presets]` section that names one preset per
+  platform, and writes no `runnable` key in the preset, so every preset it had saved read
+  `runnable: false`, including the one the editor runs. The section is read now, in the order
+  4.7.2's own loader uses: the named preset is runnable unless a later preset on the same
+  platform carries `runnable=true`. A file without the section, which is what 4.5 and 4.6
+  write, is read as before.
+
 - **`runtime_*` control tools and the live runtime-log resource share one deadline rule
   (#856).** Each kept its own copy of a guard that treated a 500 as a transport failure when
   its message began with one of two texts. Nothing in the product writes the first, and the
