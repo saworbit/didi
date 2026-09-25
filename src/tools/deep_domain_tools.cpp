@@ -705,6 +705,26 @@ CallToolResult handleProjectAddExportPreset(const json& args, std::shared_ptr<ip
          "project_export with preset \"" + name + "\" and mode \"pack\" writes a .pck and needs "
          "no export templates. A release or debug build needs the export templates for " +
              record->value("platform", "") + ", and project_export says so when they are missing."}};
+    // Where the preset writes when it is exported to its own path. Godot does
+    // not create a missing folder there: the export fails with "Can't open
+    // file for writing", naming the file rather than the folder, on 4.5.1,
+    // 4.6.2 and 4.7.2 (#932). Said rather than fixed by making the folder,
+    // because adding a preset should not create anything else in the project.
+    if (const std::string export_path = record->value("export_path", ""); !export_path.empty()) {
+        const auto relative_folder = paths::projectPathFromUtf8(export_path).parent_path();
+        std::error_code folder_error;
+        const bool folder_exists =
+            std::filesystem::is_directory(root.value() / relative_folder, folder_error) && !folder_error;
+        payload["export_path_folder_exists"] = folder_exists;
+        if (!folder_exists) {
+            payload["export_path_note"] =
+                "res://" + paths::projectPathToUtf8(relative_folder) +
+                "/ does not exist, and Godot does not create it: exporting this preset to its own "
+                "export_path fails with \"Can't open file for writing\" until the folder is there. "
+                "project_export takes its own output_path and creates that folder.";
+        }
+    }
+
     // The file is settled. The editor's re-read below can take seconds, and
     // another writer need not wait for it.
     lock.value().reset();
