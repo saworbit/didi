@@ -4,6 +4,14 @@ This document defines the complete technical specifications for the JSON-RPC 2.0
 
 ---
 
+## Experimental argument profile
+
+A default-disabled build option adds explicit per-call argument normalization
+for three read-only tools. Published input schemas remain canonical. Clients
+must support the custom metadata and alternate inputs; existing client support
+is not assumed. See the [wire contract](ELASTIC_INGRESS.md) and
+[decision record](ELASTIC_INGRESS_DECISION.md).
+
 ## 1. JSON-RPC 2.0 Stdio Transport
 
 Didi listens on `stdin` and responds on `stdout`. Log output is strictly routed to `stderr`.

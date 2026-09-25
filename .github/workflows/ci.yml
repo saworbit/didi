@@ -277,6 +277,28 @@ jobs:
       - name: Compile Targets in Parallel
         run: cmake --build build --parallel
 
+      - name: Verify optional elastic ingress enabled and disabled
+        shell: bash
+        env:
+          DIDI_COMPILER_LAUNCHER: ${{ runner.os == 'Windows' && 'sccache' || 'ccache' }}
+        run: |
+          set -euo pipefail
+          suffix=""
+          [ "$RUNNER_OS" != "Windows" ] || suffix=".exe"
+          export DIDI_TEST_BINARY="build/didi$suffix"
+          export DIDI_TEST_ELASTIC_INGRESS=0
+          "$DIDI_SCHEMA_PYTHON" -m unittest tests.test_elastic_ingress -v
+          cmake -B build-elastic -S . -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DDIDI_ELASTIC_INGRESS=ON \
+            -DCMAKE_C_COMPILER_LAUNCHER="$DIDI_COMPILER_LAUNCHER" \
+            -DCMAKE_CXX_COMPILER_LAUNCHER="$DIDI_COMPILER_LAUNCHER" \
+            -DPython3_EXECUTABLE="$DIDI_CMAKE_PYTHON"
+          cmake --build build-elastic --target didi didi_tests --parallel 2
+          "./build-elastic/didi_tests$suffix" --filter=ElasticIngress
+          export DIDI_TEST_BINARY="build-elastic/didi$suffix"
+          export DIDI_TEST_ELASTIC_INGRESS=1
+          "$DIDI_SCHEMA_PYTHON" -m unittest tests.test_elastic_ingress -v
+
       - name: Verify the staged addon is complete and clean
         shell: bash
         run: |

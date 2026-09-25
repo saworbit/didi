@@ -406,6 +406,70 @@ std::string resolveGodotExecutable() {
     return resolution.executable;
 }
 
+#if defined(_WIN32)
+namespace {
+// Job accounting can reach zero before the process objects become signaled.
+// Hold identities before termination so the wait cannot reopen a recycled PID.
+// Enumeration is bounded; an incomplete snapshot must not claim TreeExited.
+struct JobExitObservation {
+    std::vector<HANDLE> processes;
+    DWORD total_processes{0};
+    bool complete{false};
+
+    explicit JobExitObservation(HANDLE job) {
+        if (!job) return;
+        JOBOBJECT_BASIC_ACCOUNTING_INFORMATION before{}, after{};
+        if (!QueryInformationJobObject(job, JobObjectBasicAccountingInformation,
+                                       &before, sizeof(before), nullptr)) return;
+        constexpr std::size_t kMaxProcesses = 4096;
+        std::vector<char> storage(sizeof(JOBOBJECT_BASIC_PROCESS_ID_LIST) +
+                                  kMaxProcesses * sizeof(ULONG_PTR));
+        auto* ids = reinterpret_cast<JOBOBJECT_BASIC_PROCESS_ID_LIST*>(storage.data());
+        if (!QueryInformationJobObject(job, JobObjectBasicProcessIdList, ids,
+                                       static_cast<DWORD>(storage.size()), nullptr) ||
+            ids->NumberOfProcessIdsInList > kMaxProcesses ||
+            ids->NumberOfAssignedProcesses != ids->NumberOfProcessIdsInList) return;
+        // Allocate before opening handles, so allocation failure cannot leak
+        // handles from a constructor that has not completed yet.
+        processes.reserve(ids->NumberOfProcessIdsInList);
+        for (DWORD i = 0; i < ids->NumberOfProcessIdsInList; ++i) {
+            HANDLE process = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
+                                         FALSE, static_cast<DWORD>(ids->ProcessIdList[i]));
+            if (!process) {
+                // A PID that has already disappeared needs no further wait.
+                if (GetLastError() == ERROR_INVALID_PARAMETER) continue;
+                return;
+            }
+            processes.push_back(process);
+            BOOL belongs = FALSE;
+            if (!IsProcessInJob(process, job, &belongs) || !belongs) return;
+        }
+        if (!QueryInformationJobObject(job, JobObjectBasicAccountingInformation,
+                                       &after, sizeof(after), nullptr)) return;
+        total_processes = after.TotalProcesses;
+        // A child already absent from the snapshot may still be finishing
+        // teardown. Without its handle, lifetime completion is unprovable.
+        complete = before.TotalProcesses == after.TotalProcesses &&
+                   after.TotalProcesses == ids->NumberOfProcessIdsInList;
+    }
+    JobExitObservation(const JobExitObservation&) = delete;
+    JobExitObservation& operator=(const JobExitObservation&) = delete;
+    ~JobExitObservation() {
+        for (HANDLE process : processes) CloseHandle(process);
+    }
+    DWORD waitState() const {
+        DWORD state = WAIT_OBJECT_0;
+        for (HANDLE process : processes) {
+            const DWORD observed = WaitForSingleObject(process, 0);
+            if (observed == WAIT_FAILED) return WAIT_FAILED;
+            if (observed != WAIT_OBJECT_0) state = WAIT_TIMEOUT;
+        }
+        return state;
+    }
+};
+} // namespace
+#endif
+
 TestSessionResult TestRunner::runSession(const std::string& scene_path,
                                          int timeout_seconds,
                                          bool headless,
@@ -649,11 +713,10 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
             // runtime_list_sessions reported the game alive and not stale --
             // truthfully -- and the attach one call later found it gone (#732).
             //
-            // Terminating the job and waiting for its process count to reach
-            // zero makes the kill finished by the time the tool answers, which
-            // is what a caller reading `alive` is entitled to assume. Bounded,
-            // because a process that will not die must not hang the tool; the
-            // wait on pi.hProcess below is the same bound this always had.
+            // Zero active job processes alone is insufficient: on Windows a
+            // child's process object can remain nonsignaled during teardown.
+            // Capture handles before terminating, then require both an empty
+            // job and signaled handles within the existing bounded wait.
             //
             // The bound is kept and its expiry is now recorded. Three different
             // things ended this wait and all three produced the same result, so
@@ -663,7 +726,8 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
             // reaches the bound where an idle one does not, so the difference
             // is not hypothetical: it red-lighted a branch that touches none of
             // this. kill_wait is the answer, and the summary says it too.
-            if (job) TerminateJobObject(job, 1);
+            JobExitObservation observed_tree(job);
+            const bool job_terminated = job && TerminateJobObject(job, 1) != 0;
             TerminateProcess(pi.hProcess, 1);
             WaitForSingleObject(pi.hProcess, 5000);
             if (job) {
@@ -677,7 +741,14 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
                         result.kill_wait = TestSessionResult::KillWait::QueryFailed;
                         break;
                     }
-                    if (accounting.ActiveProcesses == 0) {
+                    const DWORD process_state = observed_tree.waitState();
+                    if (!job_terminated || !observed_tree.complete ||
+                        accounting.TotalProcesses != observed_tree.total_processes ||
+                        process_state == WAIT_FAILED) {
+                        result.kill_wait = TestSessionResult::KillWait::QueryFailed;
+                        break;
+                    }
+                    if (accounting.ActiveProcesses == 0 && process_state == WAIT_OBJECT_0) {
                         result.kill_wait = TestSessionResult::KillWait::TreeExited;
                         break;
                     }
