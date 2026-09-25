@@ -175,6 +175,14 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **Two `script_patch_method` calls on one script no longer lose a method (#954).** The
+  tool read the script, spliced the method in and wrote the whole file back with nothing held
+  in between, so two agents patching different methods at once both read the old text and the
+  second write replaced the first while both reported success. It now holds the script's lock
+  under `.didi/locks` from the read to the write, the one `project.godot` and
+  `export_presets.cfg` take since #953, and refuses `409 project_file_busy` with
+  `retryable: true` when another write holds it for the whole wait.
+
 - **A checkpoint or a file write no longer fails on Windows because something held a file for
   a moment (#937).** Checkpoint publication renamed the finished snapshot once, and a scanner
   or indexer holding a file it had just copied failed it with `Access is denied`, about one
