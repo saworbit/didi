@@ -366,12 +366,55 @@ Result<VariantValue> variantFromNative(GDExtensionVariantType type, void* native
     return std::move(value);
 }
 
+// The text as UTF-32 when it starts with a byte-order mark, and nothing
+// otherwise, including for bytes that are not UTF-8.
+//
+// Godot's UTF-8 reader drops a leading U+FEFF, so "\xEF\xBB\xBFnote" reached
+// the engine as "note", and the tool that set it compared its read-back with
+// the same shortened value and called it applied (#948). The engine itself
+// keeps the mark in a String, a StringName, a NodePath, a node name and a
+// Label's text on 4.5.1, 4.6.2 and 4.7.2; only the reader loses it, so that
+// text is handed over as UTF-32 instead. Everything else keeps the UTF-8
+// reader, and what it does with bytes that are not UTF-8.
+std::optional<std::u32string> utf32WhenMarkLeads(const std::string& text) {
+    if (text.rfind("\xEF\xBB\xBF", 0) != 0) return std::nullopt;
+    std::u32string wide;
+    wide.reserve(text.size());
+    for (size_t i = 0; i < text.size();) {
+        const auto lead = static_cast<unsigned char>(text[i]);
+        const size_t length = lead < 0x80 ? 1 : (lead >> 5) == 0x6 ? 2 : (lead >> 4) == 0xE ? 3
+                                                 : (lead >> 3) == 0x1E ? 4 : 0;
+        if (length == 0 || i + length > text.size()) return std::nullopt;
+        char32_t code = length == 1 ? lead : lead & (0x7F >> length);
+        for (size_t k = 1; k < length; ++k) {
+            const auto next = static_cast<unsigned char>(text[i + k]);
+            if ((next & 0xC0) != 0x80) return std::nullopt;
+            code = (code << 6) | (next & 0x3F);
+        }
+        wide.push_back(code);
+        i += length;
+    }
+    return wide;
+}
+
+void constructNativeString(NativeValue& native, const std::string& text) {
+    auto& api = GodotApi::instance();
+    const auto wide = api.string_new_with_utf32_chars_and_len ? utf32WhenMarkLeads(text)
+                                                              : std::optional<std::u32string>{};
+    if (wide.has_value()) {
+        api.string_new_with_utf32_chars_and_len(native.ptr(), wide->data(),
+                                                static_cast<GDExtensionInt>(wide->size()));
+    } else {
+        api.string_new_with_utf8_chars(native.ptr(), text.c_str());
+    }
+    native.markInitialized();
+}
+
 Result<VariantValue> makeString(const std::string& text) {
     auto& api = GodotApi::instance();
     if (!api.string_new_with_utf8_chars) return Error::internal("Godot String constructor is unavailable");
     NativeValue native(GDEXTENSION_VARIANT_TYPE_STRING);
-    api.string_new_with_utf8_chars(native.ptr(), text.c_str());
-    native.markInitialized();
+    constructNativeString(native, text);
     return variantFromNative(GDEXTENSION_VARIANT_TYPE_STRING, native.ptr());
 }
 
@@ -379,7 +422,18 @@ Result<VariantValue> makeStringName(const std::string& text) {
     auto& api = GodotApi::instance();
     if (!api.string_name_new_with_utf8_chars) return Error::internal("Godot StringName constructor is unavailable");
     NativeValue native(GDEXTENSION_VARIANT_TYPE_STRING_NAME);
-    api.string_name_new_with_utf8_chars(native.ptr(), text.c_str());
+    if (text.rfind("\xEF\xBB\xBF", 0) == 0 && api.string_new_with_utf8_chars) {
+        // StringName has no UTF-32 constructor, so the mark goes through a
+        // String first; StringName(String) is constructor 2.
+        NativeValue native_string(GDEXTENSION_VARIANT_TYPE_STRING);
+        constructNativeString(native_string, text);
+        auto ctor = api.variant_get_ptr_constructor(GDEXTENSION_VARIANT_TYPE_STRING_NAME, 2);
+        if (!ctor) return Error::internal("Godot StringName(String) constructor is unavailable");
+        const void* args[] = {native_string.ptr()};
+        ctor(native.ptr(), args);
+    } else {
+        api.string_name_new_with_utf8_chars(native.ptr(), text.c_str());
+    }
     native.markInitialized();
     return variantFromNative(GDEXTENSION_VARIANT_TYPE_STRING_NAME, native.ptr());
 }
@@ -387,8 +441,7 @@ Result<VariantValue> makeStringName(const std::string& text) {
 Result<VariantValue> makeNodePath(const std::string& text) {
     auto& api = GodotApi::instance();
     NativeValue native_string(GDEXTENSION_VARIANT_TYPE_STRING);
-    api.string_new_with_utf8_chars(native_string.ptr(), text.c_str());
-    native_string.markInitialized();
+    constructNativeString(native_string, text);
 
     auto ctor = api.variant_get_ptr_constructor(GDEXTENSION_VARIANT_TYPE_NODE_PATH, 2);
     if (!ctor) return Error::internal("Godot NodePath(String) constructor is unavailable");

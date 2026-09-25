@@ -4590,6 +4590,47 @@ static void test_concurrent_script_patches_all_land() {
     }
 }
 
+static void test_a_nul_in_a_live_argument_is_refused_by_name() {
+    // Break caught: the bridge hands every string to Godot as a C string, so
+    // "a<NUL>b" arrived as "a" and scene_set_property called the write applied,
+    // comparing the property with the same shortened value (#948). Refused
+    // before any route is chosen, so the answer is the same with or without an
+    // editor, and it names where the NUL is.
+    ScopedToolProject project("nul-live-argument");
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    const std::string with_nul("a\0b", 3);
+
+    const auto refused_at = [&](const std::string& tool, const didi::json& arguments) {
+        const auto result = registry.callTool(tool, arguments);
+        ASSERT_TRUE(result.isError);
+        const auto payload = didi::json::parse(result.content[0].text);
+        ASSERT_EQ(payload["error"]["code"], 400);
+        ASSERT_EQ(payload["error"]["data"]["code"], "invalid_arguments");
+        return payload["error"]["message"].get<std::string>();
+    };
+    const auto direct = refused_at("scene_set_property",
+                                   didi::json{{"target_node", "/root/Main"},
+                                              {"property_name", "editor_description"},
+                                              {"value", with_nul}});
+    ASSERT_TRUE(direct.find("'value'") != std::string::npos);
+    ASSERT_TRUE(direct.find("NUL") != std::string::npos);
+
+    const auto nested = refused_at(
+        "scene_instantiate_node",
+        didi::json{{"node_type", "Node"},
+                   {"parent_path", "/root/Main"},
+                   {"name", "Probe"},
+                   {"properties", {{"editor_description", with_nul}}}});
+    ASSERT_TRUE(nested.find("'properties.editor_description'") != std::string::npos);
+
+    // A tool with no live route keeps the string: the blackboard stores JSON,
+    // and nothing it holds is handed to Godot.
+    const auto stored = registry.callTool("blackboard_write",
+                                          didi::json{{"path", "note"}, {"value", with_nul}});
+    ASSERT_TRUE(stored.content[0].text.find("NUL character") == std::string::npos);
+}
+
 static void test_script_patch_replaces_without_leaving_temporary_files() {
     // Break caught: a leaked sibling temporary would be indexed as a project
     // resource and would survive a failed replace.
@@ -8626,6 +8667,8 @@ struct RegisterToolTests {
         registerTest("Tools.AtomicWriteWaitsOutAReader", test_atomic_write_waits_out_a_reader);
         registerTest("Tools.ConcurrentScriptPatchesAllLand",
                      test_concurrent_script_patches_all_land);
+        registerTest("Tools.NulInALiveArgumentIsRefusedByName",
+                     test_a_nul_in_a_live_argument_is_refused_by_name);
         registerTest("Tools.AtomicWriteKeepsDestinationOnFailure",
                      test_atomic_write_keeps_the_destination_when_the_replace_fails);
         registerTest("Tools.ScriptPatchLeavesNoTemporaryFiles",

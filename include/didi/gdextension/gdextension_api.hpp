@@ -39,6 +39,7 @@ public:
 
         if (p_get_proc_address) {
             string_new_with_utf8_chars = (GDExtensionInterfaceStringNewWithUtf8Chars)p_get_proc_address("string_new_with_utf8_chars");
+            string_new_with_utf32_chars_and_len = (GDExtensionInterfaceStringNewWithUtf32CharsAndLen)p_get_proc_address("string_new_with_utf32_chars_and_len");
             string_to_utf8_chars = (GDExtensionInterfaceStringToUtf8Chars)p_get_proc_address("string_to_utf8_chars");
             string_name_new_with_utf8_chars = (GDExtensionInterfaceStringNameNewWithUtf8Chars)p_get_proc_address("string_name_new_with_utf8_chars");
             classdb_get_method_bind = (GDExtensionInterfaceClassdbGetMethodBind)p_get_proc_address("classdb_get_method_bind");
@@ -129,6 +130,7 @@ public:
 
     // Core function pointers
     GDExtensionInterfaceStringNewWithUtf8Chars string_new_with_utf8_chars{nullptr};
+    GDExtensionInterfaceStringNewWithUtf32CharsAndLen string_new_with_utf32_chars_and_len{nullptr};
     GDExtensionInterfaceStringToUtf8Chars string_to_utf8_chars{nullptr};
     GDExtensionInterfaceStringNameNewWithUtf8Chars string_name_new_with_utf8_chars{nullptr};
     GDExtensionInterfaceClassdbGetMethodBind classdb_get_method_bind{nullptr};

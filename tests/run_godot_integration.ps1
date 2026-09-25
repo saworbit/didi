@@ -1938,6 +1938,13 @@ try {
         (@{ jsonrpc = "2.0"; id = 2508; method = "resources/read"; params = @{ uri = "godot://editor/state" } } | ConvertTo-Json -Compress),
         (Tool-Request 2505 "editor_redo" @{}),
         (Tool-Request 2506 "editor_save_scene" @{}),
+        # A string that starts with a byte-order mark, and one holding a NUL.
+        # Godot's UTF-8 reader dropped the mark and a C string ended at the
+        # NUL, so both reached the engine shorter than they were sent and the
+        # write was still called applied (#948). The close below discards them.
+        (Tool-Request 2530 "scene_set_property" @{ target_node = "/root/DupRoot"; property_name = "editor_description"; value = "$([char]0xFEFF)note" }),
+        (Tool-Request 2531 "scene_get_property" @{ target_node = "/root/DupRoot"; property_name = "editor_description" }),
+        (Tool-Request 2532 "scene_set_property" @{ target_node = "/root/DupRoot"; property_name = "editor_description"; value = "a$([char]0)b" }),
         (Tool-Request 2507 "scene_close" @{ discard_unsaved = $true }),
         # A resource slot whose declared type is a list. Godot spells the
         # classes a property accepts as one comma-separated hint_string and
@@ -4309,6 +4316,12 @@ try {
     }
     Assert-True (-not $byId[2505].result.isError) "The duplicate could not be redone."
     Assert-True ((Tool-Payload $byId[2506]).status -eq "saved") "The redone duplicate could not be saved."
+    # Compared by length and code point, because a culture-aware -eq treats
+    # U+FEFF as ignorable and would pass without it.
+    $markedRead = [string](Tool-Payload $byId[2531]).value
+    Assert-True ($markedRead.Length -eq 5 -and [int]$markedRead[0] -eq 0xFEFF) "A value that starts with a byte-order mark lost it on the way to the engine: $([int[]][char[]]$markedRead -join ',')"
+    Assert-True ((Tool-Payload $byId[2530]).applied -eq $true) "A value that starts with a byte-order mark was not reported applied: $((Tool-Payload $byId[2530]) | ConvertTo-Json -Compress)"
+    Assert-True ($byId[2532].result.isError -and $byId[2532].result.content[0].text -match "'value' holds a NUL") "A value holding a NUL was not refused by name: $($byId[2532].result.content[0].text)"
     $duplicateProbe = Get-Content -LiteralPath (Join-Path $fixtureRoot "duplicate_probe.tscn") -Raw
     Assert-True ($duplicateProbe -match 'name="DupLeaf" type="Node" parent="DupBranchCopy"') "A duplicated branch reached the saved file without its children: $duplicateProbe"
     Assert-True ($duplicateProbe -match 'name="DupDeep" type="Node" parent="DupBranchCopy/DupLeaf"') "A duplicated branch reached the saved file without its grandchildren: $duplicateProbe"
