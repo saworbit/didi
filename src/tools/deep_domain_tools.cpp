@@ -48,6 +48,15 @@ Result<std::filesystem::path> projectRoot() {
 Result<std::filesystem::path> resolveOutputPath(const std::filesystem::path& root,
                                                 const std::string& requested) {
     if (requested.empty()) return Error::invalidArgument("output_path is required");
+    // The rule every other writer applies through resolveProjectFileForWrite.
+    // This path is handed to Godot on its command line, where a newline or a tab
+    // splits it and a NUL ends it at the filesystem boundary, and a directory was
+    // created for it first (#939).
+    for (const unsigned char character : requested) {
+        if (character < 0x20 || character == 0x7F) {
+            return Error::invalidArgument("output_path cannot contain control characters");
+        }
+    }
     if (const auto problem = paths::foreignSchemeProblem(requested)) {
         return Error::invalidArgument("output_path " + *problem);
     }

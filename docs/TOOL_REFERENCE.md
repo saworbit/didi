@@ -1748,7 +1748,7 @@ An open editor reads `export_presets.cfg` once, when it starts, and writes its o
 
 ### `project_export` — Offline
 
-Requires an existing `preset` and a normalized project-contained `output_path`. `mode` is `release` (default), `debug`, or `pack`; `timeout_seconds` is `1..900` (default `300`). The destination is preserved unless `overwrite: true`. Didi invokes the corresponding headless Godot export operation and verifies that a non-empty output artifact exists before reporting success. Installed export templates and platform SDKs remain Godot/operator prerequisites.
+Requires an existing `preset` and a normalized project-contained `output_path` with no control characters, which `gridmap_export_mesh_library` requires of its `output_path` too, since the path goes on Godot's command line. `mode` is `release` (default), `debug`, or `pack`; `timeout_seconds` is `1..900` (default `300`). The destination is preserved unless `overwrite: true`. Didi invokes the corresponding headless Godot export operation and verifies that a non-empty output artifact exists before reporting success. Installed export templates and platform SDKs remain Godot/operator prerequisites.
 
 `project_export` asks the same question through the same code, so the two cannot answer differently about the same file, and its confirmation preview asks it too: a preset the file does not declare is refused at the dry run with `404` and the names that are there under `available_presets`, rather than previewed cleanly and refused on the confirm. When Godot refuses the export, its console output is carried as `engine_output` under `error.data` with the terminal escapes removed, rather than concatenated into the message.
 
