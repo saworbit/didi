@@ -216,7 +216,9 @@ Result<json> readLayoutAt(const std::filesystem::path& root, const std::string& 
         const auto value = std::string(strings::trim(entry.value_text));
         if (key == "name") bus.name = unquote(value);
         else if (key == "send") bus.send = unquote(value);
-        else if (key == "volume_db") bus.volume_db = std::atof(value.c_str());
+        // Converted the way the engine converts it, so `"-6"` is -6 dB rather
+        // than the 0 dB std::atof read for any quoted number (#907).
+        else if (key == "volume_db") bus.volume_db = config_file::floatize(value);
         // The engine reads these through `_set` and converts whatever the value
         // parsed to, so `mute = 1` is a muted bus. Comparing to the word `true`
         // reported it as unmuted, measured on 4.5.1 and 4.7.2 (#853).

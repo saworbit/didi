@@ -175,6 +175,14 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **`audio_list_buses` reads a quoted or boolean `volume_db` the way Godot does (#907).**
+  Offline it read `volume_db` with `std::atof`, so `"-6"` and `true` came back as 0 dB while
+  the game played them at -6 dB and 1 dB, and a generator that writes every value as a string
+  got a layout that read as 0 dB on every bus. There is now one float rule beside
+  `config_file::booleanize`, measured on 4.5.1, 4.6.2 and 4.7.2: a quoted value goes through
+  Godot's string-to-float, which reads a decimal prefix and ignores the rest, `true` is 1, and
+  `false`, `null`, a StringName and any container are 0.
+
 - **`project_add_export_preset` says when the preset's export folder does not exist (#932).**
   Godot does not create a missing folder when it exports a preset to its own `export_path`, on
   4.5.1, 4.6.2 and 4.7.2: the export fails with `Can't open file for writing`, naming the file
