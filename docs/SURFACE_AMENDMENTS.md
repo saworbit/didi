@@ -66,10 +66,10 @@ August 2026 competitive review and are proposed, not accepted, in
 [Realignment Implementation Plan](REALIGNMENT_IMPLEMENTATION_PLAN.md):
 `runtime_read_output`, `ui_list_controls`, `godot_api_reference`, and an `until`
 parameter on the existing `runtime_step` (a change, not a new name).
-`asset_configure_import` is proposed below with its engine evidence, and is not
-yet accepted.
+`asset_configure_import` is accepted below with its engine evidence, and is not
+yet implemented.
 
-### PROPOSED: `asset_configure_import`
+### ACCEPTED: `asset_configure_import`
 
 | Field | Value |
 | :--- | :--- |
@@ -78,7 +78,7 @@ yet accepted.
 | **Execution modes** | `live`. Editor sessions only. With no editor the tool refuses and names `resource_inspect` for reading the options. An offline write is not supported: the editor would notice it only on a scan in a later second than its last import, or at its next start, and nothing would verify the result. A game session is refused, because a game cannot reimport. The `resource_inspect` change is offline, like the rest of that tool. |
 | **Safety class** | `create/set`. Dry run, no confirmation token. It changes values in one existing sidecar. It adds no key, removes none and never changes the importer, and the same call twice leaves the same file. It registers no undo entry. The way back is the same call with the `previous` values the result carries. |
 | **Proving test** | Native: `AssetConfigureImport.RequestValidation` covers the rules under **Rules** below, each refused before any write and naming the argument: a path with no sidecar, a path under `.godot/`, a `.import` path, an empty `options`, a key the table does not hold, `loop` given as `1` and as `"yes"`, `edit/loop_mode` given as `5`, as `-1`, as `2.5` and as a word that is not one of its labels, a negative `loop_offset`, a negative `edit/loop_begin`, a window whose begin is not below its end, and a window under a mode that ignores it. `AssetConfigureImport.SidecarEdit` changes the lines of the named keys and keeps every other byte, including in a CRLF file and one with no final newline, and refuses a sidecar Godot cannot parse, using the reader `project_audit_assets` uses. `AssetConfigureImport.Registration` requires `live` only, editor sessions, and a mutation with `dry_run` and no confirmation token. `AssetConfigureImport.Gated` covers the offline refusal naming `resource_inspect` and a game session refused at the hook. `AssetConfigureImport.DryRunWritesNothing` requires the preview to leave the sidecar byte-identical. `Tools.ResourceInspectReportsImportOptions` reads the sidecars 4.5.1, 4.6.2 and 4.7.2 each wrote in the probe. Godot integration, on 4.5.1, 4.6.2 and 4.7.2 with the editor attached, on an OGG and a WAV in the fixture: a dry run that reports before and after and writes nothing; then `loop: true` and a `loop_offset` on the OGG and a loop window on the WAV, each read back through a separate `resource_inspect` that must report the new values and the old uid. Each refusal above must leave the sidecar's bytes unchanged, which is the check for a partial write. A game launched on a scene playing the OGG must still be playing after the track's length, where the same scene stopped before the call. `music_loop_workflow.py` gains a fourth row, with `asset_configure_import`, which must loop on 4.5.1 and 4.7.2. The engine-output gate stays clean throughout. |
-| **Reviewer** | Proposed, not yet accepted. It is a mutation, so the security argument is recorded below. |
+| **Reviewer** | Accepted by Shane Wall on 2026-09-25 for #958. It is a mutation, so the security argument is recorded below; nobody else has reviewed it. |
 
 The evidence below comes from `tools/vibe/probes/import_config_engine.py`, run
 on 4.5.1, 4.6.2 and 4.7.2 on 2026-09-25, and from the importers' own option
