@@ -175,6 +175,13 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **`project_add_export_preset` says when the preset's export folder does not exist (#932).**
+  Godot does not create a missing folder when it exports a preset to its own `export_path`, on
+  4.5.1, 4.6.2 and 4.7.2: the export fails with `Can't open file for writing`, naming the file
+  rather than the folder, and the add had said nothing. The result now reports
+  `export_path_folder_exists` and, when the folder is missing, an `export_path_note` naming it.
+  The tool still creates no folder, since adding a preset should not change anything else.
+
 - **`audio_add_bus` refuses a bad argument before it asks for an editor (#949).** With no
   editor attached, the registry's live-route check answered `503 not_connected` before the
   tool's own argument rules ran, so `{"name": " Music"}` sent the caller off to open an editor

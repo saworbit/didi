@@ -214,6 +214,35 @@ void request_validation() {
     ASSERT_EQ(stored["preset"]["export_path"], json("build/p.x86_64"));
 }
 
+// #932: Godot does not create the folder a preset's own export_path names, so
+// exporting to it failed until someone made the folder, and the add said
+// nothing. The result says so now, and creates nothing.
+void says_when_the_export_folder_is_missing() {
+    ScopedProject project("export-folder");
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    registry.setIpcClient(nullptr);
+
+    const auto missing = call({{"name", "Missing"}, {"platform", "Linux"},
+                               {"export_path", "builds/game.x86_64"}});
+    ASSERT_EQ(missing["export_path_folder_exists"], json(false));
+    ASSERT_TRUE(missing["export_path_note"].get<std::string>().find("res://builds/") !=
+                std::string::npos);
+    ASSERT_TRUE(!std::filesystem::exists("builds"));
+
+    std::filesystem::create_directories("builds");
+    const auto present = call({{"name", "Present"}, {"platform", "Linux"},
+                               {"export_path", "res://builds/other.x86_64"}});
+    ASSERT_EQ(present["export_path_folder_exists"], json(true));
+    ASSERT_TRUE(!present.contains("export_path_note"));
+
+    const auto at_root = call({{"name", "Root"}, {"platform", "Linux"}, {"export_path", "game.x86_64"}});
+    ASSERT_EQ(at_root["export_path_folder_exists"], json(true));
+
+    const auto no_path = call({{"name", "NoPath"}, {"platform", "Linux"}});
+    ASSERT_TRUE(!no_path.contains("export_path_folder_exists"));
+}
+
 void writes_what_every_engine_loads() {
     ScopedProject project("new-file");
     auto& registry = didi::mcp::ToolRegistry::instance();
@@ -594,6 +623,8 @@ struct Register {
     Register() {
         registerTest("ExportPresetAdd.RequestValidation", request_validation);
         registerTest("ExportPresetAdd.WritesWhatEveryEngineLoads", writes_what_every_engine_loads);
+        registerTest("ExportPresetAdd.SaysWhenTheExportFolderIsMissing",
+                     says_when_the_export_folder_is_missing);
         registerTest("ExportPresetAdd.AppendKeepsTheFile", append_keeps_the_file);
         registerTest("ExportPresetAdd.Refusals", refusals);
         registerTest("ExportPresetAdd.DryRunWritesNothing", dry_run_writes_nothing);
