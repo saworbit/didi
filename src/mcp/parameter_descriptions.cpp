@@ -153,17 +153,25 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
         {"signal_disconnect.target_method",
          "The method the connection currently calls. The argument is target_method, not "
          "method_name."},
+        {"signal_emit.emitter_node",
+         "The node that emits the signal, as in signal_connect. target_node is accepted for "
+         "the same node."},
         {"signal_emit.target_node",
-         "The node that emits the signal. Unlike signal_connect, this tool's target_node is "
-         "the emitter, because there is no receiver to name."},
+         "The same node as emitter_node, under the name this tool used first. Send one of "
+         "the two."},
         {"signal_emit.signal_name",
          "The signal to emit, as the node declares it."},
         {"signal_emit.arguments",
          "Positional values to emit with the signal. They must match the signal's declared "
          "parameters in count and type."},
+        {"signal_list_connections.emitter_node",
+         "The node whose own signals to list, with the connections going out of each: the "
+         "emitter, as in signal_connect. Connections into this node are not listed. Each "
+         "connection carries origin: scene for one inside the edited scene, editor for the "
+         "scene dock's own listeners. target_node is accepted for the same node."},
         {"signal_list_connections.target_node",
-         "The node whose signals to list. Each connection carries origin: scene for one "
-         "inside the edited scene, editor for the scene dock's own listeners."},
+         "The same node as emitter_node, under the name this tool used first. Send one of "
+         "the two."},
 
         // -- Project ------------------------------------------------------
         {"project_get_setting.setting",

@@ -2066,6 +2066,16 @@ static CallToolResult invalidArgumentsError(const ResolvedToolBinding& binding,
                   {"retryable", false}}}}}}.dump());
 }
 
+// signal_connect and signal_disconnect call the emitter emitter_node and the
+// receiver target_node. signal_list_connections and signal_emit called their
+// emitter target_node, so the spelling the siblings insist on was refused here
+// and the word meant the other end of the same connection (#769). Both
+// spellings are published on these two. Everything past dispatchTool's first
+// lines, the gate, the preview and the bridge, reads target_node.
+static bool takesEmitterAsTargetNode(std::string_view canonical_name) {
+    return canonical_name == "signal_list_connections" || canonical_name == "signal_emit";
+}
+
 CallToolResult ToolRegistry::callTool(const std::string& name, const json& arguments,
                                       const RequestScope& scope) {
     const auto binding = resolveAliasBinding(name, arguments);
@@ -2092,6 +2102,21 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
             {"code", 501},
             {"message", "Tool '" + name + "' is unimplemented: " + tool->capability.reason}}}}.dump());
     }
+    // Rewritten before anything reads the call, so the schema, the gate, the
+    // preview and a confirmation token all see one spelling.
+    const bool emitter_as_target = takesEmitterAsTargetNode(binding.canonical_name) &&
+                                   arguments.is_object();
+    if (emitter_as_target && arguments.contains("emitter_node")) {
+        if (arguments.contains("target_node")) {
+            return invalidArgumentsError(
+                binding, "Arguments 'emitter_node' and 'target_node' both name the emitting node "
+                         "on " + std::string(binding.canonical_name) + ". Send one.");
+        }
+        json rewritten = arguments;
+        rewritten["target_node"] = std::move(rewritten["emitter_node"]);
+        rewritten.erase("emitter_node");
+        return dispatchTool(name, rewritten, scope);
+    }
     // The schema this tool publishes is what the caller was told it accepts, so
     // it is checked here, once, before anything dispatches. Every route into a
     // handler comes through this function, including the dry-run preview and a
@@ -2107,6 +2132,14 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
             }
         }
         return invalidArgumentsError(binding, *invalid);
+    }
+    // After the schema, so a wrong name is still reported as unknown. Neither
+    // spelling is required there, because a published schema cannot require one
+    // of two without a top-level oneOf.
+    if (emitter_as_target && !arguments.contains("target_node")) {
+        return invalidArgumentsError(
+            binding, "Missing required argument 'emitter_node', the node that emits the "
+                     "signal. 'target_node' is accepted for it too.");
     }
     const bool recovery_tool = name == "runtime_checkpoint" || name == "runtime_recovery_status" || name == "runtime_restore_checkpoint" || name == "runtime_recover_editor";
     // Before the confirmation gate: it used to issue a token for a restore that
@@ -3159,7 +3192,7 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "signal_list_connections";
-        t.description = "Lists all signals declared on a node, including incoming and outgoing connections.";
+        t.description = "Lists the signals a node declares and the connections going out of each. The node is the emitter; connections into it are not listed.";
         t.inputSchema = {
             {"type", "object"},
             {"properties", {
