@@ -200,6 +200,13 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
          "The input events bound to the action, each an object in Godot's InputEvent shape."},
         {"project_set_input_action.replace",
          "Replace an action already registered under this name. Off by default."},
+        {"project_list_input_actions.include_engine_defaults",
+         "Include the engine's own actions, the ui_* map every project inherits. On by "
+         "default. False keeps only what project.godot declares, and says how many it left "
+         "out."},
+        {"project_list_input_actions.action",
+         "Read one action by its exact name instead of the whole map. A name the project "
+         "does not have is 404."},
         {"project_remove_input_action.action",
          "The InputMap action name to remove."},
         {"project_list_resources.type_filter",

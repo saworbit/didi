@@ -4744,8 +4744,13 @@ void ToolRegistry::registerAllDefaultTools() {
         [this](const json& args) { return handleProjectRemoveAutoload(args, m_ipcClient); });
 
     register_phase_two(
-        "project_list_input_actions", "Lists persisted project InputMap actions and supported events.",
-        {{"type", "object"}, {"properties", json::object()}},
+        "project_list_input_actions",
+        "Lists InputMap actions and their events, each marked defined_by_project. "
+        "include_engine_defaults: false leaves out the engine's own ui_* map, and action "
+        "reads one by name.",
+        {{"type", "object"}, {"properties", {
+            {"include_engine_defaults", {{"type", "boolean"}, {"default", true}}},
+            {"action", {{"type", "string"}, {"minLength", 1}}}}}},
         [this](const json& args) { return handleProjectListInputActions(args, m_ipcClient); });
     register_phase_two(
         "project_set_input_action", "Creates or explicitly replaces a persisted InputMap action.",

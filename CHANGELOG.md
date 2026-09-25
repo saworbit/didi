@@ -175,6 +175,11 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **`project_list_input_actions` can ask for less (#775).** It took no arguments and answered
+  about 69 KB, 85 of 90 actions being the engine's own `ui_*` map. Each entry now says
+  `defined_by_project`, `include_engine_defaults: false` keeps only what `project.godot`
+  declares, and `action` reads one by name. The default answer is otherwise unchanged.
+
 - **An open code scanning alert is reported (#807).** Nothing read the tab back, so a CodeQL
   finding dismissed once and raised again when its code moved sat open unannounced. A weekly job
   in `supply-chain.yml` runs `tools/check_code_scanning.py` and keeps one tracking issue open

@@ -8695,6 +8695,51 @@ static void test_test_lab_checks_the_target_before_touching_the_project() {
     ASSERT_TRUE(description.find("target_instanced") != std::string::npos);
 }
 
+// project_list_input_actions took no arguments, so reading a game's controls
+// meant ninety actions, eighty-five of them the engine's ui_* map (#775). The
+// filtering is the bridge's, measured by the live harness; this pins that the
+// published schema takes both arguments and hands them to the bridge as sent.
+class InputActionListingClient final : public didi::ipc::IIpcClient {
+public:
+    bool connect(const std::string&, int) override { return true; }
+    void disconnect() override {}
+    bool isConnected() const override { return true; }
+    didi::Result<didi::json> sendRequest(const std::string& method, const didi::json& params,
+                                         int) override {
+        last_method = method;
+        last_params = params;
+        ++requests;
+        return didi::json{{"status", "success"}, {"actions", didi::json::array()}};
+    }
+    std::string last_method;
+    didi::json last_params;
+    int requests{0};
+};
+
+static void test_input_action_listing_can_ask_for_less() {
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    const auto& schema = registry.getTool("project_list_input_actions")->inputSchema;
+    ASSERT_TRUE(schema["properties"]["include_engine_defaults"]["default"] == true);
+    ASSERT_TRUE(schema["properties"]["action"]["type"] == "string");
+
+    auto client = std::make_shared<InputActionListingClient>();
+    registry.setIpcClient(client);
+    const didi::json asked = {{"include_engine_defaults", false}, {"action", "move_left"}};
+    const auto result = registry.callTool("project_list_input_actions", asked);
+    const auto wrong = registry.callTool("project_list_input_actions",
+                                         didi::json{{"prefix", "move"}});
+    registry.setIpcClient(nullptr);
+    ASSERT_TRUE(!result.isError);
+    ASSERT_TRUE(client->requests == 1);
+    ASSERT_TRUE(client->last_method == "project.listInputActions");
+    ASSERT_TRUE(client->last_params["include_engine_defaults"] == false);
+    ASSERT_TRUE(client->last_params["action"] == "move_left");
+    // Still closed: a filter it does not have is named, not ignored.
+    ASSERT_TRUE(wrong.isError);
+    ASSERT_TRUE(wrong.content.front().text.find("prefix") != std::string::npos);
+}
+
 struct RegisterToolTests {
     RegisterToolTests() {
         registerTest("Tools.OfflineCapabilityIsDerived",
@@ -9029,6 +9074,8 @@ struct RegisterToolTests {
                      test_reflect_class_compares_the_dump_to_the_project_features);
         registerTest("Tools.TestLabChecksTargetFirst",
                      test_test_lab_checks_the_target_before_touching_the_project);
+        registerTest("Tools.InputActionListingCanAskForLess",
+                     test_input_action_listing_can_ask_for_less);
         registerTest("Resources.DefaultRegistration", test_resource_registry);
         registerTest("Prompts.DefaultRegistration", test_prompt_registry);
     }
