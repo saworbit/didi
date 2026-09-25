@@ -4119,7 +4119,7 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "project_audit_assets";
-        t.description = "Audits the project for unreferenced assets, references that resolve to nothing, declared signals nothing uses, and unhealthy Godot import metadata. Reports evidence, not verdicts. A file scan in every case; a connected editor additionally verifies unresolved uid:// findings against ResourceUID and clears the ones it disproves.";
+        t.description = "Audits the project for unreferenced assets, references that resolve to nothing, declared signals nothing uses, scene connections to methods nothing declares, and unhealthy Godot import metadata. Reports evidence, not verdicts. A file scan in every case; a connected editor additionally verifies unresolved uid:// findings against ResourceUID and clears the ones it disproves.";
         t.inputSchema = {
             {"type", "object"},
             {"properties", {
@@ -4129,6 +4129,8 @@ void ToolRegistry::registerAllDefaultTools() {
                                                {"description", "res:// paths and uid:// references that resolve to no file in the project."}}},
                 {"include_dead_signals", {{"type", "boolean"}, {"default", true},
                                           {"description", "Signals declared in GDScript that no file emits, connects to, or wires in a scene."}}},
+                {"include_broken_connections", {{"type", "boolean"}, {"default", true},
+                                                {"description", "Scene [connection] entries whose method the receiving node's script, the scripts it extends and its engine class do not declare. Judged only where every step resolves."}}},
                 {"include_import_health", {{"type", "boolean"}, {"default", true},
                                            {"description", "Existing Godot .import metadata with missing sources or outputs, malformed/unsafe paths, or source files newer than their outputs."}}},
                 {"include_addon_orphans", {{"type", "boolean"}, {"default", false},

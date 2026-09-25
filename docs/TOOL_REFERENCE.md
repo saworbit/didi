@@ -1011,16 +1011,17 @@ Refused: a `new_name` a connection or track already uses, because that merges tw
 
 ### `project_audit_assets` — Live or offline
 
-Reads the project and reports five things nothing in a single file can show: assets that nothing references, references that resolve to no file, signals that nothing emits or connects, unhealthy existing Godot `.import` metadata, and what is wrong with `project.godot` itself.
+Reads the project and reports six things nothing in a single file can show: assets that nothing references, references that resolve to no file, signals that nothing emits or connects, scene connections to a method the receiving node does not have, unhealthy existing Godot `.import` metadata, and what is wrong with `project.godot` itself.
 
 - `include_orphans` (`boolean`, default `true`).
 - `include_broken_references` (`boolean`, default `true`).
 - `include_dead_signals` (`boolean`, default `true`).
+- `include_broken_connections` (`boolean`, default `true`).
 - `include_import_health` (`boolean`, default `true`).
 - `include_addon_orphans` (`boolean`, default `false`).
 - `max_findings` (`integer`, 1-5000, default `500`).
 
-At least one of the four report switches must stay enabled.
+At least one of the five report switches must stay enabled.
 
 A file whose name is not valid UTF-8 is not in any of these answers and cannot be, because JSON is defined over Unicode. It is reported instead: `undecodable_path_count` and `undecodable_paths`, with the bytes that could not be decoded shown as U+FFFD, so the file can be renamed. `project_list_resources` reports the same two fields and `project_search_text` and `project_search_symbols` report the path under `diagnostics` with `reason: "undecodable_name"`. A POSIX filename is a byte string, so this is a Linux and Unix state; Windows names are UTF-16 and the default macOS volume refuses the name outright.
 
@@ -1035,6 +1036,8 @@ References are followed in every form Godot writes and people type: `[ext_resour
 A quoted `res://` value counts as use and is not checked for existence. It is the only form `project.godot` has, and it is also how an exported string property names a scene; in a script the same form can be `"res://levels/"` with the rest built at runtime, and a broken reference that is not broken is worse than one that is not reported.
 
 A signal counts as alive if any file emits it, connects to it, checks `is_connected`, or wires it through `[connection signal="..."]` in a scene.
+
+`broken_connections` lists each `[connection]` whose `method` the receiving node does not declare or inherit, with `scene`, `line`, `signal`, `from`, `to`, `method` and `script`. That is the state `project_rename_references` leaves a project in when it renames the method in the scene and reports the GDScript lines it did not change: the game prints `Error calling method from signal` and nothing is called (#781). A connection is judged only when every step of the answer resolves: the scene file declares the receiving node, its script is GDScript in the project, each script it extends is found by path or `class_name`, and the engine class the chain ends on is in the class reference, whose methods count with their ancestors'. A node inside an instanced or inherited scene, a built-in script, a script outside the project or an engine class the reference does not name is left alone, because a broken connection that is not broken is worse than one that is not reported. `script` is null when the node has no script and the engine class itself lacks the method.
 
 Import health inspects only existing regular, non-symlink `*.import` files. It reads at most 256 KiB and 1,024 declared output paths from each, and scans at most 20,000 metadata files without following directory or file symlinks. Answering the freshness question means hashing bytes: up to 64 MiB of source and up to 64 MiB of declared outputs per sidecar, so an audit of a large project reads roughly the size of its imported assets twice over. Declared `source_file`, `dest_files`, and `[remap] path` values must be canonical project-contained `res://` paths; generated outputs under `res://.godot/imported/` are allowed, but an escape or symlink is not. `invalid_import_metadata` also covers `valid=false`, malformed targeted assignments, an oversized file/path list, or a `source_file` that disagrees with the sidecar name. Other findings are `missing_import_source`, `missing_import_output`, `source_changed_since_import`, `output_changed_since_import`, `import_freshness_unchecked`, and `source_newer_than_output`, with `metadata`, `source`, and `target` provenance.
 
