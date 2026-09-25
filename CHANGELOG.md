@@ -175,6 +175,12 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **`project_export` and `gridmap_export_mesh_library` refuse control characters in
+  `output_path` (#939).** Their path resolver checked the scheme and the project bounds but not
+  the control characters every other writer refuses, so a newline, a tab or a NUL reached
+  Godot's command line after a directory had been created for the path. Both now refuse one
+  with `400`, in the call and its dry run alike, before anything is created.
+
 - **`project_list_export_presets` reads the runnable preset a Godot 4.7 editor saved (#922).**
   A 4.7 editor keeps the flag in a `[runnable_presets]` section that names one preset per
   platform, and writes no `runnable` key in the preset, so every preset it had saved read
