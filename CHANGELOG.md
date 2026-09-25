@@ -175,6 +175,12 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **An open code scanning alert is reported (#807).** Nothing read the tab back, so a CodeQL
+  finding dismissed once and raised again when its code moved sat open unannounced. A weekly job
+  in `supply-chain.yml` runs `tools/check_code_scanning.py` and keeps one tracking issue open
+  while any alert is, listing re-raises apart with the dismissal each most likely repeats. It
+  closes the issue once the tab is empty, and a tab it cannot read fails the job.
+
 - **`emitter_node` names the emitter on every signal tool (#769).** `signal_list_connections`
   and `signal_emit` called it `target_node`, the word `signal_connect` and `signal_disconnect`
   use for the receiver, so the spelling the siblings insist on was refused. Both now take
