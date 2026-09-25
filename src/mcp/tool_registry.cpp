@@ -2026,6 +2026,30 @@ static CallToolResult managedRecoveryDisabled(const ResolvedToolBinding& binding
                   {"retryable", false}}}}}}.dump());
 }
 
+// The first string in a live call's arguments that holds a NUL, by where it
+// sits. The bridge hands every string to Godot as a C string, so the text after
+// a NUL was dropped and the tool reported the shortened value as the one it set
+// (#948). Godot cannot carry one through its own conversions either: it prints
+// a Unicode error and substitutes U+FFFD.
+static std::optional<std::string> nulStringPath(const json& value, const std::string& path) {
+    if (value.is_string()) {
+        if (value.get_ref<const std::string&>().find('\0') == std::string::npos) return std::nullopt;
+        return path;
+    }
+    if (value.is_object()) {
+        for (const auto& [key, item] : value.items()) {
+            if (auto found = nulStringPath(item, path.empty() ? key : path + "." + key)) return found;
+        }
+    } else if (value.is_array()) {
+        for (size_t index = 0; index < value.size(); ++index) {
+            if (auto found = nulStringPath(value[index], path + "[" + std::to_string(index) + "]")) {
+                return found;
+            }
+        }
+    }
+    return std::nullopt;
+}
+
 static CallToolResult invalidArgumentsError(const ResolvedToolBinding& binding,
                                             const std::string& message) {
     return CallToolResult::error(json{{"error", {
@@ -2093,6 +2117,17 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
     const bool supports_offline =
         std::find(tool->capability.modes.begin(), tool->capability.modes.end(), "offline_fallback") !=
         tool->capability.modes.end();
+    // Before a route is chosen, so the same arguments are refused whether or
+    // not an editor is attached.
+    if (supports_live) {
+        if (const auto path = nulStringPath(arguments, "")) {
+            return invalidArgumentsError(
+                binding,
+                "Argument '" + *path + "' holds a NUL character (U+0000). The text after it "
+                "never reaches Godot, which would set a shorter string than the one sent, so "
+                "nothing was sent. Remove the NUL.");
+        }
+    }
     std::optional<runtime::RuntimeRouteLease> lease;
     if (supports_live) {
         const bool managed_route =

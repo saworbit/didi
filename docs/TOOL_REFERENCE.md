@@ -107,6 +107,15 @@ Beside the sentence, `data` carries `blocked_on: "no_live_session"`,
 `retryable` stays `true`, because the same call succeeds once an engine is
 there; `blocked_on` is what says that a human has to put one there.
 
+A string argument to a tool with a live route that holds a NUL character
+(U+0000) is refused `400` with `invalid_arguments` before any route is chosen,
+so the answer is the same with or without an editor. The message names where
+the NUL is, such as `value` or `properties.editor_description`. The text after
+a NUL never reached Godot, and Godot's own conversions cannot carry one either.
+A string that starts with a byte-order mark reaches the engine with the mark:
+the engine keeps U+FEFF in strings, names and node paths, and only its UTF-8
+reader used to drop it (#948).
+
 A tool that knows more says more, and nothing it already set is overwritten. The
 confirmation gate's `428` adds `dry_run_argument` and `confirmation_argument`, so
 the recovery path is a field rather than a sentence. Phase 7 live failures add

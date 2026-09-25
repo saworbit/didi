@@ -175,6 +175,16 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **A string sent to the engine keeps a leading byte-order mark, and one holding a NUL is
+  refused (#948).** The bridge built every Godot string with the engine's UTF-8 reader,
+  which drops a leading U+FEFF, and from a C string, which ends at a NUL. So a value like
+  `"\ufeffnote"` arrived as `note`, and `scene_set_property` called the write applied
+  because it compared the property with the same shortened value. The engine keeps the
+  mark in a String, a StringName, a NodePath and a node name on 4.5.1, 4.6.2 and 4.7.2, so
+  that text now goes in as UTF-32. A NUL cannot survive Godot's own conversions, so a live
+  tool now refuses it with `400 invalid_arguments`, naming where it is, before any route is
+  chosen.
+
 - **Two `script_patch_method` calls on one script no longer lose a method (#954).** The
   tool read the script, spliced the method in and wrote the whole file back with nothing held
   in between, so two agents patching different methods at once both read the old text and the
