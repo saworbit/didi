@@ -184,6 +184,13 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
   Redo from its Scene menu, as Ctrl+Z does, and say which history moved in
   `history`. The rollback a failed postcondition makes goes the same way.
 
+- **A board subscribed while the watcher already ran is no longer announced as changed
+  (#139).** The watcher kept one "primed" flag for every board, so a second board's
+  existing file read as a change on the next tick, and a board dropped and subscribed again
+  replayed a write made while nobody watched it. Each board now gets its baseline when it is
+  first subscribed and loses it with its last subscription, which also means a write between
+  subscribing and the next tick is announced rather than recorded as the starting state.
+
 - **Windows test-session timeout completion.** Require verified captured process
   handles to signal before reporting `TreeExited`; job accounting alone can reach
   zero before child teardown finishes. Report uncertainty when full lifetime

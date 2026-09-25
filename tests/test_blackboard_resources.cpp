@@ -334,6 +334,69 @@ void test_resources_notifies_on_external_change() {
     ASSERT_TRUE(found);
 }
 
+void writeTo(const std::string& board, const std::string& path, const json& value) {
+    offline::BlackboardWriteRequest request;
+    request.board = board;
+    request.path = path;
+    request.value = value;
+    ASSERT_TRUE(offline::blackboardWrite(request).isOk());
+}
+
+// Longer than one watcher tick, which is 500 ms, so a wait of this length
+// means the watcher has compared every subscribed board at least once.
+constexpr auto kPastOneTick = std::chrono::milliseconds(700);
+
+// A second board subscribed while the watcher is already running for a first
+// one. The watcher used one "primed" flag for all of them, so the second
+// board's existing file read as a change on the next tick and every
+// subscriber to it was told something happened the moment it subscribed
+// (#139).
+void test_resources_late_subscription_stays_quiet() {
+    ProjectFixture fixture("late");
+    writeTo("first", "design.max_jumps", 1);
+    writeTo("second", "design.max_jumps", 2);
+    McpServer server;
+    std::string captured;
+    {
+        StdoutCapture capture;
+        server.subscribeResource("blackboard://first/state");
+        std::this_thread::sleep_for(kPastOneTick);
+        server.subscribeResource("blackboard://second/state");
+        std::this_thread::sleep_for(kPastOneTick * 2);
+        captured = capture.text();
+        server.unsubscribeResource("blackboard://first/state");
+        server.unsubscribeResource("blackboard://second/state");
+    }
+    ASSERT_TRUE(captured.find("notifications/resources/updated") == std::string::npos);
+}
+
+// A board dropped and subscribed again while the watcher keeps running for
+// another. Its baseline outlived the subscription, so a write made while
+// nobody watched it was announced to the next subscriber as if it had just
+// happened (#139).
+void test_resources_resubscription_replays_nothing() {
+    ProjectFixture fixture("resubscribe");
+    writeTo("first", "design.max_jumps", 1);
+    writeTo("second", "design.max_jumps", 2);
+    McpServer server;
+    std::string captured;
+    {
+        StdoutCapture capture;
+        server.subscribeResource("blackboard://first/state");
+        server.subscribeResource("blackboard://second/state");
+        std::this_thread::sleep_for(kPastOneTick);
+        server.unsubscribeResource("blackboard://second/state");
+        writeTo("second", "design.max_jumps", 3);
+        std::this_thread::sleep_for(kPastOneTick);
+        server.subscribeResource("blackboard://second/state");
+        std::this_thread::sleep_for(kPastOneTick * 2);
+        captured = capture.text();
+        server.unsubscribeResource("blackboard://first/state");
+        server.unsubscribeResource("blackboard://second/state");
+    }
+    ASSERT_TRUE(captured.find("notifications/resources/updated") == std::string::npos);
+}
+
 void test_resources_serialises_concurrent_writes() {
     ProjectFixture fixture("interleave");
     McpServer server;
@@ -409,6 +472,10 @@ struct Register {
                      test_resources_subscription_lifecycle);
         registerTest("BlackboardResources.NotifiesOnExternalChange",
                      test_resources_notifies_on_external_change);
+        registerTest("BlackboardResources.LateSubscriptionStaysQuiet",
+                     test_resources_late_subscription_stays_quiet);
+        registerTest("BlackboardResources.ResubscriptionReplaysNothing",
+                     test_resources_resubscription_replays_nothing);
         registerTest("BlackboardResources.SerialisesConcurrentWrites",
                      test_resources_serialises_concurrent_writes);
     }
