@@ -961,6 +961,10 @@ static json outputSchemaForTool(const std::string& name) {
                               {"section_written", string_type},
                               {"preset_count", integer_type},
                               {"next_step", string_type},
+                              // Whether the folder export_path names is there,
+                              // since Godot will not create it (#932).
+                              {"export_path_folder_exists", boolean_type},
+                              {"export_path_note", string_type},
                               // Whether an attached editor was made to read
                               // the file again, and why not when it was not.
                               {"editor_reloaded", boolean_type},
