@@ -58,6 +58,10 @@ any of it as current behaviour.
 | --- | --- |
 | [Control Room Design](CONTROL_ROOM_DESIGN.md) | Implemented. The MCP Apps dashboard the host renders in the conversation, and why it waited for its condition. |
 | [Autonomous Pipeline Design](AUTONOMOUS_PIPELINE_DESIGN.md) | Design approved. The loop that finds defects, fixes them and proves the fixes. |
+| [Elastic Ingress Decision](ELASTIC_INGRESS_DECISION.md) | Implemented experiment on an isolated branch, default OFF; adoption not decided. Motivation, alternatives, and evidence gates. |
+| [Elastic Ingress Contract](ELASTIC_INGRESS.md) | Experimental profile: exact conversions, client requirements, setup, and live test invocation. |
+| [Elastic Ingress Verification](ELASTIC_INGRESS_VALIDATION.md) | Local evidence and remaining release gates. |
+| [Elastic Ingress PR Draft](ELASTIC_INGRESS_PR_DRAFT.md) | Review-description template; no release announcement or default-enablement decision. |
 | [Field Trial Design](FIELD_TRIAL_DESIGN.md) | Design approved. Method and apparatus for handing Didi to an agent that has never seen it. |
 | [Field Trial Implementation Plan](FIELD_TRIAL_IMPLEMENTATION_PLAN.md) | The executable plan for that trial. The seed, briefing and scoring script live in `tools/field-trial/`. |
 | [Field Trial Results](FIELD_TRIAL_RESULTS.md) | One section per run, numbers kept so two runs can be compared. |

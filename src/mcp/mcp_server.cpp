@@ -4,6 +4,7 @@
 #include "didi/common/base64.hpp"
 #include "didi/mcp/mutation_safety.hpp"
 #include "didi/mcp/tool_availability.hpp"
+#include "didi/mcp/argument_normalization.hpp"
 #include "didi/runtime/session_kind_policy.hpp"
 #include "didi/tools/resolved_tool_binding.hpp"
 #include <algorithm>
@@ -698,6 +699,12 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
         const bool ui_visible = uiSurfaceVisible(era, req.params);
         for (const auto& t : tools) {
             json definition = t.toJson();
+            if (argumentNormalizationEnabled() && supportsArgumentNormalization(t.name) &&
+                t.annotations.read_only && !t.legacy) {
+                definition["_meta"]["didi"]["argumentNormalization"] = {
+                    {"profile", kArgumentNormalizationProfile},
+                    {"requestMetaKey", kArgumentNormalizationKey}};
+            }
             addCurrentAvailability(definition, t.capability, connected, session_kind, false,
                                    managed_unavailable,
                                    ToolRegistry::instance().managedRecoveryEnabled());
@@ -741,9 +748,10 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
                                               "Tool arguments must be a JSON object");
         }
         std::string name = req.params["name"].get<std::string>();
-        json arguments = req.params.contains("arguments")
-                             ? req.params["arguments"]
-                             : json::object();
+        const json empty_arguments = json::object();
+        const json& supplied_arguments = req.params.contains("arguments")
+                                             ? req.params["arguments"] : empty_arguments;
+        json arguments;
         if (name.empty()) {
             return JsonRpcResponse::makeError(req.id, JsonRpcErrorCode::InvalidParams, "Tool name is required");
         }
@@ -757,6 +765,32 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
             return JsonRpcResponse::makeError(req.id, JsonRpcErrorCode::InvalidParams,
                                               "Unknown tool: " + name,
                                               json{{"name", name}});
+        }
+        // Explicit opt-in, before any confirmation or dispatch. The ordinary
+        // path never copies or walks arguments through the normalizer.
+        const auto meta = req.params.find("_meta");
+        if (meta != req.params.end() && meta->is_object() && meta->contains(kArgumentNormalizationKey)) {
+            const auto* tool = ToolRegistry::instance().getTool(name);
+            const auto& profile = meta->at(kArgumentNormalizationKey);
+            auto prepared = [&]() -> Result<json> {
+                const char* reason = nullptr;
+                if (!argumentNormalizationEnabled()) reason = "feature_disabled";
+                else if (!profile.is_string() || profile != kArgumentNormalizationProfile) reason = "unsupported_profile";
+                else if (!tool->annotations.read_only || tool->legacy || !supportsArgumentNormalization(name)) reason = "unsupported_tool";
+                if (reason) return Error(400, "Argument normalization is unavailable for this request.",
+                    {{"code", "invalid_arguments"}, {"retryable", false},
+                     {"field", "/_meta/didi~1argumentNormalization"}, {"reason", reason}});
+                return normalizeToolArguments(name, tool->inputSchema, supplied_arguments);
+            }();
+            if (prepared.isErr()) {
+                auto error = prepared.error();
+                error.data["tool"] = name;
+                error.data["canonical_tool"] = tool->canonical_name;
+                return JsonRpcResponse::makeSuccess(req.id, complete(CallToolResult::fromError(error).toJson()));
+            }
+            arguments = std::move(prepared.value());
+        } else {
+            arguments = supplied_arguments;
         }
         // The client is returning a person's decision on a previous offer.
         if (req.params.contains("inputResponses") && req.params["inputResponses"].is_object()) {

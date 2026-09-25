@@ -10,14 +10,14 @@ Every number here is derived from the suites themselves rather than written down
 
 | Measure | Count |
 | --- | ---: |
-| Automated tests | **1282** |
+| Automated tests | **1298** |
 | Live-harness assertions | 1267 |
 
 The badge in the [README](../README.md) shows the automated test total. Harness assertions are counted separately because they are assertions inside one live scenario, not independently runnable cases; adding them together would flatter the number.
 
 ## Native C++ suite (`didi_tests`)
 
-**858 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
+**862 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
 
 | Suite | Tests |
 | --- | ---: |
@@ -32,6 +32,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `ControlRoom` | 24 |
 | `CrashCapture` | 3 |
 | `EditorHook` | 7 |
+| `ElasticIngress` | 4 |
 | `EngineDiagnostics` | 7 |
 | `ErrorData` | 3 |
 | `ExportPresetAdd` | 10 |
@@ -94,7 +95,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 
 ## Python contract suites (`tests/test_*.py`)
 
-**424 tests.** Derived from `test_*` methods on every `unittest.TestCase` subclass, read with `ast`.
+**436 tests.** Derived from `test_*` methods on every `unittest.TestCase` subclass, read with `ast`.
 
 | File | Tests |
 | --- | ---: |
@@ -106,13 +107,14 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `test_didi_binary.py` | 7 |
 | `test_documentation_validator.py` | 90 |
 | `test_editor_console.py` | 9 |
+| `test_elastic_ingress.py` | 11 |
 | `test_elicitation_confirmation.py` | 6 |
 | `test_engine_identity.py` | 5 |
 | `test_field_trial.py` | 137 |
 | `test_fuzz_target_lists.py` | 6 |
 | `test_managed_recovery.py` | 2 |
 | `test_managed_recovery_adversarial.py` | 3 |
-| `test_managed_recovery_live.py` | 3 |
+| `test_managed_recovery_live.py` | 4 |
 | `test_phase7_plan_ownership.py` | 10 |
 | `test_phase7_schema_contract.py` | 4 |
 | `test_phase7_signal_admission.py` | 3 |

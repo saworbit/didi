@@ -352,3 +352,22 @@ This table records the original 79-tool canonical baseline, not the current regi
 | **11. Phase 3 Runtime Sessions (10)** | Session list/attach/detach/get; logs; pause/step/stop/tree; `eval_gdscript` | Implemented. Four tools execute as local session management; six require an authenticated auto-selected or explicitly attached live editor/game. Evaluation is read-only and expression-only. |
 | **12. Phase 4 Verification (4)** | `project_search_text`, `project_search_symbols`, `asset_reimport`, `viewport_diff_capture` | Implemented. Search is bounded/offline; reimport and diff are editor-only; capture isolation is a reversible option on the existing live viewport tool. |
 | **13. Phase 5 Deep Domains (6)** | `csharp_check_build`, `shader_check_compile`, `project_list_export_presets`, `project_export`, `gridmap_export_mesh_library`, `ui_hit_test` | Implemented. Five tools are bounded offline file/process workflows; UI hit-testing is editor-only and does not inject input. |
+
+## Future milestone: optional elastic ingress and controlled reflection
+
+Status: IN PROGRESS on an isolated feature branch, separate from current sprint work.
+
+- First increment: default-disabled, explicitly requested normalization of selected
+  read-only query limits and hit-test coordinates, with bounded diagnostics.
+- Release gates: enabled/disabled compatibility, cross-platform validation,
+  performance budgets, and measured interaction-loop improvements.
+- Follow-up: independently review additional field conversions and separately
+  advertised, allowlisted reflection discovery/read tools with lifecycle checks.
+- Excluded: automatic fuzzy targeting, fallback after execution, generic reflective
+  mutation, arbitrary script evaluation, and pagination redesign.
+
+Existing strict behavior remains the default. See
+[Optional elastic ingress](ELASTIC_INGRESS.md) for the implemented contract and
+the [decision record](ELASTIC_INGRESS_DECISION.md) for alternatives, client
+feasibility, measured adoption gates, and conditions for removing the experiment.
+Reflection is not approved by completion of this first increment.

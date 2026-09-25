@@ -247,3 +247,17 @@ The 2,000-record sequence ring is structured Didi telemetry. Cursor reads advanc
 ## 8. Phase 6 mutation boundary
 
 The MCP registry decorates every implemented mutation with `dry_run` and evaluates safety before selecting a handler. Preview requests return a conservative plan without entering Godot, spawning a process, or touching the filesystem. Confirmed operations bind a cryptographically random 64-hex token to exact tool arguments, canonical project, execution mode, session ID, and route generation. Tokens expire after 120 seconds and are consumed on first validation, including failed mismatch attempts, so replay and cross-route reuse fail closed.
+
+## Optional elastic ingress perimeter
+
+The default-disabled `safe-v1` request profile normalizes selected read-only
+fields before normal dispatch. It checks cumulative budgets before copying,
+uses a temporary object, and applies existing schema validation. Ordinary calls
+do not enter the normalizer. Routing, mutation safety, engine APIs, and tool
+names stay unchanged. See [Optional elastic ingress](ELASTIC_INGRESS.md) for the
+field allowlist, request metadata, limits, and error contract.
+
+The [elastic ingress decision record](ELASTIC_INGRESS_DECISION.md) explains why
+this compatibility boundary is experimental, the client-side alternative, and
+the evidence required before adoption. The Windows process-tree timeout fix is
+independent and remains active with the profile disabled.

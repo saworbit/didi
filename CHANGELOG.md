@@ -51,6 +51,13 @@ The three Phase 7 blockers are unchanged; the newest name is `audio_add_bus`, re
 
 ### Added
 
+- **Experimental argument normalization, disabled by default.** Builds with
+  `DIDI_ELASTIC_INGRESS=ON` let explicitly opted-in calls normalize selected
+  numeric limits and 2D coordinates on three existing read-only tools. Canonical
+  schemas and ordinary strict calls remain unchanged. Client support and practical
+  agent benefits remain to be demonstrated; reflection and script evaluation are
+  excluded. See the [decision record](docs/ELASTIC_INGRESS_DECISION.md).
+
 - **`audio_add_bus` gives a game its Music and SFX buses (#771).** Nothing
   on the surface could add a bus, so `audio_configure_bus` could only ever
   configure `Master`, and setting a player's `bus` to `Music` answered
@@ -154,6 +161,12 @@ The three Phase 7 blockers are unchanged; the newest name is `audio_add_bus`, re
   use it on the draft.
 
 ### Fixed
+
+- **Windows test-session timeout completion.** Require verified captured process
+  handles to signal before reporting `TreeExited`; job accounting alone can reach
+  zero before child teardown finishes. Report uncertainty when full lifetime
+  coverage cannot be established. This fix is independent of the normalization
+  build option. See the [verification record](docs/ELASTIC_INGRESS_VALIDATION.md).
 
 - **`asset_reimport` no longer answers, or starts, inside the editor's own
   import pass (#914).** The editor runs its main loop from inside an import

@@ -58,6 +58,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+option(DIDI_ELASTIC_INGRESS "Enable explicit safe-v1 read-only argument normalization" OFF)
 option(DIDI_BUILD_TESTS "Build the didi test executables" ON)
 option(DIDI_ENABLE_SANITIZERS "Build with AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 
@@ -218,6 +219,7 @@ set(CORE_SOURCES
     src/tools/deep_domain_tools.cpp
     src/mcp/tool_availability.cpp
     src/mcp/schema_validation.cpp
+    src/mcp/argument_normalization.cpp
     src/mcp/error_data.cpp
     src/mcp/control_room.cpp
     src/tools/control_room_tools.cpp
@@ -230,6 +232,10 @@ add_library(didi_core STATIC ${CORE_SOURCES} "${CMAKE_BINARY_DIR}/generated/src/
 set_target_properties(didi_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(didi_core PUBLIC ${DIDI_INCLUDE_DIRECTORIES})
 target_link_libraries(didi_core PUBLIC Threads::Threads)
+if(DIDI_ELASTIC_INGRESS)
+    set_property(SOURCE src/mcp/argument_normalization.cpp APPEND PROPERTY
+        COMPILE_DEFINITIONS DIDI_ELASTIC_INGRESS=1)
+endif()
 if(WIN32)
     target_link_libraries(didi_core PUBLIC bcrypt)
 endif()
@@ -380,6 +386,7 @@ install(FILES ${DIDI_ADDON_MANIFEST_FILES}
 set(TEST_SOURCES
     tests/test_main.cpp
     tests/test_jsonrpc.cpp
+    tests/test_argument_normalization.cpp
     tests/test_ipc.cpp
     tests/test_runtime_sessions.cpp
     tests/test_checkpoints.cpp

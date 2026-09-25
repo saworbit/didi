@@ -290,6 +290,66 @@ class ManagedRecoveryLive(unittest.TestCase):
         self.assertEqual(stopped['pid'], restored['pid'])
         self.assertEqual((self.source / 'main.tscn').read_bytes(), self.original)
 
+    def test_elastic_ingress_live_read_only_roundtrip(self):
+        tools = self.request('tools/list', {})['tools']
+        hit_test = next(tool for tool in tools if tool['name'] == 'ui_hit_test')
+        profile = hit_test['_meta']['didi'].get('argumentNormalization')
+        if profile is None:
+            self.skipTest('elastic ingress is disabled in this build')
+        self.assertEqual(profile['profile'], 'safe-v1')
+        scene = self.workspace / 'project' / 'elastic_ui.tscn'
+        scene.write_text('[gd_scene format=3]\n[node name="UI" type="Control"]\n'
+                         'offset_right = 640.0\noffset_bottom = 480.0\n'
+                         '[node name="Go" type="Button" parent="."]\n'
+                         'offset_left = 20.0\noffset_top = 20.0\n'
+                         'offset_right = 180.0\noffset_bottom = 80.0\ntext = "Go"\n')
+        opened, _ = self.tool('scene_open', scene_path='res://elastic_ui.tscn')
+        self.assertFalse(opened['isError'], opened)
+        before = scene.read_bytes()
+
+        def call(name, args, normalized=True):
+            params = {'name': name, 'arguments': args}
+            if normalized:
+                params['_meta'] = {profile['requestMetaKey']: profile['profile']}
+            return self.request('tools/call', params)
+
+        pairs = [
+            ('scene_get_hierarchy', {'max_depth': '2', 'max_nodes': '10'},
+             {'max_depth': 2, 'max_nodes': 10}),
+            ('ui_list_controls', {'max_results': '10'}, {'max_results': 10}),
+            ('ui_hit_test', {'point': ['40', '40'], 'max_results': '5'},
+             {'point': {'x': 40, 'y': 40}, 'max_results': 5}),
+        ]
+        for name, loose, canonical in pairs:
+            with self.subTest(tool=name):
+                result = call(name, loose)
+                self.assertFalse(result['isError'], result)
+                self.assertTrue(result['structuredContent']['is_live_engine'])
+                self.assertEqual(result, call(name, canonical, False))
+
+        invalid = [('ui_list_controls', {'max_results': value}) for value in
+                   ('+2', ' 2', '2 ', '2px', '2.0', '1e1', '0', '257', True, None)]
+        invalid += [('ui_hit_test', {'point': point}) for point in
+                    ([], [1], [1, 2, 3], [True, 2], [1, 'NaN'], [1, '1e999'],
+                     [1, 'secret-value'], {'x': 1}, [1, '9007199254740993'])]
+        invalid += [('ui_list_controls', args) for args in
+                    ({'extra': 'secret-value'}, {'max_results': '5', 'include_text': 'true'},
+                     {'extra': [0] * 4100})]
+        for index, (name, args) in enumerate(invalid):
+            with self.subTest(malformed_case=index):
+                result = call(name, args)
+                self.assertTrue(result['isError'], result)
+                self.assertNotIn('secret-value', json.dumps(result))
+                self.assertLess(len(json.dumps(result)), 2048)
+                recovered = call('ui_hit_test', {'point': ['40', '40']})
+                self.assertFalse(recovered['isError'], recovered)
+                payload = recovered['structuredContent']
+                self.assertEqual(payload['topmost']['node_path'], '/root/UI/Go')
+                self.assertFalse(payload['input_injected'])
+        self.assertTrue(call('ui_hit_test', {'point': ['40', '40']}, False)['isError'])
+        self.assertEqual(scene.read_bytes(), before)
+        self.assertEqual((self.source / 'main.tscn').read_bytes(), self.original)
+
 
 if __name__ == '__main__':
     unittest.main()
