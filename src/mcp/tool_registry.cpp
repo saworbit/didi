@@ -1734,10 +1734,11 @@ std::optional<Error> probeFileTarget(const FileTarget& target, const json& argum
         contents.str(), symbol_name, symbol_type);
     before["symbol_exists"] = declared;
     if (!declared && !arguments.value("create_if_missing", false)) {
-        return Error::notFound("This script declares no " + symbol_type + " named '" +
-                               symbol_name +
-                               "'. Patch a symbol it declares, or pass create_if_missing to "
-                               "add this one.");
+        return Error(404,
+                     "This script declares no " + symbol_type + " named '" + symbol_name +
+                         "'. Patch a symbol it declares, or pass create_if_missing to "
+                         "add this one.",
+                     json{{"code", "not_found"}, {"retry_with", {{"create_if_missing", true}}}});
     }
     return std::nullopt;
 }

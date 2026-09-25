@@ -309,8 +309,13 @@ json ManagedRecovery::status() {
 }
 Result<json> ManagedRecovery::checkpoint(bool accept) {
     if (m_needsReconciliation && !accept)
-        return recoveryError("An operation needs reconciliation. Inspect files, then explicitly "
-                             "set accept_current_files=true or restore a checkpoint.");
+        // A name of its own, since conflict says nothing about what to do, and
+        // the argument the sentence names under retry_with (#902).
+        return Error(409,
+                     "An operation needs reconciliation. Inspect files, then explicitly "
+                     "set accept_current_files=true or restore a checkpoint.",
+                     json{{"code", "needs_reconciliation"},
+                          {"retry_with", {{"accept_current_files", true}}}});
     const bool uncertain_editor_is_current = !m_operation.is_object() ||
         m_operation.value("editor_session", m_attachedSession) == m_attachedSession;
     if (m_needsReconciliation && uncertain_editor_is_current &&

@@ -92,8 +92,11 @@ to add, so it carries the value and not only the name:
 `project_export` answers a colliding output path that way, and so do the
 refusals for an autoload, an input action or a scene target that is already
 there, and the four that ask for `discard_unsaved` before closing a scene with
-changes in it. `retryable` stays `false` for all of them, because the same call
-unchanged would be refused again: `retry_with` is the change that makes it
+changes in it, `script_patch_method` for a symbol the script does not declare
+(`create_if_missing`), and `runtime_checkpoint` while an operation needs
+reconciliation (`accept_current_files`, under `code: "needs_reconciliation"`).
+`retryable` stays `false` for all of them, because the same call unchanged
+would be refused again: `retry_with` is the change that makes it
 succeed. A refusal with nothing to add omits the key rather than sending an
 empty one.
 

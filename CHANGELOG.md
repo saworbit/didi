@@ -175,6 +175,14 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **Three more refusals carry the argument that fixes them in `retry_with` (#902).** The check
+  added in #901 read one phrasing, `pass <argument>: true`, and the surface also says
+  `pass <argument> to ...` and `set <argument>=true`. `script_patch_method`'s preview and its
+  patcher now answer a symbol the script does not declare with
+  `retry_with: {"create_if_missing": true}`, and `runtime_checkpoint` answers an operation that
+  needs reconciliation with `retry_with: {"accept_current_files": true}` under a code of its
+  own, `needs_reconciliation`, rather than `conflict`. The check reads all three phrasings.
+
 - **`audio_list_buses` reads a quoted or boolean `volume_db` the way Godot does (#907).**
   Offline it read `volume_db` with `std::atof`, so `"-6"` and `true` came back as 0 dB while
   the game played them at -6 dB and 1 dB, and a generator that writes every value as a string

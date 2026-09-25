@@ -273,21 +273,39 @@ class HookRefusalsNameThemselves(unittest.TestCase):
         to read English to find the fix that was sitting in a field on the
         tool next door.
 
-        The rule is narrow on purpose: it fires on a message that says `pass
-        <argument>: true`, which is a promise about a specific argument, and
+        The rule is narrow on purpose: it fires on a message that names the
+        argument to pass, which is a promise about a specific argument, and
         asks that the same refusal carries it. Refusals with nothing to add are
         not its business.
+
+        It read one phrasing, `pass <argument>: true`, and the surface uses
+        three: that one, `pass <argument> to ...` and `set <argument>=true`.
+        Two refusals for create_if_missing and one for accept_current_files
+        left the remedy in prose (#902). Two things that read the same are
+        skipped: a value rather than an argument (`pass false to fold` in a
+        parameter description), and a note in a successful result's
+        `limitations`, where there is nothing to retry.
         """
+        phrasings = (
+            re.compile(r"pass ([a-z_]+): true"),
+            re.compile(r"pass ([a-z_]+) to\b"),
+            re.compile(r"set ([a-z_]+)=true"),
+        )
         offenders = []
         for path in sorted((ROOT / "src").rglob("*.cpp")):
             source = path.read_text(encoding="utf-8")
-            for match in re.finditer(r"pass ([a-z_]+): true", source):
-                argument = match.group(1)
-                window = source[match.start():match.start() + 600]
-                wanted = '{"retry_with", {{"%s", true}}}' % argument
-                if wanted not in window:
-                    line = source.count("\n", 0, match.start()) + 1
-                    offenders.append(f"{path.name}:{line} ({argument})")
+            for phrasing in phrasings:
+                for match in phrasing.finditer(source):
+                    argument = match.group(1)
+                    if argument in ("true", "false", "null"):
+                        continue
+                    if '"limitations"' in source[max(0, match.start() - 400):match.start()]:
+                        continue
+                    window = source[match.start():match.start() + 600]
+                    wanted = '{"retry_with", {{"%s", true}}}' % argument
+                    if wanted not in window:
+                        line = source.count("\n", 0, match.start()) + 1
+                        offenders.append(f"{path.name}:{line} ({argument})")
         self.assertEqual(
             offenders, [],
             "The sentence names the argument that fixes the call. retry_with "
