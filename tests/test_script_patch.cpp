@@ -764,6 +764,8 @@ static void test_gdscript_symbol_patch_refuses_a_symbol_the_script_does_not_decl
     ASSERT_TRUE(typo.error().message.find("declares no function named 'ready'") !=
                 std::string::npos);
     ASSERT_TRUE(typo.error().message.find("create_if_missing") != std::string::npos);
+    // And where a client reads it without the sentence (#902).
+    ASSERT_TRUE(typo.error().data["retry_with"]["create_if_missing"] == true);
 
     // Asked for, it still appends, and the answer says which of the two
     // happened.

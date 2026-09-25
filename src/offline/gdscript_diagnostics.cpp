@@ -1046,9 +1046,13 @@ Result<SymbolPatch> GDScriptDiagnostics::patchSymbol(const std::string& source_t
     // said nothing about it. Creating is still available, on a flag that says
     // so (#569).
     if (matches.empty() && !create_if_missing) {
-        return Error::notFound(
+        // The flag that makes the call succeed, where a client reads it
+        // rather than in the sentence (#902).
+        return Error(
+            404,
             "This script declares no " + symbol_type + " named '" + symbol_name +
-            "'. Patch a symbol it declares, or pass create_if_missing to add this one.");
+                "'. Patch a symbol it declares, or pass create_if_missing to add this one.",
+            json{{"code", "not_found"}, {"retry_with", {{"create_if_missing", true}}}});
     }
 
     // One name can be declared once at the top level and again inside a nested
