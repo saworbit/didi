@@ -168,3 +168,98 @@ jobs:
             gh issue create --repo "$REPO" --title "$TITLE" \
               --label dependencies --label tooling --body-file body.md
           fi
+
+  # The fourth question: is anything open in the code scanning tab? Every job
+  # that touches code scanning writes to it and none read it back, so on
+  # 2026-09-20 seven alerts had been open for up to eleven days with nobody told
+  # (#807). Two were CodeQL findings dismissed a week earlier and raised again
+  # under new numbers when the code around them moved, which recurs by design.
+  # Same shape as the vendored check above: weekly, one tracking issue, and
+  # never a failed check on somebody's pull request.
+  code-scanning-alerts:
+    name: Code Scanning Alerts
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      security-events: read
+      issues: write
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Read Open Alerts
+        id: check
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -uo pipefail
+          status=0
+          python tools/check_code_scanning.py --check > report.txt || status=$?
+          cat report.txt
+          # 2 means the tab could not be read. That fails this job rather than
+          # reading as a clean week.
+          case "$status" in
+            0) echo 'open=false' >> "$GITHUB_OUTPUT" ;;
+            1) echo 'open=true' >> "$GITHUB_OUTPUT" ;;
+            *) exit "$status" ;;
+          esac
+
+      - name: Open Or Update The Tracking Issue
+        if: steps.check.outputs.open == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TITLE: 'Code scanning alerts are open'
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "The code scanning tab has alerts open."
+            echo
+            echo '```'
+            cat report.txt
+            echo '```'
+            echo
+            echo "Each one needs a fix or a written disposition in"
+            echo "[SECURITY.md](../blob/main/SECURITY.md)."
+            echo
+            echo "Raised by [Supply Chain]($RUN_URL). This issue is reused rather than"
+            echo "reopened weekly, and the same job closes it once the tab is empty."
+          } > body.md
+
+          # Matched on the exact title, as the vendored check does, so a person
+          # retitling it starts a fresh one rather than losing the next report.
+          existing=$(gh issue list --repo "$REPO" --state open --label security \
+            --json number,title --jq "[.[] | select(.title == \"$TITLE\")] | .[0].number // empty")
+
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$REPO" --body-file body.md
+            echo "Refreshed issue #$existing"
+          else
+            gh issue create --repo "$REPO" --title "$TITLE" \
+              --label security --label ci --body-file body.md
+          fi
+
+      - name: Close The Tracking Issue
+        if: steps.check.outputs.open == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TITLE: 'Code scanning alerts are open'
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          existing=$(gh issue list --repo "$REPO" --state open --label security \
+            --json number,title --jq "[.[] | select(.title == \"$TITLE\")] | .[0].number // empty")
+          if [ -n "$existing" ]; then
+            gh issue close "$existing" --repo "$REPO" \
+              --comment "No code scanning alerts are open as of [this run]($RUN_URL)."
+          fi
