@@ -26,10 +26,13 @@ from pathlib import Path
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 # Every path a build can land on: both generators, both configurations, both
-# platforms. Order carries no meaning any more, only membership.
+# platforms. Order carries no meaning any more, only membership. build/didi.exe
+# is where CI's Ninja build puts it on Windows; without it every suite that
+# searched skipped on that leg, and each of those steps passed.
 CANDIDATES = (
     "build/Release/didi.exe",
     "build/Debug/didi.exe",
+    "build/didi.exe",
     "build/didi",
     "build-ninja/didi.exe",
     "build-ninja/didi",
@@ -46,6 +49,8 @@ def resolve() -> Path:
     build has always behaved. Raises RuntimeError when an override names a file
     that is not there, because someone who set the variable meant that path and
     should be told it is wrong rather than watch a subprocess fail obscurely.
+    The same for an override that names the test binary, and for a configured
+    build tree with no didi in it: a skip there reads as a pass.
     """
     # DIDI_EXECUTABLE is read second and only for compatibility: the command
     # line test has always used that spelling.
@@ -57,12 +62,25 @@ def resolve() -> Path:
                 f"DIDI_TEST_BINARY names {path}, which is not a file. "
                 f"Unset it to search the build directories instead."
             )
+        if path.stem == "didi_tests":
+            raise RuntimeError(
+                f"DIDI_TEST_BINARY names {path}, the native test binary. The Python "
+                f"suites want the server, didi, from the same build. "
+                f"tools/test_inventory.py is the one that wants didi_tests."
+            )
         return path
 
     built = [
         path for path in (REPOSITORY_ROOT / name for name in CANDIDATES) if path.is_file()
     ]
     if not built:
+        for tree in ("build", "build-ninja"):
+            if (REPOSITORY_ROOT / tree / "CMakeCache.txt").is_file():
+                raise RuntimeError(
+                    f"{tree}/ is a configured build tree with no didi in any place "
+                    f"tests/didi_binary.py looks: {', '.join(CANDIDATES)}. Build it, "
+                    f"add its layout to CANDIDATES, or set DIDI_TEST_BINARY."
+                )
         raise unittest.SkipTest("didi executable not built")
 
     built.sort(key=lambda path: path.stat().st_mtime, reverse=True)

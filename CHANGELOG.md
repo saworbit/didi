@@ -175,6 +175,21 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **The Python suites that drive the server now run on the Windows CI leg.** `tests/didi_binary.py`
+  never looked at `build/didi.exe`, where CI's Ninja build puts it, so each of those suites
+  skipped and its step passed. Main's last run logged 67 skips, among them the YOLO,
+  elicitation, output schema and command line suites. A configured build tree with no binary
+  in it is now an error rather than a skip.
+
+- **`DIDI_TEST_BINARY` pointed at `didi_tests` is refused by name (#846).** The suites started
+  the test binary and failed with a JSON decode error per test. They now say which binary they
+  want, and the two recovery suites read the variable through the same resolver.
+
+- **The end to end MCP check runs before a push (#845).** It was 301 lines inside `ci.yml` that
+  drove `./build` by name. It is `tests/test_mcp_wire_contract.py` now, 15 named tests on the
+  binary `tests/didi_binary.py` picks. `tools/vibe/replay_ci_e2e.py` only existed to lift it
+  out of the workflow, so it is gone.
+
 - **A timed-out test session reports `tree_exited` again when one of its processes had already
   finished (#859).** The kill wait counted every process the job had ever held, so a wrapper's
   first command or anything the game ran turned a clean kill into `query_failed`. The tree kill
