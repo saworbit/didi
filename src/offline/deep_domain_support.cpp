@@ -303,6 +303,49 @@ ExportPresetsFile readExportPresets(const std::string& contents) {
         }
     }
 
+    // Godot 4.7 keeps the runnable flag out of the preset: a [runnable_presets]
+    // section maps a platform to the one preset it runs, and the preset gets no
+    // runnable key, so every preset a 4.7 editor had saved read runnable: false
+    // (#922). EditorExport::load_config on 4.7.2 reads the section, then each
+    // preset in index order, and a preset's own runnable=true makes it its
+    // platform's runnable preset, so of the two the later one in that order
+    // wins. 4.5 and 4.6 write no section and read each preset's key alone,
+    // which is what a file without one is still read as.
+    std::map<std::string, std::string> runnable_by_platform;
+    bool has_runnable_section = false;
+    for (const auto& header : scanned.headers) {
+        if (header.name == "runnable_presets") has_runnable_section = true;
+    }
+    for (const auto& entry : scanned.entries) {
+        if (entry.section == "runnable_presets") {
+            runnable_by_platform[unquote(entry.key)] = unquote(entry.value_text);
+        }
+    }
+    if (has_runnable_section) {
+        std::vector<size_t> by_index(presets.size());
+        for (size_t i = 0; i < by_index.size(); ++i) by_index[i] = i;
+        std::stable_sort(by_index.begin(), by_index.end(), [&presets](size_t a, size_t b) {
+            return presets[a]["index"].get<int>() < presets[b]["index"].get<int>();
+        });
+        const auto platform_of = [&presets](size_t i) {
+            const std::string platform = presets[i].value("platform", "");
+            return platform == "Linux/X11" ? std::string("Linux") : platform;
+        };
+        std::map<std::string, size_t> runs;
+        for (const size_t i : by_index) {
+            const auto platform = platform_of(i);
+            const auto named = runnable_by_platform.find(platform);
+            if (named != runnable_by_platform.end() && named->second == presets[i].value("name", "")) {
+                runs[platform] = i;
+            }
+            if (presets[i].value("runnable", false)) runs[platform] = i;
+        }
+        for (size_t i = 0; i < presets.size(); ++i) {
+            const auto chosen = runs.find(platform_of(i));
+            presets[i]["runnable"] = chosen != runs.end() && chosen->second == i;
+        }
+    }
+
     std::set<std::string> names;
     for (const auto& preset : presets) {
         const std::string name = preset.value("name", "");
