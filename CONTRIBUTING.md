@@ -121,8 +121,9 @@ add noise to the log and change nothing about who is responsible.
 
    That variable means two different binaries depending on who reads it. The
    Python suites want the **server**, `didi`. `tools/test_inventory.py` wants
-   the **test** binary, `didi_tests`. Pointing either at the other hangs or
-   reports nothing.
+   the **test** binary, `didi_tests`. The suites refuse `didi_tests` with a
+   sentence saying so, and `tools/test_inventory.py` handed `didi` names the
+   binary and the option it refused.
 
 5. **Validate Documentation**:
    ```bash
