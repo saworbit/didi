@@ -8,6 +8,7 @@
 #include "didi/offline/project_search.hpp"
 #include "didi/offline/test_runner.hpp"
 #include "didi/offline/project_settings_file.hpp"
+#include "didi/offline/project_file_lock.hpp"
 #include "didi/offline/resource_indexer.hpp"
 #include "didi/runtime/session_client.hpp"
 #include "didi/common/atomic_write.hpp"
@@ -468,6 +469,23 @@ CallToolResult handleScriptPatchMethod(const json& args, std::shared_ptr<ipc::II
     const fs::path disk_path = resolved.value();
     const std::string reported_path = paths::resourcePathOf(disk_path);
 
+    // Held from the read to the write. Two agents patching different methods
+    // of one script both read the old text, and the second write replaced the
+    // first while both reported success; on Windows the replace could instead
+    // meet the other's open file and fail. The project writers hold the same
+    // lock since #953 (#954). The lock is named by the script's res:// path,
+    // which resourcePathOf spells as it is on disk, so two spellings of one
+    // file on a case-insensitive filesystem share it.
+    std::error_code root_error;
+    const auto project_root = fs::weakly_canonical(fs::current_path(), root_error);
+    if (root_error || reported_path.rfind("res://", 0) != 0) {
+        return CallToolResult::errorJson(
+            500, "Cannot lock " + reported_path + " for method patching: the project root "
+                 "cannot be resolved");
+    }
+    auto lock = offline::lockProjectFile(project_root, reported_path.substr(6));
+    if (lock.isErr()) return CallToolResult::fromError(lock.error());
+
     // Read as bytes. A text-mode read on Windows turned every CRLF into LF
     // before the patcher saw the file, and the atomic writer writes bytes, so
     // a CRLF file came back LF on every line while the result reported a
@@ -512,6 +530,9 @@ CallToolResult handleScriptPatchMethod(const json& args, std::shared_ptr<ipc::II
     }
     if (crlf) patched_content = strings::replaceAll(patched_content, "\n", "\r\n");
     auto written = files::writeFileAtomically(disk_path, patched_content);
+    // Released before the syntax check below, which can start the engine and
+    // needs nothing but the file to be there.
+    lock.value().reset();
     if (written.isErr()) {
         return CallToolResult::fromError(
             written.error(), "Cannot write patched file to disk: " + reported_path + ": ");

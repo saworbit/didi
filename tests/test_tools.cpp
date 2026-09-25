@@ -32,6 +32,7 @@
 
 #include <thread>
 #include <memory>
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -4537,6 +4538,58 @@ static void test_atomic_write_waits_out_a_reader() {
     ASSERT_EQ(readToolTestFile(target), "new");
 }
 
+namespace didi::mcp {
+CallToolResult handleScriptPatchMethod(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+}
+
+static void test_concurrent_script_patches_all_land() {
+    // Break caught: two agents patching different methods of one script. The
+    // patch read the script, spliced one method in and wrote the whole file
+    // back with nothing held in between, so both read the old text and the
+    // second write replaced the first while both reported success (#954).
+    // Threads here, because the lock is taken per open file, not per process.
+    // The handler directly, because the race is inside one call and a
+    // confirmation token is not what is being tested.
+    ScopedToolProject project("concurrent-script-patch");
+    writeAuditFile("project.godot", "config_version=5\n");
+    constexpr int kWriters = 2;
+    constexpr int kEach = 20;
+    std::ostringstream source;
+    source << "extends Node\n";
+    for (int writer = 0; writer < kWriters; ++writer) {
+        for (int index = 0; index < kEach; ++index) {
+            source << "\nfunc w" << writer << "_" << index << "():\n\tpass\n";
+        }
+    }
+    writeAuditFile("player.gd", source.str());
+
+    std::atomic<int> failed{0};
+    std::vector<std::thread> writers;
+    for (int writer = 0; writer < kWriters; ++writer) {
+        writers.emplace_back([&failed, writer] {
+            for (int index = 0; index < kEach; ++index) {
+                const auto name = "w" + std::to_string(writer) + "_" + std::to_string(index);
+                const didi::json args{
+                    {"file_path", "res://player.gd"},
+                    {"method_name", name},
+                    {"new_definition", "func " + name + "():\n\treturn " +
+                                           std::to_string(1000 + writer * 100 + index) + "\n"}};
+                if (didi::mcp::handleScriptPatchMethod(args, nullptr).isError) ++failed;
+            }
+        });
+    }
+    for (auto& thread : writers) thread.join();
+
+    ASSERT_EQ(failed.load(), 0);
+    const auto contents = readToolTestFile("player.gd");
+    for (int writer = 0; writer < kWriters; ++writer) {
+        for (int index = 0; index < kEach; ++index) {
+            const auto line = "\treturn " + std::to_string(1000 + writer * 100 + index) + "\n";
+            ASSERT_TRUE(contents.find(line) != std::string::npos);
+        }
+    }
+}
+
 static void test_script_patch_replaces_without_leaving_temporary_files() {
     // Break caught: a leaked sibling temporary would be indexed as a project
     // resource and would survive a failed replace.
@@ -8571,6 +8624,8 @@ struct RegisterToolTests {
         registerTest("Tools.ResourceCreateUnicodeFileNames",
                      test_resource_create_writes_unicode_file_names);
         registerTest("Tools.AtomicWriteWaitsOutAReader", test_atomic_write_waits_out_a_reader);
+        registerTest("Tools.ConcurrentScriptPatchesAllLand",
+                     test_concurrent_script_patches_all_land);
         registerTest("Tools.AtomicWriteKeepsDestinationOnFailure",
                      test_atomic_write_keeps_the_destination_when_the_replace_fails);
         registerTest("Tools.ScriptPatchLeavesNoTemporaryFiles",
