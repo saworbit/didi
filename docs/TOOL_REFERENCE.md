@@ -105,7 +105,7 @@ Beside the sentence, `data` carries `blocked_on: "no_live_session"`,
 `needs_live_engine`, `offline_fallback`, `discover_with` and `attach_with`, and
 `offline_alternative` where this server knows of a sibling that answers offline.
 `retryable` stays `true`, because the same call succeeds once an engine is
-there; `blocked_on` is what says that a human has to put one there.
+there; `blocked_on` is what says that a human has to put one there. A tool whose own argument rules need no engine, such as `audio_add_bus`, checks them first, so a bad argument is refused in the same words whether or not an engine is attached, and the `503` is only for a call that would otherwise have gone ahead.
 
 A string argument to a tool with a live route that holds a NUL character
 (U+0000) is refused `400` with `invalid_arguments` before any route is chosen,

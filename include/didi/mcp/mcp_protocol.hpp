@@ -360,6 +360,12 @@ struct ToolDefinition {
     json inputSchema;
     ToolHandler handler;
     BoundToolHandler boundHandler;
+    // Optional. The tool's own argument rules that need no engine, checked
+    // before a route is chosen and given the arguments without dry_run and
+    // confirmation_token. A live-only tool answered 503 for arguments it would
+    // refuse anyway, so a caller learned a name was wrong only after opening
+    // an editor (#949).
+    std::function<std::optional<Error>(const json& arguments)> argumentCheck;
     ExecutionCapability capability;
     // Set by ToolRegistry::registerTool from kLegacyToolNames. Never set by hand.
     bool legacy{false};

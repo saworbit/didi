@@ -175,6 +175,14 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **`audio_add_bus` refuses a bad argument before it asks for an editor (#949).** With no
+  editor attached, the registry's live-route check answered `503 not_connected` before the
+  tool's own argument rules ran, so `{"name": " Music"}` sent the caller off to open an editor
+  and only then said the name was refused. A tool can now declare the argument rules that need
+  no engine, and the registry checks them before a route is chosen, in the call and its dry run.
+  `audio_add_bus` declares its name, send and value rules. `AudioAddBus.Gated` claimed this order
+  already, and passed only because it ran with no managed route; it now runs through one.
+
 - **`project_export` and `gridmap_export_mesh_library` refuse control characters in
   `output_path` (#939).** Their path resolver checked the scheme and the project bounds but not
   the control characters every other writer refuses, so a newline, a tab or a NUL reached

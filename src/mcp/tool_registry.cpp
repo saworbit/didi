@@ -2128,6 +2128,14 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
                 "nothing was sent. Remove the NUL.");
         }
     }
+    if (tool->argumentCheck) {
+        json checked = arguments;
+        if (checked.is_object()) {
+            checked.erase("dry_run");
+            checked.erase("confirmation_token");
+        }
+        if (auto refused = tool->argumentCheck(checked)) return CallToolResult::fromError(*refused);
+    }
     std::optional<runtime::RuntimeRouteLease> lease;
     if (supports_live) {
         const bool managed_route =
@@ -4419,6 +4427,13 @@ void ToolRegistry::registerAllDefaultTools() {
             {"additionalProperties", false}
         };
         t.handler = [this](const json& args) { return handleAudioAddBus(args, m_ipcClient); };
+        // The name, send and value rules need no engine, so a caller with no
+        // editor open hears about a bad name now rather than after opening one.
+        t.argumentCheck = [](const json& args) -> std::optional<Error> {
+            auto parsed = runtime::parseAudioAddBusRequest(args);
+            if (parsed.isErr()) return parsed.error();
+            return std::nullopt;
+        };
         registerTool(std::move(t));
     }
     {
