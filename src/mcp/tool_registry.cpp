@@ -118,6 +118,11 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         // editor writes the file itself; a file written behind an open editor
         // would be written over by its next autosave (#771).
         , "audio_add_bus"
+        // Editor only. The editor reimports the asset, and the change is
+        // checked against what it then loads; a sidecar written with no editor
+        // is noticed only by a scan in a later second, or at the next start,
+        // and nothing checks it (#958).
+        , "asset_configure_import"
         // Phase 7C. Performance monitors exist only inside a running engine,
         // so there is no offline reading to fall back to.
         , "runtime_read_profiler"
@@ -302,6 +307,8 @@ CallToolResult handleAudioConfigureBus(const json& args, std::shared_ptr<ipc::II
 CallToolResult handleAudioAddBus(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleInstantiateAsset(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleAssetReimport(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleAssetConfigureImport(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+Result<json> previewAssetConfigureImport(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleCSharpCheckBuild(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleShaderCheckCompile(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleProjectListExportPresets(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
@@ -593,6 +600,11 @@ Error runtimeSessionMismatchError(const std::string& tool_name, const std::strin
 const char* offlineSiblingFor(std::string_view tool) {
     if (tool == "audio_configure_bus") {
         return "audio_list_buses reads the project's bus layout offline.";
+    }
+    if (tool == "asset_configure_import") {
+        return "resource_inspect reads an asset's import options offline. They are changed only "
+               "with the editor attached, because the editor reimports the asset and the change "
+               "is checked against what it then loads.";
     }
     if (tool == "audio_add_bus") {
         return "audio_list_buses reads the project's bus layout offline. A bus is added only with "
@@ -1129,6 +1141,7 @@ const std::unordered_map<std::string_view, std::string_view> kToolTitles = {
     {"anim_add_library", "Add an animation library"},
     {"anim_list_tracks", "List animation tracks"},
     {"anim_play_track", "Play an animation"},
+    {"asset_configure_import", "Configure an asset's import"},
     {"asset_reimport", "Reimport assets"},
     {"audio_add_bus", "Add an audio bus"},
     {"audio_configure_bus", "Configure an audio bus"},
@@ -2193,6 +2206,20 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
                                                     json& subject) {
             return probeAnimLibraryTarget(call_arguments, client, before, subject);
         };
+    } else if (binding.policy_source == "asset_configure_import") {
+        // Runs with no lease too. The sidecar, the importer, the keys and the
+        // types need no engine; with an editor attached the bounds that depend
+        // on the track are checked as well, and without one the preview says
+        // they were not (#958).
+        target_probe = [client = lease.has_value() ? m_sourceIpcClient : nullptr](
+                           const json& call_arguments, json& before,
+                           json& subject) -> std::optional<Error> {
+            auto preview = previewAssetConfigureImport(call_arguments, client);
+            if (preview.isErr()) return preview.error();
+            before = preview.value()["before"];
+            subject = preview.value()["subject"];
+            return std::nullopt;
+        };
     } else if (binding.policy_source == "audio_add_bus") {
         // Unlike the probes above this one runs with no lease too, because the
         // name rules need no engine and a preview of a name the call refuses
@@ -2909,6 +2936,50 @@ void ToolRegistry::registerAllDefaultTools() {
             {"timeout_ms", {{"type", "integer"}, {"default", 10000}, {"minimum", 1}, {"maximum", 10000}}}
         }}, {"required", {"paths"}}};
         t.handler = [this](const json& args) { return handleAssetReimport(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "asset_configure_import";
+        t.description =
+            "Changes an imported asset's import options in its .import file, reimports it in the "
+            "attached editor, and checks what the engine then loads. This is how a music track "
+            "is made to loop: loop: true for an OGG or MP3, edit/loop_mode 2 (Forward) for a "
+            "WAV. It sets the loop options of WAV, OGG and MP3 imports only, and refuses any "
+            "other importer or option. Godot checks none of these values, so the tool does: a "
+            "value of the wrong type, a loop mode Godot has no name for, an offset or a loop "
+            "window outside the track. If the reimported asset does not load with what was "
+            "asked, the previous file is put back and reimported. resource_inspect reports an "
+            "asset's current import options.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"asset_path", {{"type", "string"}, {"minLength", 1}, {"maxLength", 1024}}},
+                {"options", {
+                    {"type", "object"},
+                    {"properties", {
+                        {"loop", {{"type", "boolean"},
+                                  {"description", "OGG and MP3: whether the track loops."}}},
+                        {"loop_offset", {{"type", "number"}, {"minimum", 0},
+                                         {"description", "OGG and MP3: the second the track loops back "
+                                                         "to, from 0 up to its length."}}},
+                        {"edit/loop_mode", {{"type", json::array({"integer", "string"})},
+                                            {"description",
+                                             "WAV: 0 Detect From WAV, 1 Disabled, 2 Forward, 3 "
+                                             "Ping-Pong, 4 Backward, as the number or the name."}}},
+                        {"edit/loop_begin", {{"type", "integer"}, {"minimum", 0},
+                                             {"description", "WAV: the first frame of the loop, "
+                                                             "under loop modes 2 to 4."}}},
+                        {"edit/loop_end", {{"type", "integer"}, {"minimum", -1},
+                                           {"description", "WAV: the frame the loop ends at, or -1 "
+                                                           "for the last one, under loop modes 2 to 4."}}}
+                    }}
+                }}
+            }},
+            {"required", json::array({"asset_path", "options"})},
+            {"additionalProperties", false}
+        };
+        t.handler = [this](const json& args) { return handleAssetConfigureImport(args, m_ipcClient); };
         registerTool(std::move(t));
     }
     {

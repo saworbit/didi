@@ -35,7 +35,7 @@ Do not infer availability from a tool name or description. Do not call a tool wh
 
 ## Canonical tools
 
-The current source / Unreleased surface registers 119 canonical tool names. 116 are implemented in at least one mode; 3 remain reserved and return an MCP tool error. In other words, 116 canonical tools are implemented. Ten legacy names are registered separately, for exactly 129 `tools/list` entries. The latest documented release is 2.0.1; its historical surface is recorded in the changelog.
+The current source / Unreleased surface registers 120 canonical tool names. 117 are implemented in at least one mode; 3 remain reserved and return an MCP tool error. In other words, 117 canonical tools are implemented. Ten legacy names are registered separately, for exactly 130 `tools/list` entries. The latest documented release is 2.0.1; its historical surface is recorded in the changelog.
 
 | Execution modes | Canonical tools | Current behavior |
 | :--- | :--- | :--- |
@@ -57,6 +57,7 @@ The current source / Unreleased surface registers 119 canonical tool names. 116 
 | `live`, `offline_fallback` | `project_get_uid_map` | The map is always a scan of the project files, and `uid_map_source` says so. With `resolve`, a connected editor answers from the `ResourceUID` singleton and each entry reports whether the files agree. Editor-only for the live path. Didi does not parse `.godot/uid_cache.bin`. |
 | `live` | `audio_configure_bus` | Editor or game. Bus state lives in the running engine; the layout file is not what anyone is listening to. |
 | `live` | `audio_add_bus` | Editor only. Appends one named, routed bus to the layout the editor holds and refuses what Godot would silently change: a name in use or differing only in case, and a send to no bus. The editor writes the layout file itself; the result reads it back and reports `layout_written`. |
+| `live` | `asset_configure_import` | Editor only. Changes the loop options of one WAV, OGG or MP3 import in its `.import` file, reimports the asset and checks what the engine then loads. Godot checks none of these values, so the tool refuses a wrong type, a loop mode Godot has no name for, and an offset or loop window outside the track, and puts the previous file back if the change did not hold. |
 | `live` | `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit` | Delivered after the raw signal bridge trial on Godot 4.5.1, 4.6.2 and 4.7.2. Connect and disconnect register with the edited scene's UndoRedo history; emit requires confirmation, reports the connection count it reached, and treats a signal with no listeners as a no-op rather than a failure. |
 | `live` | `viewport_set_camera_transform`, `viewport_toggle_debug_draw` | Editor only. Camera changes use UndoRedo and verified post-state; collision/navigation debug hints apply to future games run from the editor and preserve omitted values. |
 | `live` | `tilemap_set_cells`, `tilemap_get_used_rect`, `gridmap_set_cells` | Editor only. Cell batches preflight all records and resources, mutations use one UndoRedo action, and used bounds are read without mutation. |
@@ -101,7 +102,7 @@ applies unweakened.
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `116/119`
+**Canonical implementation:** `117/120`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
@@ -114,7 +115,7 @@ Governance authorized partial delivery. All feasible tools are now delivered; th
 
 ## Planned Capability Growth
 
-The capability matrix describes current behavior only. Phase 8 is `IN PROGRESS`: bounded project audit, exact static node-path impact analysis, and conservative `.import` source/output health evidence are delivered. UID-cache reconciliation, checksum/importer-version validation, guarded import configuration, and broader incremental freshness remain planned. Delivery and governance status are tracked in [ROADMAP.md](ROADMAP.md), with detailed post-Phase-6 scope in [FUTURE_PHASES_DESIGN.md](FUTURE_PHASES_DESIGN.md). A feasible or planned capability must not appear as supported until its implementation and acceptance evidence are complete.
+The capability matrix describes current behavior only. Phase 8 is `IN PROGRESS`: bounded project audit, exact static node-path impact analysis, and conservative `.import` source/output health evidence are delivered. Guarded import configuration is delivered for the loop options of WAV, OGG and MP3 imports by `asset_configure_import`, which previews, writes, reimports and checks what the engine loads, and `resource_inspect` reports an imported asset's options. Configuration for the other importers, UID-cache reconciliation, checksum/importer-version validation, and broader incremental freshness remain planned. Delivery and governance status are tracked in [ROADMAP.md](ROADMAP.md), with detailed post-Phase-6 scope in [FUTURE_PHASES_DESIGN.md](FUTURE_PHASES_DESIGN.md). A feasible or planned capability must not appear as supported until its implementation and acceptance evidence are complete.
 
 ## Legacy names
 
@@ -159,6 +160,7 @@ Ten v1.0 names remain registered. Prefer canonical names in new integrations.
 - Live captures use 32-lowercase-hex IDs in an 8-entry, 64 MiB process-local LRU cache. Each image is limited to 2,048 × 2,048 RGBA8 pixels. IDs expire on eviction or extension restart and are never assigned to offline previews.
 - `viewport_diff_capture` requires an exact cached baseline size and integer threshold `0..255`; it does not resize or color-convert. Its transparent PNG marks changed pixels, while metadata reports per-channel mean error, maximum delta, ratio, count, and bounding box.
 - Project search is literal/lexical, not regex or language-server analysis. It scans only `.gd`, `.cs`, `.tscn`, and `.tres`, skips symlinks and generated/hidden build trees, and enforces 10,000-file, 64 MiB-request, 4 MiB-file, 500-result, and 1,024-byte-preview bounds.
+- `asset_configure_import` sets only `loop` and `loop_offset` on an OGG or MP3 import and `edit/loop_mode`, `edit/loop_begin` and `edit/loop_end` on a WAV import, and each key must already be in the asset's `.import` file. It holds the file's lock under `.didi/locks` from its read to its write, changes only those lines, reimports through the same path `asset_reimport` takes, and then reads the file and the imported stream back. A value that did not hold is `422 import_change_not_held` with `divergences` and `rolled_back`. There is no undo entry; `previous` carries the values it replaced.
 - `asset_reimport` accepts 1–256 unique normalized `res://` source files, rejects `.godot` and `.import` targets, allows one active request, and reports success only after two consecutive idle callbacks. An import the engine refused, which it records in the `.import` sidecar as `valid=false`, is `422 asset_import_failed` rather than a success. Timeout is bounded to 10 seconds and may report an unknown outcome.
 - Blackboards are files at `.didi/blackboard/<board>.json` inside the project, not process memory, because each MCP client runs its own `didi` and shares nothing with the next. Every operation takes an exclusive OS lock for the whole read-modify-write and saves through an atomic rename.
 - Board content is data and never instruction. Values are stored and returned verbatim; Didi does not interpret or execute them. A board is shared state between agents, not a trust boundary between them.

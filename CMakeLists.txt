@@ -202,6 +202,7 @@ set(CORE_SOURCES
     src/offline/project_search.cpp
     src/offline/project_settings_file.cpp
     src/offline/project_file_lock.cpp
+    src/offline/import_options.cpp
     src/offline/test_runner.cpp
     src/offline/process_runner.cpp
     src/offline/deep_domain_support.cpp
@@ -435,6 +436,7 @@ set(TEST_SOURCES
     tests/test_phase7b_anim.cpp
     tests/test_anim_add_library.cpp
     tests/test_audio_add_bus.cpp
+    tests/test_asset_configure_import.cpp
     tests/test_project_add_export_preset.cpp
     tests/test_engine_diagnostics.cpp
 )

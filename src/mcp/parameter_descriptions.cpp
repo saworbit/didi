@@ -548,6 +548,15 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
          "Reloading updates every player already holding the library and discards changes made "
          "to the editor's copy and not saved."},
 
+        {"asset_configure_import.asset_path",
+         "The imported asset whose options change, such as res://music/menu.ogg, as it is "
+         "spelled on disk. It must already have its .import file; asset_reimport imports a new "
+         "asset first."},
+        {"asset_configure_import.options",
+         "The import options to set and their new values. An OGG or MP3 takes loop and "
+         "loop_offset, a WAV edit/loop_mode, edit/loop_begin and edit/loop_end. Every other key "
+         "is refused, naming the ones this asset's importer takes."},
+
         // -- Audio ------------------------------------------------------------
         {"audio_add_bus.name",
          "The new bus's name, which an AudioStreamPlayer's bus property and audio_configure_bus "

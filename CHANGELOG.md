@@ -41,16 +41,29 @@ release changed, which is why it lives here and not in a version section.
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `116/119`
+**Canonical implementation:** `117/120`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Discovery now exposes 119 canonical tools plus 10 legacy registrations (129 total). 116 canonical tools are implemented and 3 remain unimplemented.
-The three Phase 7 blockers are unchanged; the newest name is `audio_add_bus`, recorded in [Surface Amendments](docs/SURFACE_AMENDMENTS.md).
+Discovery now exposes 120 canonical tools plus 10 legacy registrations (130 total). 117 canonical tools are implemented and 3 remain unimplemented.
+The three Phase 7 blockers are unchanged; the newest name is `asset_configure_import`, recorded in [Surface Amendments](docs/SURFACE_AMENDMENTS.md).
 
 ### Added
 
+- **`asset_configure_import` makes a track loop (#958).** Whether music loops is an import
+  option, `loop` for an OGG or MP3 and `edit/loop_mode` for a WAV, and nothing on the surface
+  could write one, so a menu's music played once and stopped, and the only way around it was a
+  script setting `stream.loop` in `_ready`. The new tool changes the loop options of one WAV,
+  OGG or MP3 import in its `.import` file, reimports the asset in the attached editor, and checks
+  the file and the stream loaded fresh from disk; if the change did not hold, it puts the previous
+  file back and reimports that. Godot checks none of these values: a loop mode of 5 loads as one
+  the engine has no name for, `loop="yes"` loads as true, and a loop window past the stream or
+  an offset past the end is stored as written, all without an error. So the tool refuses each of
+  them, and any importer or option it has no measurement for. `resource_inspect` now reports an
+  imported asset's options under `import`, so whether a track loops can be read without an
+  editor. Recorded in [Surface Amendments](docs/SURFACE_AMENDMENTS.md), with the engine probe
+  behind every rule in `tools/vibe/probes/import_config_engine.py`.
 - **Experimental argument normalization, disabled by default.** Builds with
   `DIDI_ELASTIC_INGRESS=ON` let explicitly opted-in calls normalize selected
   numeric limits and 2D coordinates on three existing read-only tools. Canonical

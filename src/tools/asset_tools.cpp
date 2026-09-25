@@ -6,6 +6,8 @@
 #include "didi/offline/project_audit.hpp"
 #include "didi/offline/project_impact.hpp"
 #include "didi/offline/audio_bus_layout.hpp"
+#include "didi/offline/import_options.hpp"
+#include "didi/offline/project_file_lock.hpp"
 #include "didi/offline/class_reference.hpp"
 #include "didi/common/project_path.hpp"
 #include "didi/common/atomic_write.hpp"
@@ -1300,7 +1302,21 @@ CallToolResult handleResourceInspect(const json& args, std::shared_ptr<ipc::IIpc
     // unsorted, so which sibling came back was down to directory order.
     const auto indexer = offline::ResourceIndexer::sharedIndex(".");
     if (const auto* found = indexer->findExact(resource_path)) {
-        return CallToolResult::successJson(found->toJson());
+        json described = found->toJson();
+        // An imported asset's import options, read from the sidecar the editor
+        // wrote. Whether a track loops is one of them, and nothing else on the
+        // surface could say (#958).
+        if (auto resolved = paths::resolveProjectFile(resource_path); resolved.isOk()) {
+            auto sidecar = resolved.value();
+            sidecar += ".import";
+            std::error_code error;
+            if (std::filesystem::is_regular_file(sidecar, error) && !error) {
+                if (auto text = offline::readImportSidecarFile(sidecar); text.isOk()) {
+                    described["import"] = offline::describeImportSidecar(text.value());
+                }
+            }
+        }
+        return CallToolResult::successJson(std::move(described));
     }
 
     // "You pointed at a directory, pass a file" and "that path does not
@@ -1992,6 +2008,300 @@ CallToolResult handleAssetReimport(const json& args, std::shared_ptr<ipc::IIpcCl
         return CallToolResult::error("Failed to reimport assets: " + response.error().message);
     }
     return CallToolResult::successJson(response.value());
+}
+
+namespace {
+
+// A bridge answer that is a refusal, whichever way it arrived: as a failed
+// request, or as an answer carrying an error object.
+std::optional<Error> bridgeFailure(const Result<json>& response) {
+    if (response.isErr()) return response.error();
+    const auto& payload = response.value();
+    if (payload.is_object() && payload.contains("error") && payload["error"].is_object()) {
+        const auto& error = payload["error"];
+        return Error(error.value("code", 500),
+                     error.value("message", std::string("The editor refused the request")),
+                     error.contains("data") ? error["data"] : json());
+    }
+    return std::nullopt;
+}
+
+// Every line the engine printed across the calls one answer is made of.
+void gatherDiagnostics(json& into, const Result<json>& response) {
+    if (response.isErr() || !response.value().is_object()) return;
+    const auto& payload = response.value();
+    const json* lines = nullptr;
+    if (payload.contains("engine_diagnostics")) lines = &payload["engine_diagnostics"];
+    else if (payload.contains("error") && payload["error"].is_object() &&
+             payload["error"].value("data", json::object()).contains("engine_diagnostics")) {
+        lines = &payload["error"]["data"]["engine_diagnostics"];
+    }
+    if (!lines || !lines->is_array()) return;
+    for (const auto& line : *lines) into.push_back(line);
+}
+
+std::optional<offline::ImportedStreamFacts> streamFacts(const json& stream) {
+    if (!stream.is_object()) return std::nullopt;
+    offline::ImportedStreamFacts facts;
+    if (stream.contains("length_seconds") && stream["length_seconds"].is_number()) {
+        facts.length_seconds = stream["length_seconds"].get<double>();
+    }
+    const auto properties = stream.value("properties", json::object());
+    if (properties.is_object() && properties.contains("mix_rate") &&
+        properties["mix_rate"].is_number_integer()) {
+        facts.mix_rate = properties["mix_rate"].get<int64_t>();
+    }
+    return facts;
+}
+
+// What the preview and the call both work from: the asset as it is spelled on
+// disk, its sidecar as Godot's parser reads it, and the lines that would
+// change, checked against the stream when an editor can say what it is.
+struct ImportPlan {
+    std::filesystem::path root;
+    std::filesystem::path sidecar_path;
+    std::string asset_path;
+    std::string lock_name;
+    json options;
+    offline::ImportSidecar sidecar;
+    std::vector<offline::ImportOptionChange> changes;
+    json stream;
+};
+
+Result<ImportPlan> planImport(const json& args, const std::shared_ptr<ipc::IIpcClient>& ipc) {
+    auto request = offline::parseImportConfigureRequest(args);
+    if (request.isErr()) return request.error();
+    const auto refuse = [](int code, const std::string& message, json data) {
+        data["parameter"] = "asset_path";
+        if (!data.contains("retryable")) data["retryable"] = false;
+        return Error(code, message, std::move(data));
+    };
+    ImportPlan plan;
+    plan.options = request.value().options;
+    std::error_code error;
+    plan.root = std::filesystem::weakly_canonical(std::filesystem::current_path(), error);
+    if (error) return Error::internal("The project root cannot be resolved");
+
+    auto resolved = paths::resolveProjectFile(request.value().asset_path);
+    if (resolved.isErr()) {
+        return refuse(resolved.error().code == 404 ? 404 : 400,
+                      "asset_path " + request.value().asset_path + ": " + resolved.error().message + ".",
+                      json{{"code", resolved.error().code == 404 ? "not_found" : "invalid_arguments"}});
+    }
+    // The spelling on disk, because a wrong letter case opens on Windows and
+    // names a file an export will not find, as anim_add_library found.
+    std::error_code canonical_error;
+    const auto on_disk = std::filesystem::canonical(resolved.value(), canonical_error);
+    const auto asset = canonical_error ? resolved.value() : on_disk;
+    plan.asset_path = paths::resourcePathOf(asset);
+    std::string requested = request.value().asset_path;
+    if (!strings::startsWith(requested, "res://")) requested = "res://" + requested;
+    const auto folded = [](std::string text) {
+        std::transform(text.begin(), text.end(), text.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        return text;
+    };
+    if (requested != plan.asset_path && folded(requested) == folded(plan.asset_path)) {
+        return refuse(400,
+                      "asset_path is spelled " + requested + " and the file is " + plan.asset_path +
+                          ". Windows opened it anyway, and an exported game would not.",
+                      json{{"code", "invalid_arguments"},
+                           {"retry_with", {{"asset_path", plan.asset_path}}}});
+    }
+    plan.sidecar_path = asset;
+    plan.sidecar_path += ".import";
+    if (!std::filesystem::is_regular_file(plan.sidecar_path, error) || error) {
+        return refuse(404,
+                      plan.asset_path + " has no .import sidecar, so the editor has not imported "
+                      "it. asset_reimport imports an asset the editor has not seen; call it first.",
+                      json{{"code", "no_import_metadata"}});
+    }
+    plan.lock_name = plan.asset_path.substr(6) + ".import";
+    auto text = offline::readImportSidecarFile(plan.sidecar_path);
+    if (text.isErr()) return text.error();
+    auto sidecar = offline::readImportSidecar(text.value());
+    if (sidecar.isErr()) return sidecar.error();
+    plan.sidecar = std::move(sidecar.value());
+
+    // Everything that needs no engine is checked first, so a texture or a key
+    // the importer does not have is refused without asking the editor.
+    auto checked = offline::planImportChanges(plan.sidecar, plan.options, std::nullopt);
+    if (checked.isErr()) return checked.error();
+    plan.changes = std::move(checked.value());
+    if (ipc && ipc->isConnected()) {
+        auto read = ipc->sendRequest("asset.readImportedStream", json{{"path", plan.asset_path}}, 10000);
+        if (auto failed = bridgeFailure(read)) return *failed;
+        plan.stream = read.value();
+        auto bounded = offline::planImportChanges(plan.sidecar, plan.options, streamFacts(plan.stream));
+        if (bounded.isErr()) return bounded.error();
+        plan.changes = std::move(bounded.value());
+    }
+    return plan;
+}
+
+json changesAsValues(const std::vector<offline::ImportOptionChange>& changes, bool previous) {
+    json values = json::object();
+    for (const auto& change : changes) values[change.key] = previous ? change.previous : change.value;
+    return values;
+}
+
+json streamSummary(const json& stream) {
+    if (!stream.is_object()) return json();
+    json summary = {{"class", stream.value("class", std::string())},
+                    {"properties", stream.value("properties", json::object())}};
+    if (stream.contains("length_seconds")) summary["length_seconds"] = stream["length_seconds"];
+    return summary;
+}
+
+} // namespace
+
+Result<json> previewAssetConfigureImport(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    auto planned = planImport(args, ipc);
+    if (planned.isErr()) return planned.error();
+    const auto& plan = planned.value();
+    json before = {{"asset_path", plan.asset_path},
+                   {"importer", plan.sidecar.importer},
+                   {"uid", plan.sidecar.uid},
+                   {"options", changesAsValues(plan.changes, true)},
+                   {"planned_options", changesAsValues(plan.changes, false)}};
+    if (plan.stream.is_object()) {
+        before["stream"] = streamSummary(plan.stream);
+    } else {
+        // With no editor the bounds that depend on the track were not checked,
+        // and the preview says so rather than implying they passed.
+        before["stream_read"] = false;
+    }
+    return json{{"before", std::move(before)}, {"subject", {{"asset_path", plan.asset_path}}}};
+}
+
+// Changes an imported asset's import options, reimports it, and proves the
+// change held (#958). The rules and the measurements behind them are in the
+// asset_configure_import amendment in docs/SURFACE_AMENDMENTS.md.
+CallToolResult handleAssetConfigureImport(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    if (!ipc || !ipc->isConnected()) {
+        // Unreachable in practice: the registry's live-route check answers
+        // first and names resource_inspect.
+        return CallToolResult::error(
+            "Godot Editor is offline. An import option is changed, reimported and checked by the "
+            "editor, so open the project in the editor to change one. resource_inspect reads an "
+            "asset's import options offline.");
+    }
+    auto planned = planImport(args, ipc);
+    if (planned.isErr()) return CallToolResult::fromError(planned.error());
+    auto plan = std::move(planned.value());
+
+    // Held from the read that plans the edit to the write, so another writer's
+    // change to the same sidecar is either wholly before this one or wholly
+    // after it (#929).
+    std::string previous_text;
+    {
+        auto lock = offline::lockProjectFile(plan.root, plan.lock_name);
+        if (lock.isErr()) return CallToolResult::fromError(lock.error());
+        auto text = offline::readImportSidecarFile(plan.sidecar_path);
+        if (text.isErr()) return CallToolResult::fromError(text.error());
+        auto fresh = offline::readImportSidecar(text.value());
+        if (fresh.isErr()) return CallToolResult::fromError(fresh.error());
+        auto changes = offline::planImportChanges(fresh.value(), plan.options, streamFacts(plan.stream));
+        if (changes.isErr()) return CallToolResult::fromError(changes.error());
+        auto edited = offline::applyImportChanges(fresh.value(), changes.value());
+        if (edited.isErr()) return CallToolResult::fromError(edited.error());
+        previous_text = fresh.value().text;
+        plan.sidecar = std::move(fresh.value());
+        plan.changes = std::move(changes.value());
+        auto written = files::writeFileAtomically(plan.sidecar_path, edited.value());
+        if (written.isErr()) {
+            return CallToolResult::fromError(written.error(), "Failed to write the .import sidecar: ");
+        }
+    }
+
+    json diagnostics = json::array();
+    const json reimport_request = {{"paths", json::array({plan.asset_path})}};
+    // Puts the sidecar back as it was and imports it again, so a change that
+    // did not hold leaves the asset as it found it.
+    const auto restore = [&]() {
+        {
+            auto lock = offline::lockProjectFile(plan.root, plan.lock_name);
+            if (lock.isErr()) return false;
+            if (files::writeFileAtomically(plan.sidecar_path, previous_text).isErr()) return false;
+        }
+        auto again = ipc->sendRequest("asset.reimport", reimport_request, ipc::kWaitForDefinitiveResponse);
+        offline::ResourceIndexer::invalidateSharedIndex();
+        gatherDiagnostics(diagnostics, again);
+        return !bridgeFailure(again).has_value();
+    };
+
+    auto reimported = ipc->sendRequest("asset.reimport", reimport_request, ipc::kWaitForDefinitiveResponse);
+    offline::ResourceIndexer::invalidateSharedIndex();
+    gatherDiagnostics(diagnostics, reimported);
+    if (auto failed = bridgeFailure(reimported)) {
+        const bool restored = restore();
+        json data = failed->data.is_object() ? failed->data : json::object();
+        data["asset_path"] = plan.asset_path;
+        data["rolled_back"] = restored;
+        data["engine_diagnostics"] = diagnostics;
+        return CallToolResult::fromError(
+            Error(failed->code,
+                  "The options were written and the reimport failed: " + failed->message +
+                      (restored ? " The previous sidecar is back and reimported."
+                                : " Putting the previous sidecar back failed too."),
+                  data));
+    }
+
+    // Checked against the file and the stream rather than taken from the
+    // reimport's answer, because the engine refuses nothing: it stores a value
+    // it cannot use and loads it without a word.
+    std::vector<std::string> divergences;
+    auto after_text = offline::readImportSidecarFile(plan.sidecar_path);
+    auto after = after_text.isOk() ? offline::readImportSidecar(after_text.value())
+                                   : Result<offline::ImportSidecar>(after_text.error());
+    if (after.isErr()) {
+        divergences.push_back("the sidecar does not read back after the reimport: " + after.error().message);
+    } else {
+        for (auto& line : offline::sidecarDivergences(after.value(), plan.changes, plan.sidecar.uid)) {
+            divergences.push_back(std::move(line));
+        }
+    }
+    auto stream_after = ipc->sendRequest("asset.readImportedStream", json{{"path", plan.asset_path}}, 10000);
+    gatherDiagnostics(diagnostics, stream_after);
+    if (auto failed = bridgeFailure(stream_after)) {
+        divergences.push_back("the stream does not load after the reimport: " + failed->message);
+    } else {
+        for (auto& line : offline::streamDivergences(stream_after.value(), plan.changes)) {
+            divergences.push_back(std::move(line));
+        }
+    }
+    if (!divergences.empty()) {
+        const bool restored = restore();
+        std::string summary;
+        for (size_t i = 0; i < divergences.size(); ++i) summary += (i ? "; " : "") + divergences[i];
+        return CallToolResult::errorJson(
+            422,
+            "The import options did not hold after the reimport: " + summary + "." +
+                (restored ? " The previous sidecar is back and reimported."
+                          : " Putting the previous sidecar back failed too."),
+            {{"code", "import_change_not_held"},
+             {"asset_path", plan.asset_path},
+             {"divergences", divergences},
+             {"rolled_back", restored},
+             {"engine_diagnostics", diagnostics},
+             {"retryable", false}});
+    }
+
+    json payload = {
+        {"status", "configured"},
+        {"asset_path", plan.asset_path},
+        {"importer", plan.sidecar.importer},
+        {"uid", plan.sidecar.uid},
+        {"previous", changesAsValues(plan.changes, true)},
+        {"options", changesAsValues(plan.changes, false)},
+        {"reimported", true},
+        {"verified", true},
+        {"stream", streamSummary(stream_after.value())},
+        {"undo_redo_registered", false},
+        {"way_back", "asset_configure_import on the same asset with options set to previous"},
+        {"engine_diagnostics", diagnostics},
+        {"execution_mode", "live"}};
+    return CallToolResult::successJson(std::move(payload));
 }
 
 } // namespace mcp
