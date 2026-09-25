@@ -1,3 +1,4 @@
+#include "didi/offline/class_reference.hpp"
 #include "didi/common/engine_version.hpp"
 #include "didi/offline/test_runner.hpp"
 #if defined(_WIN32)
@@ -1359,6 +1360,88 @@ static void test_audio_list_buses_follows_a_relocated_layout_setting() {
     ASSERT_EQ(report["layout_path"], "res://config/buses.tres");
     ASSERT_EQ(report["buses"].size(), 2u);
     ASSERT_EQ(report["buses"][1]["name"], "Music");
+}
+
+static void test_project_audit_names_a_connection_to_a_method_nothing_declares() {
+    // Break caught: project_rename_references renames the method in the scene's
+    // [connection] and reports the GDScript lines it left alone, by design. The
+    // project is then broken, and nothing on the surface said so: the audit
+    // looked at signal names, never at the method a connection calls (#781).
+    //
+    // What is reported has to be certain. A connection is judged only when this
+    // file declares the receiving node and every step of the answer resolves:
+    // the node's script, each script it extends, and the engine class the chain
+    // ends on, whose methods the class reference lists. Anything else is left
+    // alone, because a broken connection that is not broken is worse than one
+    // that is not reported.
+    if (!didi::offline::ClassReference::instance().loaded()) {
+        throw std::runtime_error("The generated class reference was not found next to the test binary.");
+    }
+    ScopedToolProject project("project-audit-connections");
+    writeAuditFile("project.godot", "config_version=5\n");
+    writeAuditFile("scripts/main.gd", "extends Node\nfunc _on_timer_timeout():\n\tpass\n");
+    writeAuditFile("scripts/base.gd", "extends Node2D\nfunc _on_base_hit():\n\tpass\n");
+    writeAuditFile("scripts/child.gd", "extends \"res://scripts/base.gd\"\n");
+    writeAuditFile("scripts/hero.gd", "class_name Hero\nextends Node\nstatic func heal():\n\tpass\n");
+    writeAuditFile("scripts/uses_hero.gd", "extends Hero\n");
+    writeAuditFile("scripts/lost.gd", "extends \"res://scripts/missing.gd\"\n");
+    writeAuditFile("main.tscn",
+        "[gd_scene load_steps=6 format=3]\n\n"
+        "[ext_resource type=\"Script\" path=\"res://scripts/main.gd\" id=\"1_main\"]\n"
+        "[ext_resource type=\"Script\" path=\"res://scripts/child.gd\" id=\"2_child\"]\n"
+        "[ext_resource type=\"PackedScene\" path=\"res://enemy.tscn\" id=\"3_enemy\"]\n"
+        "[ext_resource type=\"Script\" path=\"res://scripts/uses_hero.gd\" id=\"4_hero\"]\n"
+        "[ext_resource type=\"Script\" path=\"res://scripts/lost.gd\" id=\"5_lost\"]\n\n"
+        "[node name=\"Main\" type=\"Node\"]\nscript = ExtResource(\"1_main\")\n\n"
+        "[node name=\"Timer\" type=\"Timer\" parent=\".\"]\n\n"
+        "[node name=\"Child\" type=\"Node2D\" parent=\".\"]\nscript = ExtResource(\"2_child\")\n\n"
+        "[node name=\"Hero\" type=\"Node\" parent=\".\"]\nscript = ExtResource(\"4_hero\")\n\n"
+        "[node name=\"Lost\" type=\"Node\" parent=\".\"]\nscript = ExtResource(\"5_lost\")\n\n"
+        "[node name=\"Enemy\" parent=\".\" instance=ExtResource(\"3_enemy\")]\n\n"
+        "[node name=\"Plain\" type=\"Node\" parent=\"Hero\"]\n\n"
+        "[connection signal=\"timeout\" from=\"Timer\" to=\".\" method=\"_on_timer_timeout\"]\n"
+        "[connection signal=\"timeout\" from=\"Timer\" to=\".\" method=\"_on_MobTimer_timeout\"]\n"
+        "[connection signal=\"timeout\" from=\"Timer\" to=\"Child\" method=\"_on_base_hit\"]\n"
+        "[connection signal=\"timeout\" from=\"Timer\" to=\"Child\" method=\"queue_free\"]\n"
+        "[connection signal=\"timeout\" from=\"Timer\" to=\"Child\" method=\"nope_child\"]\n"
+        "[connection signal=\"timeout\" from=\"Timer\" to=\"Hero\" method=\"heal\"]\n"
+        "[connection signal=\"timeout\" from=\"Timer\" to=\"Lost\" method=\"whatever\"]\n"
+        "[connection signal=\"timeout\" from=\"Timer\" to=\"Enemy\" method=\"anything\"]\n"
+        "[connection signal=\"timeout\" from=\"Timer\" to=\"Enemy/Inner\" method=\"anything\"]\n"
+        "[connection signal=\"timeout\" from=\"Timer\" to=\"Hero/Plain\" method=\"set_process\"]\n"
+        "[connection signal=\"timeout\" from=\"Timer\" to=\"Hero/Plain\" method=\"no_such_native\"]\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    const didi::json only_connections = {
+        {"include_orphans", false}, {"include_broken_references", false},
+        {"include_dead_signals", false}, {"include_import_health", false}};
+    const auto result = registry.callTool("project_audit_assets", only_connections);
+    ASSERT_TRUE(!result.isError);
+    const auto report = didi::json::parse(result.content[0].text);
+    const auto& broken = report["broken_connections"];
+    ASSERT_EQ(broken.size(), 3u);
+    ASSERT_EQ(broken[0]["to"], ".");
+    ASSERT_EQ(broken[0]["method"], "_on_MobTimer_timeout");
+    ASSERT_EQ(broken[0]["script"], "res://scripts/main.gd");
+    ASSERT_EQ(broken[0]["scene"], "res://main.tscn");
+    ASSERT_EQ(broken[0]["line"], 28);
+    ASSERT_EQ(broken[1]["to"], "Child");
+    ASSERT_EQ(broken[1]["method"], "nope_child");
+    ASSERT_EQ(broken[2]["to"], "Hero/Plain");
+    ASSERT_EQ(broken[2]["method"], "no_such_native");
+    ASSERT_TRUE(broken[2]["script"].is_null());
+    for (const auto& finding : broken) {
+        ASSERT_TRUE(finding["signal"] == "timeout" && finding["from"] == "Timer");
+    }
+
+    // Off means off, like every other pass.
+    auto without = only_connections;
+    without["include_broken_connections"] = false;
+    without["include_dead_signals"] = true;
+    const auto skipped = registry.callTool("project_audit_assets", without);
+    ASSERT_TRUE(!skipped.isError);
+    ASSERT_TRUE(didi::json::parse(skipped.content[0].text)["broken_connections"].empty());
 }
 
 static void test_project_audit_dead_signal_cost_does_not_follow_signal_count() {
@@ -4114,6 +4197,7 @@ static void test_project_audit_honours_switches_and_rejects_bad_arguments() {
                               didi::json{{"include_orphans", false},
                                          {"include_broken_references", false},
                                          {"include_dead_signals", false},
+                                         {"include_broken_connections", false},
                                          {"include_import_health", false}})
                     .isError);
 }
@@ -4175,6 +4259,7 @@ static void test_project_audit_exposes_optional_import_health() {
                               didi::json{{"include_orphans", false},
                                          {"include_broken_references", false},
                                          {"include_dead_signals", false},
+                                         {"include_broken_connections", false},
                                          {"include_import_health", false}})
                     .isError);
 }
@@ -9076,6 +9161,8 @@ struct RegisterToolTests {
                      test_test_lab_checks_the_target_before_touching_the_project);
         registerTest("Tools.InputActionListingCanAskForLess",
                      test_input_action_listing_can_ask_for_less);
+        registerTest("Tools.AuditNamesConnectionToMissingMethod",
+                     test_project_audit_names_a_connection_to_a_method_nothing_declares);
         registerTest("Resources.DefaultRegistration", test_resource_registry);
         registerTest("Prompts.DefaultRegistration", test_prompt_registry);
     }

@@ -37,6 +37,9 @@ struct ProjectAuditOptions {
     bool include_addon_orphans{false};
     bool include_broken_references{true};
     bool include_dead_signals{true};
+    // A scene [connection] whose method the receiving node does not declare or
+    // inherit, judged only where every step of that answer resolves (#781).
+    bool include_broken_connections{true};
     bool include_import_health{true};
     // A cap so one call cannot return an unbounded list.
     size_t max_findings{500};

@@ -175,6 +175,12 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **`project_audit_assets` reports a scene connection to a method nothing declares (#781).**
+  `project_rename_references` leaves exactly that behind when it renames the method in a scene
+  and reports the script lines it did not change, and no check noticed. `broken_connections`
+  judges a connection only when the node, its script chain and the engine class all resolve,
+  so what it reports is certain.
+
 - **`project_list_input_actions` can ask for less (#775).** It took no arguments and answered
   about 69 KB, 85 of 90 actions being the engine's own `ui_*` map. Each entry now says
   `defined_by_project`, `include_engine_defaults: false` keeps only what `project.godot`
