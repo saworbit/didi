@@ -3214,12 +3214,15 @@ Result<HistoryMoved> runEditorHistoryCommand(GDExtensionObjectPtr editor,
 // postcondition fails after the commit, so the tool does not report failure
 // while the scene and the undo stack already carry the change.
 //
-// Through the editor's own Undo, so the manager's history stays true (#913).
-// The action was just committed, so it is the newest and the one the editor
-// undoes. If the editor cannot be asked, or ran the command and moved nothing,
-// which it does while a mouse button is held, the scene is put back directly:
-// a scene still holding a change the tool is about to call failed is worse
-// than a history the editor calls inconsistent.
+// Through the editor's own Undo where that is certain to take this action, so
+// the manager's history stays true (#913). The editor's command undoes the
+// newer of the scene's history and the global one. With nothing in the global
+// one, that is the action just committed. With something there, the command
+// could take that instead, so the scene is put back directly, as it is when
+// the editor cannot be asked or runs the command and moves nothing, which it
+// does while a mouse button is held. A scene still holding a change the tool
+// is about to call failed is worse than a history the editor calls
+// inconsistent.
 Result<void> undoLastAction(GDExtensionObjectPtr manager, GDExtensionObjectPtr root) {
     auto root_value = makeObject(root);
     if (root_value.isErr()) return root_value.error();
@@ -3228,20 +3231,25 @@ Result<void> undoLastAction(GDExtensionObjectPtr manager, GDExtensionObjectPtr r
     if (history_id.isErr()) return history_id.error();
     auto undo_redo = historyUndoRedo(manager, history_id.value());
     if (undo_redo.isErr()) return undo_redo.error();
-    if (auto editor = editorInterface(); editor.isOk()) {
+    const auto has_undo = [](GDExtensionObjectPtr history) -> Result<bool> {
+        auto available = callObject(history, "UndoRedo", "has_undo", 36873697LL);
+        if (available.isErr()) return available.error();
+        auto flag = scalarFromVariant<GDExtensionBool>(available.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+        if (flag.isErr()) return flag.error();
+        return flag.value() != 0;
+    };
+    auto scene_has = has_undo(undo_redo.value());
+    if (scene_has.isErr()) return scene_has.error();
+    if (!scene_has.value()) return Error(409, "Nothing to undo");
+    auto global_id = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(0));
+    auto global = global_id.isOk() ? historyUndoRedo(manager, global_id.value())
+                                   : Result<GDExtensionObjectPtr>(global_id.error());
+    auto global_has = global.isOk() ? has_undo(global.value()) : Result<bool>(true);
+    auto editor = editorInterface();
+    if (global_has.isOk() && !global_has.value() && editor.isOk()) {
         auto moved = runEditorHistoryCommand(editor.value(), manager, undo_redo.value(), true);
         if (moved.isOk() && moved.value() == HistoryMoved::Scene) return Result<void>::ok();
-        if (moved.isOk() && moved.value() == HistoryMoved::Global) {
-            return Error(409, "The editor undid a newer action in its global history rather than "
-                              "the one just committed to the scene");
-        }
     }
-    auto available = callObject(undo_redo.value(), "UndoRedo", "has_undo", 36873697LL);
-    if (available.isErr()) return available.error();
-    auto has_action = scalarFromVariant<GDExtensionBool>(available.value(),
-                                                         GDEXTENSION_VARIANT_TYPE_BOOL);
-    if (has_action.isErr()) return has_action.error();
-    if (!has_action.value()) return Error(409, "Nothing to undo");
     auto executed = callObject(undo_redo.value(), "UndoRedo", "undo", 2240911060LL);
     return executed.isOk() ? Result<void>::ok() : Result<void>(executed.error());
 }
@@ -10382,48 +10390,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
             }
             if (force_postcondition_mismatch) postcondition_ok = false;
             if (!postcondition_ok) {
-                auto root_value = makeObject(root.value());
-                Result<void> rolled_back = Result<void>::ok();
-                if (root_value.isErr()) {
-                    rolled_back = root_value.error();
-                } else {
-                    auto history_id = callObject(
-                        manager.value(), "EditorUndoRedoManager", "get_object_history_id",
-                        1107568780LL, {&root_value.value()});
-                    if (history_id.isErr()) {
-                        rolled_back = history_id.error();
-                    } else {
-                        auto history = callObject(
-                            manager.value(), "EditorUndoRedoManager", "get_history_undo_redo",
-                            2417974513LL, {&history_id.value()});
-                        if (history.isErr()) {
-                            rolled_back = history.error();
-                        } else {
-                            auto undo_redo = objectFromVariant(history.value());
-                            if (undo_redo.isErr() || !undo_redo.value()) {
-                                rolled_back = Error::internal(
-                                    "Committed signal history is unavailable");
-                            } else {
-                                auto has_undo_value = callObject(
-                                    undo_redo.value(), "UndoRedo", "has_undo", 36873697LL);
-                                if (has_undo_value.isErr()) {
-                                    rolled_back = has_undo_value.error();
-                                } else {
-                                    auto has_undo = scalarFromVariant<GDExtensionBool>(
-                                        has_undo_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
-                                    if (has_undo.isErr() || !has_undo.value()) {
-                                        rolled_back = Error::internal(
-                                            "Committed signal action is not active");
-                                    } else {
-                                        auto undone = callObject(
-                                            undo_redo.value(), "UndoRedo", "undo", 2240911060LL);
-                                        if (undone.isErr()) rolled_back = undone.error();
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                const Result<void> rolled_back = undoLastAction(manager.value(), root.value());
                 bool restored = false;
                 if (rolled_back.isOk()) {
                     auto restored_connected_value = callObject(
