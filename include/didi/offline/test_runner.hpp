@@ -168,13 +168,13 @@ struct TestSessionResult {
         // No kill was waited on: the run ended on its own, or it timed out with
         // no job to query, which is the `contained == false` host.
         NotAttempted,
-        // The job held no processes. The tree is gone and a caller may say so.
+        // The job is empty and captured process handles have signaled exit.
         TreeExited,
         // The bound expired with processes still in the job. They were sent a
         // terminate and did not go in time; something may still be running.
         WaitExpired,
-        // The job could not be queried, so nothing is known either way. This is
-        // not load, it is a broken handle.
+        // The job or its process identities could not be queried reliably,
+        // or termination failed. Completion cannot be established.
         QueryFailed
     };
     KillWait kill_wait{KillWait::NotAttempted};
