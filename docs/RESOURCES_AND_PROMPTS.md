@@ -77,8 +77,9 @@ size and modified time on a background thread and emits
 `notifications/resources/updated` when they change. That is polling. What it is
 not is polling an agent pays for: the loop is in C++ at a fixed interval and
 costs no request, no token and no turn, which is the whole point. The thread
-exists only while something is subscribed, and the first tick records what is
-already there rather than announcing it as a change.
+exists only while something is subscribed. Each board's file is recorded when
+the board is first subscribed, so what is already there is never announced as
+a change, and a board nobody watches keeps no record.
 
 A notification carries the URI and nothing else. Fetch the contents with
 `resources/read`, which applies the same bounds as any other read.
