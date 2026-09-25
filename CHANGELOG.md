@@ -589,6 +589,12 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Changed
 
+- **The vendored JSON parser is nlohmann/json 3.12.0 (#796).** It parses every request an MCP
+  client sends. The header is the signed upstream release, byte for byte. Two of its changes
+  could have reached Didi and neither has a caller here: `std::filesystem::path` converting as
+  UTF-8, which a build with that conversion deleted proves, and `get_ptr` no longer reading an
+  unsigned value as signed. Malformed input gets the same answers as before.
+
 - **The README and the website list every tool.** Their fourteen domains
   counted 94 of the 120 canonical tools: the audio buses, the shader tools,
   the spatial queries, the ghost previews, `asset_configure_import` and
