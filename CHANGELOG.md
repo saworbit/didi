@@ -447,6 +447,22 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Changed
 
+- **The README and the website list every tool.** Their fourteen domains
+  counted 94 of the 120 canonical tools: the audio buses, the shader tools,
+  the spatial queries, the ghost previews, `asset_configure_import` and
+  fourteen more were in no domain. Every canonical tool is now in exactly one,
+  and the counts add up to 120. `ui_hit_test` and `viewport_diff_capture` were
+  still described as editor-only, which they have not been since a game
+  session could answer them, and `scene_get_property` as returning scalars,
+  where it returns vectors, colours, arrays, dictionaries and resource paths.
+  The API specification listed 42 of the extension's 81 bridge methods and now
+  lists them all, with which session kinds may run which. The architecture's
+  queue says why nothing is dequeued inside an import pass (#914), and the
+  developer guide names every file an addon script has to be listed in and the
+  local replay of the end-to-end CI step. macOS and Linux were "not in CI"; a
+  headless editor answers the vibe probes there and nothing asserts, which is
+  what both platform tables now say.
+
 - **The website and the quickstart start from the download.** Both told a
   newcomer to clone and build, with a `D:/didi/build/Release` path in the
   client configuration, although every release ships a built archive for all

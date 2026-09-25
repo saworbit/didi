@@ -31,7 +31,7 @@ In managed mode, inspect `runtime_recovery_status` and use `runtime_recover_edit
 
 ### Inspect the edited scene
 
-Use `scene_get_hierarchy`. In live mode, trust names, classes, logical paths, and children. Check `omitted_fields`: bulk properties, scripts, and signals are deliberately not fabricated. Use `scene_get_property` for one scalar property at a time.
+Use `scene_get_hierarchy`. In live mode, trust names, classes, logical paths, and children. Check `omitted_fields`: bulk properties, scripts, and signals are deliberately not fabricated. Use `scene_get_property` for one property at a time; a vector, a colour, an array or a resource path comes back as JSON, and a type with no JSON form is refused.
 
 Offline hierarchy results come from parsing a `.tscn` file and contain `source: "parsed_tscn_file"`; they are not unsaved editor state.
 

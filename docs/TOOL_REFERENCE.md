@@ -197,7 +197,7 @@ Non-finite numbers read back as the strings `"inf"`, `"-inf"` and `"nan"` rather
 
 - `target_node` (`string`, required).
 - `property_name` (`string`, required).
-- `value` (required): JSON null, boolean, signed integer, real, or string compatible with the existing Godot property type.
+- `value` (required): the JSON form of the property's Godot type, from the table above.
 
 The property is read back after the commit, and the result reports what it now holds rather than what was requested. `value` is that observed state, `old_value` is what it held before, `requested_value` is the argument, and `applied` says whether the two now agree. A committed UndoRedo action is not a changed property: Godot discards some writes, such as `anchors_preset` on a Control still in `layout_mode` 0, and those return `applied: false` with `value` unchanged. Numbers are compared by value, so writing an integer to a float property is `applied: true`.
 
@@ -223,7 +223,7 @@ Every live scene answer names the scene it is about. `scene_get_hierarchy` and `
 
 ### `scene_get_property` — Live
 
-Returns one existing scalar property. Metadata and export hints are not returned.
+Returns one existing property, in the JSON forms the table under `scene_set_property` lists, plus arrays and dictionaries of them nested up to 16 levels. A resource comes back as its `res://` path, which is what a write takes, and an object with no path to give, a Node for instance, as `null`. A type with no JSON form, such as `Transform3D`, is refused. Metadata and export hints are not returned.
 
 - `target_node` (`string`, required).
 - `property_name` (`string`, required).

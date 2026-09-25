@@ -316,20 +316,32 @@ Request IDs are correlated exactly. A missing or mismatched response ID closes t
 
 - `session.handshake`
 
-- `editor.getState`, `editor.getRecoveryState`
-- `scene.getHierarchy`, `scene.instantiateNode`, `scene.removeNode`, `scene.reparentNode`, `scene.setProperty`, `scene.getProperty`, `scene.duplicateNode`
+- `editor.getState`, `editor.getRecoveryState`, `editor.getSelection`
+- `scene.getHierarchy`, `scene.instantiateNode`, `scene.removeNode`, `scene.reparentNode`, `scene.setProperty`, `scene.getProperty`, `scene.duplicateNode`, `scene.callMethod`
 - `script.attachToNode`, `script.detachFromNode`
 - `project.listAutoloads`, `project.setAutoload`, `project.removeAutoload`
 - `project.listInputActions`, `project.setInputAction`, `project.removeInputAction`
-- `project.getSetting`, `project.setSetting`
+- `project.getSetting`, `project.setSetting`, `project.resolveUids`
+- `engine.classExists`
 - `scene.listGroups`, `scene.addToGroup`, `scene.removeFromGroup`, `scene.getGroupMembers`
 - `scene.create`, `scene.open`, `scene.close`, `scene.packBranch`
 - `editor.undo`, `editor.redo`, `editor.saveScene`, `editor.reloadProject`
-- `asset.reimport`
-- `vision.captureViewport`, `vision.diffViewport`
-- `ui.hitTest`
-- `runtime.getLogs`, `runtime.getTree`, `runtime.setPaused`, `runtime.step`, `runtime.stop`
-- `runtime.evalGdscript`
+- `asset.reimport`, `asset.readImportedStream`, `resource.refreshCached`, `export.reloadPresets`
+- `audio.listBuses`, `audio.configureBus`, `audio.addBus`
+- `signal.listConnections`, `signal.connect`, `signal.disconnect`, `signal.emit`
+- `vision.captureViewport`, `vision.diffViewport`, `vision.capturePasses`, `vision.setCameraTransform`, `vision.toggleDebugDraw`, `vision.frustumQuery`
+- `preview.renderGhost`, `preview.clearGhosts`
+- `physics.raycast`, `physics.raycastBatch`, `physics.clearance`, `nav.queryPath`
+- `anim.listTracks`, `anim.playTrack`, `anim.addLibrary`
+- `tilemap.setCells`, `tilemap.getUsedRect`, `gridmap.setCells`
+- `shader.listUniforms`, `shader.setUniform`, `shader.getVisualGraph`
+- `ui.hitTest`, `ui.listControls`
+- `runtime.getLogs`, `runtime.getOutput`, `runtime.getTree`, `runtime.setPaused`, `runtime.step`, `runtime.stop`
+- `runtime.evalGdscript`, `runtime.injectInput`, `runtime.readProfiler`, `runtime.watchInvariants`, `runtime.exploreScene`
+
+Which kind of session may run a method is one table, `livePolicyForMethod` in `include/didi/runtime/session_kind_policy.hpp`, checked as the command is taken off the queue and before anything runs. `runtime.setPaused`, `runtime.step`, `runtime.stop`, `runtime.injectInput`, `runtime.watchInvariants`, `runtime.exploreScene` and `anim.playTrack` are game-only. The reads that make sense in either process are editor-or-game: `runtime.getLogs`, `runtime.getOutput`, `runtime.getTree`, `runtime.evalGdscript`, `runtime.readProfiler`, the spatial queries, `nav.queryPath`, `anim.listTracks`, `ui.listControls`, `ui.hitTest`, the three capture methods, `audio.listBuses`, `audio.configureBus` and `engine.classExists`. Everything else is editor-only. The wrong kind answers `409` with `data.code: "session_kind_rejected"`, `selected_session_kind` and `allowed_session_kinds`.
+
+`asset.readImportedStream` loads an imported audio stream fresh from disk, bypassing the resource cache, so `asset_configure_import` can check the loop properties the engine actually loads. `resource.refreshCached` and `export.reloadPresets` make an open editor re-read a file Didi wrote behind it; without them the editor answers from the copy it already holds, or writes its own list back over the file.
 
 `editor.getRecoveryState` is an internal main-thread readiness observation, not a public MCP tool. Its `filesystem_scanning` field reports ongoing editor filesystem scanning/import activity. Managed startup and reattachment share a 30-second deadline across discovery, exact-child attachment, four quiet readiness polls, and a stable saved-file checkpoint; connection alone is insufficient readiness.
 
@@ -337,7 +349,7 @@ Each `tools/list` definition carries specification `annotations` with `readOnlyH
 
 A tool publishes an `outputSchema` when something checks it against a real answer: a contract test calls every publishing tool that is reachable without an engine and fails on any returned key the schema does not declare, and the live Godot harness runs the same comparison against an attached editor for the shapes only it can produce. A tool with no schema is unspecified, and that absence is deliberate rather than an oversight. The rule is enforced in both directions: a publishing tool that the contract test does not call fails the suite, and so does a live-only tool that acquires a schema, because nothing offline could check it. Writing schemas for the live-only tools is not more of the same work; each would be a claim nothing verifies, which is the defect that made `scene_get_hierarchy`'s schema wrong for as long as it was.
 
-These scene/editor/reimport/viewport/UI/log methods execute through the extension's main-thread bridge. Public project search, asset queries, script diagnostics/reflection, visual-test-lab generation, C#/shader checks, export-preset discovery/export, and MeshLibrary generation are standalone filesystem/parser/process handlers and are never routed through extension IPC. If an offline-only helper name is sent to the extension directly, it returns `409`; other reserved internal names return a structured `501` envelope:
+These methods execute through the extension's main-thread bridge. Public project search, asset queries, script diagnostics/reflection, visual-test-lab generation, C#/shader checks, export-preset discovery/export, and MeshLibrary generation are standalone filesystem/parser/process handlers and are never routed through extension IPC. If an offline-only helper name is sent to the extension directly, it returns `409`; other reserved internal names return a structured `501` envelope:
 
 ```json
 {
