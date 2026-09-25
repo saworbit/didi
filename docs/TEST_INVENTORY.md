@@ -10,14 +10,14 @@ Every number here is derived from the suites themselves rather than written down
 
 | Measure | Count |
 | --- | ---: |
-| Automated tests | **1305** |
+| Automated tests | **1307** |
 | Live-harness assertions | 1288 |
 
 The badge in the [README](../README.md) shows the automated test total. Harness assertions are counted separately because they are assertions inside one live scenario, not independently runnable cases; adding them together would flatter the number.
 
 ## Native C++ suite (`didi_tests`)
 
-**869 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
+**871 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
 
 | Suite | Tests |
 | --- | ---: |
@@ -26,7 +26,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `AudioAddBus` | 10 |
 | `Base64` | 1 |
 | `Blackboard` | 13 |
-| `BlackboardResources` | 9 |
+| `BlackboardResources` | 11 |
 | `BlackboardTasks` | 8 |
 | `CaptureCache` | 3 |
 | `Checkpoints` | 13 |
