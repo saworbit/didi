@@ -389,7 +389,11 @@ TEST(Checkpoints, PublishWaitsOutAHeldFile) {
                         if (!dir.path().filename().string().starts_with(".partial-")) continue;
                         std::ifstream open(dir.path() / "files/a-first.txt", std::ios::binary);
                         if (!open.is_open()) continue;
-                        held = true;
+                        // Held until the manifest is written, which is the
+                        // last step before the rename, and a little past it.
+                        while (!stopRequested.load() && !fs::exists(dir.path() / "manifest.json"))
+                            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                        held = !stopRequested.load();
                         std::this_thread::sleep_for(std::chrono::milliseconds(300));
                         return;
                     }
