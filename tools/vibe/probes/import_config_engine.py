@@ -524,7 +524,11 @@ def sidecar_value(text: str, section: str, key: str) -> str | None:
     return None
 
 
-def edit_sidecar(text: str, op: str, key: str = "", value: str = "") -> str:
+def edit_sidecar(text: str, op: str, key: str = "", value: object = "") -> str:
+    if op == "setmany":
+        for many_key, many_value in value.items():
+            text = edit_sidecar(text, "set", many_key, many_value)
+        return text
     lines = text.split("\n")
     section = ""
     out: list[str] = []
@@ -659,6 +663,21 @@ EDIT_CASES = [
     ("ogg.loop_as_word", "music.ogg", "set", "loop", '"yes"'),
     ("ogg.loop_offset", "music.ogg", "set", "loop_offset", "0.25"),
     ("mp3.loop_true", "music.mp3", "set", "loop", "true"),
+    ("mp3.loop_as_word", "music.mp3", "set", "loop", '"yes"'),
+    ("mp3.loop_offset", "music.mp3", "set", "loop_offset", "0.25"),
+    # The options the importers declare no range for.
+    ("ogg.loop_offset_negative", "music.ogg", "setmany", "", {"loop": "true", "loop_offset": "-1.0"}),
+    ("ogg.loop_offset_past_end", "music.ogg", "setmany", "", {"loop": "true", "loop_offset": "99.0"}),
+    ("wav.loop_backward", "sfx.wav", "set", "edit/loop_mode", "4"),
+    ("wav.loop_mode_5", "sfx.wav", "set", "edit/loop_mode", "5"),
+    ("wav.loop_window", "sfx.wav", "setmany", "",
+     {"edit/loop_mode": "2", "edit/loop_begin": "1000", "edit/loop_end": "5000"}),
+    ("wav.loop_end_past_length", "sfx.wav", "setmany", "", {"edit/loop_mode": "2", "edit/loop_end": "999999"}),
+    ("wav.loop_begin_after_end", "sfx.wav", "setmany", "",
+     {"edit/loop_mode": "2", "edit/loop_begin": "5000", "edit/loop_end": "1000"}),
+    ("wav.loop_begin_negative", "sfx.wav", "setmany", "", {"edit/loop_mode": "2", "edit/loop_begin": "-5"}),
+    ("wav.window_without_loop", "sfx.wav", "setmany", "",
+     {"edit/loop_mode": "0", "edit/loop_begin": "1000", "edit/loop_end": "5000"}),
     ("png.mipmaps", "tex.png", "set", "mipmaps/generate", "true"),
     ("png.mipmaps_as_int", "tex.png", "set", "mipmaps/generate", "1"),
     ("png.vram", "tex.png", "set", "compress/mode", "2"),
@@ -682,9 +701,10 @@ def edits(godot: str, work: Path, pristine: Path, record: Record, engine: str) -
             continue
         original = source_sidecar.read_text(encoding="utf-8", errors="replace")
         section = "remap" if op == "remap" else "params"
-        if op in ("set", "remove", "remap") and key and sidecar_value(original, section, key) is None \
-                and key != "didi/bogus":
-            record.put(engine, prefix + "(skipped)", f"{key} is not a key this engine writes")
+        wanted = list(value) if op == "setmany" else ([key] if key and key != "didi/bogus" else [])
+        missing = [k for k in wanted if op != "raw" and sidecar_value(original, section, k) is None]
+        if missing:
+            record.put(engine, prefix + "(skipped)", f"{', '.join(missing)} is not a key this engine writes")
             continue
         case = work / "edits" / label
         if case.exists():
@@ -709,7 +729,10 @@ def edits(godot: str, work: Path, pristine: Path, record: Record, engine: str) -
         record.put(engine, prefix + "rewritten", str(after_text != edited))
         line_key = key if op in ("set", "remove") and key else ("importer" if op == "remap" else "")
         line_section = "remap" if op == "remap" else "params"
-        if line_key:
+        if op == "setmany":
+            record.put(engine, prefix + "line_after", ", ".join(
+                f"{k}={sidecar_value(after_text, 'params', k)}" for k in value))
+        elif line_key:
             found = sidecar_value(after_text, line_section, line_key)
             record.put(engine, prefix + "line_after", "(absent)" if found is None else f"{line_key}={found}")
         if op == "raw":
