@@ -447,10 +447,14 @@ struct JobExitObservation {
         if (!QueryInformationJobObject(job, JobObjectBasicAccountingInformation,
                                        &after, sizeof(after), nullptr)) return;
         total_processes = after.TotalProcesses;
-        // A child already absent from the snapshot may still be finishing
-        // teardown. Without its handle, lifetime completion is unprovable.
+        // Nothing joined the job and nothing left it while the list was read,
+        // so every process still in it has a handle here. One that left
+        // before the list was read ended on its own, before the kill, and is
+        // not waited on. Counting those as well made any tree with a finished
+        // member, a wrapper's first command or anything the game ran, report
+        // query_failed after a clean kill (#859).
         complete = before.TotalProcesses == after.TotalProcesses &&
-                   after.TotalProcesses == ids->NumberOfProcessIdsInList;
+                   before.ActiveProcesses == ids->NumberOfProcessIdsInList;
     }
     JobExitObservation(const JobExitObservation&) = delete;
     JobExitObservation& operator=(const JobExitObservation&) = delete;

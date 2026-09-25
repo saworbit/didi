@@ -175,6 +175,12 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **A timed-out test session reports `tree_exited` again when one of its processes had already
+  finished (#859).** The kill wait counted every process the job had ever held, so a wrapper's
+  first command or anything the game ran turned a clean kill into `query_failed`. The tree kill
+  tests also stop failing about one run in twenty on Linux: they read a process that was being
+  reaped as still running. A failure now names `contained`, `kill_wait` and the pid.
+
 - **Three more refusals carry the argument that fixes them in `retry_with` (#902).** The check
   added in #901 read one phrasing, `pass <argument>: true`, and the surface also says
   `pass <argument> to ...` and `set <argument>=true`. `script_patch_method`'s preview and its

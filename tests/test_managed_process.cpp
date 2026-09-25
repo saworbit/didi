@@ -34,6 +34,13 @@ void registerTest(const std::string&, std::function<void()>);
         if (!(x))                                                                                  \
             throw std::runtime_error("Assertion failed: " #x);                                     \
     } while (false)
+// The same, with what the runner reported, so a red run names the claim that
+// broke without anyone reproducing it (#859).
+#define CHECK_TREE(x, detail)                                                                      \
+    do {                                                                                           \
+        if (!(x))                                                                                  \
+            throw std::runtime_error(std::string("Assertion failed: " #x " (") + (detail) + ")"); \
+    } while (false)
 
 namespace {
 namespace fs = std::filesystem;
@@ -155,6 +162,10 @@ struct Temp {
 
 // Alive means running. A killed child on Linux is briefly a zombie, which is
 // still a pid but is not a process doing anything, so it does not count.
+// Nor does one being reaped: it reads as X for a moment, or is gone between
+// the kill() that found it and the read of its stat line. Counting those as
+// running made one dying process answer dead, then alive, then dead, and a
+// wait that stopped at the first dead could read the alive next (#859).
 bool processAlive(uint64_t pid) {
 #if defined(_WIN32)
     HANDLE handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE,
@@ -174,11 +185,17 @@ bool processAlive(uint64_t pid) {
         // The command field is parenthesised and may itself contain spaces and
         // brackets, so the state is read relative to the last close bracket.
         const auto command_end = line.rfind(')');
-        if (command_end != std::string::npos && command_end + 2 < line.size())
-            return line[command_end + 2] != 'Z';
+        if (command_end != std::string::npos && command_end + 2 < line.size()) {
+            const char state = line[command_end + 2];
+            return state != 'Z' && state != 'X' && state != 'x';
+        }
     }
-#endif
+    // Reaped since the kill() above, or there is no /proc to read. Only the
+    // second leaves the pid answering.
+    return kill(static_cast<pid_t>(pid), 0) == 0;
+#else
     return true;
+#endif
 #endif
 }
 
@@ -193,6 +210,12 @@ void hardKill(uint64_t pid) {
 #else
     CHECK_PROCESS(kill(static_cast<pid_t>(pid), SIGKILL) == 0);
 #endif
+}
+
+std::string treeState(uint64_t grandchild, bool contained, const char* kill_wait) {
+    return "grandchild " + std::to_string(grandchild) +
+           ", contained=" + (contained ? "true" : "false") +
+           ", kill_wait=" + (kill_wait ? kill_wait : "not_attempted");
 }
 
 void waitForExit(ManagedProcess& process) {
@@ -575,7 +598,9 @@ static void offlineRunnerTimeoutKillsTheWholeProcessTree() {
     deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
     while (processAlive(grandchild) && std::chrono::steady_clock::now() < deadline)
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    CHECK_PROCESS(!processAlive(grandchild));
+    CHECK_TREE(!processAlive(grandchild),
+               "still running 20 s after the kill: " +
+                   treeState(grandchild, ran.value().contained, nullptr));
 }
 
 static void testSessionTimeoutKillsTheWholeProcessTree() {
@@ -605,11 +630,17 @@ static void testSessionTimeoutKillsTheWholeProcessTree() {
     // guard doing its job is the only reason it was not a silent pass.
     const auto self = selfPath().string();
 
+    // The first line runs a child that exits at once. A real tree has members
+    // that finished before the timeout, a wrapper's own commands or anything
+    // the game ran, and one of those must not turn a clean kill into
+    // query_failed. It did: the runner counted every process the job had ever
+    // held and refused to call a tree gone once any of them had left.
 #if defined(_WIN32)
     const auto wrapper = temp.path / "godot.cmd";
     {
         std::ofstream script(wrapper);
         script << "@echo off\n"
+               << "\"" << self << "\" --didi-managed-child exit\n"
                << "start \"\" /b \"" << self << "\" --didi-managed-child "
                << "publish_self_and_hold \"" << published_text << "\"\n"
                << "\"" << self << "\" --didi-managed-child hold_long\n";
@@ -620,6 +651,7 @@ static void testSessionTimeoutKillsTheWholeProcessTree() {
     {
         std::ofstream script(wrapper);
         script << "#!/bin/sh\n"
+               << "\"" << self << "\" --didi-managed-child exit\n"
                << "\"" << self << "\" --didi-managed-child publish_self_and_hold \""
                << published_text << "\" &\n"
                << "\"" << self << "\" --didi-managed-child hold_long\n";
@@ -679,15 +711,17 @@ static void testSessionTimeoutKillsTheWholeProcessTree() {
     // that does not work at all fails either way. A query that failed is not
     // load and is not excused: nothing is known about the tree then, and that
     // is a broken handle rather than a busy machine.
-    CHECK_PROCESS(result.kill_wait != didi::offline::TestSessionResult::KillWait::QueryFailed);
+    const auto state = treeState(grandchild, result.contained,
+                                 didi::offline::TestSessionResult::killWaitName(result.kill_wait));
+    CHECK_TREE(result.kill_wait != didi::offline::TestSessionResult::KillWait::QueryFailed, state);
     if (result.contained &&
         result.kill_wait == didi::offline::TestSessionResult::KillWait::TreeExited) {
-        CHECK_PROCESS(!processAlive(grandchild));
+        CHECK_TREE(!processAlive(grandchild), "the runner reported the tree gone: " + state);
     } else {
         deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
         while (processAlive(grandchild) && std::chrono::steady_clock::now() < deadline)
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
-        CHECK_PROCESS(!processAlive(grandchild));
+        CHECK_TREE(!processAlive(grandchild), "still running 20 s after the kill: " + state);
     }
 
     // Whichever branch ran, the run that timed out inside a job must have
@@ -704,7 +738,9 @@ static void testSessionTimeoutKillsTheWholeProcessTree() {
     deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
     while (processAlive(grandchild) && std::chrono::steady_clock::now() < deadline)
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    CHECK_PROCESS(!processAlive(grandchild));
+    CHECK_TREE(!processAlive(grandchild),
+               "still running 20 s after the kill: " +
+                   treeState(grandchild, result.contained, nullptr));
 #endif
 
 #if defined(_WIN32)
