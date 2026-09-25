@@ -8283,18 +8283,29 @@ Result<std::string> projectDirectoryOnDisk() {
     return stringFromVariant(globalized.value(), GDEXTENSION_VARIANT_TYPE_STRING);
 }
 
-// Whether project.godot itself declares this input action.
+// The input actions project.godot itself declares.
 //
 // ProjectSettings.has_setting answers true for an engine default such as
 // ui_accept, because the engine registers the built-in map as settings. That is
 // the right answer to "does this action exist" and the wrong answer to "did
-// this project define it", and removal needs the second one: an action the file
-// does not contain cannot be removed by writing the file (#485).
-Result<bool> projectFileDefinesInputAction(const std::string& action) {
+// this project define it". Removal needs the second one, because an action the
+// file does not contain cannot be removed by writing the file (#485), and so
+// does a listing asked for the project's own actions (#775).
+struct ProjectInputActions {
+    std::set<std::string> names;
+    // Set when the file cannot answer, in which case names means nothing.
+    std::optional<Error> failure;
+};
+
+ProjectInputActions projectFileInputActions() {
+    ProjectInputActions declared;
     auto directory = projectDirectoryOnDisk();
-    if (directory.isErr()) return directory.error();
+    if (directory.isErr()) {
+        declared.failure = directory.error();
+        return declared;
+    }
     std::ifstream file(std::filesystem::path(directory.value()) / "project.godot");
-    if (!file.is_open()) return false;
+    if (!file.is_open()) return declared;
 
     std::ostringstream contents;
     contents << file.rdbuf();
@@ -8312,21 +8323,33 @@ Result<bool> projectFileDefinesInputAction(const std::string& action) {
                   (failure->section.empty() ? failure->key
                                             : failure->section + "/" + failure->key) +
                   " to a value Godot's parser refuses, because " + failure->value_reason;
-        return Error(409, where +
-                              ". The engine answers ERR_PARSE_ERROR for the whole file, so the "
-                              "project does not open and what it declares cannot be read. Repair "
-                              "the file before removing an input action from it: saving the "
-                              "settings would write this editor's whole map over it.");
+        declared.failure = Error(409, where +
+                                          ". The engine answers ERR_PARSE_ERROR for the whole "
+                                          "file, so the project does not open and what it "
+                                          "declares cannot be read.");
+        return declared;
     }
     // The action names the engine registers. Godot writes the name bare, or
     // quoted when it needs the spaces, and the value is a dictionary spread
     // over the four lines below it -- none of which a line-at-a-time reader
     // gets right on its own (#813).
     for (const auto& entry : scanned.entries) {
-        if (entry.section != "input") continue;
-        if (entry.key == action) return true;
+        if (entry.section == "input") declared.names.insert(entry.key);
     }
-    return false;
+    return declared;
+}
+
+Result<bool> projectFileDefinesInputAction(const std::string& action) {
+    auto declared = projectFileInputActions();
+    if (declared.failure) {
+        auto failure = *declared.failure;
+        if (failure.code == 409) {
+            failure.message += " Repair the file before removing an input action from it: saving "
+                               "the settings would write this editor's whole map over it.";
+        }
+        return failure;
+    }
+    return declared.names.count(action) != 0;
 }
 
 const char* variantTypeName(GDExtensionVariantType type) {
@@ -11119,6 +11142,21 @@ json GodotBridge::execute(const std::string& method, const json& params,
         if (project_settings.isErr()) return errorJson(project_settings.error().code, project_settings.error().message);
 
         if (method == "project.listInputActions") {
+            // Ninety actions came back on every call, eighty-five of them the
+            // engine's ui_* map, and there was no smaller question to ask: not
+            // the project's own, not one by name (#775). The default still lists
+            // every action, and each entry now says which kind it is.
+            const std::string only_action = params.value("action", "");
+            const bool include_engine_defaults = params.value("include_engine_defaults", true);
+            const auto declared = projectFileInputActions();
+            if (declared.failure && !include_engine_defaults) {
+                return errorJson(declared.failure->code,
+                                 declared.failure->message +
+                                     " Which actions are the project's own cannot be told from "
+                                     "the engine's until the file reads.");
+            }
+            size_t omitted_engine_defaults = 0;
+            bool named_action_omitted = false;
             auto properties = callObject(project_settings.value(), "Object", "get_property_list", 3995934104LL);
             if (properties.isErr()) return errorJson(properties.error().code, properties.error().message);
             auto size_value = callVariant(properties.value(), "size");
@@ -11142,6 +11180,14 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 auto property_name = stringFromVariant(property_name_value.value(), property_type);
                 if (property_name.isErr()) return errorJson(property_name.error().code, property_name.error().message);
                 if (!strings::startsWith(property_name.value(), "input/") || property_name.value().size() <= 6) continue;
+                const std::string action_name = property_name.value().substr(6);
+                if (!only_action.empty() && action_name != only_action) continue;
+                const bool defined_by_project = declared.names.count(action_name) != 0;
+                if (!include_engine_defaults && !defined_by_project) {
+                    ++omitted_engine_defaults;
+                    named_action_omitted = !only_action.empty();
+                    continue;
+                }
                 auto setting_name = makeStringName(property_name.value());
                 VariantValue default_value;
                 if (setting_name.isErr()) return errorJson(setting_name.error().code, setting_name.error().message);
@@ -11174,12 +11220,32 @@ json GodotBridge::execute(const std::string& method, const json& params,
                     if (normalized.isErr()) return errorJson(normalized.error().code, normalized.error().message);
                     events.push_back(normalized.value());
                 }
-                actions.push_back({{"action", property_name.value().substr(6)}, {"deadzone", deadzone.value()}, {"events", events}});
+                json entry = {{"action", action_name}, {"deadzone", deadzone.value()}, {"events", events}};
+                if (!declared.failure) entry["defined_by_project"] = defined_by_project;
+                actions.push_back(std::move(entry));
+            }
+            if (!only_action.empty() && actions.empty()) {
+                if (named_action_omitted) {
+                    return errorJson(404,
+                                     "Input action '" + only_action + "' is an engine default, and "
+                                     "include_engine_defaults is false.",
+                                     {{"code", "engine_default_action"},
+                                      {"action", only_action},
+                                      {"engine_default", true},
+                                      {"retry_with", {{"include_engine_defaults", true}}}});
+                }
+                return errorJson(404, "Input action not found: " + only_action,
+                                 {{"code", "input_action_not_found"}, {"action", only_action}});
             }
             std::sort(actions.begin(), actions.end(), [](const json& left, const json& right) {
                 return left["action"].get<std::string>() < right["action"].get<std::string>();
             });
-            return liveResult({{"status", "success"}, {"actions", actions}});
+            json listing = {{"status", "success"}, {"actions", actions}};
+            if (!include_engine_defaults) listing["omitted_engine_default_count"] = omitted_engine_defaults;
+            // Counted and said rather than guessed: an unreadable file leaves
+            // every action's origin unknown, not every action the engine's.
+            if (declared.failure) listing["defined_by_project_unavailable"] = declared.failure->message;
+            return liveResult(listing);
         }
 
         const std::string action = params.value("action", "");

@@ -1815,6 +1815,11 @@ try {
             @{ type = "joypad_motion"; axis = 0; axis_value = -0.75; device = 3 }
         ) }),
         (Tool-Request 77 "project_list_input_actions" @{}),
+        # The project's own actions apart from the engine's, and one by name (#775).
+        (Tool-Request 5627 "project_list_input_actions" @{ include_engine_defaults = $false }),
+        (Tool-Request 5628 "project_list_input_actions" @{ action = "phase_two_jump" }),
+        (Tool-Request 5629 "project_list_input_actions" @{ action = "ui_accept" }),
+        (Tool-Request 5630 "project_list_input_actions" @{ action = "no_such_action" }),
         (Tool-Request 78 "project_set_input_action" @{ action = "phase_two_jump"; events = @() }),
         (Tool-Request 79 "project_set_input_action" @{ action = "phase_two_jump"; deadzone = 0.1; events = @(); replace = $true }),
         (Tool-Request 80 "project_list_input_actions" @{}),
@@ -4116,6 +4121,17 @@ try {
     Assert-True (@($inputAction.events).Count -eq 4) "Input action did not persist every supported event shape."
     Assert-True ($inputAction.events[0].type -eq "key" -and $inputAction.events[0].shift -eq $true) "Key event was not normalized correctly."
     Assert-True ($inputAction.events[3].type -eq "joypad_motion" -and $inputAction.events[3].axis_value -eq -0.75) "Joypad motion event was not normalized correctly."
+    Assert-True ($inputAction.defined_by_project -eq $true) "The project's own action was not marked defined_by_project."
+    $ownActions = Tool-Payload $byId[5627]
+    Assert-True (@($ownActions.actions.action) -contains "phase_two_jump") "include_engine_defaults: false dropped the project's own action."
+    Assert-True (-not (@($ownActions.actions.action) -contains "ui_accept")) "include_engine_defaults: false still listed ui_accept."
+    Assert-True ($ownActions.omitted_engine_default_count -gt 0) "The listing did not say how many engine defaults it left out."
+    Assert-True (@($ownActions.actions | Where-Object { $_.defined_by_project -ne $true }).Count -eq 0) "A listed action was not marked as the project's own."
+    $namedAction = @((Tool-Payload $byId[5628]).actions)
+    Assert-True ($namedAction.Count -eq 1 -and $namedAction[0].action -eq "phase_two_jump" -and $namedAction[0].deadzone -eq 0.35) "Reading one action by name did not return exactly that action."
+    $engineAction = @((Tool-Payload $byId[5629]).actions)
+    Assert-True ($engineAction.Count -eq 1 -and $engineAction[0].defined_by_project -eq $false) "ui_accept was not marked as the engine's."
+    Assert-True ($byId[5630].result.isError -and $byId[5630].result.content[0].text -match "not found") "An unknown action name was not refused."
     Assert-True $byId[78].result.isError "Existing input action was overwritten without replace: true."
     $replacedInputAction = @((Tool-Payload $byId[80]).actions | Where-Object action -eq "phase_two_jump")[0]
     Assert-True (@($replacedInputAction.events).Count -eq 0) "Explicit input action replacement did not persist."
