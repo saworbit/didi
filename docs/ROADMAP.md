@@ -136,12 +136,12 @@ The native red-team contract covers invalid roots, project-key isolation, lock e
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `116/119`
+**Canonical implementation:** `117/120`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-**Objective:** The implementation remains 116/119 canonical tools, and all 3 Phase 7 names remain registered but unimplemented. All 15 feasible names are delivered. The original objective was atomic 83/83 without adding public tool names.
+**Objective:** The implementation remains 117/120 canonical tools, and all 3 Phase 7 names remain registered but unimplemented. All 15 feasible names are delivered. The original objective was atomic 83/83 without adding public tool names.
 
 **Feasibility result:** The gate completed on 2026-08-29 against Godot 4.5.1 and 4.7.2. Fifteen names (15/18) are implementation-feasible: `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit`, `viewport_set_camera_transform`, `viewport_toggle_debug_draw`, `tilemap_set_cells`, `tilemap_get_used_rect`, `gridmap_set_cells`, `physics_raycast_query`, `nav_query_path`, `anim_list_tracks`, `anim_play_track`, `runtime_inject_input`, and `runtime_read_profiler`.
 
@@ -191,7 +191,7 @@ baseline is carrying an unauthorized second decision.
 
 This decision authorized Task 2. At decision time the implementation was 61/79;
 the delivery slices have since landed and the current status block above is
-authoritative at 116/119. Phase 7 remains `PARTIAL_DELIVERY` because the three
+authoritative at 117/120. Phase 7 remains `PARTIAL_DELIVERY` because the three
 API-blocked contracts stay honestly unimplemented.
 
 **Delivery slices:**
@@ -209,7 +209,7 @@ API-blocked contracts stay honestly unimplemented.
 
 **Dependency:** The authorized Phase 7 partial-delivery exit gate is satisfied.
 
-**Current slice:** Bounded reverse impact analysis is delivered for symbols, signals, resource paths, and exact static node paths. It identifies serialized scene connections, animation tracks, `NodePath` properties, and direct code literals without claiming to follow dynamically constructed paths. `project_audit_assets` also inspects existing `.import` metadata for malformed or unsafe paths, missing sources/outputs, and source timestamps newer than outputs under explicit file-count, byte, symlink, containment, and response bounds. UID-cache reconciliation, checksum/importer-version validity, guarded import configuration, and broader incremental freshness remain planned.
+**Current slice:** Bounded reverse impact analysis is delivered for symbols, signals, resource paths, and exact static node paths. It identifies serialized scene connections, animation tracks, `NodePath` properties, and direct code literals without claiming to follow dynamically constructed paths. `project_audit_assets` also inspects existing `.import` metadata for malformed or unsafe paths, missing sources/outputs, and source timestamps newer than outputs under explicit file-count, byte, symlink, containment, and response bounds. Guarded import configuration is delivered for the loop options of WAV, OGG and MP3 imports: `asset_configure_import` previews the change, writes it under the file's lock, reimports, and checks the file and the stream the engine loads, restoring the previous file if the change did not hold (#958). Configuration for the other importers, UID-cache reconciliation, checksum/importer-version validity, and broader incremental freshness remain planned.
 
 **Exclusions:** No custom GDScript language server, unbounded whole-project semantic analysis, or silent import-setting mutation.
 
@@ -293,7 +293,7 @@ These are missing capabilities that an AI agent actually requires to complete fu
 - **Debug Draw Modifiers**: Non-destructive debug wireframes passed as capture parameters rather than global sticky toggles.
 
 ### 3. Asset Import and Pipeline Management
-- **Import Preset Configuration**: Configure compression modes, 3D normal filters, and mesh collision generation.
+- **Import Preset Configuration**: Configure compression modes, 3D normal filters, and mesh collision generation. Delivered for audio loop options as `asset_configure_import` (#958); every other importer needs its own measured rows before the tool will set it.
 
 ### 4. Animation and UI Authoring
 - **Animation Libraries**: delivered as `anim_add_library` -- an `AnimationLibrary` written with `resource_create` is added to a player in the edited scene through UndoRedo, which is what makes `anim_list_tracks` and `anim_play_track` reachable on a player the surface built (#770).

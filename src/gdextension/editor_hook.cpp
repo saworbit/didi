@@ -1613,6 +1613,9 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
         // Editor only, by not being in game_admitted below: a bus added to a
         // running game is in no file and gone when the game stops (#771).
         "audio.addBus",
+        // Editor only: asset_configure_import reads the stream the editor's
+        // reimport just wrote, and a game cannot reimport (#958).
+        "asset.readImportedStream",
         // Admission is deliberately separate from the failure-injection seams.
         // One macro previously controlled both, so the feature could not be
         // admitted to production without also compiling test seams into a

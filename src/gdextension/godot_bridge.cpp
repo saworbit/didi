@@ -8324,6 +8324,69 @@ json GodotBridge::execute(const std::string& method, const json& params,
         return liveResult({{"path", path}, {"cached", true},
                            {"reloaded", object.isOk() && object.value() != nullptr}});
     }
+    if (method == "asset.readImportedStream") {
+        // What asset_configure_import checks a value against and reads back
+        // after the reimport: the imported stream, loaded from disk. The cache
+        // is ignored, because the question is what the file now loads as; the
+        // editor's cached copy is updated in place by the reimport and is not
+        // this read's business (#958). The properties are read through
+        // Object.get by name, and AudioStream.get_length is the one new bind:
+        // 1740695150 on 4.5.1, 4.6.2 and 4.7.2.
+        if (!hasOnlyKeys(params, {"path"}) || !params.contains("path") || !params["path"].is_string()) {
+            return errorJson(400, "asset.readImportedStream takes path, a res:// asset");
+        }
+        const auto path = params["path"].get<std::string>();
+        auto valid_path = validateResPath(path, "");
+        if (valid_path.isErr()) return errorJson(valid_path.error().code, valid_path.error().message);
+        auto loader = singleton("ResourceLoader");
+        if (loader.isErr()) return errorJson(loader.error().code, loader.error().message);
+        auto godot_path = makeString(path);
+        auto type_hint = makeString("");
+        auto ignore_cache = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(0));
+        if (godot_path.isErr() || type_hint.isErr() || ignore_cache.isErr()) {
+            return errorJson(500, "Failed to build the load request");
+        }
+        // Asked first, because loading a file that is not there prints an
+        // ERROR. ResourceLoader.exists is 4185558881 on all three lines.
+        auto exists = callObject(loader.value(), "ResourceLoader", "exists", 4185558881LL,
+                                 {&godot_path.value(), &type_hint.value()});
+        auto found = exists.isOk() ? scalarFromVariant<GDExtensionBool>(exists.value(), GDEXTENSION_VARIANT_TYPE_BOOL)
+                                   : Result<GDExtensionBool>(exists.error());
+        if (found.isErr() || found.value() == 0) {
+            return errorJson(404, "Godot finds nothing to load at " + path);
+        }
+        auto loaded = callObject(loader.value(), "ResourceLoader", "load", 3358495409LL,
+                                 {&godot_path.value(), &type_hint.value(), &ignore_cache.value()});
+        if (loaded.isErr()) return errorJson(loaded.error().code, loaded.error().message);
+        auto object = objectFromVariant(loaded.value());
+        if (object.isErr() || !object.value()) {
+            return errorJson(422, "Godot could not load " + path, json{{"code", "load_failed"}});
+        }
+        const auto class_name = nodeClassName(object.value());
+        json properties = json::object();
+        std::vector<const char*> names;
+        if (class_name == "AudioStreamWAV") names = {"mix_rate", "loop_mode", "loop_begin", "loop_end"};
+        if (class_name == "AudioStreamOggVorbis" || class_name == "AudioStreamMP3") {
+            names = {"loop", "loop_offset"};
+        }
+        for (const auto* name : names) {
+            auto property = makeStringName(name);
+            if (property.isErr()) continue;
+            auto value = callObject(object.value(), "Object", "get", 2760726917LL, {&property.value()});
+            if (value.isErr()) continue;
+            auto converted = variantToJson(value.value(), 0, true);
+            if (converted.isOk()) properties[name] = converted.value();
+        }
+        json answer = {{"path", path}, {"class", class_name}, {"properties", std::move(properties)}};
+        if (!names.empty()) {
+            auto length = callObject(object.value(), "AudioStream", "get_length", 1740695150LL);
+            if (length.isOk()) {
+                auto seconds = scalarFromVariant<double>(length.value(), GDEXTENSION_VARIANT_TYPE_FLOAT);
+                if (seconds.isOk()) answer["length_seconds"] = seconds.value();
+            }
+        }
+        return liveResult(std::move(answer));
+    }
     // The audio reads answer an editor or a game, and a game has no
     // EditorInterface, so they run before the lookup below. Behind it every
     // game request failed on "Can't retrieve singleton 'EditorInterface'

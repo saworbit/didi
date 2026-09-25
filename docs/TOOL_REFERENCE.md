@@ -1,17 +1,17 @@
 # Didi MCP Tool Reference
 
-Didi exposes 119 canonical tool names plus 10 legacy names (129 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
+Didi exposes 120 canonical tool names plus 10 legacy names (130 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
 
 The `_meta.didi` object returned by `tools/list` is authoritative. A registered tool with `implemented: false` is unavailable and returns an MCP tool error. Every tool carries `legacy`, and the ten legacy registrations carry `legacy: true`; the eight of those that resolve to a differently named tool also carry `canonical` and name it in a closing sentence of their description. Ten of the listed names are duplicates, and without that an agent has no way to tell which of two identical listings to call, or why error data names a `canonical_tool` it cannot find.
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `116/119`
+**Canonical implementation:** `117/120`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `PARTIAL_DELIVERY`. The implementation is 116/119 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+Phase 7 is `PARTIAL_DELIVERY`. The implementation is 117/120 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 ## Status legend
 
@@ -872,7 +872,7 @@ With an editor attached, an overwrite also reloads the editor's copy of the file
 
 Returns indexed file metadata, UID, and parsed dependencies for a matching project resource. It does not expose arbitrary inner Godot Resource properties.
 
-`type` is the class the extension implies, which for a `.tres` or `.res` is never more specific than `Resource`. For those, `resource_type` carries the type the file declares in its `[gd_resource]` header, or `null` when the header could not be read. Anything that is not a text resource has no such field. `project_list_resources` reports the same pair per entry.
+`type` is the class the extension implies, which for a `.tres` or `.res` is never more specific than `Resource`. For those, `resource_type` carries the type the file declares in its `[gd_resource]` header, or `null` when the header could not be read. Anything that is not a text resource has no such field. `project_list_resources` reports the same pair per entry. For an asset with a `.import` file beside it, `import` carries what the editor wrote there: `importer`, `type`, `uid`, `valid` when the engine recorded a failed import, `options` with every import option as a boolean, integer, number or string, and `configurable`, the keys `asset_configure_import` sets on that importer. A file Godot's parser cannot read gives `parse_error` and `line` instead.
 
 - `resource_path` (`string`, required).
 
@@ -1153,6 +1153,20 @@ Live when an editor or a game is attached, and that is the mode worth having: on
 Offline it reads the project's bus layout, following `audio/buses/default_bus_layout` from `project.godot` and falling back to `res://default_bus_layout.tres` the way Godot does. Godot 4.6 and 4.7 hold that setting as a `uid://` once the layout file exists and write it to `project.godot` that way, so a uid is followed to the resource that carries it; a uid no file carries is no layout to the engine, which runs on Master alone, and that is the answer, with the uid as `layout_path`. The manifest is read through the shared ConfigFile rules, so `[ audio ]` is the audio section and `buses / default_bus_layout` is the same key, both of which the engine honours. The file is read the way Godot writes it. Names and sends are StringName literals, `&"Music"` rather than `"Music"`, and the `&` is stripped so the name is one `audio_configure_bus` accepts. The string escapes Godot writes into a name are undone the way its parser reads them, so a bus named `Say "hi"` or holding a tab reads back as the engine has it (#934). Bus 0 is Master and the file is usually silent about it, because the writer skips every property already at its default and Master's defaults are the whole of it; Master is filled in rather than left out, so `bus_count` is the number of buses the engine has. Master cannot be renamed, so index 0 is Master whatever the file says. A layout file with no bus lines at all is a project whose only bus is Master, which is what the engine loads it as. A project with no layout file at that path returns `layout_present: false` and the same single `Master` at 0 dB with no send. Godot writes the layout file only once a project has more than the default bus, so its absence is not an error and not an absence of audio. A layout file Godot's parser refuses loads as nothing, and the engine runs on Master alone, so that is the answer too, with `layout_loads: false` and a note naming the line to repair; `layout_loads` is true only when the engine loads the file. An index the file skips is still a bus, unnamed and at its defaults, because Godot sizes the list to the highest index named. A `project.godot` the engine refuses does not open at all, and the tool refuses with the line to repair rather than follow a layout path out of it. Effect chains are not read offline and the result says so, since an empty effects list would otherwise read as "no effects".
 
 `execution_mode` distinguishes the two, so a caller never has to guess whether it is looking at live state.
+
+### `asset_configure_import` — Live (editor only)
+
+Changes an imported asset's import options in its `.import` file, reimports the asset in the attached editor, and checks what the engine then loads (#958). It is how a track is made to loop.
+
+- `asset_path` (`string`, required): one `res://` source asset, as it is spelled on disk, with a `.import` file beside it. A wrong letter case is refused with the spelling in `retry_with`, a `.import` path is refused naming its asset, a path under `.godot/` is refused, and an asset with no `.import` file is `404 no_import_metadata`, naming `asset_reimport`.
+- `options` (`object`, required): the keys to set. An OGG (`oggvorbisstr`) or MP3 import takes `loop` (a boolean) and `loop_offset` (seconds, at least 0 and below the track's length). A WAV import takes `edit/loop_mode` (0 Detect From WAV, 1 Disabled, 2 Forward, 3 Ping-Pong, 4 Backward, as the number or the name in any letter case), `edit/loop_begin` (a frame, at least 0) and `edit/loop_end` (a frame, or -1 for the last). A window is refused unless the loop mode after the change is 2, 3 or 4, because Godot ignores it under the other two, and both ends must be inside the stream with the begin below the end.
+- `dry_run` (`boolean`): the checks and a preview under `mutation_preview`, with `options` as they are and `planned_options`. With no editor the bounds that depend on the track are not checked, and the preview says `stream_read: false`.
+
+Godot checks none of these values. `edit/loop_mode=5` loads as a loop mode the engine has no name for, `loop="yes"` loads as true, and a loop end past the stream, a begin after the end, a negative begin and a negative or past-the-end offset are all stored as written, none with an error (`tools/vibe/probes/import_config_engine.py`, on 4.5.1, 4.6.2 and 4.7.2). So the tool refuses each of them, with the key under `data.key`. Any other importer, and any other option, is refused naming the ones it takes, with `retry_with` where the caller sent a WAV option to an OGG or the other way round. A `.import` file Godot's parser cannot read is `422 unparseable_import_metadata` with its line: the engine would reimport the asset with every option at its default and a new uid. A key on a line of its own is the only kind it edits; a hand-edited file with a key twice or two keys on one line is `422 hand_edited_import_metadata`.
+
+The write holds the file's lock under `.didi/locks` from its read to its write, and a writer held off for five seconds is `409 project_file_busy`, retryable. Only the named keys' lines change; every other byte, line endings included, is kept. Then the asset is reimported through the path `asset_reimport` takes, which waits out the editor's own import pass, and the result is checked against the file and against the stream loaded fresh from disk: each value is in the `.import` file, the uid is the one it had, `valid` is not false, and the stream reads back what each option decides. An option that did not hold is `422 import_change_not_held` with `divergences`, a failed reimport keeps its own code, and in both cases the previous file is written back and reimported, and `rolled_back` says whether that worked.
+
+The result carries `previous` and `options` for each key, `uid`, `reimported`, `verified`, the `stream` it read back (`class`, `length_seconds` and the loop properties), and the engine's lines from all three calls under `engine_diagnostics`. There is no undo entry; `way_back` says to call again with `previous`.
 
 ### `audio_configure_bus` — Live
 
