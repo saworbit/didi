@@ -191,6 +191,15 @@ bool annotateRequestedStop(Error& error, const std::optional<SessionDescriptor>&
 bool annotateLiveRouteFailure(Error& error, const std::optional<SessionDescriptor>& session,
                               bool quarantined);
 
+// A 504 with no transport state and no outcome is a deadline the extension
+// reported rather than one the pipe did, and it is still a transport failure.
+// Marks it for quarantine so annotateLiveRouteFailure treats it the way it
+// treats the pipe's own. The two readers that go through their own funnel,
+// runtime_read_logs and the live runtime-log resource, call this first. It used
+// to be copied into each, beside a match on two message texts: one nothing
+// emits, and one that always carries transport state already (#856).
+void markUnstatedDeadline(Error& error);
+
 // Merges the remembered obstruction into an error that is about to say only
 // that nothing is attached. Does nothing when there is none, so a server that
 // has simply never attached still answers exactly as it did.

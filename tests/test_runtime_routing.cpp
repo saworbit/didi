@@ -1206,14 +1206,35 @@ void test_live_runtime_errors_preserve_code_data_and_quarantine_unknown_outcomes
     ASSERT_EQ(unknown_value["error"]["data"]["outcome"], "unknown_outcome");
     ASSERT_TRUE(game->disconnected);
 
+    // Both shapes a deadline actually arrives in (#856). This used to be a 500
+    // with a message nothing in the product writes, which a text match turned
+    // into a transport failure, so the test passed for a shape that cannot
+    // happen. The pipe's own deadline carries transport state.
     game->connected = true;
     game->disconnected = false;
-    game->error = didi::Error(500, "Timeout waiting for response length from IPC pipe");
+    didi::ipc::TransportFailureState pipe_deadline;
+    pipe_deadline.request_started = true;
+    pipe_deadline.outcome_unknown = true;
+    pipe_deadline.timed_out = true;
+    game->error = didi::ipc::transportFailure("Timed out waiting for the engine's answer",
+                                              pipe_deadline);
     const auto transport_timeout = didi::mcp::handleRuntimeStep({{"frames", 1}}, game);
     const auto transport_value = payload(transport_timeout);
     ASSERT_TRUE(transport_timeout.isError);
     ASSERT_EQ(transport_value["error"]["code"], 504);
     ASSERT_EQ(transport_value["error"]["data"]["outcome"], "unknown_outcome");
+    ASSERT_TRUE(game->disconnected);
+
+    // And a deadline the extension reported, with no transport state and no
+    // outcome, is still a transport failure.
+    game->connected = true;
+    game->disconnected = false;
+    game->error = didi::Error(504, "main-thread command exceeded its deadline");
+    const auto reported_timeout = didi::mcp::handleRuntimeStep({{"frames", 1}}, game);
+    const auto reported_value = payload(reported_timeout);
+    ASSERT_TRUE(reported_timeout.isError);
+    ASSERT_EQ(reported_value["error"]["code"], 504);
+    ASSERT_EQ(reported_value["error"]["data"]["outcome"], "unknown_outcome");
     ASSERT_TRUE(game->disconnected);
 
     auto editor = std::make_shared<RoutedFake>("editor");

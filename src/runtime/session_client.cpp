@@ -1145,6 +1145,13 @@ void annotateEngineState(Error& error, const std::optional<SessionDescriptor>& s
     reportCrashOnce(session->pid, incident, crash);
 }
 
+void markUnstatedDeadline(Error& error) {
+    if (error.code != 504 || ipc::transportFailureState(error).has_value()) return;
+    if (error.data.is_object() && error.data.contains("outcome")) return;
+    if (!error.data.is_object()) error.data = json::object();
+    error.data["route_quarantine"] = true;
+}
+
 bool annotateLiveRouteFailure(Error& error, const std::optional<SessionDescriptor>& session,
                               bool quarantined) {
     const auto transport = ipc::transportFailureState(error);
