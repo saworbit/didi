@@ -101,7 +101,7 @@ python -m unittest discover -s tests -p "test_managed_recovery*.py"
 
 See [Managed Recovery verification](MANAGED_RECOVERY.md#verification) for the live and adversarial suite scope. These are opt-in engine tests; a skipped test is not live recovery evidence.
 
-The Windows live integration harness copies the tracked fixture into `build/` and starts real Godot processes. It preserves the Phase 1/2 sequence, adds Phase 3 concurrent editor/game routing, and now exercises Phase 4 bounded search, SVG reimport, reversible isolation, capture IDs, mutation diffs, exact undo restoration, and cleanup. The earlier coverage still checks scripts, groups, autoloads, nested settings, InputEvent forms, persistence rollback, scene lifecycle, resource ownership, unsafe paths, and honest errors:
+The Windows live integration harness copies the tracked fixture into `build/` and starts real Godot processes. It preserves the Phase 1/2 sequence, adds Phase 3 concurrent editor/game routing, and now exercises Phase 4 bounded search, SVG reimport, reversible isolation, capture IDs, mutation diffs, exact undo restoration, and cleanup. The Phase 8 import block runs a menu scene whose music stops, as the control, then sets the loop options on an OGG and a WAV import with `asset_configure_import` after a dry run, checks seven refusals, and runs the scene again to see the music still playing. The earlier coverage still checks scripts, groups, autoloads, nested settings, InputEvent forms, persistence rollback, scene lifecycle, resource ownership, unsafe paths, and honest errors:
 
 ```powershell
 .\tests\run_godot_integration.ps1 `
@@ -125,7 +125,15 @@ the native test boundary, so it is worked on differently from the rest.
   `.github/workflows/ci.yml` (which compares against `LC_ALL=C sort` order), and
   to `demo/addons/didi/`. `tests/test_editor_console.py` fails the build when any
   of those disagree with the addon directory, so the list cannot go stale
-  silently — but it will not add the file for you.
+  silently — but it will not add the file for you. Four more places list the
+  files and no suite checks them: the `expected` strings in
+  `tools/localci/lane.sh` and `tools/localci/macos.sh`, and the install trees in
+  `docs/QUICKSTART.md` and `docs/INTEGRATION_GUIDE.md`. A new `.gd` ships with
+  the `.uid` sidecar an engine mints for it; `tools/vibe/addon_script_engines.py`
+  prints that uid and checks the script loads on every engine. A script the
+  extension itself loads, as `didi_await.gd` and `didi_import_watch.gd` are, is
+  also copied into the harness fixture by `tests/run_godot_integration.ps1`,
+  because the fixture's addon is not the repository's.
 - **The console must not become an MCP client.** It reads the session
   descriptors Didi publishes and reports them. It calls no tool, speaks no part
   of the IPC protocol, and never reads the token out of a descriptor; a test
@@ -298,7 +306,7 @@ depending on a predecessor, not on the code under test.
 
 For expression-policy changes, add a failing native scanner test and a real editor/game integration probe before changing implementation. A new accepted Node operation must prove it cannot dispatch script callbacks, traverse outside the active subtree, allocate unbounded data before a check, leak source/token text, or turn the cooperative timeout into a hard-preemption claim.
 
-The CI MCP smoke must start Didi with an explicit fixture project. It verifies the live `tools/list` surface against the manifest emitted by `didi --dump-tool-manifest` from the same build, so counts are never written into the workflow, and it asserts every `implemented` flag rather than a sample. It also continues to assert offline-only search/deep-domain metadata, live-only reimport/diff/UI-hit-test metadata, strict Phase 4/5/6/7 schemas, local metadata for the four session tools, live metadata for routed runtime tools, cursor-shaped logs, implemented game input and profiler capabilities, and `implemented: false` only for `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`.
+The CI MCP smoke must start Didi with an explicit fixture project. It verifies the live `tools/list` surface against the manifest emitted by `didi --dump-tool-manifest` from the same build, so counts are never written into the workflow, and it asserts every `implemented` flag rather than a sample. It also continues to assert offline-only search/deep-domain metadata, live-only reimport/diff/UI-hit-test metadata, strict Phase 4/5/6/7 schemas, local metadata for the four session tools, live metadata for routed runtime tools, cursor-shaped logs, implemented game input and profiler capabilities, and `implemented: false` only for `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. That script lives inside the workflow, so neither suite reaches it; `python tools/vibe/replay_ci_e2e.py` lifts it out as the workflow has it and runs it against a local build and a manifest dumped from that build, before a push rather than after one.
 
 ## Phase 7 feasibility gate
 
