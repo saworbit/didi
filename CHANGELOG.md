@@ -175,6 +175,13 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **`emitter_node` names the emitter on every signal tool (#769).** `signal_list_connections`
+  and `signal_emit` called it `target_node`, the word `signal_connect` and `signal_disconnect`
+  use for the receiver, so the spelling the siblings insist on was refused. Both now take
+  `emitter_node`, and `target_node` still works. The listing's description also claimed it
+  shows incoming connections. It shows only the ones going out, so passing the receiver
+  returned a plausible answer about the wrong node. It says so now.
+
 - **The Python suites that drive the server now run on the Windows CI leg.** `tests/didi_binary.py`
   never looked at `build/didi.exe`, where CI's Ninja build puts it, so each of those suites
   skipped and its step passed. Main's last run logged 67 skips, among them the YOLO,

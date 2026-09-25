@@ -287,9 +287,13 @@ signal bridge trial on Godot 4.5.1, 4.6.2 and 4.7.2.
 
 ### `signal_list_connections` — Live
 
-Read-only. Lists a node's signals and their current connections.
+Read-only. Lists the signals a node declares and the connections going out of
+each, so the node is the emitter. Connections into the node are not listed.
 
-- `target_node` (`string`, required). Node path; 1024 bytes maximum.
+- `emitter_node` (`string`). Node path; 1024 bytes maximum. The same word
+  `signal_connect` and `signal_disconnect` use for the emitter.
+- `target_node` (`string`). The same node, under the name this tool used first.
+  Send one of the two; both, or neither, is refused.
 
 Signals are returned sorted by name, and connections by target path, so repeated
 calls are comparable. The listing is capped at 256 signals and 256 connections
@@ -370,8 +374,9 @@ A method the file declares and the engine does not have is `409` with `code: "ta
 ### `signal_emit` — Live
 
 Mutation, and the one that runs game code: emitting a signal invokes whatever is
-connected to it. Requires `target_node` and `signal_name`; `arguments` is an
-optional array, defaulting to empty.
+connected to it. Requires `signal_name` and the emitting node as `emitter_node`,
+or as `target_node`, the name this tool used first, but not both; `arguments` is
+an optional array, defaulting to empty.
 
 Arguments are checked against the signal's declared parameter types before
 anything is dispatched, so a type mismatch returns `400` without emitting. Bounds:

@@ -515,8 +515,99 @@ void test_phase7_signal_emit_confirmation_replay_and_public_gate_do_not_dispatch
     }
 }
 
+void test_emitter_node_names_the_emitter_on_every_signal_tool() {
+    // Break caught: signal_connect and signal_disconnect call the emitter
+    // emitter_node and use target_node for the receiver, while
+    // signal_list_connections and signal_emit called the emitter target_node,
+    // so the spelling the siblings insist on was refused here (#769).
+    using namespace didi::mcp;
+    auto& registry = ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    // Published on both, and neither requires the old name any more.
+    for (const auto* name : {"signal_list_connections", "signal_emit"}) {
+        const auto& schema = registry.getTool(name)->inputSchema;
+        ASSERT_TRUE(schema["properties"].contains("emitter_node"));
+        ASSERT_TRUE(schema["properties"].contains("target_node"));
+        const auto required = schema.value("required", didi::json::array());
+        for (const auto& entry : required) ASSERT_TRUE(entry != "target_node");
+    }
+
+    // The listing forwards the emitter under the name the bridge reads.
+    {
+        auto client = std::make_shared<SignalRecordingClient>();
+        registry.setIpcClient(client);
+        const auto result = registry.callTool("signal_list_connections",
+                                              didi::json{{"emitter_node", "/root/Emitter"}});
+        registry.setIpcClient(nullptr);
+        ASSERT_TRUE(!result.isError);
+        ASSERT_TRUE(client->requests == 1);
+        ASSERT_TRUE(client->last_method == "signal.listConnections");
+        ASSERT_TRUE(client->last_params == didi::json({{"target_node", "/root/Emitter"}}));
+    }
+
+    // The emit's dry run reads its node through the new name, so the gate and
+    // the preview saw the call the handler will get.
+    // And the token it mints confirms the same call spelled the same way.
+    {
+        auto client = std::make_shared<SignalProbeClient>();
+        registry.setIpcClient(client);
+        const didi::json call = {{"emitter_node", "/root/Domain"}, {"signal_name", "renamed"}};
+        auto dry_run = call;
+        dry_run["dry_run"] = true;
+        const auto preview = registry.callTool("signal_emit", dry_run);
+        ASSERT_TRUE(!preview.isError);
+        const auto payload = signalResultPayload(preview);
+        ASSERT_TRUE(payload["mutation_preview"]["target_read"] == true);
+        ASSERT_TRUE(payload["mutation_preview"]["changes"][0]["kind"] == "resolved_target");
+        auto confirmed = call;
+        confirmed["confirmation_token"] = payload["mutation_preview"]["confirmation_token"];
+        const auto emitted = registry.callTool("signal_emit", confirmed);
+        registry.setIpcClient(nullptr);
+        ASSERT_TRUE(!emitted.isError);
+    }
+
+    // Both, or neither, is refused before anything is sent, naming emitter_node.
+    for (const auto& [name, arguments] : std::vector<std::pair<const char*, didi::json>>{
+             {"signal_list_connections",
+              {{"emitter_node", "/root/A"}, {"target_node", "/root/A"}}},
+             {"signal_list_connections", didi::json::object()},
+             {"signal_emit",
+              {{"emitter_node", "/root/A"}, {"target_node", "/root/B"}, {"signal_name", "s"}}},
+             {"signal_emit", {{"signal_name", "s"}}}}) {
+        auto client = std::make_shared<SignalRecordingClient>();
+        registry.setIpcClient(client);
+        const auto result = registry.callTool(name, arguments);
+        registry.setIpcClient(nullptr);
+        ASSERT_TRUE(result.isError);
+        ASSERT_TRUE(client->requests == 0);
+        const auto payload = signalResultPayload(result);
+        ASSERT_TRUE(payload["error"]["code"] == 400);
+        ASSERT_TRUE(payload["error"]["message"].get<std::string>().find("emitter_node") !=
+                    std::string::npos);
+    }
+
+    // The old spelling still works, and a wrong name is still named as wrong.
+    {
+        auto client = std::make_shared<SignalRecordingClient>();
+        registry.setIpcClient(client);
+        const auto kept = registry.callTool("signal_list_connections",
+                                            didi::json{{"target_node", "/root/Emitter"}});
+        const auto wrong = registry.callTool("signal_list_connections",
+                                             didi::json{{"node", "/root/Emitter"}});
+        registry.setIpcClient(nullptr);
+        ASSERT_TRUE(!kept.isError);
+        ASSERT_TRUE(client->requests == 1);
+        ASSERT_TRUE(wrong.isError);
+        ASSERT_TRUE(signalResultPayload(wrong)["error"]["message"].get<std::string>().find(
+                        "Unknown argument 'node'") != std::string::npos);
+    }
+}
+
 struct RegisterPhase7SignalBehavior {
     RegisterPhase7SignalBehavior() {
+        registerTest("Phase7Signals.EmitterNodeNamesTheEmitter",
+                     test_emitter_node_names_the_emitter_on_every_signal_tool);
         registerTest("Phase7Signals.StrictHandlerValidation",
                      test_phase7_signal_handlers_reject_non_exact_requests_without_dispatch);
         registerTest("Phase7Signals.ExactForwarding",

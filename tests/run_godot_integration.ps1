@@ -1642,6 +1642,8 @@ try {
         (Tool-Request 910 "signal_list_connections" @{ target_node = "/root/SmokeRoot" }),
         (Tool-Request 20 "signal_connect" @{ emitter_node = "/root/SmokeRoot"; signal_name = "tree_entered"; target_node = "/root/SmokeRoot/Subject"; target_method = "notify_property_list_changed" }),
         (Tool-Request 911 "signal_list_connections" @{ target_node = "/root/SmokeRoot" }),
+        # The same node named the way signal_connect names it (#769).
+        (Tool-Request 915 "signal_list_connections" @{ emitter_node = "/root/SmokeRoot" }),
         (Tool-Request 912 "signal_disconnect" @{ emitter_node = "/root/SmokeRoot"; signal_name = "tree_entered"; target_node = "/root/SmokeRoot/Subject"; target_method = "notify_property_list_changed" }),
         (Tool-Request 913 "signal_list_connections" @{ target_node = "/root/SmokeRoot" }),
         # Wrong-class rejection for the delivered TileMapLayer read.
@@ -3692,6 +3694,7 @@ try {
     }
     Assert-True ((& $connectionCount $beforeConnect) -eq 0) "Signal listing showed the connection before it was made."
     Assert-True ((& $connectionCount $afterConnect) -eq 1) "signal_list_connections did not observe the new connection."
+    Assert-True ((& $connectionCount (Tool-Payload $byId[915])) -eq 1) "signal_list_connections by emitter_node did not see the connection target_node saw."
     Assert-True (-not $byId[912].result.isError) "signal_disconnect failed against a live editor session."
     Assert-True ((& $connectionCount $afterDisconnect) -eq 0) "signal_disconnect left the connection in place."
 
