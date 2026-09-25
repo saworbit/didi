@@ -3052,28 +3052,204 @@ Result<void> commitAction(GDExtensionObjectPtr manager) {
     return result.isOk() ? Result<void>::ok() : Result<void>(result.error());
 }
 
+// The UndoRedo behind one of the manager's histories. GLOBAL_HISTORY is 0.
+Result<GDExtensionObjectPtr> historyUndoRedo(GDExtensionObjectPtr manager, VariantValue& history_id) {
+    auto history = callObject(manager, "EditorUndoRedoManager", "get_history_undo_redo",
+                              2417974513LL, {&history_id});
+    if (history.isErr()) return history.error();
+    auto undo_redo = objectFromVariant(history.value());
+    if (undo_redo.isErr()) return undo_redo.error();
+    if (!undo_redo.value()) return Error::notFound("No UndoRedo history exists for the edited scene");
+    return undo_redo.value();
+}
+
+Result<int64_t> undoRedoVersion(GDExtensionObjectPtr undo_redo) {
+    auto version = callObject(undo_redo, "UndoRedo", "get_version", 3905245786LL);
+    if (version.isErr()) return version.error();
+    return scalarFromVariant<int64_t>(version.value(), GDEXTENSION_VARIANT_TYPE_INT);
+}
+
+// Every node of one class under a node, as find_children finds them.
+Result<std::vector<GDExtensionObjectPtr>> descendantsOfClass(GDExtensionObjectPtr node,
+                                                             const char* class_name,
+                                                             bool recursive) {
+    auto pattern = makeString("*");
+    auto type = makeString(class_name);
+    auto deep = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(recursive));
+    auto owned = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(0));
+    if (pattern.isErr() || type.isErr() || deep.isErr() || owned.isErr()) {
+        return Error::internal("Failed to build find_children arguments");
+    }
+    auto found = callObject(node, "Node", "find_children", 2560337219LL,
+                            {&pattern.value(), &type.value(), &deep.value(), &owned.value()});
+    if (found.isErr()) return found.error();
+    auto size_value = callVariant(found.value(), "size");
+    if (size_value.isErr()) return size_value.error();
+    auto size = scalarFromVariant<int64_t>(size_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+    if (size.isErr()) return size.error();
+    std::vector<GDExtensionObjectPtr> nodes;
+    for (int64_t i = 0; i < size.value(); ++i) {
+        auto index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, i);
+        if (index.isErr()) return index.error();
+        auto entry = callVariant(found.value(), "get", {&index.value()});
+        if (entry.isErr()) return entry.error();
+        auto object = objectFromVariant(entry.value());
+        if (object.isOk() && object.value()) nodes.push_back(object.value());
+    }
+    return nodes;
+}
+
+// The editor's own Undo or Redo: the item in its title bar menu that a person
+// clicks, and that Ctrl+Z runs.
+//
+// EditorUndoRedoManager keeps a stack of actions per history beside the
+// UndoRedo it wraps, and only its own undo() and redo() move an action from
+// one stack to the other. Neither is bound for extensions. Stepping the
+// UndoRedo directly moves the version and leaves the stacks where they were,
+// so the manager then prints "Inconsistent redo history" and answers that a
+// scene undone past its save is saved: the answer scene_close reads before it
+// decides whether a close needs discard_unsaved (#913). The menu item calls
+// the manager's own undo() and redo() and keeps both true.
+//
+// The item is found by its shortcut's resource name, "Undo" or "Redo". That is
+// the engine's untranslated name for ui_undo and ui_redo on 4.5.1, 4.6.2 and
+// 4.7.2, where the item ids differ (12 on 4.5, 13 after), the label is
+// translated, and the keys can be remapped.
+struct EditorHistoryCommand {
+    GDExtensionObjectPtr menu = nullptr;
+    int64_t id = -1;
+};
+
+Result<EditorHistoryCommand> editorHistoryCommand(GDExtensionObjectPtr editor, bool undo) {
+    const std::string wanted = undo ? "Undo" : "Redo";
+    const auto missing = [&wanted] {
+        return Error(501, "This editor has no " + wanted + " item in its title bar menu, so Didi "
+                          "cannot " + (wanted == "Undo" ? "undo" : "redo") + " through the editor's "
+                          "own history. Stepping the scene's UndoRedo directly would leave that "
+                          "history inconsistent (#913).");
+    };
+    auto base_value = callObject(editor, "EditorInterface", "get_base_control", 2783021301LL);
+    if (base_value.isErr()) return base_value.error();
+    auto base = objectFromVariant(base_value.value());
+    if (base.isErr()) return base.error();
+    if (!base.value()) return missing();
+    auto bars = descendantsOfClass(base.value(), "MenuBar", true);
+    if (bars.isErr()) return bars.error();
+    for (GDExtensionObjectPtr bar : bars.value()) {
+        auto menus = descendantsOfClass(bar, "PopupMenu", false);
+        if (menus.isErr()) return menus.error();
+        for (GDExtensionObjectPtr menu : menus.value()) {
+            auto count_value = callObject(menu, "PopupMenu", "get_item_count", 3905245786LL);
+            if (count_value.isErr()) return count_value.error();
+            auto count = scalarFromVariant<int64_t>(count_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+            if (count.isErr()) return count.error();
+            for (int64_t item = 0; item < count.value(); ++item) {
+                auto index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, item);
+                if (index.isErr()) return index.error();
+                auto shortcut_value = callObject(menu, "PopupMenu", "get_item_shortcut", 1449483325LL,
+                                                 {&index.value()});
+                if (shortcut_value.isErr()) continue;
+                auto shortcut = objectFromVariant(shortcut_value.value());
+                if (shortcut.isErr() || !shortcut.value()) continue;
+                auto name_value = callObject(shortcut.value(), "Resource", "get_name", 201670096LL);
+                if (name_value.isErr()) continue;
+                auto name = stringFromVariant(name_value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+                if (name.isErr() || name.value() != wanted) continue;
+                auto id_value = callObject(menu, "PopupMenu", "get_item_id", 923996154LL, {&index.value()});
+                if (id_value.isErr()) return id_value.error();
+                auto id = scalarFromVariant<int64_t>(id_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+                if (id.isErr()) return id.error();
+                return EditorHistoryCommand{menu, id.value()};
+            }
+        }
+    }
+    return missing();
+}
+
+// Which history the editor's own Undo or Redo moved. The editor picks the
+// newer of the edited scene's history and the global one, as Ctrl+Z does.
+enum class HistoryMoved { None, Scene, Global };
+
+Result<HistoryMoved> runEditorHistoryCommand(GDExtensionObjectPtr editor,
+                                             GDExtensionObjectPtr manager,
+                                             GDExtensionObjectPtr scene_undo_redo, bool undo) {
+    auto command = editorHistoryCommand(editor, undo);
+    if (command.isErr()) return command.error();
+    auto global_id = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(0));
+    if (global_id.isErr()) return global_id.error();
+    auto global = historyUndoRedo(manager, global_id.value());
+    const GDExtensionObjectPtr global_undo_redo = global.isOk() ? global.value() : nullptr;
+    auto scene_before = undoRedoVersion(scene_undo_redo);
+    if (scene_before.isErr()) return scene_before.error();
+    auto global_before = global_undo_redo ? undoRedoVersion(global_undo_redo) : Result<int64_t>(int64_t{0});
+    if (global_before.isErr()) return global_before.error();
+
+    auto signal = makeStringName("id_pressed");
+    auto id = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, command.value().id);
+    if (signal.isErr() || id.isErr()) return Error::internal("Failed to build the menu command");
+    auto emitted = callObject(command.value().menu, "Object", "emit_signal", 4047867050LL,
+                              {&signal.value(), &id.value()});
+    if (emitted.isErr()) return emitted.error();
+    auto emit_code = scalarFromVariant<int64_t>(emitted.value(), GDEXTENSION_VARIANT_TYPE_INT);
+    if (emit_code.isErr()) return emit_code.error();
+    if (emit_code.value() != 0) {
+        return Error(501, std::string("The editor's ") + (undo ? "Undo" : "Redo") +
+                              " item did not run: " +
+                              ::didi::godot::describeGodotError(emit_code.value()));
+    }
+
+    auto scene_after = undoRedoVersion(scene_undo_redo);
+    if (scene_after.isErr()) return scene_after.error();
+    if (scene_after.value() != scene_before.value()) return HistoryMoved::Scene;
+    if (global_undo_redo) {
+        auto global_after = undoRedoVersion(global_undo_redo);
+        if (global_after.isOk() && global_after.value() != global_before.value()) {
+            return HistoryMoved::Global;
+        }
+    }
+    return HistoryMoved::None;
+}
+
 // Undoes the action just committed for the edited scene. Used when a
 // postcondition fails after the commit, so the tool does not report failure
 // while the scene and the undo stack already carry the change.
+//
+// Through the editor's own Undo where that is certain to take this action, so
+// the manager's history stays true (#913). The editor's command undoes the
+// newer of the scene's history and the global one. With nothing in the global
+// one, that is the action just committed. With something there, the command
+// could take that instead, so the scene is put back directly, as it is when
+// the editor cannot be asked or runs the command and moves nothing, which it
+// does while a mouse button is held. A scene still holding a change the tool
+// is about to call failed is worse than a history the editor calls
+// inconsistent.
 Result<void> undoLastAction(GDExtensionObjectPtr manager, GDExtensionObjectPtr root) {
     auto root_value = makeObject(root);
     if (root_value.isErr()) return root_value.error();
     auto history_id = callObject(manager, "EditorUndoRedoManager", "get_object_history_id",
                                  1107568780LL, {&root_value.value()});
     if (history_id.isErr()) return history_id.error();
-    auto history = callObject(manager, "EditorUndoRedoManager", "get_history_undo_redo",
-                              2417974513LL, {&history_id.value()});
-    if (history.isErr()) return history.error();
-    auto undo_redo = objectFromVariant(history.value());
-    if (undo_redo.isErr() || !undo_redo.value()) {
-        return Error::notFound("No UndoRedo history exists for the edited scene");
+    auto undo_redo = historyUndoRedo(manager, history_id.value());
+    if (undo_redo.isErr()) return undo_redo.error();
+    const auto has_undo = [](GDExtensionObjectPtr history) -> Result<bool> {
+        auto available = callObject(history, "UndoRedo", "has_undo", 36873697LL);
+        if (available.isErr()) return available.error();
+        auto flag = scalarFromVariant<GDExtensionBool>(available.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+        if (flag.isErr()) return flag.error();
+        return flag.value() != 0;
+    };
+    auto scene_has = has_undo(undo_redo.value());
+    if (scene_has.isErr()) return scene_has.error();
+    if (!scene_has.value()) return Error(409, "Nothing to undo");
+    auto global_id = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(0));
+    auto global = global_id.isOk() ? historyUndoRedo(manager, global_id.value())
+                                   : Result<GDExtensionObjectPtr>(global_id.error());
+    auto global_has = global.isOk() ? has_undo(global.value()) : Result<bool>(true);
+    auto editor = editorInterface();
+    if (global_has.isOk() && !global_has.value() && editor.isOk()) {
+        auto moved = runEditorHistoryCommand(editor.value(), manager, undo_redo.value(), true);
+        if (moved.isOk() && moved.value() == HistoryMoved::Scene) return Result<void>::ok();
     }
-    auto available = callObject(undo_redo.value(), "UndoRedo", "has_undo", 36873697LL);
-    if (available.isErr()) return available.error();
-    auto has_action = scalarFromVariant<GDExtensionBool>(available.value(),
-                                                         GDEXTENSION_VARIANT_TYPE_BOOL);
-    if (has_action.isErr()) return has_action.error();
-    if (!has_action.value()) return Error(409, "Nothing to undo");
     auto executed = callObject(undo_redo.value(), "UndoRedo", "undo", 2240911060LL);
     return executed.isOk() ? Result<void>::ok() : Result<void>(executed.error());
 }
@@ -10214,48 +10390,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
             }
             if (force_postcondition_mismatch) postcondition_ok = false;
             if (!postcondition_ok) {
-                auto root_value = makeObject(root.value());
-                Result<void> rolled_back = Result<void>::ok();
-                if (root_value.isErr()) {
-                    rolled_back = root_value.error();
-                } else {
-                    auto history_id = callObject(
-                        manager.value(), "EditorUndoRedoManager", "get_object_history_id",
-                        1107568780LL, {&root_value.value()});
-                    if (history_id.isErr()) {
-                        rolled_back = history_id.error();
-                    } else {
-                        auto history = callObject(
-                            manager.value(), "EditorUndoRedoManager", "get_history_undo_redo",
-                            2417974513LL, {&history_id.value()});
-                        if (history.isErr()) {
-                            rolled_back = history.error();
-                        } else {
-                            auto undo_redo = objectFromVariant(history.value());
-                            if (undo_redo.isErr() || !undo_redo.value()) {
-                                rolled_back = Error::internal(
-                                    "Committed signal history is unavailable");
-                            } else {
-                                auto has_undo_value = callObject(
-                                    undo_redo.value(), "UndoRedo", "has_undo", 36873697LL);
-                                if (has_undo_value.isErr()) {
-                                    rolled_back = has_undo_value.error();
-                                } else {
-                                    auto has_undo = scalarFromVariant<GDExtensionBool>(
-                                        has_undo_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
-                                    if (has_undo.isErr() || !has_undo.value()) {
-                                        rolled_back = Error::internal(
-                                            "Committed signal action is not active");
-                                    } else {
-                                        auto undone = callObject(
-                                            undo_redo.value(), "UndoRedo", "undo", 2240911060LL);
-                                        if (undone.isErr()) rolled_back = undone.error();
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                const Result<void> rolled_back = undoLastAction(manager.value(), root.value());
                 bool restored = false;
                 if (rolled_back.isOk()) {
                     auto restored_connected_value = callObject(
@@ -13579,21 +13714,41 @@ json GodotBridge::execute(const std::string& method, const json& params,
         auto root_value = makeObject(root.value());
         auto history_id = callObject(manager.value(), "EditorUndoRedoManager", "get_object_history_id", 1107568780LL, {&root_value.value()});
         if (history_id.isErr()) return errorJson(history_id.error().code, history_id.error().message);
-        auto history = callObject(manager.value(), "EditorUndoRedoManager", "get_history_undo_redo", 2417974513LL, {&history_id.value()});
-        if (history.isErr()) return errorJson(history.error().code, history.error().message);
-        auto undo_redo = objectFromVariant(history.value());
-        if (undo_redo.isErr() || !undo_redo.value()) return errorJson(404, "No UndoRedo history exists for the edited scene");
+        auto undo_redo = historyUndoRedo(manager.value(), history_id.value());
+        if (undo_redo.isErr()) return errorJson(404, "No UndoRedo history exists for the edited scene");
         const bool is_undo = method == "editor.undo";
-        auto available = callObject(undo_redo.value(), "UndoRedo", is_undo ? "has_undo" : "has_redo", 36873697LL);
-        if (available.isErr()) return errorJson(available.error().code, available.error().message);
-        auto has_action = scalarFromVariant<GDExtensionBool>(available.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
-        if (has_action.isErr() || !has_action.value()) {
-        return errorJson(409, is_undo ? "Nothing to undo" : "Nothing to redo",
-                         {{"code", "nothing_to_undo"}});
-    }
-        auto executed = callObject(undo_redo.value(), "UndoRedo", is_undo ? "undo" : "redo", 2240911060LL);
-        if (executed.isErr()) return errorJson(executed.error().code, executed.error().message);
-        return liveResult({{"status", "success"}, {"action", is_undo ? "undo" : "redo"}});
+        // The editor's own command undoes the newer of the scene's history and
+        // the global one, so either having an action is enough to run it.
+        const auto has_action = [is_undo](GDExtensionObjectPtr history) -> Result<bool> {
+            auto available = callObject(history, "UndoRedo", is_undo ? "has_undo" : "has_redo", 36873697LL);
+            if (available.isErr()) return available.error();
+            auto flag = scalarFromVariant<GDExtensionBool>(available.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+            if (flag.isErr()) return flag.error();
+            return flag.value() != 0;
+        };
+        auto scene_has = has_action(undo_redo.value());
+        if (scene_has.isErr()) return errorJson(scene_has.error().code, scene_has.error().message);
+        auto global_id = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(0));
+        auto global = global_id.isOk() ? historyUndoRedo(manager.value(), global_id.value())
+                                       : Result<GDExtensionObjectPtr>(global_id.error());
+        auto global_has = global.isOk() ? has_action(global.value()) : Result<bool>(false);
+        if (!scene_has.value() && !(global_has.isOk() && global_has.value())) {
+            return errorJson(409, is_undo ? "Nothing to undo" : "Nothing to redo",
+                             {{"code", "nothing_to_undo"}});
+        }
+        auto moved = runEditorHistoryCommand(editor, manager.value(), undo_redo.value(), is_undo);
+        if (moved.isErr()) return errorJson(moved.error().code, moved.error().message);
+        if (moved.value() == HistoryMoved::None) {
+            return errorJson(409,
+                             std::string("The editor ran its own ") + (is_undo ? "Undo" : "Redo") +
+                                 " and no history moved. Godot refuses to " +
+                                 (is_undo ? "undo" : "redo") +
+                                 " while a mouse button is held down in the editor.",
+                             {{"code", "editor_declined"}, {"retryable", true}});
+        }
+        return liveResult({{"status", "success"},
+                           {"action", is_undo ? "undo" : "redo"},
+                           {"history", moved.value() == HistoryMoved::Scene ? "scene" : "global"}});
     }
 
     if (method == "editor.saveScene") {

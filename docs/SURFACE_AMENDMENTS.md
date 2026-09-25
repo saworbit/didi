@@ -421,6 +421,8 @@ the edited scene's history, so an entry in the global one is out of their
 reach, and `undo_redo_registered: true` would be a claim Didi's own undo tools
 cannot honour while #913 is open against them. The result says
 `undo_redo_registered: false` and names the Audio panel as the way back.
+Since #913 was fixed, the two undo tools run the editor's own Undo and Redo,
+which do reach the global history; the tool still registers no entry.
 
 **What it will not do.** It adds one bus at the end. It does not rename, move
 or remove a bus, add an effect, or change any other bus. It takes no path and
