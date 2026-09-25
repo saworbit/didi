@@ -175,6 +175,14 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **`runtime_*` control tools and the live runtime-log resource share one deadline rule
+  (#856).** Each kept its own copy of a guard that treated a 500 as a transport failure when
+  its message began with one of two texts. Nothing in the product writes the first, and the
+  second always arrives with transport state, so the match could never decide anything; its
+  test built a 500 by hand that no layer produces. The part that does matter, a 504 the
+  extension reports with no transport state and no outcome, is now one function beside
+  `annotateLiveRouteFailure`, and the test uses the two shapes a deadline really arrives in.
+
 - **A string sent to the engine keeps a leading byte-order mark, and one holding a NUL is
   refused (#948).** The bridge built every Godot string with the engine's UTF-8 reader,
   which drops a leading U+FEFF, and from a C string, which ends at a NUL. So a value like

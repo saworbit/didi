@@ -453,22 +453,9 @@ void ResourceRegistry::registerAllDefaultResources() {
             }
             auto error = res.error();
             ipc::markTransportRepeated(error, sent.repeat_attempted);
-            const auto transport = ipc::transportFailureState(error);
-            // This reader's own rule, the same one runtime_read_logs keeps: a
-            // deadline that arrived without transport state is still a
-            // transport failure, and saying so hands the funnel below the
-            // failure every other route would have handed it.
-            const bool known_transport_timeout = error.code == 500 &&
-                (error.message.rfind("Timeout waiting for response", 0) == 0 ||
-                 error.message.rfind("Failed or timed out writing to", 0) == 0);
-            const bool transport_deadline =
-                (error.code == 504 || known_transport_timeout) &&
-                (!error.data.is_object() || !error.data.contains("outcome"));
-            if (transport_deadline && !transport.has_value()) {
-                error.code = 504;
-                if (!error.data.is_object()) error.data = json::object();
-                error.data["route_quarantine"] = true;
-            }
+            // A deadline the extension reported, rather than the pipe, is still a
+            // transport failure; the rule is shared with the other reader (#856).
+            runtime::markUnstatedDeadline(error);
             if (runtime::annotateLiveRouteFailure(error, session, true)) {
                 const auto wrapped = liveResourceError(
                     error, session, "Failed to retrieve live runtime logs: ");
