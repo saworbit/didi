@@ -358,10 +358,64 @@ void checkConcurrentMutation(bool addFile) {
     auto completed = store.list();
     CHECK(completed.isOk());
     CHECK(completed.value().empty());
+    // Nor is the copy that did not publish left behind, where it counted
+    // against the store's limit for every failure (#937).
+    for (const auto& entry : fs::directory_iterator(f.root / "snapshots"))
+        CHECK(!entry.path().filename().string().starts_with(".partial-"));
 }
 } // namespace
 TEST(Checkpoints, RejectsConcurrentRewriteWithRestoredMetadata) { checkConcurrentMutation(false); }
 TEST(Checkpoints, RejectsConcurrentAddedFiles) { checkConcurrentMutation(true); }
+TEST(Checkpoints, PublishWaitsOutAHeldFile) {
+    // Somebody else holding a file the snapshot has just copied: a scanner or
+    // an indexer on Windows, standing in here for the few hundred milliseconds
+    // they take. Windows refuses to rename a folder with a file open inside it,
+    // so publication failed with "Access is denied" and left the copy behind
+    // (#937). The large file keeps the copy going long enough for the holder
+    // to get in before the rename.
+    Fixture f;
+    f.put("source/a-first.txt", "abc");
+    f.put("source/z-large.bin", std::string(32 * 1024 * 1024, 'x'));
+    CheckpointStore store(f.root / "source", f.root / "snapshots");
+    std::atomic<bool> stopRequested{false};
+    std::atomic<bool> held{false};
+    std::thread holder([&]() {
+        while (!stopRequested.load()) {
+            // The folder is renamed under the iterator once publication wins,
+            // which throws; that pass simply looks again.
+            try {
+                if (fs::exists(f.root / "snapshots")) {
+                    for (const auto& dir : fs::directory_iterator(f.root / "snapshots")) {
+                        if (!dir.path().filename().string().starts_with(".partial-")) continue;
+                        std::ifstream open(dir.path() / "files/a-first.txt", std::ios::binary);
+                        if (!open.is_open()) continue;
+                        held = true;
+                        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+                        return;
+                    }
+                }
+            } catch (...) {
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    });
+    struct StopAndJoin {
+        std::thread& thread;
+        std::atomic<bool>& stop;
+        ~StopAndJoin() {
+            stop.store(true);
+            if (thread.joinable()) thread.join();
+        }
+    } stopAndJoin{holder, stopRequested};
+
+    auto result = store.create("held-file");
+    stopRequested.store(true);
+    holder.join();
+    CHECK(held.load());
+    CHECK(result.isOk());
+    for (const auto& entry : fs::directory_iterator(f.root / "snapshots"))
+        CHECK(!entry.path().filename().string().starts_with(".partial-"));
+}
 TEST(Checkpoints, FullPartialStoreRejectsCreationWithoutGrowing) {
     Fixture f;
     f.put("source/file", "abc");

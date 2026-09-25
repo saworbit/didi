@@ -30,6 +30,8 @@
 #include "didi/tools/hierarchy_view.hpp"
 #include "didi/mcp/error_data.hpp"
 
+#include <thread>
+#include <memory>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -4514,6 +4516,27 @@ static void test_atomic_write_keeps_the_destination_when_the_replace_fails() {
     }
 }
 
+static void test_atomic_write_waits_out_a_reader() {
+    // Break caught: a reader with the destination open, such as
+    // project_list_export_presets during a project_add_export_preset, made the
+    // replace fail with a 500 on Windows, though the reader lets go in
+    // milliseconds (#937). Elsewhere a file is replaced under an open reader
+    // anyway, so this passes there without the retry.
+    ScopedToolProject project("atomic-write-held-reader");
+    const std::filesystem::path target = "export_presets.cfg";
+    std::ofstream(target, std::ios::binary) << "old";
+    auto reader = std::make_unique<std::ifstream>(target, std::ios::binary);
+    ASSERT_TRUE(reader->is_open());
+    std::thread release([&reader] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        reader.reset();
+    });
+    const auto written = didi::files::writeFileAtomically(target, "new");
+    release.join();
+    ASSERT_TRUE(written.isOk());
+    ASSERT_EQ(readToolTestFile(target), "new");
+}
+
 static void test_script_patch_replaces_without_leaving_temporary_files() {
     // Break caught: a leaked sibling temporary would be indexed as a project
     // resource and would survive a failed replace.
@@ -8547,6 +8570,7 @@ struct RegisterToolTests {
                  test_resource_create_asks_the_engine_about_sub_resource_types_too);
         registerTest("Tools.ResourceCreateUnicodeFileNames",
                      test_resource_create_writes_unicode_file_names);
+        registerTest("Tools.AtomicWriteWaitsOutAReader", test_atomic_write_waits_out_a_reader);
         registerTest("Tools.AtomicWriteKeepsDestinationOnFailure",
                      test_atomic_write_keeps_the_destination_when_the_replace_fails);
         registerTest("Tools.ScriptPatchLeavesNoTemporaryFiles",

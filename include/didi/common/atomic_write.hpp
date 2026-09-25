@@ -6,14 +6,58 @@
 #include "didi/common/types.hpp"
 
 #include <cerrno>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <system_error>
 
 namespace didi::files {
+
+// Renames from to to, retrying for up to budget while Windows says one of them
+// is in use.
+//
+// A file or folder written moments ago is routinely held for a fraction of a
+// second by somebody else: a scanner, an indexer, a backup agent, or a reader
+// that has the destination open. Windows refuses a rename out of or over an
+// open file until that handle goes, so an operation that tried once failed on
+// a lock that had usually gone by the time anyone read the error (#678, #937).
+// Nowhere else is that refusal transient, so other platforms try once. The
+// caller gets the last error, so a handle that really is held still reports
+// the refusal it always did.
+inline std::error_code renameWithRetry(const std::filesystem::path& from,
+                                       const std::filesystem::path& to,
+                                       std::chrono::milliseconds budget) {
+    std::error_code error;
+    std::filesystem::rename(from, to, error);
+#if defined(_WIN32)
+    const auto in_use = [](const std::error_code& code) {
+        constexpr int kAccessDenied = 5;       // ERROR_ACCESS_DENIED
+        constexpr int kSharingViolation = 32;  // ERROR_SHARING_VIOLATION
+        constexpr int kLockViolation = 33;     // ERROR_LOCK_VIOLATION
+        return code.category() == std::system_category() &&
+               (code.value() == kAccessDenied || code.value() == kSharingViolation ||
+                code.value() == kLockViolation);
+    };
+    const auto deadline = std::chrono::steady_clock::now() + budget;
+    while (error && in_use(error) && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        error.clear();
+        std::filesystem::rename(from, to, error);
+    }
+#else
+    (void)budget;
+#endif
+    return error;
+}
+
+// How long a replace waits out a handle on the destination. A reader holds the
+// file for milliseconds; a real refusal, a read-only destination say, is told
+// after this.
+inline constexpr std::chrono::milliseconds kReplaceRetryBudget{2000};
 
 // A write that is fully prepared but not yet in place.
 //
@@ -53,8 +97,10 @@ public:
 
     Result<void> commit() {
         if (!m_staged) return Error::internal("No staged write to commit");
-        std::error_code error;
-        std::filesystem::rename(m_temporary, m_target, error);
+        // A reader with the destination open refuses the replace on Windows
+        // until it lets go: project_list_export_presets reading while
+        // project_add_export_preset wrote was one, outside the lock (#937).
+        const auto error = renameWithRetry(m_temporary, m_target, kReplaceRetryBudget);
         if (error) {
             discard();
             return Error::internal("Replacing the destination file failed; the original is unchanged");

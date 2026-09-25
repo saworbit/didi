@@ -175,6 +175,16 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **A checkpoint or a file write no longer fails on Windows because something held a file for
+  a moment (#937).** Checkpoint publication renamed the finished snapshot once, and a scanner
+  or indexer holding a file it had just copied failed it with `Access is denied`, about one
+  run in twenty in a test that did nothing else. Every staged write replaced its destination
+  once too, so a reader with the file open, `project_list_export_presets` during a
+  `project_add_export_preset` say, made the write a 500. Both now use the bounded retry the
+  managed restore already had, which retries only while Windows says the file is in use. A
+  snapshot that fails to publish is removed rather than left to count against the store's
+  limit.
+
 - **`editor_undo` and `editor_redo` no longer leave the editor's history inconsistent
   (#913).** They stepped the scene's `UndoRedo` directly, which moved it under the
   stacks `EditorUndoRedoManager` keeps beside it. The editor printed
