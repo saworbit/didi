@@ -3,6 +3,7 @@
 #include "didi/mcp/schema_validation.hpp"
 #include "didi/runtime/session_client.hpp"
 #include "didi/common/logger.hpp"
+#include <algorithm>
 #include <cassert>
 #include <chrono>
 #include <condition_variable>
@@ -130,6 +131,76 @@ static void test_mcp_initialize() {
     ASSERT_TRUE(resp.result["capabilities"].contains("resources"));
     ASSERT_TRUE(resp.result["capabilities"].contains("prompts"));
     ASSERT_TRUE(!resp.result["capabilities"].contains("logging"));
+}
+
+// Exercise the serialized protocol boundary and resolve every documented
+// canonical tool against discovery, so renamed or removed routes cannot drift.
+static void test_mcp_initialize_instructions() {
+    didi::mcp::McpServer server;
+    server.setIpcClient(nullptr);
+    didi::mcp::JsonRpcRequest req;
+    req.id = 1;
+    req.method = "initialize";
+    req.params = {{"protocolVersion", "2024-11-05"}};
+    const auto response = server.handleRequest(req);
+    ASSERT_TRUE(!response.error.has_value());
+    const auto wire = didi::json::parse(response.serialize());
+    ASSERT_TRUE(wire["result"]["instructions"].is_string());
+    const auto instructions = wire["result"]["instructions"].get<std::string>();
+    ASSERT_TRUE(!instructions.empty());
+    ASSERT_TRUE(!wire["result"]["capabilities"].contains("instructions"));
+    for (const auto* rule : {"inputSchema", "Never brute-force node paths",
+                            ".tscn/.gd", "godot --headless", "binary asset editor",
+                            "engine_checked", "offline_fallback"}) {
+        ASSERT_TRUE(instructions.find(rule) != std::string::npos);
+    }
+
+    req.id = 2;
+    req.method = "tools/list";
+    req.params = didi::json::object();
+    const auto listed = server.handleRequest(req);
+    ASSERT_TRUE(!listed.error.has_value());
+    didi::json names = didi::json::object();
+    for (const auto& tool : listed.result["tools"]) {
+        names[tool["name"].get<std::string>()] = true;
+    }
+    // Tool identifiers in the guide contain underscores. Other underscored
+    // words are schema fields or result metadata, listed explicitly here.
+    const std::vector<std::string> fields = {
+        "_meta", "DIDI_PROJECT_ROOT", "execution_mode", "session_kind", "offline_fallback", "dry_run",
+        "mutation_preview", "confirmation_token", "root_path", "max_depth",
+        "max_nodes", "omitted_fields", "target_node", "property_name",
+        "file_path", "source_text", "engine_checked", "is_live_frame"
+    };
+    std::istringstream words(instructions);
+    std::string word;
+    while (words >> word) {
+        size_t start = 0;
+        while (start < word.size()) {
+            start = word.find_first_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_", start);
+            if (start == std::string::npos) break;
+            const auto end = word.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_", start);
+            const auto identifier = word.substr(start, end - start);
+            if (identifier.find('_') != std::string::npos &&
+                std::find(fields.begin(), fields.end(), identifier) == fields.end()) {
+                if (!names.contains(identifier)) {
+                    throw std::runtime_error("Instructions name an unregistered tool: " + identifier);
+                }
+            }
+            if (end == std::string::npos) break;
+            start = end + 1;
+        }
+    }
+    for (const auto* name : {"scene_get_hierarchy", "scene_get_property",
+                            "project_get_setting", "script_get_symbols", "script_check_syntax"}) {
+        ASSERT_TRUE(instructions.find(name) != std::string::npos);
+    }
+
+    req.id = 3;
+    req.method = "server/discover";
+    const auto discovered = server.handleRequest(req);
+    ASSERT_TRUE(!discovered.error.has_value());
+    ASSERT_EQ(discovered.result["instructions"], wire["result"]["instructions"]);
 }
 
 static void test_mcp_tool_list_reports_current_availability() {
@@ -1639,6 +1710,7 @@ struct RegisterJsonRpcTests {
         registerTest("JsonRpc.ResponseSerialization", test_jsonrpc_response_serialization);
         registerTest("JsonRpc.NullResultSerialization", test_jsonrpc_null_result_serialization);
         registerTest("McpServer.Initialize", test_mcp_initialize);
+        registerTest("McpServer.InitializeInstructions", test_mcp_initialize_instructions);
         registerTest("McpServer.InitializeReadsTheProtocolVersion",
                      test_initialize_reads_the_protocol_version_it_is_sent);
         registerTest("McpServer.SubscribeRefusalIsTrue",

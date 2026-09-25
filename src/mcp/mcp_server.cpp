@@ -47,6 +47,27 @@ static constexpr size_t kMaxPendingLines = 256;
 // is still open does not, and is abandoned rather than hung on.
 static constexpr int kReaderDrainMs = 1000;
 
+// Shared by the legacy handshake and stateless discovery so clients receive
+// the same routing and safety contract regardless of their protocol revision.
+static constexpr const char* kServerInstructions = R"instructions(Didi: Godot project inspection and controlled editor/game operations.
+
+DISCOVERY AND EXECUTION
+Select the project with --project or DIDI_PROJECT_ROOT. Before invoking any tool, inspect tools/list: read its inputSchema, required parameters, descriptions, bounds, and _meta.didi availability. Use canonical names below; never invent tool names or parameters. Require implemented=true; live-only calls need currentMode=live or liveAvailable=true. Recheck discovery after session changes. Use runtime_list_sessions, runtime_attach_session, and runtime_get_session to select and verify the intended project and editor/game route. Check execution_mode and session_kind in results; offline_fallback is not observed or unsaved editor state.
+Never brute-force node paths or probe guessed node names. Discover the hierarchy first, reuse returned paths, and refresh the relevant branch after structural changes or a missing-node error. Inspect errors and limitations before changing the request; do not repeat unsupported calls.
+Preview mutations with the exact arguments plus dry_run=true; inspect mutation_preview and the project/route. If confirmation_token is returned, execute the same arguments without dry_run and with that token only after destructive intent is authorized. Do not replay uncertain mutations. Use editor_save_scene when scene persistence is intended.
+
+TOOL ROUTING
+- Files: project_list_resources discovers project paths; project_search_text finds literal text; project_search_symbols finds lexical GDScript/C# declarations.
+- Scene tree: scene_get_hierarchy(root_path, max_depth, max_nodes) returns names, classes, paths, and children. Start bounded or use summary=true; inspect truncation and expand only relevant branches. A .tscn root_path reads the saved file even when attached. Live bulk properties, scripts, and signals are omitted; inspect omitted_fields.
+- Node properties: scene_get_property(target_node, property_name) reads one existing scalar property on a discovered live node; scene_set_property writes it. Do not infer all properties from the hierarchy.
+- Project settings: project_get_setting(setting) reads a value; project_set_setting writes it. Use project_list_autoloads/project_set_autoload for autoloads and the advertised InputMap tools for input/*, not project_set_setting for those namespaces.
+- GDScript: script_get_symbols extracts declarations; script_check_syntax(file_path) attempts Godot compiler diagnostics. source_text alone is lexical checking, not proof of compilation: inspect engine_checked and limitation. project_verify_changes checks proposed files together in an isolated copy. script_reflect_class is a limited offline reference, not full live ClassDB or a language server.
+
+BOUNDARIES AND FALLBACKS
+Didi does not implement a real-time renderer or gameplay loop; Godot owns both. viewport_capture_frame provides snapshots (check is_live_frame); runtime_launch runs Godot and the advertised runtime tools offer bounded session controls, not arbitrary continuous gameplay automation. Didi is not a general shell, unrestricted GDScript executor, or binary asset editor; eval_gdscript is a restricted read-only expression language. resource_inspect reports metadata/dependencies, not arbitrary Resource internals.
+For source details beyond tool output, inspect the selected project's .tscn/.gd files directly (and project.godot for saved configuration); files cannot reveal unsaved or runtime state. For compiler or execution checks beyond supported tools, use godot --headless with the explicit project path and appropriate check/test options. Headless checks do not validate real-time rendered appearance. Use Godot/import tooling for binary assets. Registered but unimplemented tools are not capabilities: do not call physics_simulate_step, nav_bake_mesh, or runtime_get_call_stack while discovery marks them unimplemented.
+)instructions";
+
 namespace {
 
 // Lines arrive on their own thread so that a signal can end the session. A
@@ -541,11 +562,7 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
                 // confirmation gate is open before it acts, not after.
                 {"didi", {{"confirmationsSkipped", m_skipConfirmations}}}
             }},
-            {"instructions",
-             "Didi drives a local Godot editor or game over an authenticated session. "
-             "Select a project with --project or DIDI_PROJECT_ROOT, discover sessions "
-             "with runtime_list_sessions, and preview mutations with dry_run before "
-             "supplying a confirmation_token."},
+            {"instructions", kServerInstructions},
             // Caching hints are required on a complete result. Everything here
             // is fixed for the life of the process -- supported versions,
             // capabilities and identity are compile-time constants -- so it is
@@ -618,6 +635,7 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
         }
         json result = {
             {"protocolVersion", isSupportedProtocolVersion(asked) ? asked : kProtocolVersion},
+            {"instructions", kServerInstructions},
             {"capabilities", {
                 // True, and meant. Every entry tools/list returns carries
                 // bridge state -- currentMode, liveAvailable, editorConnected,
