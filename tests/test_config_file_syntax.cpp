@@ -368,6 +368,30 @@ struct Register {
         }
     });
 
+    registerTest("config_file_syntax.floatize_reads_a_value_the_way_the_engine_does", [] {
+        // #907: every row is what 4.5.1, 4.6.2 and 4.7.2 each stored for
+        // bus/0/volume_db when a layout holding the value was loaded. std::atof
+        // read every quoted number, and true, as 0.
+        struct Case { const char* value; double expected; };
+        const Case cases[] = {
+            {"-12", -12.0},       {"-12.5", -12.5},     {"1e3", 1000.0},
+            {"-0.0", 0.0},        {"0x10", 0.0},        {"1_000", 1.0},
+            {"\"-6\"", -6.0},     {"\" -6 \"", -6.0},   {"\"  7\"", 7.0},
+            {"\"7  \"", 7.0},     {"\"-6dB\"", -6.0},   {"\"12abc\"", 12.0},
+            {"\"abc\"", 0.0},     {"\"\"", 0.0},        {"\"inf\"", 0.0},
+            {"\"-inf\"", 0.0},    {"\"nan\"", 0.0},     {"\"0x10\"", 0.0},
+            {"\"1e2\"", 100.0},   {"\"+3\"", 3.0},      {"\".5\"", 0.5},
+            {"\"5.\"", 5.0},      {"\"1_000\"", 1.0},   {"true", 1.0},
+            {"false", 0.0},       {"null", 0.0},        {"&\"-6\"", 0.0},
+            {"Vector2(1, 2)", 0.0}, {"[1]", 0.0},       {"{\"a\": 1}", 0.0},
+        };
+        for (const auto& item : cases) {
+            if (didi::config_file::floatize(item.value) != item.expected) {
+                throw std::runtime_error(std::string("floatize disagreed on: ") + item.value);
+            }
+        }
+    });
+
     registerTest("config_file_syntax.booleanize_expects_the_parser_to_have_spoken_first", [] {
         // A value the parser will not start never reaches the engine's
         // conversion, because the whole file is ERR_PARSE_ERROR. So this does

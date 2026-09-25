@@ -829,6 +829,30 @@ static void test_audio_list_buses_reads_flags_the_way_the_engine_does() {
     ASSERT_TRUE(report["buses"][1]["bypass_effects"].get<bool>());
 }
 
+static void test_audio_list_buses_reads_volume_the_way_the_engine_does() {
+    // A generator that writes every value as a string wrote a layout Godot
+    // plays at the volume it says, and this read every bus as 0 dB (#907).
+    ScopedToolProject project("audio-buses-quoted-volume");
+    writeAuditFile("project.godot", "config_version=5\n");
+    writeAuditFile("default_bus_layout.tres",
+        "[gd_resource type=\"AudioBusLayout\" format=3]\n"
+        "\n"
+        "[resource]\n"
+        "bus/1/name = &\"Music\"\n"
+        "bus/1/volume_db = \"-6\"\n"
+        "bus/2/name = &\"SFX\"\n"
+        "bus/2/volume_db = true\n");
+    const auto report = [] {
+        auto& registry = didi::mcp::ToolRegistry::instance();
+        registry.registerAllDefaultTools();
+        const auto result = registry.callTool("audio_list_buses", didi::json::object());
+        ASSERT_TRUE(!result.isError);
+        return didi::json::parse(result.content[0].text);
+    }();
+    ASSERT_EQ(report["buses"][1]["volume_db"].get<double>(), -6.0);
+    ASSERT_EQ(report["buses"][2]["volume_db"].get<double>(), 1.0);
+}
+
 static didi::json listBusesOffline() {
     auto& registry = didi::mcp::ToolRegistry::instance();
     registry.registerAllDefaultTools();
@@ -8814,6 +8838,8 @@ struct RegisterToolTests {
                      test_audio_list_buses_reads_the_layout_godot_actually_writes);
         registerTest("Tools.AudioListBusesNumericFlags",
                      test_audio_list_buses_reads_flags_the_way_the_engine_does);
+        registerTest("Tools.AudioListBusesReadsVolumeLikeTheEngine",
+                     test_audio_list_buses_reads_volume_the_way_the_engine_does);
         registerTest("Tools.AudioListBusesBrokenLayout",
                      test_audio_list_buses_answers_master_for_a_layout_that_does_not_load);
         registerTest("Tools.AudioListBusesBrokenManifest",
