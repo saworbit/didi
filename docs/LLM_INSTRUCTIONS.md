@@ -17,6 +17,7 @@ Before planning work, call `tools/list` and inspect `_meta.didi` on every candid
 - Treat `offline_fallback` as file/process/synthetic analysis, never as observed editor state.
 - Never infer implementation from the fact that a schema is registered.
 - Re-check discovery after the editor starts, stops, or reconnects.
+- Argument names differ between tool families: the node a call is about is `target_node` on most tools and `tilemap_path`, `animation_player_path` or `emitter_node` on others. A refusal for one argument sent under the wrong name carries `argument` (what you sent), `did_you_mean` and `retry_with`: resend without `argument` and with `retry_with` added.
 
 The four possible `currentMode` values are:
 

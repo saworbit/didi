@@ -8825,6 +8825,61 @@ static void test_input_action_listing_can_ask_for_less() {
     ASSERT_TRUE(wrong.content.front().text.find("prefix") != std::string::npos);
 }
 
+static void test_a_misnamed_argument_is_refused_with_the_name_to_use() {
+    // Break caught: the surface spells the node a call is about ten ways and the
+    // file nine, so a first call to an unfamiliar tool guesses, and the refusal
+    // named the right name only in a sentence (#784). A client should be able to
+    // apply the fix without reading English, and only when it is the whole fix.
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    const auto refusal = [&registry](const char* tool, const didi::json& arguments) {
+        const auto result = registry.callTool(tool, arguments);
+        ASSERT_TRUE(result.isError);
+        return didi::json::parse(result.content.front().text)["error"];
+    };
+
+    // The tilemap tools say tilemap_path where most of the surface says target_node.
+    const didi::json cells = didi::json::array({{{"coords", {0, 1}}, {"erase", true}}});
+    const didi::json guessed = {{"target_node", "/root/TileMapLayer"}, {"cells", cells}};
+    const auto error = refusal("tilemap_set_cells", guessed);
+    ASSERT_EQ(error["code"], 400);
+    ASSERT_EQ(error["data"]["code"], "invalid_arguments");
+    ASSERT_EQ(error["data"]["argument"], "target_node");
+    ASSERT_EQ(error["data"]["did_you_mean"], "tilemap_path");
+    ASSERT_EQ(error["data"]["retry_with"], didi::json({{"tilemap_path", "/root/TileMapLayer"}}));
+    ASSERT_TRUE(error["message"].get<std::string>().find(
+                    "Send the value of 'target_node' as 'tilemap_path'.") != std::string::npos);
+
+    // Applied as written, the retry gets past the check that refused it.
+    auto retried = guessed;
+    retried.erase(error["data"]["argument"].get<std::string>());
+    retried.update(error["data"]["retry_with"]);
+    const auto second = registry.callTool("tilemap_set_cells", retried);
+    ASSERT_TRUE(second.content.front().text.find("invalid_arguments") == std::string::npos);
+
+    // A file argument the same way: shader_check_compile says shader_path.
+    ASSERT_EQ(refusal("shader_check_compile",
+                      didi::json{{"file_path", "res://fx.gdshader"}})["data"]["did_you_mean"],
+              "shader_path");
+
+    // Nothing is offered when moving one value is not the whole fix: two
+    // names wrong, a value the right name would refuse, or nothing missing.
+    for (const auto& arguments : std::vector<didi::json>{
+             {{"target_node", "/root/TileMapLayer"}, {"cell_list", cells}},
+             {{"target_node", 7}, {"cells", cells}},
+             {{"tilemap_path", "/root/TileMapLayer"}, {"cells", cells}, {"bogus", 1}}}) {
+        const auto data = refusal("tilemap_set_cells", arguments)["data"];
+        ASSERT_TRUE(!data.contains("did_you_mean") && !data.contains("retry_with") &&
+                    !data.contains("argument"));
+    }
+
+    // A long value is named and not sent back: the caller already has it.
+    const auto long_value =
+        refusal("eval_gdscript", didi::json{{"code", std::string(1500, 'x')}})["data"];
+    ASSERT_EQ(long_value["did_you_mean"], "expression");
+    ASSERT_TRUE(!long_value.contains("retry_with"));
+}
+
 struct RegisterToolTests {
     RegisterToolTests() {
         registerTest("Tools.OfflineCapabilityIsDerived",
@@ -9163,6 +9218,8 @@ struct RegisterToolTests {
                      test_input_action_listing_can_ask_for_less);
         registerTest("Tools.AuditNamesConnectionToMissingMethod",
                      test_project_audit_names_a_connection_to_a_method_nothing_declares);
+        registerTest("Tools.MisnamedArgumentCarriesTheFix",
+                     test_a_misnamed_argument_is_refused_with_the_name_to_use);
         registerTest("Resources.DefaultRegistration", test_resource_registry);
         registerTest("Prompts.DefaultRegistration", test_prompt_registry);
     }

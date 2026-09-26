@@ -100,6 +100,27 @@ would be refused again: `retry_with` is the change that makes it
 succeed. A refusal with nothing to add omits the key rather than sending an
 empty one.
 
+One refusal also takes an argument away. The surface names the node or file a
+call is about differently from one family to the next (`target_node`,
+`tilemap_path`, `shader_path` and more), so a first call often uses a sibling's
+name. When a call's only problem is one argument this tool does not take, and
+sending its value as the one required argument that is missing makes the call
+valid, the refusal says which is which: `argument` is the name that was sent,
+`did_you_mean` is the name to use, and `retry_with` carries the value under it.
+Drop `argument` and merge `retry_with`:
+
+```json
+{"code": "invalid_arguments",
+ "argument": "target_node",
+ "did_you_mean": "tilemap_path",
+ "retry_with": {"tilemap_path": "/root/Level/Tiles"}}
+```
+
+Nothing is offered when moving one value is not the whole fix: two names wrong,
+a value the right name would refuse, or nothing missing. A value over 1 KiB is
+not sent back, since the caller has it already, so `retry_with` is left out
+there and the other two stay (#784).
+
 A live-only tool called with no engine attached — the most common state a
 caller meets — answers `503` and names itself, says it needs a live Godot
 engine, and says how to get one: open the project in the Godot editor with the

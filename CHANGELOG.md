@@ -175,6 +175,11 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **A refusal for an argument under the wrong name carries the fix (#784).** When a call's only
+  problem is one argument this tool does not take, and its value fits the one required argument
+  that is missing, the refusal names both as `argument` and `did_you_mean` and carries the value
+  under the right name in `retry_with`. Every schema stays as it was; the retry is mechanical.
+
 - **`project_audit_assets` reports a scene connection to a method nothing declares (#781).**
   `project_rename_references` leaves exactly that behind when it renames the method in a scene
   and reports the script lines it did not change, and no check noticed. `broken_connections`
