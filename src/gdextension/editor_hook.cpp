@@ -1343,11 +1343,27 @@ void EditorHook::processAssetReimportFrame() {
             completed = std::move(m_pendingAssetReimport);
             m_pendingAssetReimport.reset();
             if (state == ReimportProgressState::TimedOut) {
+                // What the wait was still waiting for, so a timeout says
+                // whether the editor was scanning or applying what a scan
+                // found. A slow editor spends most of a scan in the second:
+                // each new script is registered under a progress task that
+                // draws a frame per step.
                 response = {{"error", {{"code", 504},
                                         {"message", "Asset reimport did not reach editor idle before timeout"},
                                         {"data", {{"code", "reimport_idle_timeout"},
                                                    {"outcome", "unknown_outcome"},
-                                                   {"route_quarantine", false}}}}}};
+                                                   {"route_quarantine", false},
+                                                   {"editor_scanning", scanning.value()}}}}}};
+                if (completed->settle.has_value()) {
+                    const bool applied = GodotBridge::instance().scanSettled(*completed->settle);
+                    response["error"]["data"]["scan_applied"] = applied;
+                    if (!scanning.value() && !applied) {
+                        response["error"]["message"] =
+                            "Asset reimport did not reach editor idle before timeout: the editor had "
+                            "finished scanning and was still applying what it found, registering new "
+                            "scripts' classes";
+                    }
+                }
             } else {
                 // What the scan did, read off the filesystem rather than
                 // inferred from the call that was made. A path with no .import

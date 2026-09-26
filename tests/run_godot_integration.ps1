@@ -5193,9 +5193,11 @@ text = "Not a key"
     # once the scan is applied, and the class of every script it found is then
     # in .godot/global_script_class_cache.cfg, which the editor writes at the
     # end of that registration. Answered on the flag, it was not: the answer
-    # came from a frame inside the registration. Twenty-five scripts a call:
-    # a CI runner's editor took longer than ten seconds to apply a scan of
-    # 250, and the call's timeout is ten seconds at most. The SVG's
+    # came from a frame inside the registration. Three scripts a call: the
+    # registration draws a frame for each script, twice over, and the 4.5.1
+    # CI runner draws in software at about 0.6 s a frame, so it took longer
+    # than the call's ten-second maximum to apply a scan of 25. Two scripts are
+    # enough to open the progress task the answer used to come from. The SVG's
     # imported texture has to be rewritten, which is the reimport happening
     # rather than the answer saying it did. The scripts stay: the fixture is
     # thrown away, and deleting them under an open editor is a test of its own
@@ -5203,9 +5205,9 @@ text = "Not a key"
     $raceFolder = Join-Path $fixtureRoot "reimport_race"
     New-Item -ItemType Directory -Path $raceFolder -Force | Out-Null
     $classCachePath = Join-Path $fixtureRoot (Join-Path ".godot" "global_script_class_cache.cfg")
-    foreach ($chunk in 0, 1, 2, 3) {
+    foreach ($chunk in 0, 1, 2) {
         $chunkClasses = @()
-        for ($index = $chunk * 25; $index -lt ($chunk + 1) * 25; $index++) {
+        for ($index = $chunk * 3; $index -lt ($chunk + 1) * 3; $index++) {
             $className = "RaceFiller{0:D4}" -f $index
             $chunkClasses += $className
             [System.IO.File]::WriteAllText((Join-Path $raceFolder ("filler_{0:D4}.gd" -f $index)),
@@ -5214,7 +5216,7 @@ text = "Not a key"
         $indexRequests = @(
             (@{ jsonrpc = "2.0"; id = 6115; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
             (Tool-Request 6116 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
-            (Tool-Request 6117 "asset_reimport" @{ paths = @(("res://reimport_race/filler_{0:D4}.gd" -f ($chunk * 25))); timeout_ms = 10000 })
+            (Tool-Request 6117 "asset_reimport" @{ paths = @(("res://reimport_race/filler_{0:D4}.gd" -f ($chunk * 3))); timeout_ms = 10000 })
         )
         $rawIndex = Invoke-Didi -Requests $indexRequests -Arguments @("--project", $fixtureRoot)
         $indexed = @($rawIndex | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.PSObject.Properties.Name -contains "id" -and $_.id -eq 6117 })
@@ -5230,7 +5232,7 @@ text = "Not a key"
         }
         $unregistered = @($chunkClasses | Where-Object { $classCache -notmatch ('"' + $_ + '"') })
         Assert-True (-not $cacheLocked) "asset_reimport answered while the editor was still writing its class list, inside the work that applies a scan."
-        Assert-True ($unregistered.Count -eq 0) "asset_reimport answered before the editor had applied its scan: $($unregistered.Count) of the 25 new classes ($($unregistered[0]) first) were not yet registered."
+        Assert-True ($unregistered.Count -eq 0) "asset_reimport answered before the editor had applied its scan: $($unregistered.Count) of the 3 new classes ($($unregistered[0]) first) were not yet registered."
     }
     [System.IO.File]::WriteAllText((Join-Path $raceFolder "fresh.gd"), "extends Node`n")
     $probeTexture = @(Get-ChildItem -LiteralPath (Join-Path $fixtureRoot (Join-Path ".godot" "imported")) -Filter "reimport_probe.svg-*.ctex")
