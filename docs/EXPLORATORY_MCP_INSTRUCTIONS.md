@@ -55,6 +55,8 @@ These are observations on a warm local machine, not CI performance thresholds or
 
 ## Existing limits confirmed
 
+**Follow-up, 2026-09-26:** both issues below were fixed before this report merged, and the two entries describe the tested commit, `1cc86bd`. #966 fixed #913: `editor_undo` and `editor_redo` run the editor's own Undo and Redo, and the live harness no longer allows the `Inconsistent redo history` line. #963 fixed #958 with `asset_configure_import`, which sets a WAV, OGG or MP3 import's loop options and checks what the engine then loads.
+
 - [#913](https://github.com/saworbit/didi/issues/913): the integration harness still observes Godot's `Inconsistent redo history` diagnostic around undo/redo. This predates the tested instructions/normalization changes and remains a tracked engine-integration defect.
 - [#958](https://github.com/saworbit/didi/issues/958): the surface cannot directly inspect or change a music asset's import-loop option. The existing script and sidecar/reimport workarounds function. The guide correctly routes unsupported asset work to files/Godot tooling; this run did not add an import-configuration API.
 - Local native and Python runs do not replace cross-platform CI or visual/artistic review of a game. Rendering checks here are the live harness's viewport/UI assertions, not a subjective visual approval.

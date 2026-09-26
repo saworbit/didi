@@ -1,7 +1,7 @@
 # Didi Strategic Roadmap & Technical Build Order 🗺️
 
 > **Core Philosophy**:
-> The 115-tool canonical surface includes completed Phases 1–6, the feasible Phase 7 delivery, and the names accepted since through [Surface Amendments](SURFACE_AMENDMENTS.md): live editor substrate, project wiring, authenticated runtime sessions, autonomous verification, deep-domain workflows, enterprise safety controls, and bounded editor/runtime authoring.
+> The canonical surface ([Current Capability Matrix](CAPABILITIES.md) has today's count) includes completed Phases 1–6, the feasible Phase 7 delivery, and the names accepted since through [Surface Amendments](SURFACE_AMENDMENTS.md): live editor substrate, project wiring, authenticated runtime sessions, autonomous verification, deep-domain workflows, enterprise safety controls, and bounded editor/runtime authoring.
 
 ---
 
@@ -284,21 +284,22 @@ Phase 13 and later must be documented before implementation begins. Each phase r
 These are missing capabilities that an AI agent actually requires to complete full development cycles and ship Godot changes.
 
 ### 1. Deeper Search and Indexing
-- **Reverse Usage Lookup**: "Where is this node type used?" and "Which scenes instance this sub-scene?"
+- **Reverse Usage Lookup**: delivered as `project_analyze_impact`. Given a scene's `res://` path it names every scene that instances it, and given a class name such as `Label` it names the scenes that use the type and the scripts that mention it.
 - **UID ↔ Path Synchronization**: delivered as the `resolve` parameter on `project_get_uid_map`. A connected editor answers from the `ResourceUID` singleton, and each result reports whether the project files agree. Not `.godot/uid_cache.bin`: that is an undocumented binary cache, absent on a fresh clone and stale between saves, and parsing it would mean maintaining a format the engine does not support — the same reason Phase 7 option C was rejected. Still open: `ResourceUID` exposes no enumeration through GDExtension, so the map itself remains a file scan.
-- **Import Status Tracking**: Inspect `.import` remaps and detect broken/missing asset imports.
+- **Import Status Tracking**: delivered as `project_audit_assets`, which reads every `.import` sidecar for malformed or unsafe paths, missing sources and outputs, and sources or outputs that changed since the engine recorded their import. See Phase 8 above.
 
 ### 2. Expanded Visual Verification
-- **Multi-Target Viewports**: Explicitly capture 2D canvas, 3D world, active editor viewport, or running game window.
+- **Multi-Target Viewports**: delivered. `viewport_capture_frame` takes the editor's 3D or 2D viewport by `camera_identifier`, and attached to a game it captures the game's root viewport, with `session_kind` saying which.
 - **Debug Draw Modifiers**: Non-destructive debug wireframes passed as capture parameters rather than global sticky toggles.
 
 ### 3. Asset Import and Pipeline Management
 - **Import Preset Configuration**: Configure compression modes, 3D normal filters, and mesh collision generation. Delivered for audio loop options as `asset_configure_import` (#958); every other importer needs its own measured rows before the tool will set it.
+- **Localisation and Game Data**: still open under #779. Nothing on the surface writes a translation CSV or a JSON of game data, and writing the bytes is the smaller half. The engine imports every `.csv` as translations unless a sidecar names another importer first, and an imported CSV's own text never ships in an export. The game has to register the `.translation` files the import produced, not the CSV. The engine measurements are in #987.
 
 ### 4. Animation and UI Authoring
 - **Animation Libraries**: delivered as `anim_add_library` -- an `AnimationLibrary` written with `resource_create` is added to a player in the edited scene through UndoRedo, which is what makes `anim_list_tracks` and `anim_play_track` reachable on a player the surface built (#770).
 - **Animation Track Keyframing**: Add, remove, and interpolate keyframes and track lengths in `AnimationPlayer`. Still open: an animation is authored whole as a resource file today, not edited key by key on a live player.
-- **Control Enumeration**: delivered as `ui_list_controls` -- live Controls with their resolved viewport rectangles, class, visibility, mouse filter and text, in an editor or a running game.
+- **Control Enumeration**: delivered as `ui_list_controls` -- live Controls with their resolved viewport rectangles, class, visibility, mouse filter and text, in an editor or a running game. Still open: the text is the `text` property, which in a localised game is the translation key rather than what the player reads (#988).
 - **Theme & Layout Inspection**: Inspect Control node anchors, margins, minimum sizes, and theme overrides. Still open: `ui_list_controls` reports the resolved rectangle, not the authoring inputs behind it.
 
 ### 5. Enhanced MCP Protocol Surface
@@ -306,7 +307,7 @@ These are missing capabilities that an AI agent actually requires to complete fu
 - **Resource Subscriptions**: `resources/subscribe` and `notifications/resources/updated` are delivered for `blackboard://` resources, which are the ones that change without a call from the subscribing client. The `godot://` resources remain unsubscribable: they change only in response to a tool call the client already made, or to editor activity that has no watcher yet.
 - **Resource Templates**: Dynamic URI templates `godot://node/{path}` and `godot://script/{res_path}`.
 - **Additional Structured Workflows**: Extend the existing anomaly-debugging and gameplay-slice prompts with guided *Create Character*, *Wire Signal*, and *Visual Verification Loop* workflows.
-- **Structured Engine Logging**: Support `logging/setLevel` and stream Godot engine warnings and errors into MCP notifications.
+- **Structured Engine Logging**: Support `logging/setLevel` and stream Godot engine warnings and errors into MCP notifications. Partly delivered: the engine's own warnings and errors can be read through `runtime_read_output`, and every live answer carries the lines its call caused as `engine_diagnostics`. Both are read on request; `logging/setLevel` and pushed notifications remain open.
 
 ## 🚫 What NOT to Add Yet
 

@@ -611,6 +611,23 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Changed
 
+- **The roadmap and the amendment log describe the surface as it stands (#990).**
+  The roadmap opened on a 115-tool canonical surface, and the tool count is 120.
+  The amendment log's first paragraph said six amendments were implemented,
+  named thirteen, and listed two implemented tools as unaccepted proposals.
+  Neither passage now states a count that has to be edited by hand. The
+  roadmap's remaining-capabilities list had four items marked open that have
+  shipped: reverse usage lookup and import status tracking in
+  `project_analyze_impact` and `project_audit_assets`, capture of the editor's 2D
+  or 3D viewport or a game's, and engine warnings and errors read through
+  `runtime_read_output`. It now also lists localisation and game data, still open
+  under #779. The tool reference and the agent instructions now describe what
+  `ui_list_controls`' `text` is in a localised game (#988). They also say that
+  `project_set_setting` checks no path inside an array (#989), and which files to
+  register as translations. The 2026-09-25 exploration report gains a follow-up
+  noting that the two limits it confirmed have since been fixed. The website's
+  resources card names the blackboard boards.
+
 - **The vendored JSON parser is nlohmann/json 3.12.0 (#796).** It parses every request an MCP
   client sends. The header is the signed upstream release, byte for byte. Two of its changes
   could have reached Didi and neither has a caller here: `std::filesystem::path` converting as

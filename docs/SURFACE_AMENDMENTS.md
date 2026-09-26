@@ -52,20 +52,24 @@ and verification, and it fails visibly wherever the surface has a hole.
 
 ## Amendment log
 
-Six amendments are implemented: `runtime_read_output`, `audio_list_buses` and
-`audio_configure_bus`, all recorded below with tri-engine feasibility evidence,
-plus `project_audit_assets`, `project_analyze_impact`,
-`runtime_explore_scene`, `didi_control_room`, `ui_list_controls`,
-`scene_call_method`, `anim_add_library`, `project_add_export_preset`,
-`audio_add_bus` and `asset_configure_import`. One
-amendment adds no name and changes an existing contract: `scene_close` reads
-real dirty state where the engine can report it. One is withdrawn: raising the engine floor to
-Godot 4.7, refused in favour of runtime capability detection so that 4.5 and 4.6
-users keep support. The remaining candidates come from the
-August 2026 competitive review and are proposed, not accepted, in
-[Realignment Implementation Plan](REALIGNMENT_IMPLEMENTATION_PLAN.md):
-`runtime_read_output`, `ui_list_controls`, `godot_api_reference`, and an `until`
-parameter on the existing `runtime_step` (a change, not a new name).
+The entries below are the record, and this paragraph does not count them. A
+count here has to be edited by hand on every amendment, and it went stale
+(#990). Every `ACCEPTED (IMPLEMENTED)` entry is registered and in
+the tool manifest, and [Current Capability Matrix](CAPABILITIES.md) carries each
+tool's status. Two entries add no tool name. The `blackboard://` resources add
+`resources/subscribe`, a protocol capability. The other changes an existing
+contract: `scene_close` reads real dirty state where the engine can report it.
+One entry is withdrawn: raising the engine floor to Godot 4.7, refused in favour
+of runtime capability detection so that 4.5 and 4.6 users keep support.
+
+The August 2026 competitive review proposed four candidates in
+[Realignment Implementation Plan](REALIGNMENT_IMPLEMENTATION_PLAN.md). Two are
+implemented, `runtime_read_output` and `ui_list_controls`, and each has an entry
+below. The other two were never added, because shipped tools answer them:
+`script_reflect_class` answers `godot_api_reference`, and
+`runtime_watch_invariants` answers an `until` parameter on `runtime_step`. Both
+were checked on 2026-09-08, and [the roadmap](ROADMAP.md) records it under
+"What NOT to Add Yet".
 
 ### ACCEPTED (IMPLEMENTED): `asset_configure_import`
 
