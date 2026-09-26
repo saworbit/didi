@@ -8479,6 +8479,122 @@ static void test_set_setting_descriptions_say_the_guard_is_live_only() {
     ASSERT_TRUE(create.find("whether create is set or not") != std::string::npos);
 }
 
+// Break caught: project_set_setting checked a res:// value only when it was a
+// single string, and only on the live route. An array's paths were never
+// checked, so internationalization/locale/translations took the CSV its
+// translations were imported from, a JSON file and a file that does not exist,
+// and reported each as written; the game then loaded no translation (#989).
+// Which files register was asked of the engine on 4.5.1, 4.6.2 and 4.7.2 by
+// tools/vibe/probes/localisation_engine.py, the register part.
+static void test_set_setting_checks_the_files_a_value_names() {
+    ScopedToolProject project("setting-value-paths");
+    writeAuditFile("project.godot", "config_version=5\n");
+    writeAuditFile("strings.csv", "keys,en,fr\nMENU_START,Start,Commencer\n");
+    writeAuditFile("strings.csv.import",
+                   "[remap]\n\nimporter=\"csv_translation\"\ntype=\"Translation\"\n\n"
+                   "[deps]\n\nfiles=[\"res://strings.en.translation\", \"res://strings.fr.translation\"]\n\n"
+                   "source_file=\"res://strings.csv\"\n"
+                   "dest_files=[\"res://strings.en.translation\", \"res://strings.fr.translation\"]\n\n"
+                   "[params]\n\ncompress=true\n");
+    writeAuditFile("strings.en.translation", "RSRC");
+    writeAuditFile("strings.fr.translation", "RSRC");
+    writeAuditFile("strings_fr.po", "msgid \"\"\nmsgstr \"\"\n");
+    writeAuditFile("saved.tres", "[gd_resource type=\"Translation\" format=3]\n\n[resource]\n");
+    writeAuditFile("data.json", "{}\n");
+    writeAuditFile("fresh.csv", "keys,fr\nMENU_START,Commencer\n");
+    writeAuditFile("kept.csv", "name,hp\nslime,10\n");
+    writeAuditFile("kept.csv.import", "[remap]\n\nimporter=\"keep\"\n");
+    writeAuditFile("level.tscn", "[gd_scene format=3]\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    registry.setIpcClient(nullptr);
+    const std::string translations = "internationalization/locale/translations";
+    const auto set = [&](const std::string& setting, const didi::json& value) {
+        return registry.callTool("project_set_setting",
+                                 didi::json{{"setting", setting}, {"value", value}});
+    };
+    const auto refusal = [](const didi::mcp::CallToolResult& result) {
+        ASSERT_TRUE(result.isError);
+        return didi::json::parse(result.content[0].text)["error"];
+    };
+    const auto message_has = [](const didi::json& error, const std::string& needle) {
+        return error["message"].get<std::string>().find(needle) != std::string::npos;
+    };
+
+    // What the engine registers a translation from is written.
+    ASSERT_TRUE(!set(translations, {"res://strings.en.translation", "res://strings.fr.translation"}).isError);
+    ASSERT_TRUE(!set(translations, {"res://strings_fr.po"}).isError);
+    // A path that names no project file is not the project's to check.
+    ASSERT_TRUE(!set(translations, {"user://strings.fr.translation"}).isError);
+
+    // The CSV, refused with the value that succeeds: the files its import wrote
+    // in its place, once each, and the rest of the list as it was.
+    const auto csv = refusal(set(translations, {"res://strings.en.translation", "res://strings.csv"}));
+    ASSERT_EQ(csv["code"], 409);
+    ASSERT_EQ(csv["data"]["code"], "translation_source_registered");
+    ASSERT_EQ(csv["data"]["index"], 1);
+    ASSERT_EQ(csv["data"]["translation_files"],
+              didi::json::array({"res://strings.en.translation", "res://strings.fr.translation"}));
+    const auto retry = csv["data"]["retry_with"]["value"];
+    ASSERT_EQ(retry, didi::json::array({"res://strings.en.translation", "res://strings.fr.translation"}));
+    ASSERT_EQ(csv["data"]["retryable"], false);
+    ASSERT_TRUE(!set(translations, retry).isError);
+
+    const auto fresh = refusal(set(translations, {"res://fresh.csv"}));
+    ASSERT_EQ(fresh["data"]["code"], "translation_source_not_imported");
+    const auto kept = refusal(set(translations, {"res://kept.csv"}));
+    ASSERT_EQ(kept["data"]["code"], "not_a_translation");
+    ASSERT_TRUE(message_has(kept, "keep importer"));
+    const auto tres = refusal(set(translations, {"res://saved.tres"}));
+    ASSERT_EQ(tres["data"]["code"], "not_a_translation");
+    ASSERT_TRUE(message_has(tres, "No loader found"));
+    const auto json_file = refusal(set(translations, {"res://data.json"}));
+    ASSERT_EQ(json_file["data"]["code"], "not_a_translation");
+    ASSERT_TRUE(message_has(json_file, "without a word"));
+
+    // A file that is not there, in this array and in any other.
+    const auto missing = refusal(set(translations, {"res://strings.fr.translation", "res://missing.fr.translation"}));
+    ASSERT_EQ(missing["code"], 404);
+    ASSERT_EQ(missing["data"]["resource_exists"], false);
+    ASSERT_EQ(missing["data"]["index"], 1);
+    ASSERT_EQ(missing["data"]["resource_path"], "res://missing.fr.translation");
+    const auto plugin = refusal(set("editor_plugins/enabled", {"res://addons/absent/plugin.cfg"}));
+    ASSERT_EQ(plugin["code"], 404);
+    const auto outside = refusal(set(translations, {"res://../outside.translation"}));
+    ASSERT_EQ(outside["code"], 400);
+    ASSERT_EQ(outside["data"]["index"], 0);
+
+    // A single string with no editor attached, which the live route already
+    // refused and this one wrote.
+    const auto main_scene = refusal(set("application/run/main_scene", "res://absent.tscn"));
+    ASSERT_EQ(main_scene["code"], 404);
+    ASSERT_TRUE(!main_scene["data"].contains("index"));
+    ASSERT_TRUE(!set("application/run/main_scene", "res://level.tscn").isError);
+
+    // None of the refused values reached the file.
+    std::ifstream manifest("project.godot");
+    const std::string written((std::istreambuf_iterator<char>(manifest)), std::istreambuf_iterator<char>());
+    ASSERT_TRUE(written.find("strings.csv") == std::string::npos);
+    ASSERT_TRUE(written.find("missing.fr.translation") == std::string::npos);
+    ASSERT_TRUE(written.find("absent.tscn") == std::string::npos);
+
+    // Refused before the route: an attached editor never hears the call, and a
+    // dry run is refused the same way rather than previewing a write that fails.
+    auto route = std::make_shared<ConnectedHierarchyRoute>();
+    registry.setIpcClient(route);
+    const auto live = refusal(set(translations, {"res://strings.csv"}));
+    ASSERT_EQ(live["data"]["code"], "translation_source_registered");
+    const auto dry = refusal(registry.callTool(
+        "project_set_setting",
+        didi::json{{"setting", translations}, {"value", {"res://missing.fr.translation"}}, {"dry_run", true}}));
+    ASSERT_EQ(dry["code"], 404);
+    ASSERT_EQ(route->requests, 0);
+    ASSERT_TRUE(!set(translations, {"res://strings.fr.translation"}).isError);
+    ASSERT_EQ(route->requests, 1);
+    registry.setIpcClient(nullptr);
+}
+
 // Break caught: script_create and resource_create echoed their argument as the
 // path they wrote, and the confirmation preview echoed it as the file it would
 // replace. #534 made res://d1/../reported.gd legal because it resolves inside
@@ -9206,6 +9322,8 @@ struct RegisterToolTests {
                      test_handler_failures_carry_the_error_envelope);
         registerTest("Tools.SetSettingCreateGuardIsLiveOnly",
                      test_set_setting_descriptions_say_the_guard_is_live_only);
+        registerTest("Tools.SetSettingChecksTheFilesAValueNames",
+                     test_set_setting_checks_the_files_a_value_names);
         registerTest("Tools.WritersReportTheResolvedPath",
                      test_writers_report_the_path_they_resolved);
         registerTest("Tools.PatchMethodKeepsLineEndings",

@@ -5016,6 +5016,34 @@ text = "Not a key"
     $textRead = @(@((Tool-Payload $localisedById[6103]).controls) | Where-Object { $_.PSObject.Properties.Name -contains "text" -or $_.PSObject.Properties.Name -contains "displayed_text" })
     Assert-True ($textRead.Count -eq 0) "include_text false still read a control's text or what it displays: $($localisedById[6103].result.content[0].text)"
 
+    # Registering translations, with the editor attached (#989). The paths in an
+    # array were never checked, so the CSV the translations were imported from
+    # and a file that does not exist were each written, and a game loaded no
+    # translation. The fixture's strings.csv was imported by this editor, so its
+    # sidecar is the one this engine line writes, and the refusal has to read
+    # the .translation files out of it. Every call is refused, so the fixture's
+    # settings do not move.
+    $registerRequests = @(
+        (@{ jsonrpc = "2.0"; id = 6110; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
+        (Tool-Request 6111 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
+        (Tool-Request 6112 "project_set_setting" @{ setting = "internationalization/locale/translations"; value = @("res://strings.csv") }),
+        (Tool-Request 6113 "project_set_setting" @{ setting = "internationalization/locale/translations"; value = @("res://strings.en.translation", "res://missing.fr.translation") }),
+        (Tool-Request 6114 "project_set_setting" @{ setting = "internationalization/locale/translations"; value = @("res://missing.fr.translation"); dry_run = $true })
+    )
+    $rawRegister = Invoke-Didi -Requests $registerRequests -Arguments @("--project", $fixtureRoot)
+    $registerById = @{}
+    foreach ($response in @($rawRegister | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.PSObject.Properties.Name -contains "id" })) { $registerById[[int]$response.id] = $response }
+    $csvText = $registerById[6112].result.content[0].text
+    Assert-True $registerById[6112].result.isError "Registering the CSV the translations came from was written: $csvText"
+    $csvRefusal = ($csvText | ConvertFrom-Json).error
+    $importedFiles = @(Get-ChildItem -LiteralPath $fixtureRoot -Filter "strings.*.translation" | Sort-Object Name | ForEach-Object { "res://$($_.Name)" })
+    Assert-True ($csvRefusal.code -eq 409 -and $csvRefusal.data.code -eq "translation_source_registered") "The CSV was not refused as the source of the translations: $csvText"
+    Assert-True ((@($csvRefusal.data.retry_with.value | Sort-Object) -join ",") -eq ($importedFiles -join ",") -and $importedFiles.Count -eq 2) "The refusal did not name the .translation files this editor's import wrote ($($importedFiles -join ', ')): $csvText"
+    $missingText = $registerById[6113].result.content[0].text
+    $missingRefusal = ($missingText | ConvertFrom-Json).error
+    Assert-True ($registerById[6113].result.isError -and $missingRefusal.code -eq 404 -and $missingRefusal.data.index -eq 1 -and $missingRefusal.data.resource_exists -eq $false) "A .translation that does not exist was not refused by its place in the array: $missingText"
+    Assert-True ($registerById[6114].result.isError -and $registerById[6114].result.content[0].text -match '"code":404') "A dry run previewed registering a file that does not exist: $($registerById[6114].result.content[0].text)"
+
     # The import freshness check reproduces four things Godot does by hand: the
     # digest, the name of the record, where the record lives and what dest_md5
     # is a digest of. Every test of it was written against a .md5 written here,
