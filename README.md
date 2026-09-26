@@ -167,7 +167,7 @@ Live main-thread work has finite boundaries. At the extension's 15-second deadli
 
 ### Phase 4 verification contract
 
-`project_search_text` and `project_search_symbols` scan only allowlisted project text formats under strict file, byte, result, path, encoding, and preview bounds. `asset_reimport` accepts an all-or-nothing batch of normalized source assets and completes only after two consecutive editor-idle observations.
+`project_search_text` and `project_search_symbols` scan only allowlisted project text formats under strict file, byte, result, path, encoding, and preview bounds. `asset_reimport` accepts an all-or-nothing batch of normalized source assets and completes only after two consecutive editor-idle observations and, when the batch needed a scan, once the editor has applied it.
 
 Every successful live viewport capture returns a 32-lowercase-hex `capture_id` backed by an 8-entry/64 MiB process-local raw RGBA cache; offline previews never receive IDs. `node_isolation_path` temporarily hides unrelated 2D/3D branches and restores every original value before success. `viewport_diff_capture` requires an unexpired live ID, exact dimensions, and a `0..255` threshold, returning metrics plus one transparent PNG diff without duplicating Base64 in the JSON metadata.
 
