@@ -99,6 +99,7 @@ Nodes inside an instanced sub-scene belong to that scene's file. `scene_get_hier
 - Attach and detach existing GDScript resources with `script_attach_to_node` and `script_detach_from_node`; both are UndoRedo-backed.
 - Use `scene_add_to_group`, `scene_remove_from_group`, `scene_list_groups`, and `scene_get_group_members` for edited-scene-confined groups.
 - Use typed autoload and InputMap tools for `autoload/*` and `input/*`; never route those namespaces through `project_set_setting`.
+- To localise a game, register the `.translation` files in `internationalization/locale/translations`, never the `.csv` they came from. Godot's importer writes them beside the CSV as `<name>.<locale>.translation` and lists them under `dest_files` in the CSV's `.import` sidecar. `project_set_setting` does not check the paths inside an array (#989): the `.csv`, a JSON file or a missing path is written and reported as a success, and the game then loads no translation. Set `internationalization/locale/test` to a locale such as `fr` to make a launched game use it.
 - `project_set_setting` is the only project writer that works with no session attached. Without one it edits `project.godot` and reports `execution_mode: "offline_fallback"`. Use it to enable the addon in a project that does not have it, by setting `editor_plugins/enabled` to an array containing `res://addons/didi/plugin.cfg`, after the addon folder is in place. Nothing has loaded the value when the call returns; start Godot and attach.
 - `project_set_autoload` persists the setting but cannot make the attached editor register the singleton; it returns `requires_editor_restart: true`. Until that editor restarts, every script referencing the new singleton fails to compile with `Identifier not found`. Those errors are the tool's doing, not your script's, so do not rewrite working code to chase them. `signal_connect` refuses a handler in such a script with `409 target_script_not_compiled`, naming the script and the singleton it cannot resolve, rather than reporting the method absent. Restart the editor or call `editor_reload_project`; do not rename the handler.
 - `script_check_syntax` reports autoload identifiers at `severity: "warning"` with a `note`, not as errors. The Godot compiler check runs in a process with no SceneTree, so it can never see an autoload; that is permanent and separate from the restart limitation above. `has_errors` is therefore a verdict about your script. Do not rewrite working code because a warning names an autoload.
@@ -136,6 +137,11 @@ where it is. Editor or game.
 
 - Each entry carries `node_path`, `class`, `global_rect`, `visible`,
   `mouse_filter`, and `text` where the Control has a `text` property.
+- `text` is the value the scene holds, not what is drawn. In a localised game a
+  button whose text is the key `MENU_START` reports `MENU_START` while the player
+  reads the translation (#988). Match on `node_path` or on the key, never on the
+  translated string. Do not read a key in `text` as evidence that the game is
+  untranslated; an untranslated game answers the same.
 - `visible_only` defaults to true and skips hidden Controls *and everything
   beneath them*, because a hidden Control hides its subtree. Pass false when
   debugging a menu that is not appearing.
