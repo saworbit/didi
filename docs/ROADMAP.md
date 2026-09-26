@@ -299,7 +299,7 @@ These are missing capabilities that an AI agent actually requires to complete fu
 ### 4. Animation and UI Authoring
 - **Animation Libraries**: delivered as `anim_add_library` -- an `AnimationLibrary` written with `resource_create` is added to a player in the edited scene through UndoRedo, which is what makes `anim_list_tracks` and `anim_play_track` reachable on a player the surface built (#770).
 - **Animation Track Keyframing**: Add, remove, and interpolate keyframes and track lengths in `AnimationPlayer`. Still open: an animation is authored whole as a resource file today, not edited key by key on a live player.
-- **Control Enumeration**: delivered as `ui_list_controls` -- live Controls with their resolved viewport rectangles, class, visibility, mouse filter and text, in an editor or a running game. Still open: the text is the `text` property, which in a localised game is the translation key rather than what the player reads (#988).
+- **Control Enumeration**: delivered as `ui_list_controls` -- live Controls with their resolved viewport rectangles, class, visibility, mouse filter and text, in an editor or a running game. Where a Control draws its text translated, `displayed_text` carries what the player reads beside the key in `text` (#988).
 - **Theme & Layout Inspection**: Inspect Control node anchors, margins, minimum sizes, and theme overrides. Still open: `ui_list_controls` reports the resolved rectangle, not the authoring inputs behind it.
 
 ### 5. Enhanced MCP Protocol Surface

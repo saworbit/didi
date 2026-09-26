@@ -1831,10 +1831,27 @@ Each entry carries `node_path`, `class`, `global_rect`, `visible`, `depth`,
 bind per widget class, so a `Button`, a `Label`, a `LineEdit` and anything else
 carrying one are all covered by the same path; it is capped at 256 bytes with
 `text_truncated` when clipped. It is the value the scene holds, not the string
-drawn. A Control translates at draw time, so in a localised game a label whose
-`text` is the key `MENU_START` is reported as `MENU_START` while the player reads
-"Commencer la partie". A game with no translations registered answers the same,
-so `text` cannot tell a working localisation from a missing one (#988). The response also carries `returned_count`,
+drawn: a Control translates its text as it draws it, so in a localised game a
+label whose `text` is the key `MENU_START` shows the player "Commencer la
+partie".
+
+`displayed_text` is that string, present when the Control draws something other
+than its `text` (#988). It is the control's own `atr(text)`, the call it makes as
+it draws, so it follows the node's `auto_translate_mode` and translation domain.
+It is capped at 256 bytes, with `displayed_text_truncated` when clipped, and
+`include_text: false` leaves it out along with `text`. For a `RichTextLabel` it
+is the translated source, BBCode included, as `text` is. Only the classes that
+draw their text translated carry it: `Label`, `Button`, `CheckBox`,
+`CheckButton`, `LinkButton`, `MenuButton`, `OptionButton` and `RichTextLabel`.
+These were rendered on 4.5.1, 4.6.2 and 4.7.2, and each drew the translation.
+A `LineEdit`, `TextEdit` or `CodeEdit` draws the key it holds, because its text
+is what the user typed, and a `ColorPickerButton` draws no text, although
+`atr()` answers a translation for all four. So none of those four carries the
+field, and neither does a subclass of the eight, which is not known to draw what
+its parent does. A script extending one of them reports the native class and is
+covered. An editor draws keys unless its translation preview is on, and `atr()`
+there answers the key, so an edited scene carries no `displayed_text`. Its
+absence means the control draws `text` as it is, or draws none. The response also carries `returned_count`,
 `match_count_total`, `traversed_nodes`, `truncated`, `traversal_limit_hit`, and
 the `visible_only` that was applied.
 

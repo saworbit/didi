@@ -16,8 +16,10 @@ an `fr` column, and the game run twice.
 Each run launches the menu as a detached headless game, attaches to it, calls
 `ui_list_controls`, and reads the game's own report of what each control
 displays (its `atr(text)`, printed from `_ready`) through `runtime_read_output`.
-The two columns side by side are the finding: they must agree in the control
-and, while the tool reads the property, differ in the case.
+The tool's answer for what the player reads is `displayed_text` where it gives
+one and `text` otherwise, and `agree` compares that with the game's report.
+The control must agree on any build. The case agrees only on a build with the
+#988 fix; before it, `displayed_text` is absent and the tool answers the key.
 
 The probe writes the menu and the CSV into the sandbox, imports them, opens a
 headless editor with a log beside the project, and stops the editor at the end.
@@ -104,7 +106,7 @@ def run_menu(s: Session, project: Path, editor: str, label: str) -> None:
         print(f"  {label}: ui_list_controls refused: {refused((listed, errored))}")
     else:
         for entry in (listed or {}).get("controls", []):
-            tool[entry.get("node_path", "").rsplit("/", 1)[-1]] = entry.get("text")
+            tool[entry.get("node_path", "").rsplit("/", 1)[-1]] = entry
     displayed = {}
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline and len(displayed) < 2:
@@ -117,11 +119,16 @@ def run_menu(s: Session, project: Path, editor: str, label: str) -> None:
         if len(displayed) < 2:
             time.sleep(0.5)
     print(f"\n  -- {label}")
-    print(f"  {'control':8} {'ui_list_controls text':24} {'the game displays':24} locale   agree")
+    print(f"  {'control':8} {'text':18} {'displayed_text':22} {'the game displays':22} locale   agree")
     for name in ("Title", "Play"):
         shown, locale = displayed.get(name, ["(no report)", "?"])
-        said = tool.get(name, "(not listed)")
-        print(f"  {name:8} {str(said):24} {shown:24} {locale:8} {'yes' if said == shown else 'NO'}")
+        entry = tool.get(name, {})
+        # What the tool says the player reads: displayed_text where it gives
+        # one (#988), and otherwise the text, which is then the same string.
+        said = entry.get("displayed_text", entry.get("text", "(not listed)"))
+        print(f"  {name:8} {str(entry.get('text', '(not listed)')):18} "
+              f"{str(entry.get('displayed_text', '(absent)')):22} {shown:22} {locale:8} "
+              f"{'yes' if said == shown else 'NO'}")
     s.call("runtime_stop", {})
     s.call("runtime_attach_session", {"session_id": editor})
 
