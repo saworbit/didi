@@ -89,6 +89,51 @@ struct ImportPassObservation {
            *seen.started > *seen.finished;
 }
 
+// Scan work the editor has yet to finish, waited out through the addon's count
+// of sources_changed. A scan clears the editor's scanning flag on its own
+// thread, and a later frame applies what it found: it swaps in a new file
+// index, updates script classes and their documentation under progress tasks
+// that run frames of their own, and only then emits sources_changed. A
+// reimport started in between had the old index freed under it, and one
+// answered in between sent the caller's next request into that work.
+struct ScanSettle {
+    // sources_changed as counted when the wait began. The wait is for a later
+    // emission.
+    int64_t after{0};
+    // The file index a scan Didi started will replace, when it started one.
+    // The editor applies a scan inside frames of its own, so a scan started in
+    // those frames is applied after that scan's emission, and the emission
+    // that ends the wait is one made with another index.
+    std::optional<int64_t> replaced_index;
+};
+
+// sources_changed as the addon's watch has counted it.
+struct ScanSettleObservation {
+    std::optional<int64_t> settled;
+    // The file index the editor held at the last emission.
+    std::optional<int64_t> settled_index;
+};
+
+// Over once sources_changed has fired since the wait began, with another index
+// when Didi's own scan is the one awaited. A watch the addon could not make
+// has nothing to report, which reads as over: the scanning flag and the
+// sidecars still bound the wait, as they did before the watch counted this.
+[[nodiscard]] inline bool scanSettled(const ScanSettle& wait, const ScanSettleObservation& seen) {
+    if (!seen.settled.has_value()) return true;
+    if (*seen.settled <= wait.after) return false;
+    if (!wait.replaced_index.has_value() || !seen.settled_index.has_value()) return true;
+    return *seen.settled_index != *wait.replaced_index;
+}
+
+// What startAssetReimport did.
+struct ReimportStart {
+    // reimport_files was not called, and the frame loop calls it once the
+    // editor can take it.
+    bool held{false};
+    // Scan work the reimport, and the answer, wait for.
+    std::optional<ScanSettle> settle;
+};
+
 // A shader uniform's declared hint_range, as the engine spells it.
 //
 // Godot puts the range a shader author wrote in the uniform's PropertyInfo as
@@ -262,8 +307,31 @@ public:
     // no importing at all. Unknown when the editor has not indexed the path,
     // which is itself outstanding work during a scan.
     bool assetImportSettled(const std::string& resource_path);
-    Result<void> startAssetReimport(const ReimportBatch& batch);
-    Result<ReimportBatch> beginAssetReimport(const std::vector<std::string>& paths);
+    // Refreshes and scans what the batch needs, then reimports its imported
+    // assets unless it cannot yet, and says which. reimport_files cannot find
+    // a file while the editor scans, so an asset named then is skipped with
+    // "Can't find file ... during file reimport" and nothing else to show for
+    // it. It is held back while any scan runs, Didi's or the editor's own,
+    // until that scan's results are applied, and while the editor does not
+    // list one of the assets, and started by reimportIndexedAssets once that
+    // is over.
+    Result<ReimportStart> startAssetReimport(const ReimportBatch& batch);
+    // The reimport_files half, for assets the editor lists, while it is not
+    // scanning. A 409 editor_import_busy when the editor's own pass refused it.
+    Result<void> reimportIndexedAssets(const std::vector<std::string>& reimported);
+    // The paths the editor's filesystem does not list, in the order given.
+    std::vector<std::string> unindexedAssets(const std::vector<std::string>& resource_paths);
+    // Whether the editor has a modal progress task open, which it does for
+    // the work that follows a scan that found new scripts (updating script
+    // classes and their documentation). Frames run inside that work, and a
+    // reimport started in one collides with it. False when the editor's
+    // ProgressDialog cannot be found, with one warning.
+    bool editorProgressOpen();
+    // A wait for scan work already under way, begun now. Empty when the
+    // addon's watch is unavailable, which leaves nothing to wait on.
+    std::optional<ScanSettle> beginScanSettle();
+    // Whether the scan work a wait began for is over.
+    bool scanSettled(const ScanSettle& wait);
     Result<bool> isEditorFilesystemScanning();
     // The editor's own import pass as this session can see it. Makes the
     // addon's watch the first time an editor session asks.

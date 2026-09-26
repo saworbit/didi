@@ -5182,6 +5182,76 @@ text = "Not a key"
     Assert-True ($ray3d.hit -eq $true -and $ray3d.collider_class -eq "StaticBody3D") "A 3D editor raycast missed a StaticBody3D standing in its path."
     Assert-True ($ray3d.collider_path -eq "/root/RayProbe3D/Block") "The 3D editor raycast answered with $($ray3d.collider_path), which is not a path the surface takes."
 
+    # A reimport while the editor scans. reimport_files cannot find a file
+    # while a scan runs, so an asset named then was skipped with "Can't find
+    # file ... during file reimport" and still reported as reimported; this gate
+    # met it only on a loaded machine. The flag is not the end of a scan
+    # either: the editor applies what it found on a later frame, in frames of
+    # its own, registering each new script's class_name under a progress task,
+    # and a reimport or an answer in between collided with that work ("Task
+    # ... already exists"). So a call that asked for a scan is answered only
+    # once the scan is applied, and the class of every script it found is then
+    # in .godot/global_script_class_cache.cfg, which the editor writes at the
+    # end of that registration. Answered on the flag, it was not: the answer
+    # came from a frame inside the registration. Three scripts a call: the
+    # registration draws a frame for each script, twice over, and the 4.5.1
+    # CI runner draws in software at about 0.6 s a frame, so it took longer
+    # than the call's ten-second maximum to apply a scan of 25. Two scripts are
+    # enough to open the progress task the answer used to come from. The SVG's
+    # imported texture has to be rewritten, which is the reimport happening
+    # rather than the answer saying it did. The scripts stay: the fixture is
+    # thrown away, and deleting them under an open editor is a test of its own
+    # (tools/vibe/probes/scan_reimport_engine.py, mixed_reimport.py).
+    $raceFolder = Join-Path $fixtureRoot "reimport_race"
+    New-Item -ItemType Directory -Path $raceFolder -Force | Out-Null
+    $classCachePath = Join-Path $fixtureRoot (Join-Path ".godot" "global_script_class_cache.cfg")
+    foreach ($chunk in 0, 1, 2) {
+        $chunkClasses = @()
+        for ($index = $chunk * 3; $index -lt ($chunk + 1) * 3; $index++) {
+            $className = "RaceFiller{0:D4}" -f $index
+            $chunkClasses += $className
+            [System.IO.File]::WriteAllText((Join-Path $raceFolder ("filler_{0:D4}.gd" -f $index)),
+                "class_name $className`nextends Node`n`nfunc value_$index() -> int:`n`treturn $index`n")
+        }
+        $indexRequests = @(
+            (@{ jsonrpc = "2.0"; id = 6115; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
+            (Tool-Request 6116 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
+            (Tool-Request 6117 "asset_reimport" @{ paths = @(("res://reimport_race/filler_{0:D4}.gd" -f ($chunk * 3))); timeout_ms = 10000 })
+        )
+        $rawIndex = Invoke-Didi -Requests $indexRequests -Arguments @("--project", $fixtureRoot)
+        $indexed = @($rawIndex | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.PSObject.Properties.Name -contains "id" -and $_.id -eq 6117 })
+        Assert-True ($indexed.Count -eq 1 -and -not $indexed[0].result.isError) "The editor did not index the race fixture's scripts ($chunk): $($indexed[0].result.content[0].text)"
+        # The editor holds this file exclusively while it writes it, and it
+        # has closed it before sources_changed. Locked now is the answer
+        # having come from inside the registration, so it is not retried:
+        # a retry would wait out the very race this asserts.
+        $classCache = ""
+        $cacheLocked = $false
+        if (Test-Path -LiteralPath $classCachePath) {
+            try { $classCache = [System.IO.File]::ReadAllText($classCachePath) } catch [System.IO.IOException] { $cacheLocked = $true }
+        }
+        $unregistered = @($chunkClasses | Where-Object { $classCache -notmatch ('"' + $_ + '"') })
+        Assert-True (-not $cacheLocked) "asset_reimport answered while the editor was still writing its class list, inside the work that applies a scan."
+        Assert-True ($unregistered.Count -eq 0) "asset_reimport answered before the editor had applied its scan: $($unregistered.Count) of the 3 new classes ($($unregistered[0]) first) were not yet registered."
+    }
+    [System.IO.File]::WriteAllText((Join-Path $raceFolder "fresh.gd"), "extends Node`n")
+    $probeTexture = @(Get-ChildItem -LiteralPath (Join-Path $fixtureRoot (Join-Path ".godot" "imported")) -Filter "reimport_probe.svg-*.ctex")
+    Assert-True ($probeTexture.Count -eq 1) "The SVG's imported texture was not found under .godot/imported."
+    $textureBefore = $probeTexture[0].LastWriteTimeUtc
+    $raceRequests = @(
+        (@{ jsonrpc = "2.0"; id = 6120; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
+        (Tool-Request 6121 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
+        (Tool-Request 6122 "asset_reimport" @{ paths = @("res://reimport_race/fresh.gd", "res://reimport_probe.svg"); timeout_ms = 10000 })
+    )
+    $rawRace = Invoke-Didi -Requests $raceRequests -Arguments @("--project", $fixtureRoot)
+    $raceById = @{}
+    foreach ($response in @($rawRace | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.PSObject.Properties.Name -contains "id" })) { $raceById[[int]$response.id] = $response }
+    $raceText = $raceById[6122].result.content[0].text
+    Assert-True (-not $raceById[6122].result.isError) "A batch that has to scan before it reimports was refused: $raceText"
+    $textureAfter = (Get-Item -LiteralPath $probeTexture[0].FullName).LastWriteTimeUtc
+    Assert-True ($textureAfter -gt $textureBefore) "asset_reimport answered for res://reimport_probe.svg while a scan ran, and its imported texture was not rewritten: $raceText"
+    Assert-True ($raceText -notmatch "Can't find file") "The engine could not find the asset it was reimporting: $raceText"
+
     $stopRequests = @(
         (@{ jsonrpc = "2.0"; id = 330; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
         (Tool-Request 331 "runtime_attach_session" @{ session_id = $gameSession.session_id }),

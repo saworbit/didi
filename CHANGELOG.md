@@ -187,6 +187,33 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **`asset_reimport` reimports an asset it batches with a new file.** A batch
+  that also named a file needing a scan -- a new script, an asset the editor
+  had never seen -- started `reimport_files` straight after `scan()`. While a
+  scan runs the editor cannot find any file, so the engine printed `Can't find
+  file ... during file reimport`, skipped the asset, and the call answered that
+  it was reimported. Asked of the engine alone with 800 scripts in the project,
+  a scan then a reimport at once failed every round on 4.5.1, 4.6.2 and 4.7.2;
+  through the tool every such batch left the texture as it was, and the editor
+  sometimes crashed. The live harness met it only on a loaded machine. The editor clears its scanning flag before it
+  applies what a scan found, and a reimport started between the two collided
+  with that work instead. The reimport is now held until the scan's results are
+  applied, which `didi_import_watch.gd` sees as `sources_changed`, until no
+  progress task is open, and until the editor lists every asset, and the frame
+  loop then starts it. A call that asked for a scan is answered only after that
+  too. A scan is asked for only when a path's import is outstanding or the
+  editor does not list it, so a script it already lists is refreshed without
+  one. When the wait ends without a reimport, the call says so: `409
+  asset_not_indexed` for an asset the editor never lists, and `504
+  editor_scanning`, retryable, for a scan that outlasts `timeout_ms`, both with
+  `outcome: not_imported`. A `504 reimport_idle_timeout` now says what the
+  call was still waiting for, as `editor_scanning` and, when it asked for a
+  scan, `scan_applied`. The harness writes nine scripts with a `class_name`,
+  three a call, and fails unless every class is registered when the call
+  answers, then pairs a fresh script with the SVG and fails unless the texture
+  is rewritten.
+  `scan_reimport_engine.py` and `mixed_reimport.py` join the vibe probes.
+
 - **`project_set_setting` checks the files an array names (#989).** A `res://`
   value was checked for a file only when it was a single string, and only with
   an editor attached. An array's paths were never checked, so
