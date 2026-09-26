@@ -213,6 +213,11 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
   answers, then pairs a fresh script with the SVG and fails unless the texture
   is rewritten.
   `scan_reimport_engine.py` and `mixed_reimport.py` join the vibe probes.
+  The tool's description and its `timeout_ms` description say so, as do the
+  agent instructions, the capability and roadmap entries, the README and the
+  architecture's main-thread guarantee. Two gaps are filed: the editor's own
+  scans still reach Didi's commands (#995), and `timeout_ms` stops at 10
+  seconds, which a software-rendered editor spends on a few new scripts (#996).
 
 - **`project_set_setting` checks the files an array names (#989).** A `res://`
   value was checked for a file only when it was a single string, and only with

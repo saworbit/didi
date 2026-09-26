@@ -301,7 +301,9 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
          "The res:// resource to inspect. Matched exactly, so res://player.gd never answers "
          "with res://player.gd.uid."},
         {"asset_reimport.timeout_ms",
-         "How long to wait for the editor to finish reimporting, 1 to 10000 milliseconds."},
+         "How long to wait for the editor to finish reimporting, and to apply any scan the batch "
+         "needed, 1 to 10000 milliseconds. A timeout's error.data says whether the editor was "
+         "still scanning (editor_scanning) or applying the scan (scan_applied)."},
         {"instantiate_asset.asset_path",
          "The res:// asset to put in the scene."},
         {"instantiate_asset.parent_path",

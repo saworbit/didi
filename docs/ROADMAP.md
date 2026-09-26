@@ -97,7 +97,7 @@ The structured ring does not intercept arbitrary external `print()` output. `run
 Phase 4 adds four canonical tools and closes the locate–change–reimport–capture–compare loop:
 
 - `project_search_text` performs bounded literal search; `project_search_symbols` extracts lexical GDScript/C# declarations while excluding comments and strings. Both enforce canonical project containment, allowlisted extensions, deterministic ordering, and hard file/byte/result limits.
-- `asset_reimport` validates an all-or-nothing source batch in the editor, permits one active request, and completes only after two consecutive idle callbacks.
+- `asset_reimport` validates an all-or-nothing source batch in the editor, permits one active request, and completes only after two consecutive idle callbacks and, when it had to scan, once the editor has applied the scan (#994).
 - Live captures receive opaque 32-hex IDs backed by an 8-entry/64 MiB raw RGBA LRU cache; offline previews remain ID-free.
 - Named-node isolation temporarily hides unrelated visible 2D/3D branches and restores original visibility/background state before success. `viewport_diff_capture` compares exact-sized live frames at a `0..255` threshold and returns metrics plus a transparent PNG diff.
 
