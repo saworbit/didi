@@ -205,6 +205,26 @@ Result<std::string> readImportSidecarFile(const std::filesystem::path& sidecar) 
     return buffer.str();
 }
 
+std::vector<std::string> importDestinations(const ImportSidecar& sidecar) {
+    std::vector<std::string> destinations;
+    for (const auto& entry : sidecar.scan.entries) {
+        if (entry.section != "deps" || entry.key != "dest_files") continue;
+        // Godot writes the value as an array of quoted res:// paths. A path
+        // holds no quote, so each quoted run is one entry.
+        const std::string& text = entry.value_text;
+        size_t cursor = 0;
+        while (destinations.size() < 1024) {
+            const auto open = text.find('"', cursor);
+            if (open == std::string::npos) break;
+            const auto close = text.find('"', open + 1);
+            if (close == std::string::npos) break;
+            if (close > open + 1) destinations.push_back(text.substr(open + 1, close - open - 1));
+            cursor = close + 1;
+        }
+    }
+    return destinations;
+}
+
 json importParamValue(const std::string& value_text) {
     const auto text = strings::trim(value_text);
     if (text == "true") return true;

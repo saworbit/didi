@@ -2798,12 +2798,14 @@ std::shared_ptr<runtime::IRuntimeSessionClient> ToolRegistry::getRuntimeSessionC
 
 void ToolRegistry::registerAllDefaultTools() {
     auto register_phase_two = [this](const char* name, const char* description,
-                                     json schema, std::function<CallToolResult(const json&)> handler) {
+                                     json schema, std::function<CallToolResult(const json&)> handler,
+                                     std::function<std::optional<Error>(const json&)> argument_check = {}) {
         ToolDefinition tool;
         tool.name = name;
         tool.description = description;
         tool.inputSchema = std::move(schema);
         tool.handler = std::move(handler);
+        tool.argumentCheck = std::move(argument_check);
         registerTool(std::move(tool));
     };
     // ==========================================
@@ -4908,7 +4910,7 @@ void ToolRegistry::registerAllDefaultTools() {
         {{"type", "object"}, {"properties", {{"setting", {{"type", "string"}}}}}, {"required", {"setting"}}},
         [this](const json& args) { return handleProjectGetSetting(args, m_ipcClient); });
     register_phase_two(
-        "project_set_setting", "Persists or explicitly removes a ProjectSettings value. With an editor attached, a name the engine does not define is refused unless create says otherwise, because a typo and a deliberate custom setting were written identically. Offline there is no engine to ask, so the name is written unchecked and the result says so in limitation.",
+        "project_set_setting", "Persists or explicitly removes a ProjectSettings value. With an editor attached, a name the engine does not define is refused unless create says otherwise, because a typo and a deliberate custom setting were written identically. Offline there is no engine to ask, so the name is written unchecked and the result says so in limitation. A res:// path in the value, and each one in an array, must name a file in the project; internationalization/locale/translations takes the .translation files a CSV import writes, or a .po, .mo or .res, and never the CSV itself.",
         {{"type", "object"}, {"properties", {
             {"setting", {{"type", "string"},
                          {"description", "Slash-delimited ProjectSettings name, such as display/window/size/viewport_width. Use the typed autoload and InputMap tools for those namespaces."}}},
@@ -4918,7 +4920,10 @@ void ToolRegistry::registerAllDefaultTools() {
             {"create", {{"type", "boolean"}, {"default", false},
                         {"description", "Write a setting name the engine does not already define. Off by default, because a misspelled built-in name is indistinguishable from a deliberate custom one and costs a key nothing reads. Only an attached editor can check the name, and the result then reports defined_by_engine. Offline the check cannot run: the name is written whether create is set or not, defined_by_engine is null, and limitation says so. Attach an editor to have the name checked."}}}
         }}, {"required", {"setting"}}},
-        [this](const json& args) { return handleProjectSetSetting(args, m_ipcClient); });
+        [this](const json& args) { return handleProjectSetSetting(args, m_ipcClient); },
+        // The files an array names need no engine, so both routes and a dry run
+        // refuse the same values (#989).
+        checkSettingValuePaths);
 
     register_phase_two(
         "scene_list_groups", "Lists the groups assigned to a live edited-scene node.",

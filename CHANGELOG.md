@@ -187,6 +187,23 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **`project_set_setting` checks the files an array names (#989).** A `res://`
+  value was checked for a file only when it was a single string, and only with
+  an editor attached. An array's paths were never checked, so
+  `internationalization/locale/translations` took a file that does not exist, a
+  JSON file and the CSV the translations were imported from. Each was reported
+  as written, and the game then loaded no translation. Every `res://` string in
+  an array now has to name a file in the project, and the refusal names its
+  `index`. The rule runs before the route is chosen, so an attached editor, the
+  offline route and a dry run refuse the same values; offline, a single string
+  is checked too, as it always was live. `locale/translations` takes only the
+  files Godot registers a translation from, measured on 4.5.1, 4.6.2 and 4.7.2:
+  a `.translation`, `.po`, `.mo` or `.res`. The CSV is refused with
+  `retry_with` holding the list with the CSV replaced by the `.translation`
+  files its import wrote, so the refusal carries the value that succeeds. A
+  `.tres` is refused even when it holds a Translation, because the engine loads
+  registered translations before it can read a text resource.
+
 - **`ui_list_controls` reports what a translated control draws (#988).** A
   Control translates its text as it draws it. So in a localised game the
   `text` property holds the key, and the tool reported `MENU_START` for a button

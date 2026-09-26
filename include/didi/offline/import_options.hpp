@@ -52,6 +52,13 @@ Result<ImportSidecar> readImportSidecar(std::string text);
 // The sidecar beside a source asset, read whole and capped at 1 MiB.
 Result<std::string> readImportSidecarFile(const std::filesystem::path& sidecar);
 
+// The files the last import wrote, in the order `[deps] dest_files` names them.
+// For a translation CSV these are the `.translation` files a project registers,
+// one per locale, beside the CSV rather than under the data directory. Empty
+// when the sidecar declares none, which is what an import that found no
+// translation leaves behind.
+std::vector<std::string> importDestinations(const ImportSidecar& sidecar);
+
 // A [params] value as JSON: a boolean, an integer, a number or a string where
 // the text is one of those, and the text itself for anything else.
 json importParamValue(const std::string& value_text);

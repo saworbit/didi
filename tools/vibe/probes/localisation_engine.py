@@ -43,6 +43,13 @@ depend on, on every engine it is given:
   and `.csv`, and the pack run as a game from an empty directory. Recorded:
   which data files the game can still open, whether the JSON loads, and
   whether the translations still apply.
+* **What `locale/translations` can name.** Each kind of file registered alone,
+  with `locale/test` at `fr`, and the game asked what loaded: the imported
+  `.translation` files, a `.po` written by hand, a `.mo` written here, a
+  Translation the engine saved as `.tres` and as `.res`, a `.tres` holding
+  something else, a `.json`, the source `.csv`, a file that is not there, and
+  a list naming one file twice. The evidence for #989's rules in
+  `project_set_setting`.
 
 Everything here is evidence for a localisation and data-file amendment in
 `docs/SURFACE_AMENDMENTS.md` (#779). Needs no Didi build, no addon and no MCP
@@ -60,6 +67,7 @@ import argparse
 import os
 import re
 import shutil
+import struct
 import sys
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
@@ -335,6 +343,10 @@ func _run() -> void:
 	_row("loaded_locales", str(loaded))
 	for key in KEYS:
 		_row("tr." + key, tr(key))
+	if OS.get_environment("DIDI_BRIEF") == "1":
+		printerr("DIDI_PROBE_DONE")
+		get_tree().quit()
+		return
 	_row("label.text", label.text)
 	_row("label.get_text", label.get_text())
 	_row("label.auto_translate_mode", str(label.auto_translate_mode))
@@ -383,6 +395,69 @@ GAME_VARIANTS: list[tuple[str, str, object, str | None]] = [
      ["res://strings.csv"], "fr"),
     ("missing_registered_test_fr", "a .translation that does not exist registered beside the real ones",
      "dests+missing", "fr"),
+]
+
+# What a registration can name besides the imported .translation files. The
+# .po is written by hand; the .tres and .res are Translations the engine saves
+# itself, each with its own French string so a row says which one loaded.
+PO_TEXT = ('msgid ""\nmsgstr ""\n"Content-Type: text/plain; charset=UTF-8\\n"\n"Language: fr\\n"\n\n'
+           'msgid "MENU_START"\nmsgstr "Commencer (po)"\n')
+
+def mo_bytes() -> bytes:
+    """A GNU .mo catalogue with a header naming fr and one message, which is
+    what msgfmt would write for PO_TEXT's twin."""
+    entries = sorted({
+        b"": b"Content-Type: text/plain; charset=UTF-8\nLanguage: fr\n",
+        b"MENU_START": b"Commencer (mo)",
+    }.items())
+    count = len(entries)
+    originals_at = 28
+    translations_at = originals_at + count * 8
+    strings_at = translations_at + count * 8
+    tables, blob = [b"", b""], b""
+    for column, index in ((0, 0), (1, 1)):
+        for entry in entries:
+            text = entry[index]
+            tables[column] += struct.pack("<II", len(text), strings_at + len(blob))
+            blob += text + b"\0"
+    header = struct.pack("<7I", 0x950412DE, 0, count, originals_at, translations_at, 0, 0)
+    return header + tables[0] + tables[1] + blob
+
+
+SAVER_SOURCE = r'''extends SceneTree
+
+
+func _init() -> void:
+	for extension in ["tres", "res"]:
+		var translation := Translation.new()
+		translation.locale = "fr"
+		translation.add_message("MENU_START", "Commencer (%s)" % extension)
+		var path: String = "res://saved_translation." + extension
+		var err := ResourceSaver.save(translation, path)
+		var uid := ResourceLoader.get_resource_uid(path)
+		printerr("DIDI_ROW\tregister.saved_%s\terr=%d uid=%s" % [extension, err, "none" if uid == ResourceUID.INVALID_ID else "present"])
+		if uid != ResourceUID.INVALID_ID:
+			printerr("DIDI_UID\t%s\t%s" % [extension, ResourceUID.id_to_text(uid)])
+	var style := StyleBoxFlat.new()
+	printerr("DIDI_ROW\tregister.saved_style\terr=%d" % ResourceSaver.save(style, "res://not_a_translation.tres"))
+	printerr("DIDI_PROBE_DONE")
+	quit()
+'''
+
+# (label, what it asks, what locale/translations lists). "dests" is the imported
+# .translation files; "uid:tres" is the uid:// of the saved .tres.
+REGISTER_VARIANTS: list[tuple[str, str, object]] = [
+    ("imported_translations", "the .translation files the CSV import wrote (the control)", "dests"),
+    ("po_file", "a gettext .po file written by hand", ["res://strings_fr.po"]),
+    ("mo_file", "a gettext .mo file, the compiled form of the same catalogue", ["res://strings_fr.mo"]),
+    ("saved_tres", "a Translation the engine saved as .tres", ["res://saved_translation.tres"]),
+    ("saved_res", "a Translation the engine saved as .res", ["res://saved_translation.res"]),
+    ("uid_of_tres", "the uid:// of that .tres", "uid:tres"),
+    ("other_tres", "a .tres the engine saved holding a StyleBoxFlat", ["res://not_a_translation.tres"]),
+    ("json_file", "a JSON data file", ["res://data.json"]),
+    ("csv_source", "the CSV the translations were imported from", ["res://strings.csv"]),
+    ("missing", "a .translation that does not exist", ["res://missing.fr.translation"]),
+    ("fr_listed_twice", "the imported .translation files with fr listed twice", "dests+fr"),
 ]
 
 # (label, what it asks, include_filter as the preset stores it).
@@ -534,12 +609,46 @@ def exports(godot: str, version: str, work: Path, project: Path, dests: list[str
             record.put(engine, f"export.{label}.finished", f"NO, rc={code}")
 
 
+def registrations(godot: str, version: str, project: Path, dests: list[str],
+                  record: Record, engine: str) -> None:
+    write(project / "strings_fr.po", PO_TEXT)
+    (project / "strings_fr.mo").write_bytes(mo_bytes())
+    write(project / "saver.gd", SAVER_SOURCE)
+    _, text = run([godot, "--headless", "--path", str(project), "--script", "res://saver.gd"], timeout=120)
+    record.take(engine, "", text)
+    uids = dict(line.split("\t")[1:3] for line in text.splitlines() if line.startswith("DIDI_UID\t"))
+    (project / "saver.gd").unlink()
+    # An import pass, so the editor's filesystem and uid cache know the new files.
+    run([godot, "--headless", "--path", str(project), "--import"], timeout=240)
+    fr = [d for d in dests if d.endswith(".fr.translation")]
+    for label, asks, listed in REGISTER_VARIANTS:
+        if listed == "dests":
+            translations = dests
+        elif listed == "dests+fr":
+            translations = dests + fr
+        elif listed == "uid:tres":
+            if "tres" not in uids:
+                record.put(engine, f"register.{label}.asks", asks + ": no uid was assigned, not run")
+                continue
+            translations = [uids["tres"]]
+        else:
+            translations = listed
+        write(project / "project.godot", project_godot(
+            version, "Didi localisation probe: game", main_scene=True,
+            translations=translations, locale_test="fr"))
+        record.put(engine, f"register.{label}.asks", asks)
+        code, text = run([godot, "--headless", "--path", str(project)],
+                         env=dict(os.environ, DIDI_BRIEF="1"), timeout=90)
+        if not record.take(engine, f"register.{label}.", text):
+            record.put(engine, f"register.{label}.finished", f"NO, rc={code}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--godot", action="append", default=[],
                         help="a Godot console binary; repeat for each engine line")
     parser.add_argument("--out", help="where the throwaway projects go (default: a temp dir)")
-    parser.add_argument("--only", choices=("importer", "game", "export"), action="append",
+    parser.add_argument("--only", choices=("importer", "game", "export", "register"), action="append",
                         help="run one part; repeat for several")
     args = parser.parse_args()
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -547,7 +656,7 @@ def main() -> int:
     if not engines:
         print("pass --godot (repeatable) or set GODOT_BIN: this probe has no witness without one")
         return 2
-    parts = args.only or ["importer", "game", "export"]
+    parts = args.only or ["importer", "game", "export", "register"]
     base = Path(args.out) if args.out else Path(tempfile.mkdtemp(prefix="didi_localisation_probe_"))
     print(f"working under {base}")
     record = Record()
@@ -558,12 +667,14 @@ def main() -> int:
         work.mkdir(parents=True, exist_ok=True)
         if "importer" in parts:
             importer(godot, version, work, record, version)
-        if "game" in parts or "export" in parts:
+        if "game" in parts or "export" in parts or "register" in parts:
             project, dests = build_game(godot, version, work, record, version)
             if "game" in parts:
                 game_variants(godot, version, project, dests, record, version)
             if "export" in parts:
                 exports(godot, version, work, project, dests, record, version)
+            if "register" in parts:
+                registrations(godot, version, project, dests, record, version)
         print(f"  finished {version}  ({godot})", flush=True)
 
     with ThreadPoolExecutor(max_workers=len(engines)) as pool:

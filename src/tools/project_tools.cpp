@@ -1,7 +1,11 @@
 #include "didi/mcp/project_tools.hpp"
+#include "didi/common/project_path.hpp"
+#include "didi/offline/import_options.hpp"
 #include "didi/offline/project_search.hpp"
 #include "didi/offline/project_settings_file.hpp"
 
+#include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <set>
 
@@ -195,6 +199,168 @@ CallToolResult handleProjectGetSetting(const json& args, std::shared_ptr<ipc::II
           "and it is published as value_literal rather than value for that reason. A running "
           "editor holding an unsaved change would answer differently."}});
 }
+namespace {
+
+constexpr const char* kTranslationsSetting = "internationalization/locale/translations";
+
+std::string lowerExtension(const std::filesystem::path& path) {
+    auto extension = path.extension().string();
+    if (!extension.empty() && extension.front() == '.') extension.erase(0, 1);
+    std::transform(extension.begin(), extension.end(), extension.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return extension;
+}
+
+std::string elementName(size_t index) {
+    return "value[" + std::to_string(index) + "]";
+}
+
+// Why a file cannot be registered as a translation, or nothing when it can.
+// Asked of the engine on 4.5.1, 4.6.2 and 4.7.2 with each kind registered alone
+// and the game told to use its locale (tools/vibe/probes/localisation_engine.py,
+// the register part): a .translation, a .po, a .mo and a .res holding a
+// Translation load. A .tres never does, because the engine loads registered
+// translations before it can read a text resource and prints "No loader found".
+// The CSV the translations were imported from loads nothing and prints one
+// ERROR. A .json loads nothing and prints nothing at all.
+std::optional<Error> translationFileProblem(const json& items, size_t index,
+                                            const std::string& text,
+                                            const std::filesystem::path& resolved) {
+    static const std::set<std::string> registrable = {"translation", "po", "mo", "res"};
+    const auto extension = lowerExtension(resolved);
+    if (registrable.count(extension)) return std::nullopt;
+    const std::string where = elementName(index) + ", " + text + ",";
+    json data{{"code", "not_a_translation"},
+              {"setting", kTranslationsSetting},
+              {"index", index},
+              {"resource_path", text},
+              {"retryable", false}};
+
+    if (extension == "csv") {
+        auto sidecar_text = offline::readImportSidecarFile(resolved.string() + ".import");
+        std::optional<offline::ImportSidecar> sidecar;
+        if (sidecar_text.isOk()) {
+            auto parsed = offline::readImportSidecar(sidecar_text.value());
+            if (parsed.isOk()) sidecar = std::move(parsed.value());
+        }
+        if (!sidecar) {
+            data["code"] = "translation_source_not_imported";
+            return Error(409,
+                         where + " is a CSV that has not been imported, so there is no "
+                         ".translation file to register yet. Godot registers what the import "
+                         "writes, not the CSV: registered, it loads no translation and prints "
+                         "an ERROR at startup. Import it in an attached editor, then register "
+                         "the files its .import sidecar lists under dest_files.",
+                         std::move(data));
+        }
+        const auto destinations = offline::importDestinations(*sidecar);
+        if (sidecar->importer == "csv_translation" && !destinations.empty()) {
+            // The same list with this entry replaced by what its import wrote,
+            // which is the value that succeeds.
+            json replaced = json::array();
+            std::set<std::string> seen;
+            for (size_t i = 0; i < items.size(); ++i) {
+                if (i == index) {
+                    for (const auto& destination : destinations) {
+                        if (seen.insert(destination).second) replaced.push_back(destination);
+                    }
+                } else if (!items[i].is_string() || seen.insert(items[i].get<std::string>()).second) {
+                    replaced.push_back(items[i]);
+                }
+            }
+            std::string listed;
+            for (size_t i = 0; i < destinations.size(); ++i) {
+                listed += (i == 0 ? "" : i + 1 == destinations.size() ? " and " : ", ") + destinations[i];
+            }
+            data["code"] = "translation_source_registered";
+            data["translation_files"] = destinations;
+            data["retry_with"] = json{{"value", std::move(replaced)}};
+            return Error(409,
+                         where + " is the CSV the translations were imported from. Godot "
+                         "registers what the import wrote, not its source: with the CSV "
+                         "registered the game loads no translation and prints an ERROR at "
+                         "startup. Register " + listed + " instead.",
+                         std::move(data));
+        }
+        const std::string importer =
+            sidecar->importer.empty() ? "no importer" : "the " + sidecar->importer + " importer";
+        return Error(409,
+                     where + " is a CSV its .import sidecar gives to " + importer +
+                         ", so it holds no translation. A CSV of translations is imported by "
+                         "csv_translation, and the .translation files it writes are what a "
+                         "project registers.",
+                     std::move(data));
+    }
+    if (extension == "tres") {
+        return Error(409,
+                     where + " is a text resource, and Godot loads registered translations "
+                     "before it can read one: the game prints \"No loader found\" at startup "
+                     "and loads nothing from it, whatever the file holds. Save the Translation "
+                     "as .res, or register a .translation, .po or .mo file.",
+                     std::move(data));
+    }
+    return Error(409,
+                 where + " is not a file Godot registers a translation from. It takes a "
+                 ".translation, .po, .mo or .res file; anything else loads no translation, and "
+                 "a file with a loader of its own, such as a .json, fails without a word.",
+                 std::move(data));
+}
+
+// A res:// value with nothing at it, answered the way the live route answers a
+// single string (#490), with the element that named it.
+Error missingSettingResource(const std::string& setting, const std::string& text,
+                             std::optional<size_t> index) {
+    json data{{"setting", setting},
+              {"resource_path", text},
+              {"resource_exists", false},
+              {"retryable", false}};
+    std::string where = text;
+    if (index) {
+        data["index"] = *index;
+        where += ", at " + elementName(*index);
+    }
+    return Error(404,
+                 "Project setting resource not found: " + where + ". Nothing is at that path, "
+                 "so " + setting + " would name a file the project cannot load.",
+                 std::move(data));
+}
+
+} // namespace
+
+std::optional<Error> checkSettingValuePaths(const json& args) {
+    if (!args.is_object() || args.value("remove", false)) return std::nullopt;
+    const auto value = args.find("value");
+    if (value == args.end() || !value->is_array()) return std::nullopt;
+    const auto setting_value = args.find("setting");
+    if (setting_value == args.end() || !setting_value->is_string()) return std::nullopt;
+    const auto& setting = setting_value->get_ref<const std::string&>();
+    const bool translations = setting == kTranslationsSetting;
+
+    const auto& items = *value;
+    for (size_t index = 0; index < items.size(); ++index) {
+        if (!items[index].is_string()) continue;
+        const auto& text = items[index].get_ref<const std::string&>();
+        if (!strings::startsWith(text, "res://")) continue;
+        auto resolved = paths::resolveProjectFileForWrite(text);
+        if (resolved.isErr()) {
+            return Error(400,
+                         elementName(index) + ", " + text + ", is not a path in the project: " +
+                             resolved.error().message + ".",
+                         json{{"setting", setting}, {"index", index}, {"retryable", false}});
+        }
+        std::error_code error;
+        if (!std::filesystem::exists(resolved.value(), error) || error) {
+            return missingSettingResource(setting, text, index);
+        }
+        if (translations) {
+            if (auto problem = translationFileProblem(items, index, text, resolved.value())) {
+                return problem;
+            }
+        }
+    }
+    return std::nullopt;
+}
+
 // Persists a project setting, using the editor when one is attached and
 // project.godot directly when none is.
 //
@@ -217,6 +383,26 @@ CallToolResult handleProjectSetSetting(const json& args, std::shared_ptr<ipc::II
     }
     if (!remove && !args.contains("value")) {
         return CallToolResult::errorJson(400, "value is required unless remove is true");
+    }
+    // The live route refuses a res:// string with nothing at it (#490), and
+    // this route wrote one, so application/run/main_scene could name a scene
+    // that does not exist with no editor attached (#989). An array's paths are
+    // checked before either route, by checkSettingValuePaths.
+    if (!remove && args["value"].is_string()) {
+        const auto& text = args["value"].get_ref<const std::string&>();
+        if (strings::startsWith(text, "res://")) {
+            auto resolved = paths::resolveProjectFileForWrite(text);
+            if (resolved.isErr()) {
+                return CallToolResult::errorJson(
+                    400, "value, " + text + ", is not a path in the project: " +
+                             resolved.error().message + ".",
+                    json{{"setting", setting}});
+            }
+            std::error_code missing_error;
+            if (!std::filesystem::exists(resolved.value(), missing_error) || missing_error) {
+                return CallToolResult::fromError(missingSettingResource(setting, text, std::nullopt));
+            }
+        }
     }
 
     std::error_code root_error;
