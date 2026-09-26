@@ -16,6 +16,10 @@ the C++ build and its native suite are fine and `pip install -r
 requirements-dev.txt` fails with a resolution error that never names a Python
 version.
 
+Install `requirements-dev.txt` into the Python environment used for tests.
+If it differs from the default interpreter, pass its absolute executable to
+CMake with `-DPython3_EXECUTABLE=...` so generators and CTest use that environment.
+
 ### Windows (MSVC)
 - Visual Studio 2022 / Build Tools with C++20 support
 - CMake 3.20+
@@ -45,6 +49,7 @@ ctest --test-dir build --output-on-failure
 
 | Option | Default | Effect |
 | :--- | :--- | :--- |
+| `DIDI_ELASTIC_INGRESS` | `OFF` | Enables the explicitly requested `safe-v1` profile on three read-only tools; strict calls stay strict. See [Elastic Ingress](ELASTIC_INGRESS.md) for the contract and paired-build verification. |
 | `DIDI_BUILD_TESTS` | `ON` | Builds the native suite, the Phase 7 signal bridge fixture and its probe, and registers both CTest entries. `OFF` produces only `didi` and `didi_extension`, and the configure fails if a test-only target is defined anyway. |
 | `DIDI_ENABLE_SANITIZERS` | `OFF` | ASan and UBSan on GCC and Clang. MSVC has no supported combination here, so the configure refuses rather than building without the runtime. CI runs this on Ubuntu. |
 
@@ -91,12 +96,43 @@ didi/
 - Tool/resource live and offline provenance, viewport/image encoding, GDScript diagnostics/patching/reflection, and resource indexing.
 - Blackboard path rejection, atomic patching, expiry, bounds, and the cross-process file lock; task claim exclusivity under concurrent claimers, lease expiry and reclaim, dependency readiness, cycle refusal, and lease ownership on update and complete.
 
+### Protocol guidance and test-fixture maintenance
+
+`kServerInstructions` in `src/mcp/mcp_server.cpp` is the shared compiled guide
+for `initialize` and `server/discover`; `docs/LLM_INSTRUCTIONS.md` is the expanded
+reference, not a file loaded at runtime. When a documented route or boundary
+changes, update both and the [API contract](API_SPECIFICATION.md#server-operational-instructions).
+Keep the guide compact and do not embed project paths, client data or live
+availability in it.
+
+`McpServer.InitializeInstructions` checks the serialized field and resolves
+named routes against the registry. `tests/test_initialize_instructions.py`
+drives the actual binary through malformed-handshake recovery, protocol
+fallback, pipelined/batched requests, concurrent clients and the guide's
+read workflow. Run it with `python -m unittest tests.test_initialize_instructions -v`.
+The normalization wire suite adds boundary and per-request opt-in tests; run
+`tests.test_elastic_ingress` with both compile-time profiles, setting
+`DIDI_TEST_ELASTIC_INGRESS` to `0` or `1` to verify the binary being tested.
+
+New Python modules must participate in discovery and an explicit invocation
+in the existing CI workflow. Support both `tests.<module>` imports and discovery
+with `-t tests`. For simple test-owned stdio children, use
+`tests/stdio_process.py` to kill if needed, drain/close pipes and wait with a
+finite timeout. Managed editor fixtures keep their process-tree ownership
+cleanup. Avoid shared project/session state in new real-wire fixtures.
+
+See the [2026-09-25 exploratory report](EXPLORATORY_MCP_INSTRUCTIONS.md) for
+measured latency, cross-version live coverage, harness fixes and outstanding
+issues. Its local results do not substitute for cross-platform CI.
+
+### Opt-in live verification
+
 The opt-in Python recovery suites launch real Godot through MCP stdio and cover owned-child crashes, saved-file persistence, the single restart, no replay, restore, source preservation, previews, and corrupt snapshots. Set `DIDI_TEST_BINARY` to the built host and `DIDI_RECOVERY_GODOT` to an absolute Godot executable:
 
 ```powershell
 $env:DIDI_TEST_BINARY = "D:/didi/build/Release/didi.exe"
 $env:DIDI_RECOVERY_GODOT = "C:/Godot/Godot_v4.5.1-stable_win64.exe"
-python -m unittest discover -s tests -p "test_managed_recovery*.py"
+python -m unittest discover -s tests -t tests -p "test_managed_recovery*.py"
 ```
 
 See [Managed Recovery verification](MANAGED_RECOVERY.md#verification) for the live and adversarial suite scope. These are opt-in engine tests; a skipped test is not live recovery evidence.

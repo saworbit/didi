@@ -2,6 +2,15 @@
 
 Resources are read-only MCP context endpoints. Prompt templates return advisory text for the model; they do not execute tools themselves. Capability metadata remains authoritative for every tool named by a prompt.
 
+## Connection instructions are separate
+
+Current source/Unreleased builds return an operational guide directly as
+`result.instructions` in `initialize` and `server/discover`. A host does not
+need `prompts/get` or `resources/read` to retrieve it. The workflow templates
+below are optional task-specific context; none is the handshake guide.
+See the [protocol contract](API_SPECIFICATION.md#server-operational-instructions)
+and [expanded agent guide](LLM_INSTRUCTIONS.md).
+
 ## Resource capability metadata
 
 `resources/list` includes `_meta.didi` with the same fields documented for tools: `executionModes`, `implemented`, `currentMode`, `liveAvailable`, `editorConnected`, and optional selected `sessionKind`. Availability is kind-aware: runtime logs allow editor or game, editor state is editor-only, and project tree remains offline. See [Current Capability Matrix](CAPABILITIES.md).

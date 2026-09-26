@@ -23,8 +23,10 @@ So asking whether an AI helped build it is a bit like asking a locksmith whether
 a key.
 
 This repository already contains a file written to be read by machines.
-[`docs/LLM_INSTRUCTIONS.md`](docs/LLM_INSTRUCTIONS.md) is a system prompt and a decision
-tree for the assistants that connect to this server, and it is addressed to them. This page
+[`docs/LLM_INSTRUCTIONS.md`](docs/LLM_INSTRUCTIONS.md) is the expanded operating guide
+and decision tree for assistants that connect to this server. Current source builds
+also send a compact guide during MCP initialization; the document is the fuller
+reference and fallback when a host does not expose it. Both are addressed to them. This page
 is addressed to you. It seemed only fair to have both.
 
 ## The recursion, stated in full

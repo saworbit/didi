@@ -10,14 +10,14 @@ Every number here is derived from the suites themselves rather than written down
 
 | Measure | Count |
 | --- | ---: |
-| Automated tests | **1348** |
+| Automated tests | **1359** |
 | Live-harness assertions | 1300 |
 
 The badge in the [README](../README.md) shows the automated test total. Harness assertions are counted separately because they are assertions inside one live scenario, not independently runnable cases; adding them together would flatter the number.
 
 ## Native C++ suite (`didi_tests`)
 
-**884 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
+**885 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
 
 | Suite | Tests |
 | --- | ---: |
@@ -46,7 +46,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `InvariantWatch` | 4 |
 | `JsonRpc` | 5 |
 | `ManagedProcess` | 6 |
-| `McpServer` | 41 |
+| `McpServer` | 42 |
 | `Phase5` | 28 |
 | `Phase6` | 25 |
 | `Phase7Contract` | 9 |
@@ -96,7 +96,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 
 ## Python contract suites (`tests/test_*.py`)
 
-**464 tests.** Derived from `test_*` methods on every `unittest.TestCase` subclass, read with `ast`.
+**474 tests.** Derived from `test_*` methods on every `unittest.TestCase` subclass, read with `ast`.
 
 | File | Tests |
 | --- | ---: |
@@ -109,12 +109,13 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `test_didi_binary.py` | 10 |
 | `test_documentation_validator.py` | 90 |
 | `test_editor_console.py` | 9 |
-| `test_elastic_ingress.py` | 11 |
+| `test_elastic_ingress.py` | 13 |
 | `test_elicitation_confirmation.py` | 6 |
 | `test_engine_identity.py` | 5 |
 | `test_field_trial.py` | 137 |
 | `test_fuzz_target_lists.py` | 6 |
-| `test_managed_recovery.py` | 2 |
+| `test_initialize_instructions.py` | 5 |
+| `test_managed_recovery.py` | 3 |
 | `test_managed_recovery_adversarial.py` | 3 |
 | `test_managed_recovery_live.py` | 4 |
 | `test_mcp_wire_contract.py` | 15 |
@@ -122,6 +123,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `test_phase7_schema_contract.py` | 4 |
 | `test_phase7_signal_admission.py` | 3 |
 | `test_refusal_codes.py` | 10 |
+| `test_stdio_process.py` | 2 |
 | `test_test_inventory.py` | 25 |
 | `test_tool_output_schema_contract.py` | 5 |
 | `test_vendored_versions.py` | 23 |

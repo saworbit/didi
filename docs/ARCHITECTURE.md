@@ -82,6 +82,17 @@ Managed mutations receive pre-dispatch and post-success saved-file snapshots; su
 
 Before ordinary authorized dispatch, the supervisor can restart an abnormally exited child once. Reads can therefore execute project startup code; status via `runtime_recovery_status`, dry runs, and confirmation previews do not relaunch. A recovery that changes the route defers a pending mutation without starting it. Confirmed restore preserves the prior project and launches an editor, but does not replenish the automatic restart budget. New host invocations require new workspaces; retained containers are salvage artifacts, not resumable host state. This is process ownership and saved-file recovery, not an OS sandbox. See [Managed Recovery](MANAGED_RECOVERY.md).
 
+### Operational guidance at the protocol boundary
+
+The C++ MCP dispatcher emits one compiled `kServerInstructions` string from
+both `initialize` and `server/discover`. Keeping it in `src/mcp/mcp_server.cpp`
+shares the guide across protocol eras without a runtime Markdown dependency.
+Hosts consume `result.instructions` before planning calls; tool schemas and
+session-dependent availability still come from the registries. The guide is
+static and carries no per-client or per-project state. It does not add an SDK,
+a tool registration or a new execution path. See the
+[wire contract](API_SPECIFICATION.md#server-operational-instructions).
+
 ## 3. Threading & Concurrency Model
 
 Godot's `SceneTree`, `EditorInterface`, and `RenderingServer` are **not thread-safe** for concurrent mutations. Didi solves this with a multi-layered queue dispatcher:

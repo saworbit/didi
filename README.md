@@ -9,7 +9,7 @@
 [![CI](https://github.com/saworbit/didi/actions/workflows/ci.yml/badge.svg)](https://github.com/saworbit/didi/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/saworbit/didi/actions/workflows/codeql.yml/badge.svg)](https://github.com/saworbit/didi/actions/workflows/codeql.yml)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/saworbit/didi/badge)](https://scorecard.dev/viewer/?uri=github.com/saworbit/didi)
-[![Tests](https://img.shields.io/badge/tests-1348-2ea043?logo=pytest&logoColor=white)](docs/TEST_INVENTORY.md)
+[![Tests](https://img.shields.io/badge/tests-1359-2ea043?logo=pytest&logoColor=white)](docs/TEST_INVENTORY.md)
 [![Release](https://img.shields.io/github/v/release/saworbit/didi?logo=github&color=blue)](https://github.com/saworbit/didi/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Godot Engine](https://img.shields.io/badge/Godot-4.5%2B-478cbf?logo=godotengine&logoColor=white)](https://godotengine.org/)
@@ -63,7 +63,7 @@ a useful report contains.
 | 🌐 [**Project Website**](https://saworbit.github.io/didi/) | **Everyone** | What Didi is, the tool surface, setup, and the in-editor console. |
 | 📚 [**Documentation Index**](docs/README.md) | **Everyone** | Every page under `docs/`, grouped, with the status of each design record. |
 | 🚀 [**Quickstart Guide**](docs/QUICKSTART.md) | **Developers / Humans** | 5-minute step-by-step setup for Godot, Cursor, Claude, and VS Code. |
-| 🤖 [**LLM Agent Instructions**](docs/LLM_INSTRUCTIONS.md) | **AI Assistants / LLMs** | Dedicated system prompt & decision tree for Claude, Cursor, Windsurf, Antigravity. |
+| 🤖 [**LLM Agent Instructions**](docs/LLM_INSTRUCTIONS.md) | **AI Assistants / LLMs** | Expanded guide and fallback for hosts that do not expose handshake instructions. |
 | ✅ [**Current Capability Matrix**](docs/CAPABILITIES.md) | **Everyone** | Authoritative live, offline, unavailable, and unimplemented behavior. |
 | ♻️ [**Managed Recovery**](docs/MANAGED_RECOVERY.md) | **Users / Operators** | Opt-in owned editor, project copies, checkpoints, and recovery limits. |
 | 🎛️ [**Control Room**](docs/CONTROL_ROOM_DESIGN.md) | **Users / Operators** | The MCP Apps dashboard: bridge lights, live tool modes, safety posture, and Didi's own log, rendered inside your assistant. |
@@ -273,7 +273,17 @@ publishes and keeps the fields it names; the shared secret in them is not one of
 
 ## 🤖 Instructions for AI Assistants (LLMs)
 
-Copy [**`docs/LLM_INSTRUCTIONS.md`**](docs/LLM_INSTRUCTIONS.md) into your agent instructions and keep [**`docs/CAPABILITIES.md`**](docs/CAPABILITIES.md) available as the current execution contract.
+Current source/Unreleased builds return an operational guide in
+`result.instructions` during `initialize`, and return the same guide from
+`server/discover`. A host that supplies server instructions to its model can
+use it immediately on connection. It covers tool routing, schema inspection,
+node discovery, execution rules and unsupported workflows.
+
+[**`docs/LLM_INSTRUCTIONS.md`**](docs/LLM_INSTRUCTIONS.md) is the expanded guide.
+Supply it manually if your host does not expose server instructions or an older
+build omits the field. Keep [**`docs/CAPABILITIES.md`**](docs/CAPABILITIES.md)
+available and inspect runtime `tools/list` for actual availability; handshake
+guidance does not establish a live editor connection.
 
 ---
 

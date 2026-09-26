@@ -41,4 +41,12 @@ This feature recovers a Godot editor crash while the MCP host survives. It does 
 
 ## Verification
 
-`tests/test_managed_recovery_live.py` and `tests/test_managed_recovery_adversarial.py` launch real Godot through MCP stdio, kill only their owned child, and check persistence, one restart, no mutation replay, restoration, source preservation, dry runs and corrupt-snapshot refusal. Set `DIDI_TEST_BINARY` to the built host and `DIDI_RECOVERY_GODOT` to an absolute Godot executable; then run `python -m unittest discover -s tests -p "test_managed_recovery*.py"`.
+The suites also support explicit package invocation from the repository root:
+`python -m unittest tests.test_managed_recovery_live tests.test_managed_recovery_adversarial -v`.
+No `PYTHONPATH` workaround is required. `tests.test_managed_recovery` verifies
+that the shared fixture imports in both invocation modes. The live normalization
+case additionally requires a host built with `DIDI_ELASTIC_INGRESS=ON`; it skips
+when the feature is disabled. The [exploratory report](EXPLORATORY_MCP_INSTRUCTIONS.md)
+records the acceptance/adversarial scenarios and enabled-profile live run.
+
+`tests/test_managed_recovery_live.py` and `tests/test_managed_recovery_adversarial.py` launch real Godot through MCP stdio, kill only their owned child, and check persistence, one restart, no mutation replay, restoration, source preservation, dry runs and corrupt-snapshot refusal. Set `DIDI_TEST_BINARY` to the built host and `DIDI_RECOVERY_GODOT` to an absolute Godot executable; then run `python -m unittest discover -s tests -t tests -p "test_managed_recovery*.py"`.

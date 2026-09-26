@@ -51,6 +51,18 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Added
 
+- **Operational guidance in the MCP handshake.** `InitializeResult.instructions`
+  now carries a compact guide to tool routing, schema inspection, node discovery,
+  mutation previews and unsupported workflows with file/headless fallbacks.
+  `server/discover` uses the same guide. Host integration is documented in the
+  [API specification](docs/API_SPECIFICATION.md#server-operational-instructions);
+  this adds no tools or availability guarantees.
+- **End-to-end protocol and normalization coverage.** Ten Python tests extend
+  handshake recovery, pipelining, concurrent-client isolation, routing, numeric
+  boundaries and harness cleanup. Existing CI steps run the new modules. The
+  [exploratory report](docs/EXPLORATORY_MCP_INSTRUCTIONS.md) records both build
+  profiles, Godot 4.5.1/4.7.2 integration, live recovery and existing limitations.
+
 - **`asset_configure_import` makes a track loop (#958).** Whether music loops is an import
   option, `loop` for an OGG or MP3 and `edit/loop_mode` for a WAV, and nothing on the surface
   could write one, so a menu's music played once and stopped, and the only way around it was a
@@ -174,6 +186,11 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
   use it on the draft.
 
 ### Fixed
+
+- **Recovery test imports and stdio fixture cleanup.** The adversarial recovery
+  suite now works through both discovery and explicit `tests.<module>` invocation.
+  YOLO, elicitation and output-schema fixtures reap their owned subprocesses and
+  close pipes through bounded cleanup, eliminating the observed ResourceWarnings.
 
 - **A refusal for an argument under the wrong name carries the fix (#784).** When a call's only
   problem is one argument this tool does not take, and its value fits the one required argument

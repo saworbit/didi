@@ -13,6 +13,26 @@ This guide walks through configuring Didi with popular AI coding assistants and 
 
 ---
 
+## Server guidance in the host
+
+Current source/Unreleased builds publish the same operational guide in
+`initialize` and `server/discover` at `result.instructions`. No additional
+Didi launch flag, prompt lookup or MCP Apps negotiation is needed. Host support
+for making that string visible to the model determines whether the assistant
+actually receives it; a successful connection alone does not prove this.
+
+For a custom host, preserve this field when decoding the result and supply the
+guide to the model before its first tool-planning turn. Verify it is a nonempty
+string in an MCP trace, then inspect `tools/list` schemas and `_meta.didi` for
+current availability. Do not nest the field under `capabilities` or infer a
+live route from its presence. Modern requests still need explicit session
+metadata; see the [protocol specification](API_SPECIFICATION.md#server-operational-instructions).
+
+If an older installed build lacks the field, or the host does not expose it,
+use [LLM Operating Instructions](LLM_INSTRUCTIONS.md) as the manual fallback.
+That document expands the short wire guide; keeping both full copies in every
+turn is unnecessary.
+
 ## 1. Setting Up the Godot Project
 
 1. Copy the `addons/didi` directory into your Godot project's root `addons/` folder:

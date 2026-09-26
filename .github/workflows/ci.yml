@@ -411,7 +411,7 @@ jobs:
           # The load-bearing assertion is that no tool argument can turn
           # confirmations off. An agent able to authorise its own bypass would
           # make the confirmation system decorative.
-          "$DIDI_SCHEMA_PYTHON" -m unittest tests.test_yolo_mode -v
+          "$DIDI_SCHEMA_PYTHON" -m unittest tests.test_yolo_mode tests.test_stdio_process -v
 
       - name: Verify the Control Room page and its MCP Apps contract
         shell: bash
@@ -425,7 +425,7 @@ jobs:
           else
             export DIDI_TEST_BINARY="$PWD/build/didi"
           fi
-          "$DIDI_SCHEMA_PYTHON" -m unittest tests.test_control_room_app tests.test_control_room_protocol -v
+          "$DIDI_SCHEMA_PYTHON" -m unittest tests.test_control_room_app tests.test_control_room_protocol tests.test_initialize_instructions -v
 
       - name: Verify the command line refuses unknown and malformed options
         shell: bash

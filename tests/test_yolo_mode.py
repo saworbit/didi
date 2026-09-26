@@ -40,6 +40,11 @@ except ImportError:
 
 _executable = _binary.resolve
 
+try:
+    from stdio_process import stop as stop_stdio_process
+except ImportError:
+    from tests.stdio_process import stop as stop_stdio_process
+
 
 class _Server:
     def __init__(self, *extra_args):
@@ -65,7 +70,7 @@ class _Server:
         return self.request("tools/call", params)["result"]
 
     def close(self):
-        self.process.kill()
+        stop_stdio_process(self.process)
 
 
 def _gated_arguments():

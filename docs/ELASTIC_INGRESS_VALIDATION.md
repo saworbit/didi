@@ -1,5 +1,12 @@
 # Elastic ingress: local verification
 
+**Follow-up, 2026-09-25:** [MCP instructions and capability exploration](EXPLORATORY_MCP_INSTRUCTIONS.md)
+records later Release verification with the pinned test dependency, both profiles,
+new request-isolation/boundary tests and live recovery. The subprocess/pipe
+ResourceWarnings recorded below were fixed in that pass. These earlier Debug
+results remain historical evidence; the follow-up does not establish real-client
+adoption or cross-platform performance.
+
 Date: 2026-09-25. Initial base: `89998a9`. Publication base: `5e41c7d`
 (`origin/main`). Branch: `feature/elastic-ingress`.
 Platform: Windows x64, MSVC 19.44, Debug, Python 3.14.0.

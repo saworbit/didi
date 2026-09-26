@@ -111,6 +111,35 @@ two clients sharing one process cannot see each other's declarations.
 `server/discover` is exempt: it is how a client finds out what the server
 speaks, so it answers whatever it is sent.
 
+### Server operational instructions
+
+Successful `initialize` replies include the MCP `InitializeResult.instructions`
+string at `result.instructions`, beside `protocolVersion`, `capabilities` and
+`serverInfo`. `server/discover` returns the same string at `result.instructions`,
+including when called before initialization. It is not a capability flag, tool
+result, prompt resource or member of `_meta`.
+
+The guide covers canonical scene-tree/property, project-setting and GDScript
+routes; schema and availability inspection; discovery before node access;
+mutation previews; and boundaries with direct file inspection and
+`godot --headless` fallbacks. It forbids brute-force node probing. Rendering and
+gameplay remain Godot's responsibility, and binary asset editing is outside the
+server's general-purpose surface; the advertised snapshot/runtime tools still
+retain their documented capabilities.
+
+Hosts should make the returned guide available to the consuming model before
+planning tool calls. It is static guidance, not a session selection or a
+promise that a tool is currently live. `tools/list` input schemas and
+`_meta.didi` remain authoritative; modern clients must still send the runtime
+session metadata described below. The guide is identical across clients,
+projects and UI/confirmation modes and contains no project-specific secrets.
+
+This is an additive current-source/Unreleased field; older installed builds may
+omit it. The field does not change version negotiation, duplicate-initialize
+refusal, tool names, schemas or tool counts. The expanded human-readable guide
+is [LLM Operating Instructions](LLM_INSTRUCTIONS.md); the shared compiled text
+is `kServerInstructions` in `src/mcp/mcp_server.cpp`.
+
 ### Naming the runtime session
 
 A Godot session is state that spans requests, so a modern request names the one
@@ -234,11 +263,10 @@ serves a stale claim is worse than no cache.
 
 | Method | Direction | Description |
 | :--- | :--- | :--- |
-| `server/discover` | Client $
-ightarrow$ Server | Reports supported protocol versions, capabilities, and server identity. Answers without a handshake, since it is the probe a modern client sends first. |
-| `initialize` | Client $\rightarrow$ Server | Initializes the session and advertises implemented tool, resource, and prompt capabilities. Logging is omitted until `logging/setLevel` exists. |
+| `server/discover` | Client to Server | Reports supported protocol versions, capabilities, server identity and operational `instructions`. Answers without a handshake, since it is the probe a modern client sends first. |
+| `initialize` | Client $\rightarrow$ Server | Initializes the session, returns operational `instructions`, and advertises implemented tool, resource, and prompt capabilities. Logging is omitted until `logging/setLevel` exists. |
 | `notifications/initialized` | Client $\rightarrow$ Server | Notification acknowledging initialization |
-| `ping` | Client $\rightarrow$ Server | Liveness check; returns `{}` |
+| `ping` | Client $\rightarrow$ Server | Liveness check; returns `{"resultType":"complete"}` |
 | `tools/list` | Client $\rightarrow$ Server | Lists all registered tools with JSON input schemas and Didi capability metadata |
 | `tools/call` | Client $\rightarrow$ Server | Executes a tool by name with arguments |
 | `resources/list` | Client $\rightarrow$ Server | Lists all available static and dynamic resources |

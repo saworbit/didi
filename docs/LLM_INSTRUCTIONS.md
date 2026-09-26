@@ -2,6 +2,24 @@
 
 Use these instructions when an MCP client is connected to Didi for a Godot 4.5+ project.
 
+## Read the connection guide and discover the surface
+
+Current source/Unreleased builds return a compact operational guide as
+`result.instructions` from `initialize` and `server/discover`. Read it before
+planning work. This page expands that guide and is also the fallback when an
+older build omits it or a host does not include it in the model's context.
+The guide is static; it does not replace tool schemas or current availability.
+
+Before each invocation, inspect the selected tool's `inputSchema`, required
+parameters, descriptions and bounds. Never invent tool names or arguments.
+Never brute-force node paths or probe guessed node names: first discover the
+hierarchy, reuse returned paths and refresh the relevant branch after a
+structural change or a missing-node error. Inspect refusals before retrying.
+
+For a modern request, select the intended session through
+`_meta.didi.runtime_session_id` on each request; legacy attachment alone does
+not supply a modern route. See the [protocol contract](API_SPECIFICATION.md#naming-the-runtime-session).
+
 ## Establish the project boundary
 
 Didi starts only with `--project <root>` or `DIDI_PROJECT_ROOT`, and that directory must contain `project.godot`. Treat the selected canonical project as the filesystem and session-isolation boundary. Do not attempt to recover a missing project by searching parent directories, `demo/`, or unrelated workspaces.
@@ -27,6 +45,21 @@ The four possible `currentMode` values are:
 - `unimplemented`: the name is reserved and calls will be rejected.
 
 In managed mode, inspect `runtime_recovery_status` and use `runtime_recover_editor` for an abnormal editor exit; never replay an uncertain mutation. In ordinary attach mode, when live tools report `unavailable`, call `didi_control_room` first: it reports the bridge state with the pid or session behind it, the current execution mode of every tool, and a tail of this server's own log, which no other tool can read. Then inspect the editor connection. Say so plainly and point the person at Godot's **Didi** main screen tab: its dashboard distinguishes an extension that is not loaded from one that is loaded without a published session, names the file, path or pid behind each, and lists any session published for a different project. Do not retry the call on a schedule, and never describe an `offline_fallback` result as observed editor state because the live route was closed.
+
+## Boundaries and fallbacks
+
+Godot owns real-time rendering and the gameplay loop. Didi's viewport snapshots
+and bounded runtime controls do not constitute a renderer or arbitrary
+continuous gameplay automation. Didi is not a general shell, unrestricted
+GDScript executor or binary asset editor.
+
+When a supported tool omits source details, inspect the selected project's
+`.tscn` and `.gd` files directly, or `project.godot` for saved settings. Those
+files do not describe unsaved editor or runtime state. For compilation or
+execution checks beyond the supported tools, use `godot --headless` with an
+explicit project path and appropriate check/test options; it cannot establish
+rendered appearance. Use Godot/import tooling for binary assets and unsupported
+import-option changes.
 
 ## Supported workflows
 

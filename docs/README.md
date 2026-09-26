@@ -14,7 +14,7 @@ record is kept for the reasoning, not because it describes today's behaviour.
 | --- | --- |
 | [Quickstart Guide](QUICKSTART.md) | Getting Didi running with Godot and one assistant in about five minutes. |
 | [Integration Guide](INTEGRATION_GUIDE.md) | Installing the addon into an existing project and wiring each supported assistant to it. |
-| [LLM Operating Instructions](LLM_INSTRUCTIONS.md) | The system prompt and decision tree to hand an agent. |
+| [LLM Operating Instructions](LLM_INSTRUCTIONS.md) | Expanded connection guidance and the fallback when a host does not expose `result.instructions`. |
 
 ## What Didi does today
 
@@ -33,6 +33,7 @@ record is kept for the reasoning, not because it describes today's behaviour.
 | [API and Protocol Specification](API_SPECIFICATION.md) | JSON-RPC 2.0 over the wire and the binary frame format. |
 | [Administrator and Operations Guide](ADMIN_GUIDE.md) | DACL hardening, headless CI, observability and troubleshooting. |
 | [Developer and Extension Guide](DEVELOPER_GUIDE.md) | Building from source, the test suites, and adding a tool. |
+| [MCP Instructions and Capability Exploration](EXPLORATORY_MCP_INSTRUCTIONS.md) | Dated Windows evidence: handshake/concurrency edges, both normalization profiles, Godot 4.5.1/4.7.2, harness fixes, latency and known outstanding issues. |
 | [Test Inventory](TEST_INVENTORY.md) | Generated. What each suite contains and how many cases it runs, derived from the suites themselves. |
 | [Fuzz Targets](../fuzz/README.md) | The three decoders that read untrusted bytes, why those three, and how to run one locally. |
 | [Brand Identity](brand/BRAND.md) | The mark, wordmark, lockups and palette, and the assets they generate from. |
