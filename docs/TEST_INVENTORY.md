@@ -10,32 +10,33 @@ Every number here is derived from the suites themselves rather than written down
 
 | Measure | Count |
 | --- | ---: |
-| Automated tests | **1309** |
-| Live-harness assertions | 1267 |
+| Automated tests | **1359** |
+| Live-harness assertions | 1300 |
 
 The badge in the [README](../README.md) shows the automated test total. Harness assertions are counted separately because they are assertions inside one live scenario, not independently runnable cases; adding them together would flatter the number.
 
 ## Native C++ suite (`didi_tests`)
 
-**863 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
+**885 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
 
 | Suite | Tests |
 | --- | ---: |
 | `AnimAddLibrary` | 3 |
+| `AssetConfigureImport` | 6 |
 | `AudioAddBus` | 10 |
 | `Base64` | 1 |
 | `Blackboard` | 13 |
-| `BlackboardResources` | 9 |
+| `BlackboardResources` | 11 |
 | `BlackboardTasks` | 8 |
 | `CaptureCache` | 3 |
-| `Checkpoints` | 13 |
+| `Checkpoints` | 14 |
 | `ControlRoom` | 24 |
 | `CrashCapture` | 3 |
 | `EditorHook` | 7 |
 | `ElasticIngress` | 4 |
 | `EngineDiagnostics` | 7 |
 | `ErrorData` | 3 |
-| `ExportPresetAdd` | 10 |
+| `ExportPresetAdd` | 11 |
 | `ExpressionSandbox` | 7 |
 | `GDScript` | 24 |
 | `Hierarchy` | 9 |
@@ -46,13 +47,13 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `JsonRpc` | 5 |
 | `ManagedProcess` | 6 |
 | `McpServer` | 42 |
-| `Phase5` | 27 |
+| `Phase5` | 28 |
 | `Phase6` | 25 |
 | `Phase7Contract` | 9 |
 | `Phase7Diagnostics` | 1 |
 | `Phase7Navigation` | 1 |
 | `Phase7Physics` | 1 |
-| `Phase7Signals` | 11 |
+| `Phase7Signals` | 12 |
 | `Phase7TileGrid` | 7 |
 | `Phase7Viewport` | 4 |
 | `ProcessRunner` | 2 |
@@ -73,11 +74,11 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `SpeculativeVerify` | 8 |
 | `TestRunner` | 2 |
 | `ToolManifest` | 1 |
-| `Tools` | 148 |
+| `Tools` | 157 |
 | `UiListControls` | 6 |
 | `ViewportIsolation` | 2 |
 | `autoload_diagnostics` | 9 |
-| `config_file_syntax` | 30 |
+| `config_file_syntax` | 31 |
 | `ghost_preview` | 4 |
 | `phase7` | 1 |
 | `phase7b_anim` | 6 |
@@ -95,16 +96,17 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 
 ## Python contract suites (`tests/test_*.py`)
 
-**446 tests.** Derived from `test_*` methods on every `unittest.TestCase` subclass, read with `ast`.
+**474 tests.** Derived from `test_*` methods on every `unittest.TestCase` subclass, read with `ast`.
 
 | File | Tests |
 | --- | ---: |
 | `test_check_release_archive.py` | 15 |
 | `test_ci_change_classification.py` | 7 |
 | `test_cli_arguments.py` | 13 |
+| `test_code_scanning_watch.py` | 10 |
 | `test_control_room_app.py` | 14 |
 | `test_control_room_protocol.py` | 17 |
-| `test_didi_binary.py` | 7 |
+| `test_didi_binary.py` | 10 |
 | `test_documentation_validator.py` | 90 |
 | `test_editor_console.py` | 9 |
 | `test_elastic_ingress.py` | 13 |
@@ -116,6 +118,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `test_managed_recovery.py` | 3 |
 | `test_managed_recovery_adversarial.py` | 3 |
 | `test_managed_recovery_live.py` | 4 |
+| `test_mcp_wire_contract.py` | 15 |
 | `test_phase7_plan_ownership.py` | 10 |
 | `test_phase7_schema_contract.py` | 4 |
 | `test_phase7_signal_admission.py` | 3 |
@@ -128,11 +131,11 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 
 ## Live Godot harness (`tests/*.ps1`)
 
-**1267 assertions.** Derived from `Assert-True` call sites. The harness is one long live scenario rather than a set of named cases, so this counts assertions and says so.
+**1300 assertions.** Derived from `Assert-True` call sites. The harness is one long live scenario rather than a set of named cases, so this counts assertions and says so.
 
 | File | Assertions |
 | --- | ---: |
-| `run_godot_integration.ps1` | 1267 |
+| `run_godot_integration.ps1` | 1300 |
 
 ## What is not counted here
 

@@ -2,12 +2,14 @@
 
 #include "didi/common/config_file_syntax.hpp"
 #include "didi/common/project_path.hpp"
+#include "didi/offline/class_reference.hpp"
 #include "didi/offline/import_health.hpp"
 #include "didi/offline/project_text_scan.hpp"
 #include "didi/offline/resource_indexer.hpp"
 
 #include <algorithm>
 #include <map>
+#include <optional>
 #include <regex>
 #include <set>
 #include <sstream>
@@ -292,6 +294,226 @@ std::unordered_set<std::string> usedSignalNames(const std::vector<ProjectTextSou
     return used;
 }
 
+// A [connection] whose method the receiving node does not have.
+//
+// project_rename_references renames the method in a scene's [connection] and
+// reports the GDScript lines it left alone, by design, and the project is then
+// broken: the game prints "Error calling method from signal" and the timer does
+// nothing. Nothing said so. dead_signals is about signal names, and a script
+// that parses is not a script that declares the method (#781).
+//
+// Everything reported here has to be certain, because a broken connection that
+// is not broken is worse than one that is not reported. A connection is judged
+// only when this scene file declares the receiving node and every step of the
+// answer resolves: the node's own GDScript, each script it extends by path or by
+// class_name, and the engine class the chain ends on, whose methods the class
+// reference lists with their ancestors'. A node inside an instanced or inherited
+// scene, a built-in or non-GDScript script, a script that is not in the project
+// or an engine class the reference does not name is left alone.
+struct ConnectionTarget {
+    std::string type;
+    std::string script_id;
+    bool instanced{false};
+};
+
+std::optional<std::string> headerAttribute(const std::string& line, const std::string& name) {
+    const auto key = " " + name + "=\"";
+    const auto start = line.find(key);
+    if (start == std::string::npos) return std::nullopt;
+    std::string value;
+    for (auto at = start + key.size(); at < line.size(); ++at) {
+        if (line[at] == '\\' && at + 1 < line.size()) {
+            value += line[++at];
+        } else if (line[at] == '"') {
+            return value;
+        } else {
+            value += line[at];
+        }
+    }
+    return std::nullopt;
+}
+
+std::optional<std::string> extResourceId(const std::string& text) {
+    static const std::regex id(R"re(ExtResource\(\s*"([^"]{1,256})"\s*\))re");
+    std::smatch match;
+    if (std::regex_search(text, match, id)) return match[1].str();
+    return std::nullopt;
+}
+
+struct ScriptShape {
+    std::unordered_set<std::string> functions;
+    std::string extends;
+};
+
+ScriptShape scriptShapeOf(const std::string& text) {
+    static const std::regex function(R"re(^\s*(?:static\s+)?func\s+()re" + kIdentifierPattern +
+                                     R"re())re");
+    // Top level only: an inner class's own extends is indented.
+    static const std::regex extends(
+        R"re(^(?:class_name\s+\S+\s+)?extends\s+("[^"]*"|[A-Za-z_][A-Za-z0-9_.]*))re");
+    ScriptShape shape;
+    std::istringstream lines(text);
+    std::string line;
+    while (std::getline(lines, line)) {
+        std::smatch match;
+        if (std::regex_search(line, match, function)) {
+            shape.functions.insert(match[1].str());
+        } else if (shape.extends.empty() && std::regex_search(line, match, extends)) {
+            shape.extends = match[1].str();
+        }
+    }
+    return shape;
+}
+
+// Whether an engine class has the method, walking its ancestors. nullopt when
+// the reference is missing or does not name a class on the way.
+std::optional<bool> engineClassHasMethod(std::string class_name, const std::string& method) {
+    const auto& reference = ClassReference::instance();
+    if (!reference.loaded()) return std::nullopt;
+    for (int depth = 0; depth < 64 && !class_name.empty(); ++depth) {
+        const json* record = reference.find(class_name);
+        if (!record) return std::nullopt;
+        const auto methods = record->find("methods");
+        if (methods != record->end() && methods->is_object() && methods->contains(method)) {
+            return true;
+        }
+        class_name = record->value("inherits", "");
+    }
+    if (!class_name.empty()) return std::nullopt;
+    return false;
+}
+
+class ConnectionJudge {
+public:
+    explicit ConnectionJudge(const std::vector<ProjectTextSource>& sources) {
+        static const std::regex class_name(R"re(^class_name\s+([A-Za-z_][A-Za-z0-9_]*))re");
+        for (const auto& source : sources) {
+            if (!strings::endsWith(source.path, ".gd")) continue;
+            m_scripts[source.path] = &source.contents;
+            std::istringstream lines(source.contents);
+            std::string line;
+            while (std::getline(lines, line)) {
+                std::smatch match;
+                if (std::regex_search(line, match, class_name)) {
+                    m_class_names[match[1].str()] = source.path;
+                    break;
+                }
+            }
+        }
+    }
+
+    // nullopt means some step did not resolve, and nothing is reported.
+    std::optional<bool> scriptHasMethod(std::string path, const std::string& method) {
+        std::unordered_set<std::string> visited;
+        while (visited.insert(path).second) {
+            const auto script = m_scripts.find(path);
+            if (script == m_scripts.end()) return std::nullopt;
+            auto cached = m_shapes.find(path);
+            if (cached == m_shapes.end()) {
+                cached = m_shapes.emplace(path, scriptShapeOf(*script->second)).first;
+            }
+            const auto& shape = cached->second;
+            if (shape.functions.count(method) != 0) return true;
+            // No extends line means RefCounted, which is what Godot assumes.
+            if (shape.extends.empty()) return engineClassHasMethod("RefCounted", method);
+            if (shape.extends.front() == '"') {
+                path = shape.extends.substr(1, shape.extends.size() - 2);
+                if (!strings::startsWith(path, "res://")) return std::nullopt;
+                continue;
+            }
+            const auto named = m_class_names.find(shape.extends);
+            if (named != m_class_names.end()) {
+                path = named->second;
+                continue;
+            }
+            if (shape.extends.find('.') != std::string::npos) return std::nullopt;
+            return engineClassHasMethod(shape.extends, method);
+        }
+        return std::nullopt;
+    }
+
+private:
+    std::unordered_map<std::string, const std::string*> m_scripts;
+    std::unordered_map<std::string, std::string> m_class_names;
+    std::unordered_map<std::string, ScriptShape> m_shapes;
+};
+
+void collectBrokenConnections(const ProjectTextSource& scene, ConnectionJudge& judge,
+                              size_t max_findings, json& out) {
+    if (!mayContain(scene.contents, {"[connection"})) return;
+    std::unordered_map<std::string, std::string> resources;
+    std::unordered_map<std::string, ConnectionTarget> nodes;
+    ConnectionTarget* current = nullptr;
+    bool root_seen = false;
+    std::istringstream lines(scene.contents);
+    std::string line;
+    int number = 0;
+    while (std::getline(lines, line)) {
+        ++number;
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (strings::startsWith(line, "[")) current = nullptr;
+        if (strings::startsWith(line, "[ext_resource ")) {
+            const auto id = headerAttribute(line, "id");
+            const auto path = headerAttribute(line, "path");
+            if (id && path) resources[*id] = *path;
+        } else if (strings::startsWith(line, "[node ")) {
+            const auto name = headerAttribute(line, "name");
+            if (!name) continue;
+            const auto parent = headerAttribute(line, "parent");
+            std::string node_path;
+            if (!parent) {
+                if (root_seen) continue;
+                root_seen = true;
+                node_path = ".";
+            } else {
+                node_path = *parent == "." ? *name : *parent + "/" + *name;
+            }
+            auto& node = nodes[node_path];
+            node.type = headerAttribute(line, "type").value_or("");
+            node.instanced = line.find(" instance=ExtResource(") != std::string::npos;
+            current = &node;
+        } else if (current && strings::startsWith(line, "script = ")) {
+            // A built-in script is a SubResource. Its id is never an
+            // ext_resource id, so the connection below is left alone.
+            current->script_id = extResourceId(line).value_or("\n");
+        } else if (strings::startsWith(line, "[connection ")) {
+            if (out.size() >= max_findings) return;
+            const auto method = headerAttribute(line, "method");
+            auto to = headerAttribute(line, "to");
+            if (!method || !to) continue;
+            if (strings::startsWith(*to, "./")) to = to->substr(2);
+            const auto target = nodes.find(*to);
+            if (target == nodes.end()) continue;
+            const auto& node = target->second;
+            std::optional<bool> has;
+            json script = nullptr;
+            if (!node.script_id.empty()) {
+                const auto resource = resources.find(node.script_id);
+                if (resource == resources.end() || !strings::endsWith(resource->second, ".gd")) {
+                    continue;
+                }
+                script = resource->second;
+                has = judge.scriptHasMethod(resource->second, *method);
+            } else if (!node.instanced && !node.type.empty()) {
+                has = engineClassHasMethod(node.type, *method);
+            }
+            if (!has.has_value() || *has) continue;
+            const std::string owner = script.is_null() ? node.type : script.get<std::string>();
+            out.push_back({{"scene", scene.path},
+                           {"line", number},
+                           {"signal", headerAttribute(line, "signal").value_or("")},
+                           {"from", headerAttribute(line, "from").value_or("")},
+                           {"to", *to},
+                           {"method", *method},
+                           {"script", script},
+                           {"detail", "The connection calls " + *method + ", and " + owner +
+                                          " neither declares it nor inherits it. Godot prints "
+                                          "\"Error calling method from signal\" when it fires, "
+                                          "and nothing is called."}});
+        }
+    }
+}
+
 } // namespace
 
 json auditProject(const std::string& root_dir, const ProjectAuditOptions& options) {
@@ -397,6 +619,16 @@ json auditProject(const std::string& root_dir, const ProjectAuditOptions& option
         }
     }
 
+    json broken_connections = json::array();
+    if (options.include_broken_connections) {
+        ConnectionJudge judge(sources);
+        for (const auto& source : sources) {
+            if (strings::endsWith(source.path, ".tscn")) {
+                collectBrokenConnections(source, judge, options.max_findings, broken_connections);
+            }
+        }
+    }
+
     json import_health = {
         {"scanned_import_metadata", 0},
         {"import_issues", json::array()},
@@ -422,6 +654,7 @@ json auditProject(const std::string& root_dir, const ProjectAuditOptions& option
         {"addon_orphans_included", options.include_addon_orphans},
         {"broken_references", broken},
         {"dead_signals", dead_signals},
+        {"broken_connections", broken_connections},
         {"max_findings", options.max_findings},
         {"scanned_import_metadata", import_health["scanned_import_metadata"]},
         {"import_issues", import_health["import_issues"]},
@@ -455,6 +688,11 @@ json auditProject(const std::string& root_dir, const ProjectAuditOptions& option
         "it, or wires it in a scene. A connection made through a variable name "
         "cannot be seen, and neither can a member call written with the name "
         "and the .connect on different lines.",
+        "broken_connections reports only what it can prove. A connection whose "
+        "receiving node sits inside an instanced or inherited scene, has a "
+        "built-in or non-GDScript script, or extends something outside the "
+        "project or the class reference is not judged, so an empty list is not "
+        "a promise that every connection resolves.",
         "source_changed_since_import and output_changed_since_import compare the "
         "source and the outputs against the source_md5 and dest_md5 Godot "
         "recorded in the .md5 it wrote beside the output. Those are two of the "

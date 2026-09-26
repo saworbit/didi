@@ -153,17 +153,25 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
         {"signal_disconnect.target_method",
          "The method the connection currently calls. The argument is target_method, not "
          "method_name."},
+        {"signal_emit.emitter_node",
+         "The node that emits the signal, as in signal_connect. target_node is accepted for "
+         "the same node."},
         {"signal_emit.target_node",
-         "The node that emits the signal. Unlike signal_connect, this tool's target_node is "
-         "the emitter, because there is no receiver to name."},
+         "The same node as emitter_node, under the name this tool used first. Send one of "
+         "the two."},
         {"signal_emit.signal_name",
          "The signal to emit, as the node declares it."},
         {"signal_emit.arguments",
          "Positional values to emit with the signal. They must match the signal's declared "
          "parameters in count and type."},
+        {"signal_list_connections.emitter_node",
+         "The node whose own signals to list, with the connections going out of each: the "
+         "emitter, as in signal_connect. Connections into this node are not listed. Each "
+         "connection carries origin: scene for one inside the edited scene, editor for the "
+         "scene dock's own listeners. target_node is accepted for the same node."},
         {"signal_list_connections.target_node",
-         "The node whose signals to list. Each connection carries origin: scene for one "
-         "inside the edited scene, editor for the scene dock's own listeners."},
+         "The same node as emitter_node, under the name this tool used first. Send one of "
+         "the two."},
 
         // -- Project ------------------------------------------------------
         {"project_get_setting.setting",
@@ -192,6 +200,13 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
          "The input events bound to the action, each an object in Godot's InputEvent shape."},
         {"project_set_input_action.replace",
          "Replace an action already registered under this name. Off by default."},
+        {"project_list_input_actions.include_engine_defaults",
+         "Include the engine's own actions, the ui_* map every project inherits. On by "
+         "default. False keeps only what project.godot declares, and says how many it left "
+         "out."},
+        {"project_list_input_actions.action",
+         "Read one action by its exact name instead of the whole map. A name the project "
+         "does not have is 404."},
         {"project_remove_input_action.action",
          "The InputMap action name to remove."},
         {"project_list_resources.type_filter",
@@ -547,6 +562,15 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
          "reloads the editor's copy itself. The call refuses and says so otherwise. "
          "Reloading updates every player already holding the library and discards changes made "
          "to the editor's copy and not saved."},
+
+        {"asset_configure_import.asset_path",
+         "The imported asset whose options change, such as res://music/menu.ogg, as it is "
+         "spelled on disk. It must already have its .import file; asset_reimport imports a new "
+         "asset first."},
+        {"asset_configure_import.options",
+         "The import options to set and their new values. An OGG or MP3 takes loop and "
+         "loop_offset, a WAV edit/loop_mode, edit/loop_begin and edit/loop_end. Every other key "
+         "is refused, naming the ones this asset's importer takes."},
 
         // -- Audio ------------------------------------------------------------
         {"audio_add_bus.name",

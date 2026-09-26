@@ -366,12 +366,55 @@ Result<VariantValue> variantFromNative(GDExtensionVariantType type, void* native
     return std::move(value);
 }
 
+// The text as UTF-32 when it starts with a byte-order mark, and nothing
+// otherwise, including for bytes that are not UTF-8.
+//
+// Godot's UTF-8 reader drops a leading U+FEFF, so "\xEF\xBB\xBFnote" reached
+// the engine as "note", and the tool that set it compared its read-back with
+// the same shortened value and called it applied (#948). The engine itself
+// keeps the mark in a String, a StringName, a NodePath, a node name and a
+// Label's text on 4.5.1, 4.6.2 and 4.7.2; only the reader loses it, so that
+// text is handed over as UTF-32 instead. Everything else keeps the UTF-8
+// reader, and what it does with bytes that are not UTF-8.
+std::optional<std::u32string> utf32WhenMarkLeads(const std::string& text) {
+    if (text.rfind("\xEF\xBB\xBF", 0) != 0) return std::nullopt;
+    std::u32string wide;
+    wide.reserve(text.size());
+    for (size_t i = 0; i < text.size();) {
+        const auto lead = static_cast<unsigned char>(text[i]);
+        const size_t length = lead < 0x80 ? 1 : (lead >> 5) == 0x6 ? 2 : (lead >> 4) == 0xE ? 3
+                                                 : (lead >> 3) == 0x1E ? 4 : 0;
+        if (length == 0 || i + length > text.size()) return std::nullopt;
+        char32_t code = length == 1 ? lead : lead & (0x7F >> length);
+        for (size_t k = 1; k < length; ++k) {
+            const auto next = static_cast<unsigned char>(text[i + k]);
+            if ((next & 0xC0) != 0x80) return std::nullopt;
+            code = (code << 6) | (next & 0x3F);
+        }
+        wide.push_back(code);
+        i += length;
+    }
+    return wide;
+}
+
+void constructNativeString(NativeValue& native, const std::string& text) {
+    auto& api = GodotApi::instance();
+    const auto wide = api.string_new_with_utf32_chars_and_len ? utf32WhenMarkLeads(text)
+                                                              : std::optional<std::u32string>{};
+    if (wide.has_value()) {
+        api.string_new_with_utf32_chars_and_len(native.ptr(), wide->data(),
+                                                static_cast<GDExtensionInt>(wide->size()));
+    } else {
+        api.string_new_with_utf8_chars(native.ptr(), text.c_str());
+    }
+    native.markInitialized();
+}
+
 Result<VariantValue> makeString(const std::string& text) {
     auto& api = GodotApi::instance();
     if (!api.string_new_with_utf8_chars) return Error::internal("Godot String constructor is unavailable");
     NativeValue native(GDEXTENSION_VARIANT_TYPE_STRING);
-    api.string_new_with_utf8_chars(native.ptr(), text.c_str());
-    native.markInitialized();
+    constructNativeString(native, text);
     return variantFromNative(GDEXTENSION_VARIANT_TYPE_STRING, native.ptr());
 }
 
@@ -379,7 +422,18 @@ Result<VariantValue> makeStringName(const std::string& text) {
     auto& api = GodotApi::instance();
     if (!api.string_name_new_with_utf8_chars) return Error::internal("Godot StringName constructor is unavailable");
     NativeValue native(GDEXTENSION_VARIANT_TYPE_STRING_NAME);
-    api.string_name_new_with_utf8_chars(native.ptr(), text.c_str());
+    if (text.rfind("\xEF\xBB\xBF", 0) == 0 && api.string_new_with_utf8_chars) {
+        // StringName has no UTF-32 constructor, so the mark goes through a
+        // String first; StringName(String) is constructor 2.
+        NativeValue native_string(GDEXTENSION_VARIANT_TYPE_STRING);
+        constructNativeString(native_string, text);
+        auto ctor = api.variant_get_ptr_constructor(GDEXTENSION_VARIANT_TYPE_STRING_NAME, 2);
+        if (!ctor) return Error::internal("Godot StringName(String) constructor is unavailable");
+        const void* args[] = {native_string.ptr()};
+        ctor(native.ptr(), args);
+    } else {
+        api.string_name_new_with_utf8_chars(native.ptr(), text.c_str());
+    }
     native.markInitialized();
     return variantFromNative(GDEXTENSION_VARIANT_TYPE_STRING_NAME, native.ptr());
 }
@@ -387,8 +441,7 @@ Result<VariantValue> makeStringName(const std::string& text) {
 Result<VariantValue> makeNodePath(const std::string& text) {
     auto& api = GodotApi::instance();
     NativeValue native_string(GDEXTENSION_VARIANT_TYPE_STRING);
-    api.string_new_with_utf8_chars(native_string.ptr(), text.c_str());
-    native_string.markInitialized();
+    constructNativeString(native_string, text);
 
     auto ctor = api.variant_get_ptr_constructor(GDEXTENSION_VARIANT_TYPE_NODE_PATH, 2);
     if (!ctor) return Error::internal("Godot NodePath(String) constructor is unavailable");
@@ -3052,28 +3105,204 @@ Result<void> commitAction(GDExtensionObjectPtr manager) {
     return result.isOk() ? Result<void>::ok() : Result<void>(result.error());
 }
 
+// The UndoRedo behind one of the manager's histories. GLOBAL_HISTORY is 0.
+Result<GDExtensionObjectPtr> historyUndoRedo(GDExtensionObjectPtr manager, VariantValue& history_id) {
+    auto history = callObject(manager, "EditorUndoRedoManager", "get_history_undo_redo",
+                              2417974513LL, {&history_id});
+    if (history.isErr()) return history.error();
+    auto undo_redo = objectFromVariant(history.value());
+    if (undo_redo.isErr()) return undo_redo.error();
+    if (!undo_redo.value()) return Error::notFound("No UndoRedo history exists for the edited scene");
+    return undo_redo.value();
+}
+
+Result<int64_t> undoRedoVersion(GDExtensionObjectPtr undo_redo) {
+    auto version = callObject(undo_redo, "UndoRedo", "get_version", 3905245786LL);
+    if (version.isErr()) return version.error();
+    return scalarFromVariant<int64_t>(version.value(), GDEXTENSION_VARIANT_TYPE_INT);
+}
+
+// Every node of one class under a node, as find_children finds them.
+Result<std::vector<GDExtensionObjectPtr>> descendantsOfClass(GDExtensionObjectPtr node,
+                                                             const char* class_name,
+                                                             bool recursive) {
+    auto pattern = makeString("*");
+    auto type = makeString(class_name);
+    auto deep = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(recursive));
+    auto owned = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(0));
+    if (pattern.isErr() || type.isErr() || deep.isErr() || owned.isErr()) {
+        return Error::internal("Failed to build find_children arguments");
+    }
+    auto found = callObject(node, "Node", "find_children", 2560337219LL,
+                            {&pattern.value(), &type.value(), &deep.value(), &owned.value()});
+    if (found.isErr()) return found.error();
+    auto size_value = callVariant(found.value(), "size");
+    if (size_value.isErr()) return size_value.error();
+    auto size = scalarFromVariant<int64_t>(size_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+    if (size.isErr()) return size.error();
+    std::vector<GDExtensionObjectPtr> nodes;
+    for (int64_t i = 0; i < size.value(); ++i) {
+        auto index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, i);
+        if (index.isErr()) return index.error();
+        auto entry = callVariant(found.value(), "get", {&index.value()});
+        if (entry.isErr()) return entry.error();
+        auto object = objectFromVariant(entry.value());
+        if (object.isOk() && object.value()) nodes.push_back(object.value());
+    }
+    return nodes;
+}
+
+// The editor's own Undo or Redo: the item in its title bar menu that a person
+// clicks, and that Ctrl+Z runs.
+//
+// EditorUndoRedoManager keeps a stack of actions per history beside the
+// UndoRedo it wraps, and only its own undo() and redo() move an action from
+// one stack to the other. Neither is bound for extensions. Stepping the
+// UndoRedo directly moves the version and leaves the stacks where they were,
+// so the manager then prints "Inconsistent redo history" and answers that a
+// scene undone past its save is saved: the answer scene_close reads before it
+// decides whether a close needs discard_unsaved (#913). The menu item calls
+// the manager's own undo() and redo() and keeps both true.
+//
+// The item is found by its shortcut's resource name, "Undo" or "Redo". That is
+// the engine's untranslated name for ui_undo and ui_redo on 4.5.1, 4.6.2 and
+// 4.7.2, where the item ids differ (12 on 4.5, 13 after), the label is
+// translated, and the keys can be remapped.
+struct EditorHistoryCommand {
+    GDExtensionObjectPtr menu = nullptr;
+    int64_t id = -1;
+};
+
+Result<EditorHistoryCommand> editorHistoryCommand(GDExtensionObjectPtr editor, bool undo) {
+    const std::string wanted = undo ? "Undo" : "Redo";
+    const auto missing = [&wanted] {
+        return Error(501, "This editor has no " + wanted + " item in its title bar menu, so Didi "
+                          "cannot " + (wanted == "Undo" ? "undo" : "redo") + " through the editor's "
+                          "own history. Stepping the scene's UndoRedo directly would leave that "
+                          "history inconsistent (#913).");
+    };
+    auto base_value = callObject(editor, "EditorInterface", "get_base_control", 2783021301LL);
+    if (base_value.isErr()) return base_value.error();
+    auto base = objectFromVariant(base_value.value());
+    if (base.isErr()) return base.error();
+    if (!base.value()) return missing();
+    auto bars = descendantsOfClass(base.value(), "MenuBar", true);
+    if (bars.isErr()) return bars.error();
+    for (GDExtensionObjectPtr bar : bars.value()) {
+        auto menus = descendantsOfClass(bar, "PopupMenu", false);
+        if (menus.isErr()) return menus.error();
+        for (GDExtensionObjectPtr menu : menus.value()) {
+            auto count_value = callObject(menu, "PopupMenu", "get_item_count", 3905245786LL);
+            if (count_value.isErr()) return count_value.error();
+            auto count = scalarFromVariant<int64_t>(count_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+            if (count.isErr()) return count.error();
+            for (int64_t item = 0; item < count.value(); ++item) {
+                auto index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, item);
+                if (index.isErr()) return index.error();
+                auto shortcut_value = callObject(menu, "PopupMenu", "get_item_shortcut", 1449483325LL,
+                                                 {&index.value()});
+                if (shortcut_value.isErr()) continue;
+                auto shortcut = objectFromVariant(shortcut_value.value());
+                if (shortcut.isErr() || !shortcut.value()) continue;
+                auto name_value = callObject(shortcut.value(), "Resource", "get_name", 201670096LL);
+                if (name_value.isErr()) continue;
+                auto name = stringFromVariant(name_value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+                if (name.isErr() || name.value() != wanted) continue;
+                auto id_value = callObject(menu, "PopupMenu", "get_item_id", 923996154LL, {&index.value()});
+                if (id_value.isErr()) return id_value.error();
+                auto id = scalarFromVariant<int64_t>(id_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+                if (id.isErr()) return id.error();
+                return EditorHistoryCommand{menu, id.value()};
+            }
+        }
+    }
+    return missing();
+}
+
+// Which history the editor's own Undo or Redo moved. The editor picks the
+// newer of the edited scene's history and the global one, as Ctrl+Z does.
+enum class HistoryMoved { None, Scene, Global };
+
+Result<HistoryMoved> runEditorHistoryCommand(GDExtensionObjectPtr editor,
+                                             GDExtensionObjectPtr manager,
+                                             GDExtensionObjectPtr scene_undo_redo, bool undo) {
+    auto command = editorHistoryCommand(editor, undo);
+    if (command.isErr()) return command.error();
+    auto global_id = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(0));
+    if (global_id.isErr()) return global_id.error();
+    auto global = historyUndoRedo(manager, global_id.value());
+    const GDExtensionObjectPtr global_undo_redo = global.isOk() ? global.value() : nullptr;
+    auto scene_before = undoRedoVersion(scene_undo_redo);
+    if (scene_before.isErr()) return scene_before.error();
+    auto global_before = global_undo_redo ? undoRedoVersion(global_undo_redo) : Result<int64_t>(int64_t{0});
+    if (global_before.isErr()) return global_before.error();
+
+    auto signal = makeStringName("id_pressed");
+    auto id = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, command.value().id);
+    if (signal.isErr() || id.isErr()) return Error::internal("Failed to build the menu command");
+    auto emitted = callObject(command.value().menu, "Object", "emit_signal", 4047867050LL,
+                              {&signal.value(), &id.value()});
+    if (emitted.isErr()) return emitted.error();
+    auto emit_code = scalarFromVariant<int64_t>(emitted.value(), GDEXTENSION_VARIANT_TYPE_INT);
+    if (emit_code.isErr()) return emit_code.error();
+    if (emit_code.value() != 0) {
+        return Error(501, std::string("The editor's ") + (undo ? "Undo" : "Redo") +
+                              " item did not run: " +
+                              ::didi::godot::describeGodotError(emit_code.value()));
+    }
+
+    auto scene_after = undoRedoVersion(scene_undo_redo);
+    if (scene_after.isErr()) return scene_after.error();
+    if (scene_after.value() != scene_before.value()) return HistoryMoved::Scene;
+    if (global_undo_redo) {
+        auto global_after = undoRedoVersion(global_undo_redo);
+        if (global_after.isOk() && global_after.value() != global_before.value()) {
+            return HistoryMoved::Global;
+        }
+    }
+    return HistoryMoved::None;
+}
+
 // Undoes the action just committed for the edited scene. Used when a
 // postcondition fails after the commit, so the tool does not report failure
 // while the scene and the undo stack already carry the change.
+//
+// Through the editor's own Undo where that is certain to take this action, so
+// the manager's history stays true (#913). The editor's command undoes the
+// newer of the scene's history and the global one. With nothing in the global
+// one, that is the action just committed. With something there, the command
+// could take that instead, so the scene is put back directly, as it is when
+// the editor cannot be asked or runs the command and moves nothing, which it
+// does while a mouse button is held. A scene still holding a change the tool
+// is about to call failed is worse than a history the editor calls
+// inconsistent.
 Result<void> undoLastAction(GDExtensionObjectPtr manager, GDExtensionObjectPtr root) {
     auto root_value = makeObject(root);
     if (root_value.isErr()) return root_value.error();
     auto history_id = callObject(manager, "EditorUndoRedoManager", "get_object_history_id",
                                  1107568780LL, {&root_value.value()});
     if (history_id.isErr()) return history_id.error();
-    auto history = callObject(manager, "EditorUndoRedoManager", "get_history_undo_redo",
-                              2417974513LL, {&history_id.value()});
-    if (history.isErr()) return history.error();
-    auto undo_redo = objectFromVariant(history.value());
-    if (undo_redo.isErr() || !undo_redo.value()) {
-        return Error::notFound("No UndoRedo history exists for the edited scene");
+    auto undo_redo = historyUndoRedo(manager, history_id.value());
+    if (undo_redo.isErr()) return undo_redo.error();
+    const auto has_undo = [](GDExtensionObjectPtr history) -> Result<bool> {
+        auto available = callObject(history, "UndoRedo", "has_undo", 36873697LL);
+        if (available.isErr()) return available.error();
+        auto flag = scalarFromVariant<GDExtensionBool>(available.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+        if (flag.isErr()) return flag.error();
+        return flag.value() != 0;
+    };
+    auto scene_has = has_undo(undo_redo.value());
+    if (scene_has.isErr()) return scene_has.error();
+    if (!scene_has.value()) return Error(409, "Nothing to undo");
+    auto global_id = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(0));
+    auto global = global_id.isOk() ? historyUndoRedo(manager, global_id.value())
+                                   : Result<GDExtensionObjectPtr>(global_id.error());
+    auto global_has = global.isOk() ? has_undo(global.value()) : Result<bool>(true);
+    auto editor = editorInterface();
+    if (global_has.isOk() && !global_has.value() && editor.isOk()) {
+        auto moved = runEditorHistoryCommand(editor.value(), manager, undo_redo.value(), true);
+        if (moved.isOk() && moved.value() == HistoryMoved::Scene) return Result<void>::ok();
     }
-    auto available = callObject(undo_redo.value(), "UndoRedo", "has_undo", 36873697LL);
-    if (available.isErr()) return available.error();
-    auto has_action = scalarFromVariant<GDExtensionBool>(available.value(),
-                                                         GDEXTENSION_VARIANT_TYPE_BOOL);
-    if (has_action.isErr()) return has_action.error();
-    if (!has_action.value()) return Error(409, "Nothing to undo");
     auto executed = callObject(undo_redo.value(), "UndoRedo", "undo", 2240911060LL);
     return executed.isOk() ? Result<void>::ok() : Result<void>(executed.error());
 }
@@ -8054,18 +8283,29 @@ Result<std::string> projectDirectoryOnDisk() {
     return stringFromVariant(globalized.value(), GDEXTENSION_VARIANT_TYPE_STRING);
 }
 
-// Whether project.godot itself declares this input action.
+// The input actions project.godot itself declares.
 //
 // ProjectSettings.has_setting answers true for an engine default such as
 // ui_accept, because the engine registers the built-in map as settings. That is
 // the right answer to "does this action exist" and the wrong answer to "did
-// this project define it", and removal needs the second one: an action the file
-// does not contain cannot be removed by writing the file (#485).
-Result<bool> projectFileDefinesInputAction(const std::string& action) {
+// this project define it". Removal needs the second one, because an action the
+// file does not contain cannot be removed by writing the file (#485), and so
+// does a listing asked for the project's own actions (#775).
+struct ProjectInputActions {
+    std::set<std::string> names;
+    // Set when the file cannot answer, in which case names means nothing.
+    std::optional<Error> failure;
+};
+
+ProjectInputActions projectFileInputActions() {
+    ProjectInputActions declared;
     auto directory = projectDirectoryOnDisk();
-    if (directory.isErr()) return directory.error();
+    if (directory.isErr()) {
+        declared.failure = directory.error();
+        return declared;
+    }
     std::ifstream file(std::filesystem::path(directory.value()) / "project.godot");
-    if (!file.is_open()) return false;
+    if (!file.is_open()) return declared;
 
     std::ostringstream contents;
     contents << file.rdbuf();
@@ -8083,21 +8323,33 @@ Result<bool> projectFileDefinesInputAction(const std::string& action) {
                   (failure->section.empty() ? failure->key
                                             : failure->section + "/" + failure->key) +
                   " to a value Godot's parser refuses, because " + failure->value_reason;
-        return Error(409, where +
-                              ". The engine answers ERR_PARSE_ERROR for the whole file, so the "
-                              "project does not open and what it declares cannot be read. Repair "
-                              "the file before removing an input action from it: saving the "
-                              "settings would write this editor's whole map over it.");
+        declared.failure = Error(409, where +
+                                          ". The engine answers ERR_PARSE_ERROR for the whole "
+                                          "file, so the project does not open and what it "
+                                          "declares cannot be read.");
+        return declared;
     }
     // The action names the engine registers. Godot writes the name bare, or
     // quoted when it needs the spaces, and the value is a dictionary spread
     // over the four lines below it -- none of which a line-at-a-time reader
     // gets right on its own (#813).
     for (const auto& entry : scanned.entries) {
-        if (entry.section != "input") continue;
-        if (entry.key == action) return true;
+        if (entry.section == "input") declared.names.insert(entry.key);
     }
-    return false;
+    return declared;
+}
+
+Result<bool> projectFileDefinesInputAction(const std::string& action) {
+    auto declared = projectFileInputActions();
+    if (declared.failure) {
+        auto failure = *declared.failure;
+        if (failure.code == 409) {
+            failure.message += " Repair the file before removing an input action from it: saving "
+                               "the settings would write this editor's whole map over it.";
+        }
+        return failure;
+    }
+    return declared.names.count(action) != 0;
 }
 
 const char* variantTypeName(GDExtensionVariantType type) {
@@ -8323,6 +8575,69 @@ json GodotBridge::execute(const std::string& method, const json& params,
                                       : Result<GDExtensionObjectPtr>(reloaded.error());
         return liveResult({{"path", path}, {"cached", true},
                            {"reloaded", object.isOk() && object.value() != nullptr}});
+    }
+    if (method == "asset.readImportedStream") {
+        // What asset_configure_import checks a value against and reads back
+        // after the reimport: the imported stream, loaded from disk. The cache
+        // is ignored, because the question is what the file now loads as; the
+        // editor's cached copy is updated in place by the reimport and is not
+        // this read's business (#958). The properties are read through
+        // Object.get by name, and AudioStream.get_length is the one new bind:
+        // 1740695150 on 4.5.1, 4.6.2 and 4.7.2.
+        if (!hasOnlyKeys(params, {"path"}) || !params.contains("path") || !params["path"].is_string()) {
+            return errorJson(400, "asset.readImportedStream takes path, a res:// asset");
+        }
+        const auto path = params["path"].get<std::string>();
+        auto valid_path = validateResPath(path, "");
+        if (valid_path.isErr()) return errorJson(valid_path.error().code, valid_path.error().message);
+        auto loader = singleton("ResourceLoader");
+        if (loader.isErr()) return errorJson(loader.error().code, loader.error().message);
+        auto godot_path = makeString(path);
+        auto type_hint = makeString("");
+        auto ignore_cache = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(0));
+        if (godot_path.isErr() || type_hint.isErr() || ignore_cache.isErr()) {
+            return errorJson(500, "Failed to build the load request");
+        }
+        // Asked first, because loading a file that is not there prints an
+        // ERROR. ResourceLoader.exists is 4185558881 on all three lines.
+        auto exists = callObject(loader.value(), "ResourceLoader", "exists", 4185558881LL,
+                                 {&godot_path.value(), &type_hint.value()});
+        auto found = exists.isOk() ? scalarFromVariant<GDExtensionBool>(exists.value(), GDEXTENSION_VARIANT_TYPE_BOOL)
+                                   : Result<GDExtensionBool>(exists.error());
+        if (found.isErr() || found.value() == 0) {
+            return errorJson(404, "Godot finds nothing to load at " + path);
+        }
+        auto loaded = callObject(loader.value(), "ResourceLoader", "load", 3358495409LL,
+                                 {&godot_path.value(), &type_hint.value(), &ignore_cache.value()});
+        if (loaded.isErr()) return errorJson(loaded.error().code, loaded.error().message);
+        auto object = objectFromVariant(loaded.value());
+        if (object.isErr() || !object.value()) {
+            return errorJson(422, "Godot could not load " + path, json{{"code", "load_failed"}});
+        }
+        const auto class_name = nodeClassName(object.value());
+        json properties = json::object();
+        std::vector<const char*> names;
+        if (class_name == "AudioStreamWAV") names = {"mix_rate", "loop_mode", "loop_begin", "loop_end"};
+        if (class_name == "AudioStreamOggVorbis" || class_name == "AudioStreamMP3") {
+            names = {"loop", "loop_offset"};
+        }
+        for (const auto* name : names) {
+            auto property = makeStringName(name);
+            if (property.isErr()) continue;
+            auto value = callObject(object.value(), "Object", "get", 2760726917LL, {&property.value()});
+            if (value.isErr()) continue;
+            auto converted = variantToJson(value.value(), 0, true);
+            if (converted.isOk()) properties[name] = converted.value();
+        }
+        json answer = {{"path", path}, {"class", class_name}, {"properties", std::move(properties)}};
+        if (!names.empty()) {
+            auto length = callObject(object.value(), "AudioStream", "get_length", 1740695150LL);
+            if (length.isOk()) {
+                auto seconds = scalarFromVariant<double>(length.value(), GDEXTENSION_VARIANT_TYPE_FLOAT);
+                if (seconds.isOk()) answer["length_seconds"] = seconds.value();
+            }
+        }
+        return liveResult(std::move(answer));
     }
     // The audio reads answer an editor or a game, and a game has no
     // EditorInterface, so they run before the lookup below. Behind it every
@@ -10151,48 +10466,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
             }
             if (force_postcondition_mismatch) postcondition_ok = false;
             if (!postcondition_ok) {
-                auto root_value = makeObject(root.value());
-                Result<void> rolled_back = Result<void>::ok();
-                if (root_value.isErr()) {
-                    rolled_back = root_value.error();
-                } else {
-                    auto history_id = callObject(
-                        manager.value(), "EditorUndoRedoManager", "get_object_history_id",
-                        1107568780LL, {&root_value.value()});
-                    if (history_id.isErr()) {
-                        rolled_back = history_id.error();
-                    } else {
-                        auto history = callObject(
-                            manager.value(), "EditorUndoRedoManager", "get_history_undo_redo",
-                            2417974513LL, {&history_id.value()});
-                        if (history.isErr()) {
-                            rolled_back = history.error();
-                        } else {
-                            auto undo_redo = objectFromVariant(history.value());
-                            if (undo_redo.isErr() || !undo_redo.value()) {
-                                rolled_back = Error::internal(
-                                    "Committed signal history is unavailable");
-                            } else {
-                                auto has_undo_value = callObject(
-                                    undo_redo.value(), "UndoRedo", "has_undo", 36873697LL);
-                                if (has_undo_value.isErr()) {
-                                    rolled_back = has_undo_value.error();
-                                } else {
-                                    auto has_undo = scalarFromVariant<GDExtensionBool>(
-                                        has_undo_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
-                                    if (has_undo.isErr() || !has_undo.value()) {
-                                        rolled_back = Error::internal(
-                                            "Committed signal action is not active");
-                                    } else {
-                                        auto undone = callObject(
-                                            undo_redo.value(), "UndoRedo", "undo", 2240911060LL);
-                                        if (undone.isErr()) rolled_back = undone.error();
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                const Result<void> rolled_back = undoLastAction(manager.value(), root.value());
                 bool restored = false;
                 if (rolled_back.isOk()) {
                     auto restored_connected_value = callObject(
@@ -10868,6 +11142,21 @@ json GodotBridge::execute(const std::string& method, const json& params,
         if (project_settings.isErr()) return errorJson(project_settings.error().code, project_settings.error().message);
 
         if (method == "project.listInputActions") {
+            // Ninety actions came back on every call, eighty-five of them the
+            // engine's ui_* map, and there was no smaller question to ask: not
+            // the project's own, not one by name (#775). The default still lists
+            // every action, and each entry now says which kind it is.
+            const std::string only_action = params.value("action", "");
+            const bool include_engine_defaults = params.value("include_engine_defaults", true);
+            const auto declared = projectFileInputActions();
+            if (declared.failure && !include_engine_defaults) {
+                return errorJson(declared.failure->code,
+                                 declared.failure->message +
+                                     " Which actions are the project's own cannot be told from "
+                                     "the engine's until the file reads.");
+            }
+            size_t omitted_engine_defaults = 0;
+            bool named_action_omitted = false;
             auto properties = callObject(project_settings.value(), "Object", "get_property_list", 3995934104LL);
             if (properties.isErr()) return errorJson(properties.error().code, properties.error().message);
             auto size_value = callVariant(properties.value(), "size");
@@ -10891,6 +11180,14 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 auto property_name = stringFromVariant(property_name_value.value(), property_type);
                 if (property_name.isErr()) return errorJson(property_name.error().code, property_name.error().message);
                 if (!strings::startsWith(property_name.value(), "input/") || property_name.value().size() <= 6) continue;
+                const std::string action_name = property_name.value().substr(6);
+                if (!only_action.empty() && action_name != only_action) continue;
+                const bool defined_by_project = declared.names.count(action_name) != 0;
+                if (!include_engine_defaults && !defined_by_project) {
+                    ++omitted_engine_defaults;
+                    named_action_omitted = !only_action.empty();
+                    continue;
+                }
                 auto setting_name = makeStringName(property_name.value());
                 VariantValue default_value;
                 if (setting_name.isErr()) return errorJson(setting_name.error().code, setting_name.error().message);
@@ -10923,12 +11220,32 @@ json GodotBridge::execute(const std::string& method, const json& params,
                     if (normalized.isErr()) return errorJson(normalized.error().code, normalized.error().message);
                     events.push_back(normalized.value());
                 }
-                actions.push_back({{"action", property_name.value().substr(6)}, {"deadzone", deadzone.value()}, {"events", events}});
+                json entry = {{"action", action_name}, {"deadzone", deadzone.value()}, {"events", events}};
+                if (!declared.failure) entry["defined_by_project"] = defined_by_project;
+                actions.push_back(std::move(entry));
+            }
+            if (!only_action.empty() && actions.empty()) {
+                if (named_action_omitted) {
+                    return errorJson(404,
+                                     "Input action '" + only_action + "' is an engine default, and "
+                                     "include_engine_defaults is false.",
+                                     {{"code", "engine_default_action"},
+                                      {"action", only_action},
+                                      {"engine_default", true},
+                                      {"retry_with", {{"include_engine_defaults", true}}}});
+                }
+                return errorJson(404, "Input action not found: " + only_action,
+                                 {{"code", "input_action_not_found"}, {"action", only_action}});
             }
             std::sort(actions.begin(), actions.end(), [](const json& left, const json& right) {
                 return left["action"].get<std::string>() < right["action"].get<std::string>();
             });
-            return liveResult({{"status", "success"}, {"actions", actions}});
+            json listing = {{"status", "success"}, {"actions", actions}};
+            if (!include_engine_defaults) listing["omitted_engine_default_count"] = omitted_engine_defaults;
+            // Counted and said rather than guessed: an unreadable file leaves
+            // every action's origin unknown, not every action the engine's.
+            if (declared.failure) listing["defined_by_project_unavailable"] = declared.failure->message;
+            return liveResult(listing);
         }
 
         const std::string action = params.value("action", "");
@@ -13516,21 +13833,41 @@ json GodotBridge::execute(const std::string& method, const json& params,
         auto root_value = makeObject(root.value());
         auto history_id = callObject(manager.value(), "EditorUndoRedoManager", "get_object_history_id", 1107568780LL, {&root_value.value()});
         if (history_id.isErr()) return errorJson(history_id.error().code, history_id.error().message);
-        auto history = callObject(manager.value(), "EditorUndoRedoManager", "get_history_undo_redo", 2417974513LL, {&history_id.value()});
-        if (history.isErr()) return errorJson(history.error().code, history.error().message);
-        auto undo_redo = objectFromVariant(history.value());
-        if (undo_redo.isErr() || !undo_redo.value()) return errorJson(404, "No UndoRedo history exists for the edited scene");
+        auto undo_redo = historyUndoRedo(manager.value(), history_id.value());
+        if (undo_redo.isErr()) return errorJson(404, "No UndoRedo history exists for the edited scene");
         const bool is_undo = method == "editor.undo";
-        auto available = callObject(undo_redo.value(), "UndoRedo", is_undo ? "has_undo" : "has_redo", 36873697LL);
-        if (available.isErr()) return errorJson(available.error().code, available.error().message);
-        auto has_action = scalarFromVariant<GDExtensionBool>(available.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
-        if (has_action.isErr() || !has_action.value()) {
-        return errorJson(409, is_undo ? "Nothing to undo" : "Nothing to redo",
-                         {{"code", "nothing_to_undo"}});
-    }
-        auto executed = callObject(undo_redo.value(), "UndoRedo", is_undo ? "undo" : "redo", 2240911060LL);
-        if (executed.isErr()) return errorJson(executed.error().code, executed.error().message);
-        return liveResult({{"status", "success"}, {"action", is_undo ? "undo" : "redo"}});
+        // The editor's own command undoes the newer of the scene's history and
+        // the global one, so either having an action is enough to run it.
+        const auto has_action = [is_undo](GDExtensionObjectPtr history) -> Result<bool> {
+            auto available = callObject(history, "UndoRedo", is_undo ? "has_undo" : "has_redo", 36873697LL);
+            if (available.isErr()) return available.error();
+            auto flag = scalarFromVariant<GDExtensionBool>(available.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+            if (flag.isErr()) return flag.error();
+            return flag.value() != 0;
+        };
+        auto scene_has = has_action(undo_redo.value());
+        if (scene_has.isErr()) return errorJson(scene_has.error().code, scene_has.error().message);
+        auto global_id = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(0));
+        auto global = global_id.isOk() ? historyUndoRedo(manager.value(), global_id.value())
+                                       : Result<GDExtensionObjectPtr>(global_id.error());
+        auto global_has = global.isOk() ? has_action(global.value()) : Result<bool>(false);
+        if (!scene_has.value() && !(global_has.isOk() && global_has.value())) {
+            return errorJson(409, is_undo ? "Nothing to undo" : "Nothing to redo",
+                             {{"code", "nothing_to_undo"}});
+        }
+        auto moved = runEditorHistoryCommand(editor, manager.value(), undo_redo.value(), is_undo);
+        if (moved.isErr()) return errorJson(moved.error().code, moved.error().message);
+        if (moved.value() == HistoryMoved::None) {
+            return errorJson(409,
+                             std::string("The editor ran its own ") + (is_undo ? "Undo" : "Redo") +
+                                 " and no history moved. Godot refuses to " +
+                                 (is_undo ? "undo" : "redo") +
+                                 " while a mouse button is held down in the editor.",
+                             {{"code", "editor_declined"}, {"retryable", true}});
+        }
+        return liveResult({{"status", "success"},
+                           {"action", is_undo ? "undo" : "redo"},
+                           {"history", moved.value() == HistoryMoved::Scene ? "scene" : "global"}});
     }
 
     if (method == "editor.saveScene") {

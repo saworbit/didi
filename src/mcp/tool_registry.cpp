@@ -118,6 +118,11 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         // editor writes the file itself; a file written behind an open editor
         // would be written over by its next autosave (#771).
         , "audio_add_bus"
+        // Editor only. The editor reimports the asset, and the change is
+        // checked against what it then loads; a sidecar written with no editor
+        // is noticed only by a scan in a later second, or at the next start,
+        // and nothing checks it (#958).
+        , "asset_configure_import"
         // Phase 7C. Performance monitors exist only inside a running engine,
         // so there is no offline reading to fall back to.
         , "runtime_read_profiler"
@@ -302,6 +307,8 @@ CallToolResult handleAudioConfigureBus(const json& args, std::shared_ptr<ipc::II
 CallToolResult handleAudioAddBus(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleInstantiateAsset(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleAssetReimport(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleAssetConfigureImport(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+Result<json> previewAssetConfigureImport(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleCSharpCheckBuild(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleShaderCheckCompile(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleProjectListExportPresets(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
@@ -593,6 +600,11 @@ Error runtimeSessionMismatchError(const std::string& tool_name, const std::strin
 const char* offlineSiblingFor(std::string_view tool) {
     if (tool == "audio_configure_bus") {
         return "audio_list_buses reads the project's bus layout offline.";
+    }
+    if (tool == "asset_configure_import") {
+        return "resource_inspect reads an asset's import options offline. They are changed only "
+               "with the editor attached, because the editor reimports the asset and the change "
+               "is checked against what it then loads.";
     }
     if (tool == "audio_add_bus") {
         return "audio_list_buses reads the project's bus layout offline. A bus is added only with "
@@ -949,6 +961,10 @@ static json outputSchemaForTool(const std::string& name) {
                               {"section_written", string_type},
                               {"preset_count", integer_type},
                               {"next_step", string_type},
+                              // Whether the folder export_path names is there,
+                              // since Godot will not create it (#932).
+                              {"export_path_folder_exists", boolean_type},
+                              {"export_path_note", string_type},
                               // Whether an attached editor was made to read
                               // the file again, and why not when it was not.
                               {"editor_reloaded", boolean_type},
@@ -1129,6 +1145,7 @@ const std::unordered_map<std::string_view, std::string_view> kToolTitles = {
     {"anim_add_library", "Add an animation library"},
     {"anim_list_tracks", "List animation tracks"},
     {"anim_play_track", "Play an animation"},
+    {"asset_configure_import", "Configure an asset's import"},
     {"asset_reimport", "Reimport assets"},
     {"audio_add_bus", "Add an audio bus"},
     {"audio_configure_bus", "Configure an audio bus"},
@@ -1717,10 +1734,11 @@ std::optional<Error> probeFileTarget(const FileTarget& target, const json& argum
         contents.str(), symbol_name, symbol_type);
     before["symbol_exists"] = declared;
     if (!declared && !arguments.value("create_if_missing", false)) {
-        return Error::notFound("This script declares no " + symbol_type + " named '" +
-                               symbol_name +
-                               "'. Patch a symbol it declares, or pass create_if_missing to "
-                               "add this one.");
+        return Error(404,
+                     "This script declares no " + symbol_type + " named '" + symbol_name +
+                         "'. Patch a symbol it declares, or pass create_if_missing to "
+                         "add this one.",
+                     json{{"code", "not_found"}, {"retry_with", {{"create_if_missing", true}}}});
     }
     return std::nullopt;
 }
@@ -2013,15 +2031,95 @@ static CallToolResult managedRecoveryDisabled(const ResolvedToolBinding& binding
                   {"retryable", false}}}}}}.dump());
 }
 
+// The first string in a live call's arguments that holds a NUL, by where it
+// sits. The bridge hands every string to Godot as a C string, so the text after
+// a NUL was dropped and the tool reported the shortened value as the one it set
+// (#948). Godot cannot carry one through its own conversions either: it prints
+// a Unicode error and substitutes U+FFFD.
+static std::optional<std::string> nulStringPath(const json& value, const std::string& path) {
+    if (value.is_string()) {
+        if (value.get_ref<const std::string&>().find('\0') == std::string::npos) return std::nullopt;
+        return path;
+    }
+    if (value.is_object()) {
+        for (const auto& [key, item] : value.items()) {
+            if (auto found = nulStringPath(item, path.empty() ? key : path + "." + key)) return found;
+        }
+    } else if (value.is_array()) {
+        for (size_t index = 0; index < value.size(); ++index) {
+            if (auto found = nulStringPath(value[index], path + "[" + std::to_string(index) + "]")) {
+                return found;
+            }
+        }
+    }
+    return std::nullopt;
+}
+
 static CallToolResult invalidArgumentsError(const ResolvedToolBinding& binding,
-                                            const std::string& message) {
+                                            const std::string& message,
+                                            const json& extra = json::object()) {
+    json data = {{"tool", binding.invoked_name},
+                 {"canonical_tool", binding.canonical_name},
+                 {"code", "invalid_arguments"},
+                 {"retryable", false}};
+    data.update(extra);
     return CallToolResult::error(json{{"error", {
         {"code", 400},
         {"message", message},
-        {"data", {{"tool", binding.invoked_name},
-                  {"canonical_tool", binding.canonical_name},
-                  {"code", "invalid_arguments"},
-                  {"retryable", false}}}}}}.dump());
+        {"data", std::move(data)}}}}.dump());
+}
+
+// One argument sent under a name this tool does not use, and the one required
+// name it does use missing. The surface spells "the node this call is about"
+// ten ways and "the file" nine, so a first call to an unfamiliar tool is a
+// guess, and the refusal named both halves only in a sentence (#784). This
+// carries the fix as data, and only when moving the value is all the call
+// needs: the call with the value moved has to satisfy the schema. Aliases would
+// have saved the round trip and cost every one of those schemas its required
+// list; this keeps each contract as it is and makes the retry mechanical.
+struct MisnamedArgument {
+    std::string sent;
+    std::string expected;
+};
+
+static std::optional<MisnamedArgument> misnamedArgument(const json& schema,
+                                                        const json& arguments) {
+    if (!schema.is_object() || !arguments.is_object()) return std::nullopt;
+    const auto properties = schema.find("properties");
+    const auto required = schema.find("required");
+    if (properties == schema.end() || !properties->is_object() || required == schema.end() ||
+        !required->is_array()) {
+        return std::nullopt;
+    }
+    std::vector<std::string> unknown;
+    for (auto it = arguments.begin(); it != arguments.end(); ++it) {
+        if (!properties->contains(it.key())) unknown.push_back(it.key());
+    }
+    std::vector<std::string> missing;
+    for (const auto& name : *required) {
+        if (name.is_string() && !arguments.contains(name.get<std::string>())) {
+            missing.push_back(name.get<std::string>());
+        }
+    }
+    if (unknown.size() != 1 || missing.size() != 1) return std::nullopt;
+    json moved = arguments;
+    moved[missing.front()] = moved[unknown.front()];
+    moved.erase(unknown.front());
+    if (validateAgainstSchema(schema, moved)) return std::nullopt;
+    return MisnamedArgument{unknown.front(), missing.front()};
+}
+
+// The caller has the value already, so a long one is not sent back to it.
+constexpr size_t kMaxEchoedArgumentBytes = 1024;
+
+// signal_connect and signal_disconnect call the emitter emitter_node and the
+// receiver target_node. signal_list_connections and signal_emit called their
+// emitter target_node, so the spelling the siblings insist on was refused here
+// and the word meant the other end of the same connection (#769). Both
+// spellings are published on these two. Everything past dispatchTool's first
+// lines, the gate, the preview and the bridge, reads target_node.
+static bool takesEmitterAsTargetNode(std::string_view canonical_name) {
+    return canonical_name == "signal_list_connections" || canonical_name == "signal_emit";
 }
 
 CallToolResult ToolRegistry::callTool(const std::string& name, const json& arguments,
@@ -2050,6 +2148,21 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
             {"code", 501},
             {"message", "Tool '" + name + "' is unimplemented: " + tool->capability.reason}}}}.dump());
     }
+    // Rewritten before anything reads the call, so the schema, the gate, the
+    // preview and a confirmation token all see one spelling.
+    const bool emitter_as_target = takesEmitterAsTargetNode(binding.canonical_name) &&
+                                   arguments.is_object();
+    if (emitter_as_target && arguments.contains("emitter_node")) {
+        if (arguments.contains("target_node")) {
+            return invalidArgumentsError(
+                binding, "Arguments 'emitter_node' and 'target_node' both name the emitting node "
+                         "on " + std::string(binding.canonical_name) + ". Send one.");
+        }
+        json rewritten = arguments;
+        rewritten["target_node"] = std::move(rewritten["emitter_node"]);
+        rewritten.erase("emitter_node");
+        return dispatchTool(name, rewritten, scope);
+    }
     // The schema this tool publishes is what the caller was told it accepts, so
     // it is checked here, once, before anything dispatches. Every route into a
     // handler comes through this function, including the dry-run preview and a
@@ -2064,7 +2177,27 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
                 return CallToolResult::fromError(*refused);
             }
         }
+        if (const auto misnamed = misnamedArgument(tool->inputSchema, arguments)) {
+            const auto& value = arguments[misnamed->sent];
+            json extra = {{"argument", misnamed->sent}, {"did_you_mean", misnamed->expected}};
+            if (value.dump().size() <= kMaxEchoedArgumentBytes) {
+                extra.update({{"retry_with", {{misnamed->expected, value}}}});
+            }
+            return invalidArgumentsError(
+                binding,
+                *invalid + " Send the value of '" + misnamed->sent + "' as '" +
+                    misnamed->expected + "'.",
+                extra);
+        }
         return invalidArgumentsError(binding, *invalid);
+    }
+    // After the schema, so a wrong name is still reported as unknown. Neither
+    // spelling is required there, because a published schema cannot require one
+    // of two without a top-level oneOf.
+    if (emitter_as_target && !arguments.contains("target_node")) {
+        return invalidArgumentsError(
+            binding, "Missing required argument 'emitter_node', the node that emits the "
+                     "signal. 'target_node' is accepted for it too.");
     }
     const bool recovery_tool = name == "runtime_checkpoint" || name == "runtime_recovery_status" || name == "runtime_restore_checkpoint" || name == "runtime_recover_editor";
     // Before the confirmation gate: it used to issue a token for a restore that
@@ -2080,6 +2213,25 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
     const bool supports_offline =
         std::find(tool->capability.modes.begin(), tool->capability.modes.end(), "offline_fallback") !=
         tool->capability.modes.end();
+    // Before a route is chosen, so the same arguments are refused whether or
+    // not an editor is attached.
+    if (supports_live) {
+        if (const auto path = nulStringPath(arguments, "")) {
+            return invalidArgumentsError(
+                binding,
+                "Argument '" + *path + "' holds a NUL character (U+0000). The text after it "
+                "never reaches Godot, which would set a shorter string than the one sent, so "
+                "nothing was sent. Remove the NUL.");
+        }
+    }
+    if (tool->argumentCheck) {
+        json checked = arguments;
+        if (checked.is_object()) {
+            checked.erase("dry_run");
+            checked.erase("confirmation_token");
+        }
+        if (auto refused = tool->argumentCheck(checked)) return CallToolResult::fromError(*refused);
+    }
     std::optional<runtime::RuntimeRouteLease> lease;
     if (supports_live) {
         const bool managed_route =
@@ -2192,6 +2344,20 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
         target_probe = [client = m_sourceIpcClient](const json& call_arguments, json& before,
                                                     json& subject) {
             return probeAnimLibraryTarget(call_arguments, client, before, subject);
+        };
+    } else if (binding.policy_source == "asset_configure_import") {
+        // Runs with no lease too. The sidecar, the importer, the keys and the
+        // types need no engine; with an editor attached the bounds that depend
+        // on the track are checked as well, and without one the preview says
+        // they were not (#958).
+        target_probe = [client = lease.has_value() ? m_sourceIpcClient : nullptr](
+                           const json& call_arguments, json& before,
+                           json& subject) -> std::optional<Error> {
+            auto preview = previewAssetConfigureImport(call_arguments, client);
+            if (preview.isErr()) return preview.error();
+            before = preview.value()["before"];
+            subject = preview.value()["subject"];
+            return std::nullopt;
         };
     } else if (binding.policy_source == "audio_add_bus") {
         // Unlike the probes above this one runs with no lease too, because the
@@ -2913,6 +3079,50 @@ void ToolRegistry::registerAllDefaultTools() {
     }
     {
         ToolDefinition t;
+        t.name = "asset_configure_import";
+        t.description =
+            "Changes an imported asset's import options in its .import file, reimports it in the "
+            "attached editor, and checks what the engine then loads. This is how a music track "
+            "is made to loop: loop: true for an OGG or MP3, edit/loop_mode 2 (Forward) for a "
+            "WAV. It sets the loop options of WAV, OGG and MP3 imports only, and refuses any "
+            "other importer or option. Godot checks none of these values, so the tool does: a "
+            "value of the wrong type, a loop mode Godot has no name for, an offset or a loop "
+            "window outside the track. If the reimported asset does not load with what was "
+            "asked, the previous file is put back and reimported. resource_inspect reports an "
+            "asset's current import options.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"asset_path", {{"type", "string"}, {"minLength", 1}, {"maxLength", 1024}}},
+                {"options", {
+                    {"type", "object"},
+                    {"properties", {
+                        {"loop", {{"type", "boolean"},
+                                  {"description", "OGG and MP3: whether the track loops."}}},
+                        {"loop_offset", {{"type", "number"}, {"minimum", 0},
+                                         {"description", "OGG and MP3: the second the track loops back "
+                                                         "to, from 0 up to its length."}}},
+                        {"edit/loop_mode", {{"type", json::array({"integer", "string"})},
+                                            {"description",
+                                             "WAV: 0 Detect From WAV, 1 Disabled, 2 Forward, 3 "
+                                             "Ping-Pong, 4 Backward, as the number or the name."}}},
+                        {"edit/loop_begin", {{"type", "integer"}, {"minimum", 0},
+                                             {"description", "WAV: the first frame of the loop, "
+                                                             "under loop modes 2 to 4."}}},
+                        {"edit/loop_end", {{"type", "integer"}, {"minimum", -1},
+                                           {"description", "WAV: the frame the loop ends at, or -1 "
+                                                           "for the last one, under loop modes 2 to 4."}}}
+                    }}
+                }}
+            }},
+            {"required", json::array({"asset_path", "options"})},
+            {"additionalProperties", false}
+        };
+        t.handler = [this](const json& args) { return handleAssetConfigureImport(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
         t.name = "scene_remove_node";
         t.description = "Detaches a node through UndoRedo while retaining its lifetime for undo and redo.";
         t.inputSchema = {
@@ -3040,7 +3250,7 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "signal_list_connections";
-        t.description = "Lists all signals declared on a node, including incoming and outgoing connections.";
+        t.description = "Lists the signals a node declares and the connections going out of each. The node is the emitter; connections into it are not listed.";
         t.inputSchema = {
             {"type", "object"},
             {"properties", {
@@ -3967,7 +4177,7 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "project_audit_assets";
-        t.description = "Audits the project for unreferenced assets, references that resolve to nothing, declared signals nothing uses, and unhealthy Godot import metadata. Reports evidence, not verdicts. A file scan in every case; a connected editor additionally verifies unresolved uid:// findings against ResourceUID and clears the ones it disproves.";
+        t.description = "Audits the project for unreferenced assets, references that resolve to nothing, declared signals nothing uses, scene connections to methods nothing declares, and unhealthy Godot import metadata. Reports evidence, not verdicts. A file scan in every case; a connected editor additionally verifies unresolved uid:// findings against ResourceUID and clears the ones it disproves.";
         t.inputSchema = {
             {"type", "object"},
             {"properties", {
@@ -3977,6 +4187,8 @@ void ToolRegistry::registerAllDefaultTools() {
                                                {"description", "res:// paths and uid:// references that resolve to no file in the project."}}},
                 {"include_dead_signals", {{"type", "boolean"}, {"default", true},
                                           {"description", "Signals declared in GDScript that no file emits, connects to, or wires in a scene."}}},
+                {"include_broken_connections", {{"type", "boolean"}, {"default", true},
+                                                {"description", "Scene [connection] entries whose method the receiving node's script, the scripts it extends and its engine class do not declare. Judged only where every step resolves."}}},
                 {"include_import_health", {{"type", "boolean"}, {"default", true},
                                            {"description", "Existing Godot .import metadata with missing sources or outputs, malformed/unsafe paths, or source files newer than their outputs."}}},
                 {"include_addon_orphans", {{"type", "boolean"}, {"default", false},
@@ -4313,6 +4525,13 @@ void ToolRegistry::registerAllDefaultTools() {
             {"additionalProperties", false}
         };
         t.handler = [this](const json& args) { return handleAudioAddBus(args, m_ipcClient); };
+        // The name, send and value rules need no engine, so a caller with no
+        // editor open hears about a bad name now rather than after opening one.
+        t.argumentCheck = [](const json& args) -> std::optional<Error> {
+            auto parsed = runtime::parseAudioAddBusRequest(args);
+            if (parsed.isErr()) return parsed.error();
+            return std::nullopt;
+        };
         registerTool(std::move(t));
     }
     {
@@ -4585,8 +4804,13 @@ void ToolRegistry::registerAllDefaultTools() {
         [this](const json& args) { return handleProjectRemoveAutoload(args, m_ipcClient); });
 
     register_phase_two(
-        "project_list_input_actions", "Lists persisted project InputMap actions and supported events.",
-        {{"type", "object"}, {"properties", json::object()}},
+        "project_list_input_actions",
+        "Lists InputMap actions and their events, each marked defined_by_project. "
+        "include_engine_defaults: false leaves out the engine's own ui_* map, and action "
+        "reads one by name.",
+        {{"type", "object"}, {"properties", {
+            {"include_engine_defaults", {{"type", "boolean"}, {"default", true}}},
+            {"action", {{"type", "string"}, {"minLength", 1}}}}}},
         [this](const json& args) { return handleProjectListInputActions(args, m_ipcClient); });
     register_phase_two(
         "project_set_input_action", "Creates or explicitly replaces a persisted InputMap action.",

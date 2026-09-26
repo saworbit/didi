@@ -1,3 +1,4 @@
+#include "didi/offline/class_reference.hpp"
 #include "didi/common/engine_version.hpp"
 #include "didi/offline/test_runner.hpp"
 #if defined(_WIN32)
@@ -30,6 +31,9 @@
 #include "didi/tools/hierarchy_view.hpp"
 #include "didi/mcp/error_data.hpp"
 
+#include <thread>
+#include <memory>
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -429,7 +433,7 @@ static void test_tool_registry_default_tools() {
     reg.registerAllDefaultTools();
     auto tools = reg.listTools();
 
-    ASSERT_EQ(tools.size(), 129u);
+    ASSERT_EQ(tools.size(), 130u);
     const std::unordered_set<std::string> legacy_names = {
         "get_scene_hierarchy", "capture_viewport", "analyze_script_diagnostics",
         "patch_script_symbols", "create_visual_test_lab", "query_project_resources",
@@ -441,7 +445,7 @@ static void test_tool_registry_default_tools() {
         if (legacy_names.count(tool.name) == 0) ++canonical_count;
     }
     ASSERT_EQ(legacy_names.size(), 10u);
-    ASSERT_EQ(canonical_count, 119u);
+    ASSERT_EQ(canonical_count, 120u);
 
     // Domain 1: Scene Tree & Node Manipulation
     ASSERT_TRUE(reg.getTool("scene_get_hierarchy") != nullptr);
@@ -574,7 +578,7 @@ static void test_phase7_input_alias_keeps_invoked_entry_with_canonical_contract(
         if (legacy_names.count(tool.name) != 0) continue;
         tool.capability.implemented ? ++implemented : ++unimplemented;
     }
-    ASSERT_EQ(implemented, 116u);
+    ASSERT_EQ(implemented, 117u);
     ASSERT_EQ(unimplemented, 3u);
 }
 
@@ -824,6 +828,30 @@ static void test_audio_list_buses_reads_flags_the_way_the_engine_does() {
     ASSERT_TRUE(report["buses"][1]["mute"].get<bool>());
     ASSERT_TRUE(!report["buses"][1]["solo"].get<bool>());
     ASSERT_TRUE(report["buses"][1]["bypass_effects"].get<bool>());
+}
+
+static void test_audio_list_buses_reads_volume_the_way_the_engine_does() {
+    // A generator that writes every value as a string wrote a layout Godot
+    // plays at the volume it says, and this read every bus as 0 dB (#907).
+    ScopedToolProject project("audio-buses-quoted-volume");
+    writeAuditFile("project.godot", "config_version=5\n");
+    writeAuditFile("default_bus_layout.tres",
+        "[gd_resource type=\"AudioBusLayout\" format=3]\n"
+        "\n"
+        "[resource]\n"
+        "bus/1/name = &\"Music\"\n"
+        "bus/1/volume_db = \"-6\"\n"
+        "bus/2/name = &\"SFX\"\n"
+        "bus/2/volume_db = true\n");
+    const auto report = [] {
+        auto& registry = didi::mcp::ToolRegistry::instance();
+        registry.registerAllDefaultTools();
+        const auto result = registry.callTool("audio_list_buses", didi::json::object());
+        ASSERT_TRUE(!result.isError);
+        return didi::json::parse(result.content[0].text);
+    }();
+    ASSERT_EQ(report["buses"][1]["volume_db"].get<double>(), -6.0);
+    ASSERT_EQ(report["buses"][2]["volume_db"].get<double>(), 1.0);
 }
 
 static didi::json listBusesOffline() {
@@ -1332,6 +1360,88 @@ static void test_audio_list_buses_follows_a_relocated_layout_setting() {
     ASSERT_EQ(report["layout_path"], "res://config/buses.tres");
     ASSERT_EQ(report["buses"].size(), 2u);
     ASSERT_EQ(report["buses"][1]["name"], "Music");
+}
+
+static void test_project_audit_names_a_connection_to_a_method_nothing_declares() {
+    // Break caught: project_rename_references renames the method in the scene's
+    // [connection] and reports the GDScript lines it left alone, by design. The
+    // project is then broken, and nothing on the surface said so: the audit
+    // looked at signal names, never at the method a connection calls (#781).
+    //
+    // What is reported has to be certain. A connection is judged only when this
+    // file declares the receiving node and every step of the answer resolves:
+    // the node's script, each script it extends, and the engine class the chain
+    // ends on, whose methods the class reference lists. Anything else is left
+    // alone, because a broken connection that is not broken is worse than one
+    // that is not reported.
+    if (!didi::offline::ClassReference::instance().loaded()) {
+        throw std::runtime_error("The generated class reference was not found next to the test binary.");
+    }
+    ScopedToolProject project("project-audit-connections");
+    writeAuditFile("project.godot", "config_version=5\n");
+    writeAuditFile("scripts/main.gd", "extends Node\nfunc _on_timer_timeout():\n\tpass\n");
+    writeAuditFile("scripts/base.gd", "extends Node2D\nfunc _on_base_hit():\n\tpass\n");
+    writeAuditFile("scripts/child.gd", "extends \"res://scripts/base.gd\"\n");
+    writeAuditFile("scripts/hero.gd", "class_name Hero\nextends Node\nstatic func heal():\n\tpass\n");
+    writeAuditFile("scripts/uses_hero.gd", "extends Hero\n");
+    writeAuditFile("scripts/lost.gd", "extends \"res://scripts/missing.gd\"\n");
+    writeAuditFile("main.tscn",
+        "[gd_scene load_steps=6 format=3]\n\n"
+        "[ext_resource type=\"Script\" path=\"res://scripts/main.gd\" id=\"1_main\"]\n"
+        "[ext_resource type=\"Script\" path=\"res://scripts/child.gd\" id=\"2_child\"]\n"
+        "[ext_resource type=\"PackedScene\" path=\"res://enemy.tscn\" id=\"3_enemy\"]\n"
+        "[ext_resource type=\"Script\" path=\"res://scripts/uses_hero.gd\" id=\"4_hero\"]\n"
+        "[ext_resource type=\"Script\" path=\"res://scripts/lost.gd\" id=\"5_lost\"]\n\n"
+        "[node name=\"Main\" type=\"Node\"]\nscript = ExtResource(\"1_main\")\n\n"
+        "[node name=\"Timer\" type=\"Timer\" parent=\".\"]\n\n"
+        "[node name=\"Child\" type=\"Node2D\" parent=\".\"]\nscript = ExtResource(\"2_child\")\n\n"
+        "[node name=\"Hero\" type=\"Node\" parent=\".\"]\nscript = ExtResource(\"4_hero\")\n\n"
+        "[node name=\"Lost\" type=\"Node\" parent=\".\"]\nscript = ExtResource(\"5_lost\")\n\n"
+        "[node name=\"Enemy\" parent=\".\" instance=ExtResource(\"3_enemy\")]\n\n"
+        "[node name=\"Plain\" type=\"Node\" parent=\"Hero\"]\n\n"
+        "[connection signal=\"timeout\" from=\"Timer\" to=\".\" method=\"_on_timer_timeout\"]\n"
+        "[connection signal=\"timeout\" from=\"Timer\" to=\".\" method=\"_on_MobTimer_timeout\"]\n"
+        "[connection signal=\"timeout\" from=\"Timer\" to=\"Child\" method=\"_on_base_hit\"]\n"
+        "[connection signal=\"timeout\" from=\"Timer\" to=\"Child\" method=\"queue_free\"]\n"
+        "[connection signal=\"timeout\" from=\"Timer\" to=\"Child\" method=\"nope_child\"]\n"
+        "[connection signal=\"timeout\" from=\"Timer\" to=\"Hero\" method=\"heal\"]\n"
+        "[connection signal=\"timeout\" from=\"Timer\" to=\"Lost\" method=\"whatever\"]\n"
+        "[connection signal=\"timeout\" from=\"Timer\" to=\"Enemy\" method=\"anything\"]\n"
+        "[connection signal=\"timeout\" from=\"Timer\" to=\"Enemy/Inner\" method=\"anything\"]\n"
+        "[connection signal=\"timeout\" from=\"Timer\" to=\"Hero/Plain\" method=\"set_process\"]\n"
+        "[connection signal=\"timeout\" from=\"Timer\" to=\"Hero/Plain\" method=\"no_such_native\"]\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    const didi::json only_connections = {
+        {"include_orphans", false}, {"include_broken_references", false},
+        {"include_dead_signals", false}, {"include_import_health", false}};
+    const auto result = registry.callTool("project_audit_assets", only_connections);
+    ASSERT_TRUE(!result.isError);
+    const auto report = didi::json::parse(result.content[0].text);
+    const auto& broken = report["broken_connections"];
+    ASSERT_EQ(broken.size(), 3u);
+    ASSERT_EQ(broken[0]["to"], ".");
+    ASSERT_EQ(broken[0]["method"], "_on_MobTimer_timeout");
+    ASSERT_EQ(broken[0]["script"], "res://scripts/main.gd");
+    ASSERT_EQ(broken[0]["scene"], "res://main.tscn");
+    ASSERT_EQ(broken[0]["line"], 28);
+    ASSERT_EQ(broken[1]["to"], "Child");
+    ASSERT_EQ(broken[1]["method"], "nope_child");
+    ASSERT_EQ(broken[2]["to"], "Hero/Plain");
+    ASSERT_EQ(broken[2]["method"], "no_such_native");
+    ASSERT_TRUE(broken[2]["script"].is_null());
+    for (const auto& finding : broken) {
+        ASSERT_TRUE(finding["signal"] == "timeout" && finding["from"] == "Timer");
+    }
+
+    // Off means off, like every other pass.
+    auto without = only_connections;
+    without["include_broken_connections"] = false;
+    without["include_dead_signals"] = true;
+    const auto skipped = registry.callTool("project_audit_assets", without);
+    ASSERT_TRUE(!skipped.isError);
+    ASSERT_TRUE(didi::json::parse(skipped.content[0].text)["broken_connections"].empty());
 }
 
 static void test_project_audit_dead_signal_cost_does_not_follow_signal_count() {
@@ -2626,6 +2736,49 @@ static void test_runnable_is_read_the_way_the_engine_reads_it() {
         "[preset.0]\nname=\"Windows\"\nplatform=\"Windows Desktop\"\nrunnable=maybe\n");
     ASSERT_TRUE(refused.malformed);
     ASSERT_EQ(refused.reason, std::string("unloadable_value"));
+}
+
+static void test_runnable_is_read_from_the_section_godot_4_7_writes() {
+    // #922: a 4.7 editor keeps the flag in [runnable_presets], one preset per
+    // platform, and writes no runnable key in the preset, so every preset it had
+    // saved read runnable: false. The order below is EditorExport::load_config's
+    // on 4.7.2: the section, then each preset in index order, where a preset's
+    // own runnable=true takes its platform over.
+    const auto runnable_of = [](const didi::offline::ExportPresetsFile& file, const char* name) {
+        for (const auto& preset : file.presets) {
+            if (preset["name"] == name) return preset["runnable"].get<bool>();
+        }
+        throw std::runtime_error(std::string("no preset named ") + name);
+    };
+
+    const auto saved = didi::offline::readExportPresets(
+        "[runnable_presets]\n\n\"Windows Desktop\"=\"HandWritten\"\n\"Linux\"=\"Penguin\"\n\n"
+        "[preset.0]\nname=\"Other\"\nplatform=\"Windows Desktop\"\n\n"
+        "[preset.1]\nname=\"HandWritten\"\nplatform=\"Windows Desktop\"\n\n"
+        "[preset.2]\nname=\"Web\"\nplatform=\"Web\"\n\n"
+        "[preset.3]\nname=\"Penguin\"\nplatform=\"Linux/X11\"\n");
+    ASSERT_TRUE(!saved.malformed);
+    ASSERT_TRUE(runnable_of(saved, "HandWritten"));
+    ASSERT_TRUE(!runnable_of(saved, "Other"));
+    ASSERT_TRUE(!runnable_of(saved, "Web"));
+    // The platform's name before 4.3 is still Linux to the engine.
+    ASSERT_TRUE(runnable_of(saved, "Penguin"));
+
+    // A later preset that carries runnable=true takes the platform over; an
+    // explicit runnable=false does nothing to the one the section names.
+    const auto both = didi::offline::readExportPresets(
+        "[runnable_presets]\n\n\"Windows Desktop\"=\"First\"\n\n"
+        "[preset.0]\nname=\"First\"\nplatform=\"Windows Desktop\"\nrunnable=false\n\n"
+        "[preset.1]\nname=\"Second\"\nplatform=\"Windows Desktop\"\nrunnable=true\n");
+    ASSERT_TRUE(!runnable_of(both, "First"));
+    ASSERT_TRUE(runnable_of(both, "Second"));
+
+    const auto named_only = didi::offline::readExportPresets(
+        "[runnable_presets]\n\n\"Windows Desktop\"=\"First\"\n\n"
+        "[preset.0]\nname=\"First\"\nplatform=\"Windows Desktop\"\nrunnable=false\n\n"
+        "[preset.1]\nname=\"Second\"\nplatform=\"Windows Desktop\"\n");
+    ASSERT_TRUE(runnable_of(named_only, "First"));
+    ASSERT_TRUE(!runnable_of(named_only, "Second"));
 }
 
 static void test_the_first_cause_is_the_one_reported() {
@@ -4044,6 +4197,7 @@ static void test_project_audit_honours_switches_and_rejects_bad_arguments() {
                               didi::json{{"include_orphans", false},
                                          {"include_broken_references", false},
                                          {"include_dead_signals", false},
+                                         {"include_broken_connections", false},
                                          {"include_import_health", false}})
                     .isError);
 }
@@ -4105,6 +4259,7 @@ static void test_project_audit_exposes_optional_import_health() {
                               didi::json{{"include_orphans", false},
                                          {"include_broken_references", false},
                                          {"include_dead_signals", false},
+                                         {"include_broken_connections", false},
                                          {"include_import_health", false}})
                     .isError);
 }
@@ -4512,6 +4667,120 @@ static void test_atomic_write_keeps_the_destination_when_the_replace_fails() {
         const auto name = entry.path().filename().string();
         ASSERT_TRUE(name.find(".didi-tmp-") == std::string::npos);
     }
+}
+
+static void test_atomic_write_waits_out_a_reader() {
+    // Break caught: a reader with the destination open, such as
+    // project_list_export_presets during a project_add_export_preset, made the
+    // replace fail with a 500 on Windows, though the reader lets go in
+    // milliseconds (#937). Elsewhere a file is replaced under an open reader
+    // anyway, so this passes there without the retry.
+    ScopedToolProject project("atomic-write-held-reader");
+    const std::filesystem::path target = "export_presets.cfg";
+    std::ofstream(target, std::ios::binary) << "old";
+    auto reader = std::make_unique<std::ifstream>(target, std::ios::binary);
+    ASSERT_TRUE(reader->is_open());
+    std::thread release([&reader] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        reader.reset();
+    });
+    const auto written = didi::files::writeFileAtomically(target, "new");
+    release.join();
+    ASSERT_TRUE(written.isOk());
+    ASSERT_EQ(readToolTestFile(target), "new");
+}
+
+namespace didi::mcp {
+CallToolResult handleScriptPatchMethod(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+}
+
+static void test_concurrent_script_patches_all_land() {
+    // Break caught: two agents patching different methods of one script. The
+    // patch read the script, spliced one method in and wrote the whole file
+    // back with nothing held in between, so both read the old text and the
+    // second write replaced the first while both reported success (#954).
+    // Threads here, because the lock is taken per open file, not per process.
+    // The handler directly, because the race is inside one call and a
+    // confirmation token is not what is being tested.
+    ScopedToolProject project("concurrent-script-patch");
+    writeAuditFile("project.godot", "config_version=5\n");
+    constexpr int kWriters = 2;
+    constexpr int kEach = 20;
+    std::ostringstream source;
+    source << "extends Node\n";
+    for (int writer = 0; writer < kWriters; ++writer) {
+        for (int index = 0; index < kEach; ++index) {
+            source << "\nfunc w" << writer << "_" << index << "():\n\tpass\n";
+        }
+    }
+    writeAuditFile("player.gd", source.str());
+
+    std::atomic<int> failed{0};
+    std::vector<std::thread> writers;
+    for (int writer = 0; writer < kWriters; ++writer) {
+        writers.emplace_back([&failed, writer] {
+            for (int index = 0; index < kEach; ++index) {
+                const auto name = "w" + std::to_string(writer) + "_" + std::to_string(index);
+                const didi::json args{
+                    {"file_path", "res://player.gd"},
+                    {"method_name", name},
+                    {"new_definition", "func " + name + "():\n\treturn " +
+                                           std::to_string(1000 + writer * 100 + index) + "\n"}};
+                if (didi::mcp::handleScriptPatchMethod(args, nullptr).isError) ++failed;
+            }
+        });
+    }
+    for (auto& thread : writers) thread.join();
+
+    ASSERT_EQ(failed.load(), 0);
+    const auto contents = readToolTestFile("player.gd");
+    for (int writer = 0; writer < kWriters; ++writer) {
+        for (int index = 0; index < kEach; ++index) {
+            const auto line = "\treturn " + std::to_string(1000 + writer * 100 + index) + "\n";
+            ASSERT_TRUE(contents.find(line) != std::string::npos);
+        }
+    }
+}
+
+static void test_a_nul_in_a_live_argument_is_refused_by_name() {
+    // Break caught: the bridge hands every string to Godot as a C string, so
+    // "a<NUL>b" arrived as "a" and scene_set_property called the write applied,
+    // comparing the property with the same shortened value (#948). Refused
+    // before any route is chosen, so the answer is the same with or without an
+    // editor, and it names where the NUL is.
+    ScopedToolProject project("nul-live-argument");
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    const std::string with_nul("a\0b", 3);
+
+    const auto refused_at = [&](const std::string& tool, const didi::json& arguments) {
+        const auto result = registry.callTool(tool, arguments);
+        ASSERT_TRUE(result.isError);
+        const auto payload = didi::json::parse(result.content[0].text);
+        ASSERT_EQ(payload["error"]["code"], 400);
+        ASSERT_EQ(payload["error"]["data"]["code"], "invalid_arguments");
+        return payload["error"]["message"].get<std::string>();
+    };
+    const auto direct = refused_at("scene_set_property",
+                                   didi::json{{"target_node", "/root/Main"},
+                                              {"property_name", "editor_description"},
+                                              {"value", with_nul}});
+    ASSERT_TRUE(direct.find("'value'") != std::string::npos);
+    ASSERT_TRUE(direct.find("NUL") != std::string::npos);
+
+    const auto nested = refused_at(
+        "scene_instantiate_node",
+        didi::json{{"node_type", "Node"},
+                   {"parent_path", "/root/Main"},
+                   {"name", "Probe"},
+                   {"properties", {{"editor_description", with_nul}}}});
+    ASSERT_TRUE(nested.find("'properties.editor_description'") != std::string::npos);
+
+    // A tool with no live route keeps the string: the blackboard stores JSON,
+    // and nothing it holds is handed to Godot.
+    const auto stored = registry.callTool("blackboard_write",
+                                          didi::json{{"path", "note"}, {"value", with_nul}});
+    ASSERT_TRUE(stored.content[0].text.find("NUL character") == std::string::npos);
 }
 
 static void test_script_patch_replaces_without_leaving_temporary_files() {
@@ -8511,6 +8780,106 @@ static void test_test_lab_checks_the_target_before_touching_the_project() {
     ASSERT_TRUE(description.find("target_instanced") != std::string::npos);
 }
 
+// project_list_input_actions took no arguments, so reading a game's controls
+// meant ninety actions, eighty-five of them the engine's ui_* map (#775). The
+// filtering is the bridge's, measured by the live harness; this pins that the
+// published schema takes both arguments and hands them to the bridge as sent.
+class InputActionListingClient final : public didi::ipc::IIpcClient {
+public:
+    bool connect(const std::string&, int) override { return true; }
+    void disconnect() override {}
+    bool isConnected() const override { return true; }
+    didi::Result<didi::json> sendRequest(const std::string& method, const didi::json& params,
+                                         int) override {
+        last_method = method;
+        last_params = params;
+        ++requests;
+        return didi::json{{"status", "success"}, {"actions", didi::json::array()}};
+    }
+    std::string last_method;
+    didi::json last_params;
+    int requests{0};
+};
+
+static void test_input_action_listing_can_ask_for_less() {
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    const auto& schema = registry.getTool("project_list_input_actions")->inputSchema;
+    ASSERT_TRUE(schema["properties"]["include_engine_defaults"]["default"] == true);
+    ASSERT_TRUE(schema["properties"]["action"]["type"] == "string");
+
+    auto client = std::make_shared<InputActionListingClient>();
+    registry.setIpcClient(client);
+    const didi::json asked = {{"include_engine_defaults", false}, {"action", "move_left"}};
+    const auto result = registry.callTool("project_list_input_actions", asked);
+    const auto wrong = registry.callTool("project_list_input_actions",
+                                         didi::json{{"prefix", "move"}});
+    registry.setIpcClient(nullptr);
+    ASSERT_TRUE(!result.isError);
+    ASSERT_TRUE(client->requests == 1);
+    ASSERT_TRUE(client->last_method == "project.listInputActions");
+    ASSERT_TRUE(client->last_params["include_engine_defaults"] == false);
+    ASSERT_TRUE(client->last_params["action"] == "move_left");
+    // Still closed: a filter it does not have is named, not ignored.
+    ASSERT_TRUE(wrong.isError);
+    ASSERT_TRUE(wrong.content.front().text.find("prefix") != std::string::npos);
+}
+
+static void test_a_misnamed_argument_is_refused_with_the_name_to_use() {
+    // Break caught: the surface spells the node a call is about ten ways and the
+    // file nine, so a first call to an unfamiliar tool guesses, and the refusal
+    // named the right name only in a sentence (#784). A client should be able to
+    // apply the fix without reading English, and only when it is the whole fix.
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    const auto refusal = [&registry](const char* tool, const didi::json& arguments) {
+        const auto result = registry.callTool(tool, arguments);
+        ASSERT_TRUE(result.isError);
+        return didi::json::parse(result.content.front().text)["error"];
+    };
+
+    // The tilemap tools say tilemap_path where most of the surface says target_node.
+    const didi::json cells = didi::json::array({{{"coords", {0, 1}}, {"erase", true}}});
+    const didi::json guessed = {{"target_node", "/root/TileMapLayer"}, {"cells", cells}};
+    const auto error = refusal("tilemap_set_cells", guessed);
+    ASSERT_EQ(error["code"], 400);
+    ASSERT_EQ(error["data"]["code"], "invalid_arguments");
+    ASSERT_EQ(error["data"]["argument"], "target_node");
+    ASSERT_EQ(error["data"]["did_you_mean"], "tilemap_path");
+    ASSERT_EQ(error["data"]["retry_with"], didi::json({{"tilemap_path", "/root/TileMapLayer"}}));
+    ASSERT_TRUE(error["message"].get<std::string>().find(
+                    "Send the value of 'target_node' as 'tilemap_path'.") != std::string::npos);
+
+    // Applied as written, the retry gets past the check that refused it.
+    auto retried = guessed;
+    retried.erase(error["data"]["argument"].get<std::string>());
+    retried.update(error["data"]["retry_with"]);
+    const auto second = registry.callTool("tilemap_set_cells", retried);
+    ASSERT_TRUE(second.content.front().text.find("invalid_arguments") == std::string::npos);
+
+    // A file argument the same way: shader_check_compile says shader_path.
+    ASSERT_EQ(refusal("shader_check_compile",
+                      didi::json{{"file_path", "res://fx.gdshader"}})["data"]["did_you_mean"],
+              "shader_path");
+
+    // Nothing is offered when moving one value is not the whole fix: two
+    // names wrong, a value the right name would refuse, or nothing missing.
+    for (const auto& arguments : std::vector<didi::json>{
+             {{"target_node", "/root/TileMapLayer"}, {"cell_list", cells}},
+             {{"target_node", 7}, {"cells", cells}},
+             {{"tilemap_path", "/root/TileMapLayer"}, {"cells", cells}, {"bogus", 1}}}) {
+        const auto data = refusal("tilemap_set_cells", arguments)["data"];
+        ASSERT_TRUE(!data.contains("did_you_mean") && !data.contains("retry_with") &&
+                    !data.contains("argument"));
+    }
+
+    // A long value is named and not sent back: the caller already has it.
+    const auto long_value =
+        refusal("eval_gdscript", didi::json{{"code", std::string(1500, 'x')}})["data"];
+    ASSERT_EQ(long_value["did_you_mean"], "expression");
+    ASSERT_TRUE(!long_value.contains("retry_with"));
+}
+
 struct RegisterToolTests {
     RegisterToolTests() {
         registerTest("Tools.OfflineCapabilityIsDerived",
@@ -8547,6 +8916,11 @@ struct RegisterToolTests {
                  test_resource_create_asks_the_engine_about_sub_resource_types_too);
         registerTest("Tools.ResourceCreateUnicodeFileNames",
                      test_resource_create_writes_unicode_file_names);
+        registerTest("Tools.AtomicWriteWaitsOutAReader", test_atomic_write_waits_out_a_reader);
+        registerTest("Tools.ConcurrentScriptPatchesAllLand",
+                     test_concurrent_script_patches_all_land);
+        registerTest("Tools.NulInALiveArgumentIsRefusedByName",
+                     test_a_nul_in_a_live_argument_is_refused_by_name);
         registerTest("Tools.AtomicWriteKeepsDestinationOnFailure",
                      test_atomic_write_keeps_the_destination_when_the_replace_fails);
         registerTest("Tools.ScriptPatchLeavesNoTemporaryFiles",
@@ -8649,6 +9023,8 @@ struct RegisterToolTests {
                      test_audio_list_buses_reads_the_layout_godot_actually_writes);
         registerTest("Tools.AudioListBusesNumericFlags",
                      test_audio_list_buses_reads_flags_the_way_the_engine_does);
+        registerTest("Tools.AudioListBusesReadsVolumeLikeTheEngine",
+                     test_audio_list_buses_reads_volume_the_way_the_engine_does);
         registerTest("Tools.AudioListBusesBrokenLayout",
                      test_audio_list_buses_answers_master_for_a_layout_that_does_not_load);
         registerTest("Tools.AudioListBusesBrokenManifest",
@@ -8689,6 +9065,8 @@ struct RegisterToolTests {
                      test_an_unparseable_presets_file_says_which_of_the_six_causes_it_is);
         registerTest("Tools.ExportPresetRunnableBooleanizes",
                      test_runnable_is_read_the_way_the_engine_reads_it);
+        registerTest("Tools.RunnableIsReadFromTheGodot47Section",
+                     test_runnable_is_read_from_the_section_godot_4_7_writes);
         registerTest("Tools.ExportPresetFirstCauseWins",
                      test_the_first_cause_is_the_one_reported);
         registerTest("Tools.ExportPresetParsedCarriesNoCause",
@@ -8836,6 +9214,12 @@ struct RegisterToolTests {
                      test_reflect_class_compares_the_dump_to_the_project_features);
         registerTest("Tools.TestLabChecksTargetFirst",
                      test_test_lab_checks_the_target_before_touching_the_project);
+        registerTest("Tools.InputActionListingCanAskForLess",
+                     test_input_action_listing_can_ask_for_less);
+        registerTest("Tools.AuditNamesConnectionToMissingMethod",
+                     test_project_audit_names_a_connection_to_a_method_nothing_declares);
+        registerTest("Tools.MisnamedArgumentCarriesTheFix",
+                     test_a_misnamed_argument_is_refused_with_the_name_to_use);
         registerTest("Resources.DefaultRegistration", test_resource_registry);
         registerTest("Prompts.DefaultRegistration", test_prompt_registry);
     }

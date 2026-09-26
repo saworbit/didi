@@ -1,5 +1,7 @@
 #include "didi/offline/project_file_lock.hpp"
 
+#include "didi/common/project_path.hpp"
+
 #include <chrono>
 #include <system_error>
 
@@ -16,13 +18,17 @@ constexpr auto kProjectFileLockWait = std::chrono::milliseconds(5000);
 Result<std::shared_ptr<runtime::RuntimeSessionLock>> lockProjectFile(
     const std::filesystem::path& project_root, const std::string& file_name) {
     const auto directory = project_root / ".didi" / "locks";
+    // A file below the root, such as a sidecar beside an asset in a folder,
+    // keeps its folders under .didi/locks, so two such files never share a
+    // lock and the refusal can name the file itself.
+    const auto lock_path = directory / paths::projectPathFromUtf8(file_name + ".lock");
     std::error_code error;
-    std::filesystem::create_directories(directory, error);
+    std::filesystem::create_directories(lock_path.parent_path(), error);
     if (error) {
         return Error::internal("The lock for " + file_name + " cannot be taken, because " +
                                ".didi/locks cannot be created in the project: " + error.message());
     }
-    auto lock = runtime::RuntimeSessionLock::acquireWithin(directory / (file_name + ".lock"),
+    auto lock = runtime::RuntimeSessionLock::acquireWithin(lock_path,
                                                            json::object(), kProjectFileLockWait);
     if (lock.isOk()) return lock;
     // acquire speaks of runtime sessions, which is not what this is.

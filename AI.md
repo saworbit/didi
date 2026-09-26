@@ -15,7 +15,7 @@ Yes. A great deal of it.
 ## Why the question lands a little differently here
 
 Didi is a machine for handing a live Godot editor to a language model. That is not a side
-effect of the design, it is the entire product: 119 canonical tools whose only purpose is
+effect of the design, it is the entire product: 120 canonical tools whose only purpose is
 to let something that is not you move a node, patch a script, drive the game and look at
 the result.
 
@@ -116,7 +116,7 @@ repository, all of it runnable by you.
 - A protected `main` that takes no direct pushes from anyone, me included. Everything
   arrives as a pull request with green checks.
 
-None of that is here because of AI. It is here because one person cannot hold 115 tools in
+None of that is here because of AI. It is here because one person cannot hold 120 tools in
 their head. But it is the reason I am willing to work this way: the checks do not care who
 wrote a line, and they are not impressed by confidence.
 

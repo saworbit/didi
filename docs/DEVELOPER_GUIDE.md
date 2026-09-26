@@ -137,7 +137,7 @@ python -m unittest discover -s tests -t tests -p "test_managed_recovery*.py"
 
 See [Managed Recovery verification](MANAGED_RECOVERY.md#verification) for the live and adversarial suite scope. These are opt-in engine tests; a skipped test is not live recovery evidence.
 
-The Windows live integration harness copies the tracked fixture into `build/` and starts real Godot processes. It preserves the Phase 1/2 sequence, adds Phase 3 concurrent editor/game routing, and now exercises Phase 4 bounded search, SVG reimport, reversible isolation, capture IDs, mutation diffs, exact undo restoration, and cleanup. The earlier coverage still checks scripts, groups, autoloads, nested settings, InputEvent forms, persistence rollback, scene lifecycle, resource ownership, unsafe paths, and honest errors:
+The Windows live integration harness copies the tracked fixture into `build/` and starts real Godot processes. It preserves the Phase 1/2 sequence, adds Phase 3 concurrent editor/game routing, and now exercises Phase 4 bounded search, SVG reimport, reversible isolation, capture IDs, mutation diffs, exact undo restoration, and cleanup. The Phase 8 import block runs a menu scene whose music stops, as the control, then sets the loop options on an OGG and a WAV import with `asset_configure_import` after a dry run, checks seven refusals, and runs the scene again to see the music still playing. The earlier coverage still checks scripts, groups, autoloads, nested settings, InputEvent forms, persistence rollback, scene lifecycle, resource ownership, unsafe paths, and honest errors:
 
 ```powershell
 .\tests\run_godot_integration.ps1 `
@@ -161,7 +161,15 @@ the native test boundary, so it is worked on differently from the rest.
   `.github/workflows/ci.yml` (which compares against `LC_ALL=C sort` order), and
   to `demo/addons/didi/`. `tests/test_editor_console.py` fails the build when any
   of those disagree with the addon directory, so the list cannot go stale
-  silently — but it will not add the file for you.
+  silently — but it will not add the file for you. Four more places list the
+  files and no suite checks them: the `expected` strings in
+  `tools/localci/lane.sh` and `tools/localci/macos.sh`, and the install trees in
+  `docs/QUICKSTART.md` and `docs/INTEGRATION_GUIDE.md`. A new `.gd` ships with
+  the `.uid` sidecar an engine mints for it; `tools/vibe/addon_script_engines.py`
+  prints that uid and checks the script loads on every engine. A script the
+  extension itself loads, as `didi_await.gd` and `didi_import_watch.gd` are, is
+  also copied into the harness fixture by `tests/run_godot_integration.ps1`,
+  because the fixture's addon is not the repository's.
 - **The console must not become an MCP client.** It reads the session
   descriptors Didi publishes and reports them. It calls no tool, speaks no part
   of the IPC protocol, and never reads the token out of a descriptor; a test
@@ -334,13 +342,13 @@ depending on a predecessor, not on the code under test.
 
 For expression-policy changes, add a failing native scanner test and a real editor/game integration probe before changing implementation. A new accepted Node operation must prove it cannot dispatch script callbacks, traverse outside the active subtree, allocate unbounded data before a check, leak source/token text, or turn the cooperative timeout into a hard-preemption claim.
 
-The CI MCP smoke must start Didi with an explicit fixture project. It verifies the live `tools/list` surface against the manifest emitted by `didi --dump-tool-manifest` from the same build, so counts are never written into the workflow, and it asserts every `implemented` flag rather than a sample. It also continues to assert offline-only search/deep-domain metadata, live-only reimport/diff/UI-hit-test metadata, strict Phase 4/5/6/7 schemas, local metadata for the four session tools, live metadata for routed runtime tools, cursor-shaped logs, implemented game input and profiler capabilities, and `implemented: false` only for `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`.
+The CI MCP smoke must start Didi with an explicit fixture project. It verifies the live `tools/list` surface against the manifest emitted by `didi --dump-tool-manifest` from the same build, so counts are never written into the workflow, and it asserts every `implemented` flag rather than a sample. It also continues to assert offline-only search/deep-domain metadata, live-only reimport/diff/UI-hit-test metadata, strict Phase 4/5/6/7 schemas, local metadata for the four session tools, live metadata for routed runtime tools, cursor-shaped logs, implemented game input and profiler capabilities, and `implemented: false` only for `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. It is `tests/test_mcp_wire_contract.py`, so the Python suite runs it before a push, against the build `tests/didi_binary.py` picks.
 
 ## Phase 7 feasibility gate
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `116/119`
+**Canonical implementation:** `117/120`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
@@ -349,7 +357,7 @@ Phase 7 is `PARTIAL_DELIVERY`. The gate completed on 2026-08-29 against Godot 4.
 
 Feasibility is design evidence; a production trial is production behavior. All 15 feasible Phase 7 names are delivered, including the three TileMapLayer/GridMap tools. The 3 API-blocked names remain registered but unimplemented.
 
-Governance authorized partial delivery, and all 15 feasible tools are now shipped, and the surface stands at 116/119 canonical implementations. Further work on `physics_simulate_step`, `nav_bake_mesh`, or `runtime_get_call_stack` requires new feasibility evidence on Godot 4.5.1 and 4.7.2 or an explicit contract amendment; do not weaken their contracts implicitly. Use [PHASE_7_API_FEASIBILITY.md](PHASE_7_API_FEASIBILITY.md) for reproducible evidence and [PHASE_7_IMPLEMENTATION_PLAN.md](PHASE_7_IMPLEMENTATION_PLAN.md) for the approved executable plan.
+Governance authorized partial delivery, and all 15 feasible tools are now shipped, and the surface stands at 117/120 canonical implementations. Further work on `physics_simulate_step`, `nav_bake_mesh`, or `runtime_get_call_stack` requires new feasibility evidence on Godot 4.5.1 and 4.7.2 or an explicit contract amendment; do not weaken their contracts implicitly. Use [PHASE_7_API_FEASIBILITY.md](PHASE_7_API_FEASIBILITY.md) for reproducible evidence and [PHASE_7_IMPLEMENTATION_PLAN.md](PHASE_7_IMPLEMENTATION_PLAN.md) for the approved executable plan.
 
 ## Phase 5 and Phase 6 implementation map
 
@@ -370,6 +378,6 @@ python -m unittest tests.test_documentation_validator -v
 python tools/validate_documentation.py
 ```
 
-The validator derives the release from `CMakeLists.txt` and checks the MCP server header, standalone version output, addon manifest, README, capability matrix, changelog, and security policy for alignment. It also locks the documented 119 canonical/10 legacy/129 total surface, the 116 implemented/3 unimplemented split, Phase 7's `PARTIAL_DELIVERY` status, 15/18 versus 3/18 feasibility result, exact three-tool blocker set, authoritative-record links, stale current-state prose, and all relative Markdown targets and anchors.
+The validator derives the release from `CMakeLists.txt` and checks the MCP server header, standalone version output, addon manifest, README, capability matrix, changelog, and security policy for alignment. It also locks the documented 120 canonical/10 legacy/130 total surface, the 117 implemented/3 unimplemented split, Phase 7's `PARTIAL_DELIVERY` status, 15/18 versus 3/18 feasibility result, exact three-tool blocker set, authoritative-record links, stale current-state prose, and all relative Markdown targets and anchors.
 
 When the release changes, update these files in one change: `CMakeLists.txt`, `include/didi/mcp/mcp_protocol.hpp`, `src/standalone/main.cpp`, `addons/didi/plugin.cfg`, `README.md`, `CHANGELOG.md`, `docs/CAPABILITIES.md`, and `SECURITY.md`. When the tool surface or capability modes change, also update runtime discovery tests, `docs/TOOL_REFERENCE.md`, `docs/ROADMAP.md`, `docs/LLM_INSTRUCTIONS.md`, and the relevant quickstart/integration examples. Historical specs and plans record their original decisions and should not be rewritten as current release documentation.

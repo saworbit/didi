@@ -1328,11 +1328,33 @@ void McpServer::runStdio() {
 }
 
 
+namespace {
+
+// The board a blackboard:// URI names, or nothing for any other URI.
+std::optional<std::string> boardOfUri(const std::string& uri) {
+    constexpr const char* kScheme = "blackboard://";
+    if (uri.rfind(kScheme, 0) != 0) return std::nullopt;
+    const std::string rest = uri.substr(std::string(kScheme).size());
+    const auto slash = rest.find('/');
+    if (slash == std::string::npos || slash == 0) return std::nullopt;
+    return rest.substr(0, slash);
+}
+
+} // namespace
+
 bool McpServer::subscribeResource(const std::string& uri) {
     bool added = false;
     {
         std::lock_guard<std::mutex> guard(m_subscriptionMutex);
         added = m_subscriptions.insert(uri).second;
+        // The board as the subscriber found it, taken now and not on the
+        // watcher's next tick. A board that is already being watched keeps its
+        // baseline, so a second URI on it changes nothing. One the watcher has
+        // never seen was announced as changed on the next tick, and a write
+        // between this call and that tick went unannounced (#139).
+        if (const auto board = boardOfUri(uri); added && board && !m_boardBaselines.count(*board)) {
+            m_boardBaselines.emplace(*board, offline::blackboardFileStamp(*board));
+        }
     }
     // The thread exists only while something is subscribed, so a session that
     // never subscribes never starts one.
@@ -1347,6 +1369,14 @@ bool McpServer::unsubscribeResource(const std::string& uri) {
         std::lock_guard<std::mutex> guard(m_subscriptionMutex);
         removed = m_subscriptions.erase(uri) > 0;
         empty = m_subscriptions.empty();
+        // A board nobody watches keeps no baseline. Kept, it would make a
+        // later subscription announce every write made while nobody was.
+        if (const auto board = boardOfUri(uri); removed && board) {
+            const bool watched = std::any_of(
+                m_subscriptions.begin(), m_subscriptions.end(),
+                [&board](const std::string& other) { return boardOfUri(other) == board; });
+            if (!watched) m_boardBaselines.erase(*board);
+        }
     }
     if (empty) stopBoardWatcher();
     return removed;
@@ -1372,40 +1402,33 @@ void McpServer::stopBoardWatcher() {
 // This compares the board file's size and modified time on a timer. It is
 // polling, but it is polling nobody pays for: no request, no token, no turn.
 void McpServer::watchBoards() {
-    std::unordered_map<std::string, offline::BlackboardFileStamp> seen;
-    bool primed = false;
-
     while (m_watching.load()) {
-        std::vector<std::string> uris = subscribedResources();
-        std::unordered_map<std::string, std::vector<std::string>> boards;
-        for (const auto& uri : uris) {
-            constexpr const char* kScheme = "blackboard://";
-            if (uri.rfind(kScheme, 0) != 0) continue;
-            const std::string rest = uri.substr(std::string(kScheme).size());
-            const auto slash = rest.find('/');
-            if (slash == std::string::npos || slash == 0) continue;
-            boards[rest.substr(0, slash)].push_back(uri);
-        }
-
-        for (const auto& entry : boards) {
-            const auto stamp = offline::blackboardFileStamp(entry.first);
-            const auto previous = seen.find(entry.first);
-            const bool known = previous != seen.end();
-            const bool changed =
-                stamp.has_value() ? (!known || previous->second != *stamp) : known;
-
-            if (stamp.has_value()) seen[entry.first] = *stamp;
-            else seen.erase(entry.first);
-
-            // The first tick records what is already there. Announcing it would
-            // tell every subscriber that something changed the moment it
-            // subscribed, which is never true and trains callers to ignore us.
-            if (!primed || !changed) continue;
-            for (const auto& uri : entry.second) {
-                sendNotification("notifications/resources/updated", {{"uri", uri}});
+        // Compared under the subscription lock, so a board subscribed or
+        // dropped mid-tick is compared against the baseline it was given
+        // rather than one this tick is about to overwrite. A stat per board is
+        // all the lock covers; the notifications go out after it.
+        std::vector<std::string> changed;
+        {
+            std::lock_guard<std::mutex> guard(m_subscriptionMutex);
+            std::unordered_map<std::string, std::vector<std::string>> boards;
+            for (const auto& uri : m_subscriptions) {
+                if (const auto board = boardOfUri(uri)) boards[*board].push_back(uri);
+            }
+            for (const auto& entry : boards) {
+                const auto stamp = offline::blackboardFileStamp(entry.first);
+                auto baseline = m_boardBaselines.find(entry.first);
+                if (baseline == m_boardBaselines.end()) {
+                    m_boardBaselines.emplace(entry.first, stamp);
+                    continue;
+                }
+                if (baseline->second == stamp) continue;
+                baseline->second = stamp;
+                changed.insert(changed.end(), entry.second.begin(), entry.second.end());
             }
         }
-        primed = true;
+        for (const auto& uri : changed) {
+            sendNotification("notifications/resources/updated", {{"uri", uri}});
+        }
 
         for (int slice = 0; slice < kBoardPollSlices && m_watching.load(); ++slice) {
             std::this_thread::sleep_for(std::chrono::milliseconds(kBoardPollSliceMs));

@@ -12,6 +12,11 @@ import threading
 import time
 import unittest
 
+try:
+    import didi_binary
+except ImportError:
+    from tests import didi_binary
+
 
 @unittest.skipUnless(os.environ.get('DIDI_TEST_BINARY') and os.environ.get('DIDI_RECOVERY_GODOT'), 'real Godot recovery test is opt-in')
 class ManagedRecoveryLive(unittest.TestCase):
@@ -25,7 +30,7 @@ class ManagedRecoveryLive(unittest.TestCase):
         self.source = self.root / 'source'
         self.source.mkdir()
         self.workspace = self.root / 'managed'
-        self.binary = Path(os.environ['DIDI_TEST_BINARY']).resolve()
+        self.binary = didi_binary.resolve().resolve()
         addon = self.binary.parent / 'addons' / 'didi'
         if not addon.is_dir():
             addon = self.binary.parent.parent / 'addons' / 'didi'

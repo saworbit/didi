@@ -1,17 +1,17 @@
 # Didi MCP Tool Reference
 
-Didi exposes 119 canonical tool names plus 10 legacy names (129 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
+Didi exposes 120 canonical tool names plus 10 legacy names (130 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
 
 The `_meta.didi` object returned by `tools/list` is authoritative. A registered tool with `implemented: false` is unavailable and returns an MCP tool error. Every tool carries `legacy`, and the ten legacy registrations carry `legacy: true`; the eight of those that resolve to a differently named tool also carry `canonical` and name it in a closing sentence of their description. Ten of the listed names are duplicates, and without that an agent has no way to tell which of two identical listings to call, or why error data names a `canonical_tool` it cannot find.
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `116/119`
+**Canonical implementation:** `117/120`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `PARTIAL_DELIVERY`. The implementation is 116/119 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+Phase 7 is `PARTIAL_DELIVERY`. The implementation is 117/120 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 The current source/Unreleased connection guide is returned in
 `initialize` and `server/discover` as `result.instructions`. It routes common
@@ -99,10 +99,34 @@ to add, so it carries the value and not only the name:
 `project_export` answers a colliding output path that way, and so do the
 refusals for an autoload, an input action or a scene target that is already
 there, and the four that ask for `discard_unsaved` before closing a scene with
-changes in it. `retryable` stays `false` for all of them, because the same call
-unchanged would be refused again: `retry_with` is the change that makes it
+changes in it, `script_patch_method` for a symbol the script does not declare
+(`create_if_missing`), and `runtime_checkpoint` while an operation needs
+reconciliation (`accept_current_files`, under `code: "needs_reconciliation"`).
+`retryable` stays `false` for all of them, because the same call unchanged
+would be refused again: `retry_with` is the change that makes it
 succeed. A refusal with nothing to add omits the key rather than sending an
 empty one.
+
+One refusal also takes an argument away. The surface names the node or file a
+call is about differently from one family to the next (`target_node`,
+`tilemap_path`, `shader_path` and more), so a first call often uses a sibling's
+name. When a call's only problem is one argument this tool does not take, and
+sending its value as the one required argument that is missing makes the call
+valid, the refusal says which is which: `argument` is the name that was sent,
+`did_you_mean` is the name to use, and `retry_with` carries the value under it.
+Drop `argument` and merge `retry_with`:
+
+```json
+{"code": "invalid_arguments",
+ "argument": "target_node",
+ "did_you_mean": "tilemap_path",
+ "retry_with": {"tilemap_path": "/root/Level/Tiles"}}
+```
+
+Nothing is offered when moving one value is not the whole fix: two names wrong,
+a value the right name would refuse, or nothing missing. A value over 1 KiB is
+not sent back, since the caller has it already, so `retry_with` is left out
+there and the other two stay (#784).
 
 A live-only tool called with no engine attached — the most common state a
 caller meets — answers `503` and names itself, says it needs a live Godot
@@ -112,7 +136,16 @@ Beside the sentence, `data` carries `blocked_on: "no_live_session"`,
 `needs_live_engine`, `offline_fallback`, `discover_with` and `attach_with`, and
 `offline_alternative` where this server knows of a sibling that answers offline.
 `retryable` stays `true`, because the same call succeeds once an engine is
-there; `blocked_on` is what says that a human has to put one there.
+there; `blocked_on` is what says that a human has to put one there. A tool whose own argument rules need no engine, such as `audio_add_bus`, checks them first, so a bad argument is refused in the same words whether or not an engine is attached, and the `503` is only for a call that would otherwise have gone ahead.
+
+A string argument to a tool with a live route that holds a NUL character
+(U+0000) is refused `400` with `invalid_arguments` before any route is chosen,
+so the answer is the same with or without an editor. The message names where
+the NUL is, such as `value` or `properties.editor_description`. The text after
+a NUL never reached Godot, and Godot's own conversions cannot carry one either.
+A string that starts with a byte-order mark reaches the engine with the mark:
+the engine keeps U+FEFF in strings, names and node paths, and only its UTF-8
+reader used to drop it (#948).
 
 A tool that knows more says more, and nothing it already set is overwritten. The
 confirmation gate's `428` adds `dry_run_argument` and `confirmation_argument`, so
@@ -204,7 +237,7 @@ Non-finite numbers read back as the strings `"inf"`, `"-inf"` and `"nan"` rather
 
 - `target_node` (`string`, required).
 - `property_name` (`string`, required).
-- `value` (required): JSON null, boolean, signed integer, real, or string compatible with the existing Godot property type.
+- `value` (required): the JSON form of the property's Godot type, from the table above.
 
 The property is read back after the commit, and the result reports what it now holds rather than what was requested. `value` is that observed state, `old_value` is what it held before, `requested_value` is the argument, and `applied` says whether the two now agree. A committed UndoRedo action is not a changed property: Godot discards some writes, such as `anchors_preset` on a Control still in `layout_mode` 0, and those return `applied: false` with `value` unchanged. Numbers are compared by value, so writing an integer to a float property is `applied: true`.
 
@@ -230,7 +263,7 @@ Every live scene answer names the scene it is about. `scene_get_hierarchy` and `
 
 ### `scene_get_property` — Live
 
-Returns one existing scalar property. Metadata and export hints are not returned.
+Returns one existing property, in the JSON forms the table under `scene_set_property` lists, plus arrays and dictionaries of them nested up to 16 levels. A resource comes back as its `res://` path, which is what a write takes, and an object with no path to give, a Node for instance, as `null`. A type with no JSON form, such as `Transform3D`, is refused. Metadata and export hints are not returned.
 
 - `target_node` (`string`, required).
 - `property_name` (`string`, required).
@@ -282,9 +315,13 @@ signal bridge trial on Godot 4.5.1, 4.6.2 and 4.7.2.
 
 ### `signal_list_connections` — Live
 
-Read-only. Lists a node's signals and their current connections.
+Read-only. Lists the signals a node declares and the connections going out of
+each, so the node is the emitter. Connections into the node are not listed.
 
-- `target_node` (`string`, required). Node path; 1024 bytes maximum.
+- `emitter_node` (`string`). Node path; 1024 bytes maximum. The same word
+  `signal_connect` and `signal_disconnect` use for the emitter.
+- `target_node` (`string`). The same node, under the name this tool used first.
+  Send one of the two; both, or neither, is refused.
 
 Signals are returned sorted by name, and connections by target path, so repeated
 calls are comparable. The listing is capped at 256 signals and 256 connections
@@ -365,8 +402,9 @@ A method the file declares and the engine does not have is `409` with `code: "ta
 ### `signal_emit` — Live
 
 Mutation, and the one that runs game code: emitting a signal invokes whatever is
-connected to it. Requires `target_node` and `signal_name`; `arguments` is an
-optional array, defaulting to empty.
+connected to it. Requires `signal_name` and the emitting node as `emitter_node`,
+or as `target_node`, the name this tool used first, but not both; `arguments` is
+an optional array, defaulting to empty.
 
 Arguments are checked against the signal's declared parameter types before
 anything is dispatched, so a type mismatch returns `400` without emitting. Bounds:
@@ -503,6 +541,8 @@ Rewrites a matching GDScript symbol in a project-root-confined file, then runs t
 - `symbol_type` (`string`, default `"function"`); one of `function`, `variable`, `constant`, `signal`, `enum`, `class`. Any other value is refused by the argument check before the file is opened.
 - `create_if_missing` (`boolean`, default `false`); add the symbol when the script does not declare it.
 - Legacy alias: `patch_script_symbols`.
+
+The call holds the script's lock under `.didi/locks` from its read of the file to its write, so two servers patching one script take turns and both methods land. A call held off for five seconds is refused `409` with `data.code: "project_file_busy"` and `retryable: true`, and the file is not touched. The diagnostics run after the lock is released.
 
 The replacement is read before it is spliced. A `new_definition` that declares nothing, declares a different name, or declares a different kind of symbol is refused with a 400 and no write, because the old behaviour was to splice it anyway: a mistyped name deleted the target and still reported the method patched.
 
@@ -879,7 +919,7 @@ With an editor attached, an overwrite also reloads the editor's copy of the file
 
 Returns indexed file metadata, UID, and parsed dependencies for a matching project resource. It does not expose arbitrary inner Godot Resource properties.
 
-`type` is the class the extension implies, which for a `.tres` or `.res` is never more specific than `Resource`. For those, `resource_type` carries the type the file declares in its `[gd_resource]` header, or `null` when the header could not be read. Anything that is not a text resource has no such field. `project_list_resources` reports the same pair per entry.
+`type` is the class the extension implies, which for a `.tres` or `.res` is never more specific than `Resource`. For those, `resource_type` carries the type the file declares in its `[gd_resource]` header, or `null` when the header could not be read. Anything that is not a text resource has no such field. `project_list_resources` reports the same pair per entry. For an asset with a `.import` file beside it, `import` carries what the editor wrote there: `importer`, `type`, `uid`, `valid` when the engine recorded a failed import, `options` with every import option as a boolean, integer, number or string, and `configurable`, the keys `asset_configure_import` sets on that importer. A file Godot's parser cannot read gives `parse_error` and `line` instead.
 
 - `resource_path` (`string`, required).
 
@@ -999,16 +1039,17 @@ Refused: a `new_name` a connection or track already uses, because that merges tw
 
 ### `project_audit_assets` — Live or offline
 
-Reads the project and reports five things nothing in a single file can show: assets that nothing references, references that resolve to no file, signals that nothing emits or connects, unhealthy existing Godot `.import` metadata, and what is wrong with `project.godot` itself.
+Reads the project and reports six things nothing in a single file can show: assets that nothing references, references that resolve to no file, signals that nothing emits or connects, scene connections to a method the receiving node does not have, unhealthy existing Godot `.import` metadata, and what is wrong with `project.godot` itself.
 
 - `include_orphans` (`boolean`, default `true`).
 - `include_broken_references` (`boolean`, default `true`).
 - `include_dead_signals` (`boolean`, default `true`).
+- `include_broken_connections` (`boolean`, default `true`).
 - `include_import_health` (`boolean`, default `true`).
 - `include_addon_orphans` (`boolean`, default `false`).
 - `max_findings` (`integer`, 1-5000, default `500`).
 
-At least one of the four report switches must stay enabled.
+At least one of the five report switches must stay enabled.
 
 A file whose name is not valid UTF-8 is not in any of these answers and cannot be, because JSON is defined over Unicode. It is reported instead: `undecodable_path_count` and `undecodable_paths`, with the bytes that could not be decoded shown as U+FFFD, so the file can be renamed. `project_list_resources` reports the same two fields and `project_search_text` and `project_search_symbols` report the path under `diagnostics` with `reason: "undecodable_name"`. A POSIX filename is a byte string, so this is a Linux and Unix state; Windows names are UTF-16 and the default macOS volume refuses the name outright.
 
@@ -1023,6 +1064,8 @@ References are followed in every form Godot writes and people type: `[ext_resour
 A quoted `res://` value counts as use and is not checked for existence. It is the only form `project.godot` has, and it is also how an exported string property names a scene; in a script the same form can be `"res://levels/"` with the rest built at runtime, and a broken reference that is not broken is worse than one that is not reported.
 
 A signal counts as alive if any file emits it, connects to it, checks `is_connected`, or wires it through `[connection signal="..."]` in a scene.
+
+`broken_connections` lists each `[connection]` whose `method` the receiving node does not declare or inherit, with `scene`, `line`, `signal`, `from`, `to`, `method` and `script`. That is the state `project_rename_references` leaves a project in when it renames the method in the scene and reports the GDScript lines it did not change: the game prints `Error calling method from signal` and nothing is called (#781). A connection is judged only when every step of the answer resolves: the scene file declares the receiving node, its script is GDScript in the project, each script it extends is found by path or `class_name`, and the engine class the chain ends on is in the class reference, whose methods count with their ancestors'. A node inside an instanced or inherited scene, a built-in script, a script outside the project or an engine class the reference does not name is left alone, because a broken connection that is not broken is worse than one that is not reported. `script` is null when the node has no script and the engine class itself lacks the method.
 
 Import health inspects only existing regular, non-symlink `*.import` files. It reads at most 256 KiB and 1,024 declared output paths from each, and scans at most 20,000 metadata files without following directory or file symlinks. Answering the freshness question means hashing bytes: up to 64 MiB of source and up to 64 MiB of declared outputs per sidecar, so an audit of a large project reads roughly the size of its imported assets twice over. Declared `source_file`, `dest_files`, and `[remap] path` values must be canonical project-contained `res://` paths; generated outputs under `res://.godot/imported/` are allowed, but an escape or symlink is not. `invalid_import_metadata` also covers `valid=false`, malformed targeted assignments, an oversized file/path list, or a `source_file` that disagrees with the sidecar name. Other findings are `missing_import_source`, `missing_import_output`, `source_changed_since_import`, `output_changed_since_import`, `import_freshness_unchecked`, and `source_newer_than_output`, with `metadata`, `source`, and `target` provenance.
 
@@ -1157,9 +1200,23 @@ A muted bus is invisible: the game runs, nothing errors, and no sound comes out.
 
 Live when an editor or a game is attached, and that is the mode worth having: only a running engine reports each bus's `effects` chain, and only a running engine sees a bus a script muted at runtime. An editor answers for the layout it holds and a game for its own mix, so a bus a script muted while the game runs is muted in the game, and that is the session to ask; the result's `session` says which one answered. When an engine is attached and its read fails, the answer is the offline one below with `live_error` and `live_error_note` beside it, because the file is then not what the running engine holds; it used to come back looking like an answer with nothing attached. Every `AudioServer` method it calls carries the same hash on Godot 4.5.1, 4.6.2 and 4.7.2, so there is no per-version branch, and the live Godot harness exercises it on all three.
 
-Offline it reads the project's bus layout, following `audio/buses/default_bus_layout` from `project.godot` and falling back to `res://default_bus_layout.tres` the way Godot does. Godot 4.6 and 4.7 hold that setting as a `uid://` once the layout file exists and write it to `project.godot` that way, so a uid is followed to the resource that carries it; a uid no file carries is no layout to the engine, which runs on Master alone, and that is the answer, with the uid as `layout_path`. The manifest is read through the shared ConfigFile rules, so `[ audio ]` is the audio section and `buses / default_bus_layout` is the same key, both of which the engine honours. The file is read the way Godot writes it. Names and sends are StringName literals, `&"Music"` rather than `"Music"`, and the `&` is stripped so the name is one `audio_configure_bus` accepts. The string escapes Godot writes into a name are undone the way its parser reads them, so a bus named `Say "hi"` or holding a tab reads back as the engine has it (#934). Bus 0 is Master and the file is usually silent about it, because the writer skips every property already at its default and Master's defaults are the whole of it; Master is filled in rather than left out, so `bus_count` is the number of buses the engine has. Master cannot be renamed, so index 0 is Master whatever the file says. A layout file with no bus lines at all is a project whose only bus is Master, which is what the engine loads it as. A project with no layout file at that path returns `layout_present: false` and the same single `Master` at 0 dB with no send. Godot writes the layout file only once a project has more than the default bus, so its absence is not an error and not an absence of audio. A layout file Godot's parser refuses loads as nothing, and the engine runs on Master alone, so that is the answer too, with `layout_loads: false` and a note naming the line to repair; `layout_loads` is true only when the engine loads the file. An index the file skips is still a bus, unnamed and at its defaults, because Godot sizes the list to the highest index named. A `project.godot` the engine refuses does not open at all, and the tool refuses with the line to repair rather than follow a layout path out of it. Effect chains are not read offline and the result says so, since an empty effects list would otherwise read as "no effects".
+Offline it reads the project's bus layout, following `audio/buses/default_bus_layout` from `project.godot` and falling back to `res://default_bus_layout.tres` the way Godot does. Godot 4.6 and 4.7 hold that setting as a `uid://` once the layout file exists and write it to `project.godot` that way, so a uid is followed to the resource that carries it; a uid no file carries is no layout to the engine, which runs on Master alone, and that is the answer, with the uid as `layout_path`. The manifest is read through the shared ConfigFile rules, so `[ audio ]` is the audio section and `buses / default_bus_layout` is the same key, both of which the engine honours. The file is read the way Godot writes it. Names and sends are StringName literals, `&"Music"` rather than `"Music"`, and the `&` is stripped so the name is one `audio_configure_bus` accepts. The string escapes Godot writes into a name are undone the way its parser reads them, so a bus named `Say "hi"` or holding a tab reads back as the engine has it (#934). Values are converted the way the engine converts them: `mute = 1` is a muted bus, and `volume_db = "-6"` is -6 dB, since Godot reads a quoted number through its own string-to-float. `"abc"` reads as 0 dB and `true` as 1 dB, because that is what the engine makes of them (#907). Bus 0 is Master and the file is usually silent about it, because the writer skips every property already at its default and Master's defaults are the whole of it; Master is filled in rather than left out, so `bus_count` is the number of buses the engine has. Master cannot be renamed, so index 0 is Master whatever the file says. A layout file with no bus lines at all is a project whose only bus is Master, which is what the engine loads it as. A project with no layout file at that path returns `layout_present: false` and the same single `Master` at 0 dB with no send. Godot writes the layout file only once a project has more than the default bus, so its absence is not an error and not an absence of audio. A layout file Godot's parser refuses loads as nothing, and the engine runs on Master alone, so that is the answer too, with `layout_loads: false` and a note naming the line to repair; `layout_loads` is true only when the engine loads the file. An index the file skips is still a bus, unnamed and at its defaults, because Godot sizes the list to the highest index named. A `project.godot` the engine refuses does not open at all, and the tool refuses with the line to repair rather than follow a layout path out of it. Effect chains are not read offline and the result says so, since an empty effects list would otherwise read as "no effects".
 
 `execution_mode` distinguishes the two, so a caller never has to guess whether it is looking at live state.
+
+### `asset_configure_import` — Live (editor only)
+
+Changes an imported asset's import options in its `.import` file, reimports the asset in the attached editor, and checks what the engine then loads (#958). It is how a track is made to loop.
+
+- `asset_path` (`string`, required): one `res://` source asset, as it is spelled on disk, with a `.import` file beside it. A wrong letter case is refused with the spelling in `retry_with`, a `.import` path is refused naming its asset, a path under `.godot/` is refused, and an asset with no `.import` file is `404 no_import_metadata`, naming `asset_reimport`.
+- `options` (`object`, required): the keys to set. An OGG (`oggvorbisstr`) or MP3 import takes `loop` (a boolean) and `loop_offset` (seconds, at least 0 and below the track's length). A WAV import takes `edit/loop_mode` (0 Detect From WAV, 1 Disabled, 2 Forward, 3 Ping-Pong, 4 Backward, as the number or the name in any letter case), `edit/loop_begin` (a frame, at least 0) and `edit/loop_end` (a frame, or -1 for the last). A window is refused unless the loop mode after the change is 2, 3 or 4, because Godot ignores it under the other two, and both ends must be inside the stream with the begin below the end.
+- `dry_run` (`boolean`): the checks and a preview under `mutation_preview`, with `options` as they are and `planned_options`. With no editor the bounds that depend on the track are not checked, and the preview says `stream_read: false`.
+
+Godot checks none of these values. `edit/loop_mode=5` loads as a loop mode the engine has no name for, `loop="yes"` loads as true, and a loop end past the stream, a begin after the end, a negative begin and a negative or past-the-end offset are all stored as written, none with an error (`tools/vibe/probes/import_config_engine.py`, on 4.5.1, 4.6.2 and 4.7.2). So the tool refuses each of them, with the key under `data.key`. Any other importer, and any other option, is refused naming the ones it takes, with `retry_with` where the caller sent a WAV option to an OGG or the other way round. A `.import` file Godot's parser cannot read is `422 unparseable_import_metadata` with its line: the engine would reimport the asset with every option at its default and a new uid. A key on a line of its own is the only kind it edits; a hand-edited file with a key twice or two keys on one line is `422 hand_edited_import_metadata`.
+
+The write holds the file's lock under `.didi/locks` from its read to its write, and a writer held off for five seconds is `409 project_file_busy`, retryable. Only the named keys' lines change; every other byte, line endings included, is kept. Then the asset is reimported through the path `asset_reimport` takes, which waits out the editor's own import pass, and the result is checked against the file and against the stream loaded fresh from disk: each value is in the `.import` file, the uid is the one it had, `valid` is not false, and the stream reads back what each option decides. An option that did not hold is `422 import_change_not_held` with `divergences`, a failed reimport keeps its own code, and in both cases the previous file is written back and reimported, and `rolled_back` says whether that worked.
+
+The result carries `previous` and `options` for each key, `uid`, `reimported`, `verified`, the `stream` it read back (`class`, `length_seconds` and the loop properties), and the engine's lines from all three calls under `engine_diagnostics`. There is no undo entry; `way_back` says to call again with `previous`.
 
 ### `audio_configure_bus` — Live
 
@@ -1214,7 +1271,7 @@ Launches a separate Godot process, optionally headless, captures stdout/stderr, 
 - `headless` (`boolean`, default `true`).
 - `break_on_error` (`boolean`, default `true`): marks captured `ERROR:`/`SCRIPT ERROR:` lines as failure after the child exits; it does not stop the child early.
 - The timeout kills the whole process tree, and the call waits for it to go before returning. Godot is not always the process that was started -- a `godot.cmd` wrapper, or Godot's own Windows console build, launches the engine and waits on it -- so the tool terminates the job the child was spawned into rather than the child alone, and waits for the job to empty. That matters for what comes next: `runtime_list_sessions` reports a session as alive when the process behind it is alive, so a game still shutting down would be listed as attachable and then refuse the connection.
-- That wait is bounded at five seconds, and `kill_wait` says how it ended: `tree_exited` when the job held no processes and the tree is gone, `wait_expired` when the bound ran out with processes still in it, `query_failed` when the job could not be read back at all. It is null for any run that did not wait on a kill, which is every run that did not time out, and on POSIX, where the timeout signals the process group and does not wait on it. Only `tree_exited` entitles a caller to assume the tree has stopped; the other two say so in `summary` as well. A loaded machine reaches the bound where an idle one does not, so this is the difference between "it is gone" and "we stopped waiting", and before it was recorded both read the same.
+- That wait is bounded at five seconds, and `kill_wait` says how it ended: `tree_exited` when the job held no processes and the tree is gone, `wait_expired` when the bound ran out with processes still in it, `query_failed` when the job or the processes in it could not be read back reliably enough to say. It is null for any run that did not wait on a kill, which is every run that did not time out, and on POSIX, where the timeout signals the process group and does not wait on it. Only `tree_exited` entitles a caller to assume the tree has stopped; the other two say so in `summary` as well. A loaded machine reaches the bound where an idle one does not, so this is the difference between "it is gone" and "we stopped waiting", and before it was recorded both read the same.
 - `extra_args` (`array` of strings, optional; unsafe shell metacharacters are rejected).
 - `detach` (`boolean`, default `false`): start the game and leave it running.
 - Legacy alias: `execute_test_session`.
@@ -1355,8 +1412,8 @@ Errors: `400` malformed batch, `409` editor session, `413` request over 32 KiB, 
 
 All four tools are live-only, and the first three return an error when no editor is connected:
 
-- `editor_undo`: Undoes the active edited scene's most recent UndoRedo action.
-- `editor_redo`: Redoes the active edited scene's next action.
+- `editor_undo`: Runs the editor's own Undo, the Scene menu item Ctrl+Z runs. It undoes the newer of the active edited scene's last action and the editor's global history's last action, and `history` says which (`scene` or `global`). It goes through the editor rather than the scene's `UndoRedo` because the editor keeps its own record of the history beside it, and stepping one without the other left the editor reporting a scene undone past its save as saved (#913).
+- `editor_redo`: Runs the editor's own Redo the same way, with the same `history` field.
 - `editor_save_scene`: Calls `EditorInterface.save_scene` for the active scene. `saved` means Godot accepted the request: that call returns OK for any open scene with a path, including one the editor then refuses to write, so the refusals the scene tools make for foreign nodes, inherited nodes and cyclic instances happen before the tree can reach a state the save would drop. Anything the engine printed while saving comes back in `engine_diagnostics`, with `engine_diagnostics_note` saying what they are about. Against a headless editor every save produces one: Godot's save path asks for a scene thumbnail, there is no renderer to make one, and the engine prints `Parameter "t" is null` from its dummy rendering backend. The scene does save. The thumbnail step belongs to Godot's save and cannot be switched off from here, so it is reported rather than left in the editor log for someone to find later.
 - `editor_reload_project`: Requests an `EditorFileSystem.scan_sources` rescan; it is not a full editor restart. It does not re-read a resource the editor has already loaded: a file changed underneath the editor keeps answering from the loaded copy afterwards, as it does after the editor's own `update_file` and `scan`, measured on all three supported engines. `resource_create` reloads the copy of what it writes, and `anim_add_library` takes `reload_from_disk`. Phase 6 requires an exact dry-run confirmation token. With no editor connected it drops Didi's cached resource index instead, so the next offline read crawls the project again.
 
@@ -1379,7 +1436,7 @@ Mutations use Godot's `autoload/<name>` representation, call `ProjectSettings.sa
 
 ### InputMap
 
-- `project_list_input_actions`: returns sorted `{action, deadzone, events}` entries, including editor defaults exposed by Godot.
+- `project_list_input_actions`: returns sorted `{action, deadzone, events, defined_by_project}` entries, including the engine's own `ui_*` actions, which are `defined_by_project: false`. `include_engine_defaults: false` keeps only what `project.godot` declares and reports `omitted_engine_default_count`. `action` reads one entry by exact name, and a name the project does not have is `404`. When `project.godot` cannot be parsed, entries carry no `defined_by_project`, `defined_by_project_unavailable` says why, and `include_engine_defaults: false` is refused.
 - `project_set_input_action`: requires `action`; `deadzone` defaults to `0.2`, `events` to an empty array, and existing actions require `replace: true`. Up to 64 events.
 - `project_remove_input_action`: requires `action` and rejects missing entries. It also refuses an action the project does not define. `ProjectSettings.has_setting` answers true for an engine default such as `ui_accept`, because the engine registers the built-in map as settings, so removing one used to leave the running editor's InputMap without the action, write nothing to `project.godot`, and report `persisted: true`. The refusal is a `409` carrying `engine_default: true`. Give the project its own events for that name with `project_set_input_action` instead. A removal that goes ahead reports the deadzone and event count the action actually had. A `project.godot` Godot will not load is refused with a `409` naming the line, rather than answered: the parse stops where the file breaks, so an action below that point is absent and "the project does not define it" would be a claim with nothing behind it -- and the removal writes this editor's whole settings map over the file, which would take the hand edit that broke it as well.
 
@@ -1685,13 +1742,13 @@ Godot ships seven platforms under the same names on 4.5.1, 4.6.2 and 4.7.2: `Win
 Godot writes `export_presets.cfg` the first time a preset is added, so a project that has never configured an export has no file. That is an empty list with `presets_file_exists: false`, not an error. A file that is there and cannot be read or parsed is still an error, so "no presets" and "the file is broken" stay different answers.
 
 
-A project with no export presets answers the same way whether or not `export_presets.cfg` is on disk: `preset_count: 0`, an empty `presets` list, and `presets_file_exists` saying which case it is. A file that is there and cannot be parsed is the separate state and is refused with `422` and `code: "unprocessable"`, carrying `declared_preset_sections` so "there is nothing here" and "there is something here I cannot read" are answerable. The refusal names which of the seven causes it is: `reason` is a stable token (`byte_order_mark`, `truncated_value`, `unloadable_value`, `no_section_header`, `key_before_section`, `incomplete_preset`, `duplicate_preset_name`), the message says what was found, and `line` is published where the cause has one. The first cause found is the one reported. The remedies differ, which is why one sentence for all of them was not enough: the Export dialog will not open a file that does not parse, so it is a remedy for a duplicate name and not for a truncated write. A valid ini holding sections that are not presets is the first case, not the second: its keys are skipped the way `[preset.N.options]` keys are. A file with content but no section the engine honours at all is the second. Section names and keys are read by the engine's rules: `[ preset.0 ]` is the preset section, `#` does not start a comment, and a `#` line with no `=` joins forward into the next key -- so a trailing note leaves the presets intact and a note above `platform` leaves a preset the engine has no platform for, which is refused rather than listed. Values are read by them too. `runnable` is read the way the engine reads it rather than compared against the two words Godot's own writer emits: the value is parsed and converted, so a number decides on being zero and `runnable=1` is a runnable preset rather than a file that could not be parsed. A value Godot's parser will not start, such as `export_path=)`, is `ERR_PARSE_ERROR` for the whole file and not for that one field: Godot's own answer is `Invalid export preset name` with an empty list of detected presets, even though the keys ahead of the bad value parse. So it is the unparseable case rather than a preset with an odd path, and `project_export` refuses it through the same code. A file that starts with a UTF-8 byte-order mark, which is what PowerShell 5.1's `Set-Content` writes, is `byte_order_mark` on line 1: Godot does not skip the mark in this file, reads the first section header as part of a key, and detects no presets at all on 4.5.1, 4.6.2 and 4.7.2. It used to be reported as `key_before_section`, naming a key whose first character nobody could see.
+A project with no export presets answers the same way whether or not `export_presets.cfg` is on disk: `preset_count: 0`, an empty `presets` list, and `presets_file_exists` saying which case it is. A file that is there and cannot be parsed is the separate state and is refused with `422` and `code: "unprocessable"`, carrying `declared_preset_sections` so "there is nothing here" and "there is something here I cannot read" are answerable. The refusal names which of the seven causes it is: `reason` is a stable token (`byte_order_mark`, `truncated_value`, `unloadable_value`, `no_section_header`, `key_before_section`, `incomplete_preset`, `duplicate_preset_name`), the message says what was found, and `line` is published where the cause has one. The first cause found is the one reported. The remedies differ, which is why one sentence for all of them was not enough: the Export dialog will not open a file that does not parse, so it is a remedy for a duplicate name and not for a truncated write. A valid ini holding sections that are not presets is the first case, not the second: its keys are skipped the way `[preset.N.options]` keys are. A file with content but no section the engine honours at all is the second. Section names and keys are read by the engine's rules: `[ preset.0 ]` is the preset section, `#` does not start a comment, and a `#` line with no `=` joins forward into the next key -- so a trailing note leaves the presets intact and a note above `platform` leaves a preset the engine has no platform for, which is refused rather than listed. Values are read by them too. `runnable` is read the way the engine reads it rather than compared against the two words Godot's own writer emits: the value is parsed and converted, so a number decides on being zero and `runnable=1` is a runnable preset rather than a file that could not be parsed. A file a 4.7 editor saved keeps the flag in a `[runnable_presets]` section that names one preset per platform instead, and gives the preset no `runnable` key; that section is read too, the way 4.7.2 reads it: the named preset is runnable unless a later preset on the same platform carries `runnable=true`, which takes the platform over. A value Godot's parser will not start, such as `export_path=)`, is `ERR_PARSE_ERROR` for the whole file and not for that one field: Godot's own answer is `Invalid export preset name` with an empty list of detected presets, even though the keys ahead of the bad value parse. So it is the unparseable case rather than a preset with an odd path, and `project_export` refuses it through the same code. A file that starts with a UTF-8 byte-order mark, which is what PowerShell 5.1's `Set-Content` writes, is `byte_order_mark` on line 1: Godot does not skip the mark in this file, reads the first section header as part of a key, and detects no presets at all on 4.5.1, 4.6.2 and 4.7.2. It used to be reported as `key_before_section`, naming a key whose first character nobody could see.
 
 ### `project_add_export_preset` — Offline and live
 
 Adds one export preset to the project-root `export_presets.cfg`, which `project_export` needs and a project nobody has exported by hand does not have (#779). Takes `name`, `platform` and an optional `export_path`, and supports `dry_run`. There is no confirmation token: it only adds.
 
-`platform` is one of the seven export platforms Godot ships, spelled exactly: `Windows Desktop`, `Linux`, `macOS`, `Android`, `iOS`, `Web` or `visionOS`. The schema publishes them as an enum, so a client can offer exactly those, and any other value is refused with the list, as a `400` naming `parameter: "platform"`. A value close to one of the seven, such as `HTML5`, `Windows`, `windows desktop` or `Linux/X11`, is refused with the one Godot uses as `did_you_mean` and `retry_with`; the schema's own enum check used to answer first, so that hint never reached a caller. `name` is 1 to 256 characters on one line with no control characters, and is written with the `ConfigFile` string escapes, so a quote, a backslash or a bracket reads back unchanged. Two more rules come from `project_export`, which asks Godot for the preset by name on its command line: a name may not contain `%20`, which Godot turns into a space there, and may not start with `-`, which Godot reads as one of its own options when it has one by that name (`--headless`, `-e` and `--verbose` all are). A space at either end is kept and exports, because `project_export` sends it in a form Godot does not trim. `export_path` is where the editor's Export dialog proposes to write the build. It is confined to the project the way `project_export`'s `output_path` is, may be given as `res://`, and is stored relative to the project, the way the editor stores a path inside it. A path ending in `/` or `\` names a directory and is refused, whether or not the directory exists.
+`platform` is one of the seven export platforms Godot ships, spelled exactly: `Windows Desktop`, `Linux`, `macOS`, `Android`, `iOS`, `Web` or `visionOS`. The schema publishes them as an enum, so a client can offer exactly those, and any other value is refused with the list, as a `400` naming `parameter: "platform"`. A value close to one of the seven, such as `HTML5`, `Windows`, `windows desktop` or `Linux/X11`, is refused with the one Godot uses as `did_you_mean` and `retry_with`; the schema's own enum check used to answer first, so that hint never reached a caller. `name` is 1 to 256 characters on one line with no control characters, and is written with the `ConfigFile` string escapes, so a quote, a backslash or a bracket reads back unchanged. Two more rules come from `project_export`, which asks Godot for the preset by name on its command line: a name may not contain `%20`, which Godot turns into a space there, and may not start with `-`, which Godot reads as one of its own options when it has one by that name (`--headless`, `-e` and `--verbose` all are). A space at either end is kept and exports, because `project_export` sends it in a form Godot does not trim. `export_path` is where the editor's Export dialog proposes to write the build. It is confined to the project the way `project_export`'s `output_path` is, may be given as `res://`, and is stored relative to the project, the way the editor stores a path inside it. A path ending in `/` or `\` names a directory and is refused, whether or not the directory exists. Godot does not create a missing folder when it exports a preset to its own path, measured on 4.5.1, 4.6.2 and 4.7.2, so the result reports `export_path_folder_exists` for a preset with an `export_path`, and `export_path_note` naming the folder when it is not there. The tool creates no folder.
 
 It writes the fewest keys that 4.5.1, 4.6.2 and 4.7.2 all load with no ERROR or WARNING line, and leaves everything else to the editor, which fills in its own defaults when it loads the preset. The three lines save a preset differently, and 4.7 keeps the runnable flag in a section of its own, so writing more would mean writing one line's format for all three. For a preset numbered `N`:
 
@@ -1730,7 +1787,7 @@ An open editor reads `export_presets.cfg` once, when it starts, and writes its o
 
 ### `project_export` — Offline
 
-Requires an existing `preset` and a normalized project-contained `output_path`. `mode` is `release` (default), `debug`, or `pack`; `timeout_seconds` is `1..900` (default `300`). The destination is preserved unless `overwrite: true`. Didi invokes the corresponding headless Godot export operation and verifies that a non-empty output artifact exists before reporting success. Installed export templates and platform SDKs remain Godot/operator prerequisites.
+Requires an existing `preset` and a normalized project-contained `output_path` with no control characters, which `gridmap_export_mesh_library` requires of its `output_path` too, since the path goes on Godot's command line. `mode` is `release` (default), `debug`, or `pack`; `timeout_seconds` is `1..900` (default `300`). The destination is preserved unless `overwrite: true`. Didi invokes the corresponding headless Godot export operation and verifies that a non-empty output artifact exists before reporting success. Installed export templates and platform SDKs remain Godot/operator prerequisites.
 
 `project_export` asks the same question through the same code, so the two cannot answer differently about the same file, and its confirmation preview asks it too: a preset the file does not declare is refused at the dry run with `404` and the names that are there under `available_presets`, rather than previewed cleanly and refused on the confirm. When Godot refuses the export, its console output is carried as `engine_output` under `error.data` with the terminal escapes removed, rather than concatenated into the message.
 

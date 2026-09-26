@@ -8,6 +8,7 @@
 #include <mutex>
 #include <set>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 #include "didi/mcp/jsonrpc.hpp"
 #include "didi/mcp/tool_registry.hpp"
@@ -15,6 +16,7 @@
 #include "didi/mcp/prompt_registry.hpp"
 #include "didi/common/ipc_channel.hpp"
 #include "didi/runtime/session_client.hpp"
+#include "didi/offline/blackboard.hpp"
 
 namespace didi {
 namespace mcp {
@@ -118,6 +120,10 @@ private:
     std::mutex m_writeMutex;
     mutable std::mutex m_subscriptionMutex;
     std::set<std::string> m_subscriptions;
+    // Each subscribed board's file as it last stood, taken when the board is
+    // first subscribed and dropped when its last URI goes. An absent value is
+    // a board with no file yet, which is a state and not an unknown.
+    std::unordered_map<std::string, std::optional<offline::BlackboardFileStamp>> m_boardBaselines;
     std::thread m_boardWatcher;
     std::optional<std::string> m_listingFingerprint;
     std::atomic<bool> m_watching{false};

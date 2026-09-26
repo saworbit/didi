@@ -29,7 +29,7 @@ Existing AI integrations for game engines usually rely on two flawed patterns:
 ┌─────────────────────────────────────────────────────────────┐
 │        Didi (C++ MCP Core Engine - didi / didi.exe)         │
 │  - JSON-RPC 2.0 Dispatcher (MCP 2026-07-28 + 2024-11-05)    │
-│  - Registry (119 canonical tools + 10 legacy names)         │
+│  - Registry (120 canonical tools + 10 legacy names)         │
 │  - Dynamic Resources (project tree, editor state, logs)     │
 │  - IPC Session Manager (Named Pipes / Local IPC)            │
 │  - Offline file/process tools and capability metadata       │
@@ -107,7 +107,8 @@ Godot's `SceneTree`, `EditorInterface`, and `RenderingServer` are **not thread-s
 [Command Queue (Thread-Safe FIFO)]
        │
        ├─► Native GDExtension main-loop frame callback
-       │    (bounded to 64 commands per frame)
+       │    (bounded to 64 commands per frame; none taken
+       │     from a nested frame or inside an import pass)
        ▼
 [Godot Main Thread / Engine Context]
        │
@@ -124,7 +125,7 @@ Godot's `SceneTree`, `EditorInterface`, and `RenderingServer` are **not thread-s
 ```
 
 ### Key Safety Guarantees:
-1. **Main-Thread Godot Calls**: Supported live scene and viewport operations run only after the native main-loop callback drains the synchronized queue.
+1. **Main-Thread Godot Calls**: Supported live scene and viewport operations run only after the native main-loop callback drains the synchronized queue. The engine can run that callback from inside one of its own calls: `EditorFileSystem.reimport_files` and `RenderingServer.force_draw` do, and so does every editor import pass, because a windowed editor's progress dialog pumps the main loop. Such a frame only advances the multi-frame work already in flight (runtime steps, reimports, profiler windows, invariant watches, scene exploration, captures, script calls) and takes nothing off the queue, so no command runs against a tree that is mid-reimport or mid-capture. The pass is open from `resources_reimporting` to `resources_reimported`, which the addon's `didi_import_watch.gd` counts, and on Godot 4.7 also while `EditorFileSystem.is_importing()` is true (#914).
 2. **Editor Undo/Redo Integration**: All modifications register transactions with Godot's `EditorUndoRedoManager`, allowing human developers to press `Ctrl+Z` in the editor to undo any AI-generated modification.
 3. **Timeout & Deadlock Protection**:
    - IPC client operations use recursive mutexes and platform-specific readiness checks with millisecond deadlines: `PeekNamedPipe` on Windows and `poll` on POSIX.

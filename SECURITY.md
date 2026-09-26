@@ -93,6 +93,12 @@ arriving on the wire can reach that slot -- so both were dismissed again for
 the reason above. Re-read the taint path before re-dismissing rather than
 matching on the rule name. The point of a re-raise is that the code moved.
 
+Nothing read the tab back, so those two and five untriaged Scorecard findings
+sat open until someone happened to look (#807). `tools/check_code_scanning.py`
+now reads it weekly from `supply-chain.yml` and keeps one issue open while
+anything is. A re-raise is listed apart from the rest, with the dismissal it
+most likely repeats. It dismisses nothing.
+
 Scorecard reports against the repository rather than against the code, and
 those findings have dispositions of their own.
 

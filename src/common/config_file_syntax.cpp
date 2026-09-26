@@ -761,6 +761,64 @@ bool booleanize(std::string_view value_text) {
     return true;
 }
 
+namespace {
+
+// The longest decimal number at the start of text: a sign, digits with at most
+// one point, and an exponent only when digits follow it. Nothing else counts,
+// so hex, inf, nan and digit separators stop it, the way they stop Godot.
+double decimalPrefix(std::string_view text) {
+    size_t at = 0;
+    if (at < text.size() && (text[at] == '+' || text[at] == '-')) ++at;
+    bool any_digit = false;
+    while (at < text.size() && std::isdigit(static_cast<unsigned char>(text[at]))) {
+        ++at;
+        any_digit = true;
+    }
+    if (at < text.size() && text[at] == '.') {
+        ++at;
+        while (at < text.size() && std::isdigit(static_cast<unsigned char>(text[at]))) {
+            ++at;
+            any_digit = true;
+        }
+    }
+    if (!any_digit) return 0.0;
+    size_t end = at;
+    if (at < text.size() && (text[at] == 'e' || text[at] == 'E')) {
+        size_t exponent = at + 1;
+        if (exponent < text.size() && (text[exponent] == '+' || text[exponent] == '-')) ++exponent;
+        if (exponent < text.size() && std::isdigit(static_cast<unsigned char>(text[exponent]))) {
+            while (exponent < text.size() &&
+                   std::isdigit(static_cast<unsigned char>(text[exponent]))) {
+                ++exponent;
+            }
+            end = exponent;
+        }
+    }
+    // strtod over exactly the prefix found, so its reading of the digits is the
+    // only thing used. The locale is never changed, so the point is `.`.
+    const std::string owned(text.substr(0, end));
+    const double value = std::strtod(owned.c_str(), nullptr);
+    // -0.0 reads back from the engine as 0.0.
+    return value == 0.0 ? 0.0 : value;
+}
+
+} // namespace
+
+double floatize(std::string_view value_text) {
+    const auto text = strings::trim(value_text);
+    if (text == "true") return 1.0;
+    if (text.empty() || text.front() == '&' || text.front() == '@') return 0.0;
+    if (text.front() == '"') {
+        const auto decoded = stringValue(text);
+        if (!decoded) return 0.0;
+        const std::string_view body = decoded->text;
+        size_t start = 0;
+        while (start < body.size() && std::isspace(static_cast<unsigned char>(body[start]))) ++start;
+        return decimalPrefix(body.substr(start));
+    }
+    return decimalPrefix(text);
+}
+
 std::optional<StringValue> stringValue(std::string_view value_text) {
     const auto text = trimmedView(value_text);
     size_t quote = 0;

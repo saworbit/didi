@@ -41,13 +41,13 @@ release changed, which is why it lives here and not in a version section.
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `116/119`
+**Canonical implementation:** `117/120`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Discovery now exposes 119 canonical tools plus 10 legacy registrations (129 total). 116 canonical tools are implemented and 3 remain unimplemented.
-The three Phase 7 blockers are unchanged; the newest name is `audio_add_bus`, recorded in [Surface Amendments](docs/SURFACE_AMENDMENTS.md).
+Discovery now exposes 120 canonical tools plus 10 legacy registrations (130 total). 117 canonical tools are implemented and 3 remain unimplemented.
+The three Phase 7 blockers are unchanged; the newest name is `asset_configure_import`, recorded in [Surface Amendments](docs/SURFACE_AMENDMENTS.md).
 
 ### Added
 
@@ -63,6 +63,19 @@ The three Phase 7 blockers are unchanged; the newest name is `audio_add_bus`, re
   [exploratory report](docs/EXPLORATORY_MCP_INSTRUCTIONS.md) records both build
   profiles, Godot 4.5.1/4.7.2 integration, live recovery and existing limitations.
 
+- **`asset_configure_import` makes a track loop (#958).** Whether music loops is an import
+  option, `loop` for an OGG or MP3 and `edit/loop_mode` for a WAV, and nothing on the surface
+  could write one, so a menu's music played once and stopped, and the only way around it was a
+  script setting `stream.loop` in `_ready`. The new tool changes the loop options of one WAV,
+  OGG or MP3 import in its `.import` file, reimports the asset in the attached editor, and checks
+  the file and the stream loaded fresh from disk; if the change did not hold, it puts the previous
+  file back and reimports that. Godot checks none of these values: a loop mode of 5 loads as one
+  the engine has no name for, `loop="yes"` loads as true, and a loop window past the stream or
+  an offset past the end is stored as written, all without an error. So the tool refuses each of
+  them, and any importer or option it has no measurement for. `resource_inspect` now reports an
+  imported asset's options under `import`, so whether a track loops can be read without an
+  editor. Recorded in [Surface Amendments](docs/SURFACE_AMENDMENTS.md), with the engine probe
+  behind every rule in `tools/vibe/probes/import_config_engine.py`.
 - **Experimental argument normalization, disabled by default.** Builds with
   `DIDI_ELASTIC_INGRESS=ON` let explicitly opted-in calls normalize selected
   numeric limits and 2D coordinates on three existing read-only tools. Canonical
@@ -178,6 +191,153 @@ The three Phase 7 blockers are unchanged; the newest name is `audio_add_bus`, re
   suite now works through both discovery and explicit `tests.<module>` invocation.
   YOLO, elicitation and output-schema fixtures reap their owned subprocesses and
   close pipes through bounded cleanup, eliminating the observed ResourceWarnings.
+
+- **A refusal for an argument under the wrong name carries the fix (#784).** When a call's only
+  problem is one argument this tool does not take, and its value fits the one required argument
+  that is missing, the refusal names both as `argument` and `did_you_mean` and carries the value
+  under the right name in `retry_with`. Every schema stays as it was; the retry is mechanical.
+
+- **`project_audit_assets` reports a scene connection to a method nothing declares (#781).**
+  `project_rename_references` leaves exactly that behind when it renames the method in a scene
+  and reports the script lines it did not change, and no check noticed. `broken_connections`
+  judges a connection only when the node, its script chain and the engine class all resolve,
+  so what it reports is certain.
+
+- **`project_list_input_actions` can ask for less (#775).** It took no arguments and answered
+  about 69 KB, 85 of 90 actions being the engine's own `ui_*` map. Each entry now says
+  `defined_by_project`, `include_engine_defaults: false` keeps only what `project.godot`
+  declares, and `action` reads one by name. The default answer is otherwise unchanged.
+
+- **An open code scanning alert is reported (#807).** Nothing read the tab back, so a CodeQL
+  finding dismissed once and raised again when its code moved sat open unannounced. A weekly job
+  in `supply-chain.yml` runs `tools/check_code_scanning.py` and keeps one tracking issue open
+  while any alert is, listing re-raises apart with the dismissal each most likely repeats. It
+  closes the issue once the tab is empty, and a tab it cannot read fails the job.
+
+- **`emitter_node` names the emitter on every signal tool (#769).** `signal_list_connections`
+  and `signal_emit` called it `target_node`, the word `signal_connect` and `signal_disconnect`
+  use for the receiver, so the spelling the siblings insist on was refused. Both now take
+  `emitter_node`, and `target_node` still works. The listing's description also claimed it
+  shows incoming connections. It shows only the ones going out, so passing the receiver
+  returned a plausible answer about the wrong node. It says so now.
+
+- **The Python suites that drive the server now run on the Windows CI leg.** `tests/didi_binary.py`
+  never looked at `build/didi.exe`, where CI's Ninja build puts it, so each of those suites
+  skipped and its step passed. Main's last run logged 67 skips, among them the YOLO,
+  elicitation, output schema and command line suites. A configured build tree with no binary
+  in it is now an error rather than a skip.
+
+- **`DIDI_TEST_BINARY` pointed at `didi_tests` is refused by name (#846).** The suites started
+  the test binary and failed with a JSON decode error per test. They now say which binary they
+  want, and the two recovery suites read the variable through the same resolver.
+
+- **The end to end MCP check runs before a push (#845).** It was 301 lines inside `ci.yml` that
+  drove `./build` by name. It is `tests/test_mcp_wire_contract.py` now, 15 named tests on the
+  binary `tests/didi_binary.py` picks. `tools/vibe/replay_ci_e2e.py` only existed to lift it
+  out of the workflow, so it is gone.
+
+- **A timed-out test session reports `tree_exited` again when one of its processes had already
+  finished (#859).** The kill wait counted every process the job had ever held, so a wrapper's
+  first command or anything the game ran turned a clean kill into `query_failed`. The tree kill
+  tests also stop failing about one run in twenty on Linux: they read a process that was being
+  reaped as still running. A failure now names `contained`, `kill_wait` and the pid.
+
+- **Three more refusals carry the argument that fixes them in `retry_with` (#902).** The check
+  added in #901 read one phrasing, `pass <argument>: true`, and the surface also says
+  `pass <argument> to ...` and `set <argument>=true`. `script_patch_method`'s preview and its
+  patcher now answer a symbol the script does not declare with
+  `retry_with: {"create_if_missing": true}`, and `runtime_checkpoint` answers an operation that
+  needs reconciliation with `retry_with: {"accept_current_files": true}` under a code of its
+  own, `needs_reconciliation`, rather than `conflict`. The check reads all three phrasings.
+
+- **`audio_list_buses` reads a quoted or boolean `volume_db` the way Godot does (#907).**
+  Offline it read `volume_db` with `std::atof`, so `"-6"` and `true` came back as 0 dB while
+  the game played them at -6 dB and 1 dB, and a generator that writes every value as a string
+  got a layout that read as 0 dB on every bus. There is now one float rule beside
+  `config_file::booleanize`, measured on 4.5.1, 4.6.2 and 4.7.2: a quoted value goes through
+  Godot's string-to-float, which reads a decimal prefix and ignores the rest, `true` is 1, and
+  `false`, `null`, a StringName and any container are 0.
+
+- **`project_add_export_preset` says when the preset's export folder does not exist (#932).**
+  Godot does not create a missing folder when it exports a preset to its own `export_path`, on
+  4.5.1, 4.6.2 and 4.7.2: the export fails with `Can't open file for writing`, naming the file
+  rather than the folder, and the add had said nothing. The result now reports
+  `export_path_folder_exists` and, when the folder is missing, an `export_path_note` naming it.
+  The tool still creates no folder, since adding a preset should not change anything else.
+
+- **`audio_add_bus` refuses a bad argument before it asks for an editor (#949).** With no
+  editor attached, the registry's live-route check answered `503 not_connected` before the
+  tool's own argument rules ran, so `{"name": " Music"}` sent the caller off to open an editor
+  and only then said the name was refused. A tool can now declare the argument rules that need
+  no engine, and the registry checks them before a route is chosen, in the call and its dry run.
+  `audio_add_bus` declares its name, send and value rules. `AudioAddBus.Gated` claimed this order
+  already, and passed only because it ran with no managed route; it now runs through one.
+
+- **`project_export` and `gridmap_export_mesh_library` refuse control characters in
+  `output_path` (#939).** Their path resolver checked the scheme and the project bounds but not
+  the control characters every other writer refuses, so a newline, a tab or a NUL reached
+  Godot's command line after a directory had been created for the path. Both now refuse one
+  with `400`, in the call and its dry run alike, before anything is created.
+
+- **`project_list_export_presets` reads the runnable preset a Godot 4.7 editor saved (#922).**
+  A 4.7 editor keeps the flag in a `[runnable_presets]` section that names one preset per
+  platform, and writes no `runnable` key in the preset, so every preset it had saved read
+  `runnable: false`, including the one the editor runs. The section is read now, in the order
+  4.7.2's own loader uses: the named preset is runnable unless a later preset on the same
+  platform carries `runnable=true`. A file without the section, which is what 4.5 and 4.6
+  write, is read as before.
+
+- **`runtime_*` control tools and the live runtime-log resource share one deadline rule
+  (#856).** Each kept its own copy of a guard that treated a 500 as a transport failure when
+  its message began with one of two texts. Nothing in the product writes the first, and the
+  second always arrives with transport state, so the match could never decide anything; its
+  test built a 500 by hand that no layer produces. The part that does matter, a 504 the
+  extension reports with no transport state and no outcome, is now one function beside
+  `annotateLiveRouteFailure`, and the test uses the two shapes a deadline really arrives in.
+
+- **A string sent to the engine keeps a leading byte-order mark, and one holding a NUL is
+  refused (#948).** The bridge built every Godot string with the engine's UTF-8 reader,
+  which drops a leading U+FEFF, and from a C string, which ends at a NUL. So a value like
+  `"\ufeffnote"` arrived as `note`, and `scene_set_property` called the write applied
+  because it compared the property with the same shortened value. The engine keeps the
+  mark in a String, a StringName, a NodePath and a node name on 4.5.1, 4.6.2 and 4.7.2, so
+  that text now goes in as UTF-32. A NUL cannot survive Godot's own conversions, so a live
+  tool now refuses it with `400 invalid_arguments`, naming where it is, before any route is
+  chosen.
+
+- **Two `script_patch_method` calls on one script no longer lose a method (#954).** The
+  tool read the script, spliced the method in and wrote the whole file back with nothing held
+  in between, so two agents patching different methods at once both read the old text and the
+  second write replaced the first while both reported success. It now holds the script's lock
+  under `.didi/locks` from the read to the write, the one `project.godot` and
+  `export_presets.cfg` take since #953, and refuses `409 project_file_busy` with
+  `retryable: true` when another write holds it for the whole wait.
+
+- **A checkpoint or a file write no longer fails on Windows because something held a file for
+  a moment (#937).** Checkpoint publication renamed the finished snapshot once, and a scanner
+  or indexer holding a file it had just copied failed it with `Access is denied`, about one
+  run in twenty in a test that did nothing else. Every staged write replaced its destination
+  once too, so a reader with the file open, `project_list_export_presets` during a
+  `project_add_export_preset` say, made the write a 500. Both now use the bounded retry the
+  managed restore already had, which retries only while Windows says the file is in use. A
+  snapshot that fails to publish is removed rather than left to count against the store's
+  limit.
+
+- **`editor_undo` and `editor_redo` no longer leave the editor's history inconsistent
+  (#913).** They stepped the scene's `UndoRedo` directly, which moved it under the
+  stacks `EditorUndoRedoManager` keeps beside it. The editor printed
+  `Inconsistent redo history` four times a harness run, and on 4.7 a scene undone
+  past its save read as saved, which is what `scene_close` asks before it decides
+  whether a close needs `discard_unsaved`. Both now run the editor's own Undo and
+  Redo from its Scene menu, as Ctrl+Z does, and say which history moved in
+  `history`. The rollback a failed postcondition makes goes the same way.
+
+- **A board subscribed while the watcher already ran is no longer announced as changed
+  (#139).** The watcher kept one "primed" flag for every board, so a second board's
+  existing file read as a change on the next tick, and a board dropped and subscribed again
+  replayed a write made while nobody watched it. Each board now gets its baseline when it is
+  first subscribed and loses it with its last subscription, which also means a write between
+  subscribing and the next tick is announced rather than recorded as the starting state.
 
 - **Windows test-session timeout completion.** Require verified captured process
   handles to signal before reporting `TreeExited`; job accounting alone can reach
@@ -450,6 +610,28 @@ The three Phase 7 blockers are unchanged; the newest name is `audio_add_bus`, re
   said.
 
 ### Changed
+
+- **The vendored JSON parser is nlohmann/json 3.12.0 (#796).** It parses every request an MCP
+  client sends. The header is the signed upstream release, byte for byte. Two of its changes
+  could have reached Didi and neither has a caller here: `std::filesystem::path` converting as
+  UTF-8, which a build with that conversion deleted proves, and `get_ptr` no longer reading an
+  unsigned value as signed. Malformed input gets the same answers as before.
+
+- **The README and the website list every tool.** Their fourteen domains
+  counted 94 of the 120 canonical tools: the audio buses, the shader tools,
+  the spatial queries, the ghost previews, `asset_configure_import` and
+  fourteen more were in no domain. Every canonical tool is now in exactly one,
+  and the counts add up to 120. `ui_hit_test` and `viewport_diff_capture` were
+  still described as editor-only, which they have not been since a game
+  session could answer them, and `scene_get_property` as returning scalars,
+  where it returns vectors, colours, arrays, dictionaries and resource paths.
+  The API specification listed 42 of the extension's 81 bridge methods and now
+  lists them all, with which session kinds may run which. The architecture's
+  queue says why nothing is dequeued inside an import pass (#914), and the
+  developer guide names every file an addon script has to be listed in and the
+  local replay of the end-to-end CI step. macOS and Linux were "not in CI"; a
+  headless editor answers the vibe probes there and nothing asserts, which is
+  what both platform tables now say.
 
 - **The website and the quickstart start from the download.** Both told a
   newcomer to clone and build, with a `D:/didi/build/Release` path in the

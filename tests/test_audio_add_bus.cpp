@@ -5,6 +5,7 @@
 #include "didi/mcp/mutation_safety.hpp"
 #include "didi/mcp/tool_registry.hpp"
 #include "didi/runtime/audio_requests.hpp"
+#include "didi/runtime/session_client.hpp"
 #include "didi/runtime/session_kind_policy.hpp"
 #include "didi/tools/resolved_tool_binding.hpp"
 
@@ -13,6 +14,7 @@
 #include <fstream>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -249,20 +251,60 @@ void registration() {
 // With no editor there is no layout to add to. The call says where to go, a
 // bad name is refused before anything else, and a game session is refused at
 // the hook: a bus added to a running game is in no file and gone when it stops.
+// The route the shipped server always has: a session router, here with no
+// session attached, so the registry's live-route check is what answers. A null
+// client is not a managed route, and the registry skips that check for it,
+// which is how this test used to pass for an order the product did not have
+// (#949).
+class NoSessionRouter final : public didi::runtime::IRuntimeSessionClient {
+public:
+    bool connect(const std::string&, int) override { return true; }
+    void disconnect() override {}
+    bool isConnected() const override { return false; }
+    didi::Result<json> sendRequest(const std::string&, const json&, int) override {
+        ++requests;
+        return didi::Error::notConnected();
+    }
+    didi::Result<json> listSessions(const std::optional<std::string>&) override {
+        return json::object();
+    }
+    didi::Result<json> attachSession(const std::string&) override { return json::object(); }
+    didi::Result<json> detachSession() override { return json::object(); }
+    std::optional<didi::runtime::SessionDescriptor> activeSession() const override {
+        return std::nullopt;
+    }
+    std::optional<didi::runtime::RuntimeRouteLease> acquireRouteLease() override {
+        return std::nullopt;
+    }
+    bool quarantineRoute(const didi::runtime::RuntimeRouteLease&) override { return false; }
+
+    int requests{0};
+};
+
 void gated() {
     auto& registry = didi::mcp::ToolRegistry::instance();
     registry.registerAllDefaultTools();
-    registry.setIpcClient(nullptr);
+    auto router = std::make_shared<NoSessionRouter>();
+    registry.setIpcClient(router);
 
     const auto offline = registry.callTool("audio_add_bus", {{"name", "Music"}});
     ASSERT_TRUE(offline.isError);
     ASSERT_TRUE(textOf(offline).find("audio_list_buses") != std::string::npos);
     ASSERT_TRUE(textOf(offline).find("\"status\":\"success\"") == std::string::npos);
+    ASSERT_TRUE(textOf(offline).find("no_live_session") != std::string::npos);
 
-    // The name rules need no engine, so they answer first and say which.
-    const auto bad_name = registry.callTool("audio_add_bus", {{"name", "Music "}});
-    ASSERT_TRUE(bad_name.isError);
-    ASSERT_TRUE(textOf(bad_name).find("space") != std::string::npos);
+    // The name rules need no engine, so they answer first and say which, in
+    // the call and in its dry run, before the missing editor is mentioned.
+    for (const bool dry_run : {false, true}) {
+        json arguments = {{"name", "Music "}};
+        if (dry_run) arguments["dry_run"] = true;
+        const auto bad_name = registry.callTool("audio_add_bus", arguments);
+        ASSERT_TRUE(bad_name.isError);
+        ASSERT_TRUE(textOf(bad_name).find("space") != std::string::npos);
+        ASSERT_TRUE(textOf(bad_name).find("no_live_session") == std::string::npos);
+    }
+    ASSERT_EQ(router->requests, 0);
+    registry.setIpcClient(nullptr);
 
     auto& hook = didi::godot::EditorHook::instance();
     hook.cancelPendingCommands("test reset");

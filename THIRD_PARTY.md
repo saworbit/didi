@@ -9,7 +9,7 @@ written down is a dependency nobody checks.
 
 | File | Upstream | Version in tree | License |
 | :--- | :--- | :--- | :--- |
-| `include/didi/common/json.hpp` | [nlohmann/json](https://github.com/nlohmann/json) | 3.11.3 | MIT |
+| `include/didi/common/json.hpp` | [nlohmann/json](https://github.com/nlohmann/json) | 3.12.0 | MIT |
 | `include/didi/common/stb_image_write.h` | [nothings/stb](https://github.com/nothings/stb) | v1.16 | Public domain or MIT, at your option |
 | `include/didi/gdextension/gdextension_interface.h` | [godotengine/godot](https://github.com/godotengine/godot) | Godot 4.7 era, carries deprecation notes through 4.7 | MIT |
 

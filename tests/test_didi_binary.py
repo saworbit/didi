@@ -61,6 +61,15 @@ class BinaryResolution(unittest.TestCase):
         os.utime(path, (mtime, mtime))
         return path
 
+    def _resolve_without_skipping(self):
+        # resolve() skips when it finds nothing, and a skip inside a test
+        # reports the test as skipped. For the two tests below that would turn
+        # the regression they guard into the silent pass they are about.
+        try:
+            return didi_binary.resolve()
+        except unittest.SkipTest as skipped:
+            self.fail(f"resolve() skipped: {skipped}")
+
     def test_the_newest_build_wins_over_directory_order(self):
         # build/ comes first in the candidate list and is the older tree, which
         # is exactly the arrangement that used to drive a stale binary.
@@ -102,6 +111,37 @@ class BinaryResolution(unittest.TestCase):
     def test_no_build_at_all_still_skips(self):
         with self.assertRaises(unittest.SkipTest):
             didi_binary.resolve()
+
+    def test_the_layout_ci_builds_on_windows_is_found(self):
+        # Ninja puts didi.exe in the build root. This path was missing, so every
+        # suite that searched skipped on the Windows leg and its step passed.
+        built = self._build("build/didi.exe", 1_000_000)
+        self.assertEqual(self._resolve_without_skipping(), built)
+
+    def test_a_configured_tree_with_no_binary_is_an_error_not_a_skip(self):
+        # A skip reads as green. A tree that was configured and holds no didi
+        # anywhere this looks is a broken build or an out of date list, and
+        # either way the suite did not run.
+        cache = self.root / "build" / "CMakeCache.txt"
+        cache.parent.mkdir(parents=True)
+        cache.write_text("", encoding="utf-8")
+        with self.assertRaises(RuntimeError) as raised:
+            self._resolve_without_skipping()
+        self.assertIn("build", str(raised.exception))
+        self.assertIn("DIDI_TEST_BINARY", str(raised.exception))
+
+    def test_the_test_binary_is_refused_by_name(self):
+        # The variable names the test binary for tools/test_inventory.py, so it
+        # gets set to it. The suites used to start it and fail with a JSON
+        # decode error per test that named neither (#846).
+        for name in ("didi_tests", "didi_tests.exe"):
+            with self.subTest(name=name):
+                os.environ["DIDI_TEST_BINARY"] = str(self._build(f"build/{name}", 1_000_000))
+                with self.assertRaises(RuntimeError) as raised:
+                    didi_binary.resolve()
+                message = str(raised.exception)
+                self.assertIn("DIDI_TEST_BINARY", message)
+                self.assertIn("test_inventory", message)
 
 
 if __name__ == "__main__":

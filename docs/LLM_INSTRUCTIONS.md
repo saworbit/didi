@@ -35,6 +35,7 @@ Before planning work, call `tools/list` and inspect `_meta.didi` on every candid
 - Treat `offline_fallback` as file/process/synthetic analysis, never as observed editor state.
 - Never infer implementation from the fact that a schema is registered.
 - Re-check discovery after the editor starts, stops, or reconnects.
+- Argument names differ between tool families: the node a call is about is `target_node` on most tools and `tilemap_path`, `animation_player_path` or `emitter_node` on others. A refusal for one argument sent under the wrong name carries `argument` (what you sent), `did_you_mean` and `retry_with`: resend without `argument` and with `retry_with` added.
 
 The four possible `currentMode` values are:
 
@@ -64,7 +65,7 @@ import-option changes.
 
 ### Inspect the edited scene
 
-Use `scene_get_hierarchy`. In live mode, trust names, classes, logical paths, and children. Check `omitted_fields`: bulk properties, scripts, and signals are deliberately not fabricated. Use `scene_get_property` for one scalar property at a time.
+Use `scene_get_hierarchy`. In live mode, trust names, classes, logical paths, and children. Check `omitted_fields`: bulk properties, scripts, and signals are deliberately not fabricated. Use `scene_get_property` for one property at a time; a vector, a colour, an array or a resource path comes back as JSON, and a type with no JSON form is refused.
 
 Offline hierarchy results come from parsing a `.tscn` file and contain `source: "parsed_tscn_file"`; they are not unsaved editor state.
 
@@ -190,7 +191,7 @@ For API details outside that limited map, inspect the project or use official Go
 - `blackboard_task_create` refuses a dependency that does not exist yet, so create prerequisites before the work that waits on them.
 
 - `project_audit_assets` reports unreferenced assets, references that resolve to nothing, signals nothing uses, existing `.import` metadata with malformed/unsafe paths, missing sources/outputs, or sources newer than outputs, and what is wrong with `project.godot` itself. Read `project_settings_issues` first: `unusable_setting_name` means the engine registers a setting under a name nothing can refer to, because a line with no `=` above it joined forward into the key, `unparseable_project_settings` means the file ends part-way through a value and Godot will not open the project at all, and `unloadable_setting_value` means the file is balanced and Godot still refuses it, because a bracket count is not a parse. Any of them makes every other answer about the project a description of a project that does not run. Treat every finding as evidence to check, not as a delete/reimport command: timestamp evidence is not Godot's checksum or importer-version verdict. Read `reference_verification` before acting on a broken-reference finding: with an editor attached the engine has already checked both `unresolved_uid` and `missing_file`, and `confirmed_by_engine` means the engine agrees it is broken. Findings the engine disproved move to `engine_only_references` instead, which means the reference works here and may break on a fresh checkout.
-- `resource_inspect` returns indexed metadata and dependencies, not arbitrary inner Resource properties. For a `.tres` or `.res` it also reports `resource_type`, read from the file's own header.
+- `resource_inspect` returns indexed metadata and dependencies, not arbitrary inner Resource properties. For a `.tres` or `.res` it also reports `resource_type`, read from the file's own header. For an imported asset it reports `import`: the importer and every import option as the editor wrote it, such as whether a track loops.
 - `resource_create` writes textual `.tres` content and does not instantiate the Resource class in Godot. It does refuse a `resource_type` the pinned class reference does not list, because Godot cannot load such a file at all; pass `allow_unknown_type: true` for a class_name script or a GDExtension type. It preserves an existing target unless destructive replacement is explicitly authorized with `overwrite: true`. `save_path` must end in `.tres`: a `.res` is Godot's binary format, so it is refused with the `.tres` spelling in `retry_with`. With an editor attached, `editor_copy_reloaded: true` means the editor's copy of the file was reloaded from what was just written.
 - `viewport_create_test_lab` writes a basic sandbox `.tscn` and preserves an existing sandbox unless `overwrite: true` is explicit; open or run it explicitly before visual conclusions.
 
@@ -206,9 +207,13 @@ Use `runtime_launch` to start a separate Godot process, optionally headless, for
 
 A fresh project has one bus, `Master`, and a settings menu needs a `Music` and an `SFX` bus to turn down. With the editor attached, call `audio_add_bus` for each, giving a `name` and, if it should feed another bus rather than `Master`, a `send` naming a bus that already exists. Do it in this order: add the buses, then set each `AudioStreamPlayer`'s `bus` with `scene_set_property`, then `editor_save_scene`. A player set to a bus that does not exist yet reads back `Master` and is saved as `Master`. The tool refuses a name in use, including one differing only in letter case, and a send to a bus that is not there, because Godot would otherwise rename the bus or route it to Master without a word; read `data.code` on the refusal. The editor writes the bus layout file itself, and `layout_written` says whether it has. `audio_configure_bus` then changes a bus by name.
 
+### Make a track loop
+
+Whether music loops is an import option, not a property of the player, so no scene edit can make it loop. With the editor attached, call `asset_configure_import` on the track: `{"loop": true}` for an OGG or MP3, `{"edit/loop_mode": 2}` for a WAV, which is Forward. `resource_inspect` on the track reports the current value under `import.options` first if you need it. The tool reimports the asset and checks what it loads, and refuses the value rather than writing one Godot would quietly misread. Do not set `stream.loop` from a script to get the same effect; that moves an asset's setting into code, and a second player of the same track would not loop.
+
 ### Observe or control an already-running session
 
-Ordinary Didi starts detached and exposes 119 canonical tools plus 10 legacy registrations. On first availability it may select the sole same-project session, or a unique editor among games; same-kind ambiguity stays detached. Verify rather than assume selection:
+Ordinary Didi starts detached and exposes 120 canonical tools plus 10 legacy registrations. On first availability it may select the sole same-project session, or a unique editor among games; same-kind ambiguity stays detached. Verify rather than assume selection:
 
 1. Call `runtime_list_sessions`, preferably with the canonical project path.
 2. Choose the intended `editor` or `game` descriptor and call `runtime_attach_session` if deterministic auto-selection did not choose it.
@@ -225,12 +230,12 @@ Treat `eval_gdscript` as a small read-only expression language. Prefer literals,
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `116/119`
+**Canonical implementation:** `117/120`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `PARTIAL_DELIVERY`. The implementation is 116/119 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and exactly 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version.
+Phase 7 is `PARTIAL_DELIVERY`. The implementation is 117/120 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and exactly 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version.
 
 All 15 feasible Phase 7 names are delivered and callable, including `tilemap_set_cells`, `tilemap_get_used_rect`, and `gridmap_set_cells` in editor sessions. Do not call or advertise the remaining 3 as available; feasibility is not implementation. See [reproducible evidence](PHASE_7_API_FEASIBILITY.md) and the [approved executable plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 

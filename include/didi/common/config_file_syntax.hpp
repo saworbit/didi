@@ -210,6 +210,21 @@ std::optional<LoadFailure> loadFailure(const Scan& scanned);
 // the whole file is ERR_PARSE_ERROR.
 bool booleanize(std::string_view value_text);
 
+// What a value means where the engine wants a float, such as a bus's
+// `volume_db` in an AudioBusLayout.
+//
+// The same shape as `booleanize`: Godot parses the value and converts it. A
+// quoted string goes through String's own to_float, which skips leading space,
+// reads a decimal prefix and ignores the rest, so `"-6"` and `"-6dB"` are -6
+// and `"abc"`, `"inf"`, `"nan"` and `"0x10"` are 0. `true` is 1. `false`,
+// `null`, a StringName and every container or constructor are 0. A bare number
+// keeps only its decimal prefix, so `0x10` is 0 and `1_000` is 1.
+//
+// Measured on 4.5.1, 4.6.2 and 4.7.2 by loading a layout per value and reading
+// `bus/0/volume_db` back (#907). `std::atof` had read every quoted number, and
+// `true`, as 0 dB.
+double floatize(std::string_view value_text);
+
 // What a quoted value holds, the way Godot's parser reads it.
 //
 // Readers stripped the quotes and kept everything between them, so every escape

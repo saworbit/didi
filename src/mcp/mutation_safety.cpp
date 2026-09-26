@@ -66,6 +66,10 @@ const std::unordered_set<std::string_view> kMutations = {
     // replaced, and the way back is the Audio panel. A dry run and no
     // confirmation token (#771).
     "audio_add_bus",
+    // Changes values in one existing .import file and reimports. The previous
+    // values come back in the answer, so the way back is the same call; a dry
+    // run and no confirmation token (#958).
+    "asset_configure_import",
     // The board is shared state between agents. A write is reversible and
     // idempotent for the same arguments, so it gets a dry run and no token.
     "blackboard_write", "blackboard_patch", "blackboard_clear",
@@ -192,6 +196,9 @@ const std::unordered_set<std::string_view> kIdempotentWriters = {
     "project_remove_input_action", "project_set_autoload",
     "project_remove_autoload", "input_map_set_action", "shader_set_uniform",
     "audio_configure_bus", "runtime_set_paused",
+    // Sets named options to named values: a second identical call writes the
+    // same lines and imports the same asset (#958).
+    "asset_configure_import",
     "blackboard_write", "blackboard_patch", "blackboard_clear",
     // Detaching twice lands detached, and attaching to the same session twice
     // lands on that session. Both are in kServerStateWriters, so neither is

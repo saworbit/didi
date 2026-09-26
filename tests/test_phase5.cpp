@@ -516,6 +516,36 @@ TEST(Phase5, ProjectExportRefusesAPresetGodotCannotDetectBeforeItStartsGodot) {
     ASSERT_EQ(before["not_detected"]["reason"], "platform_not_shipped");
 }
 
+TEST(Phase5, ExportOutputPathRefusesControlCharacters) {
+    // #939: resolveOutputPath checked the scheme and the project bounds and not
+    // the control characters every other writer refuses, so a newline, a tab or
+    // a NUL reached Godot's command line, after a directory had been made for
+    // the path. Refused by the call and its dry run alike, before anything is
+    // created.
+    ScopedPhase5Project project("output-control-characters");
+    std::ofstream("export_presets.cfg") << windowsPreset(0, "Kept");
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const std::vector<std::string> refused = {
+        "res://builds/game\nrun.pck", "res://builds/game\trun.pck",
+        std::string("res://builds/a\0b.pck", 20), "res://builds/a\x7F.pck"};
+    for (const auto& output_path : refused) {
+        for (const bool dry_run : {false, true}) {
+            didi::json arguments = {{"preset", "Kept"}, {"output_path", output_path},
+                                    {"mode", "pack"}};
+            if (dry_run) arguments["dry_run"] = true;
+            const auto result = registry.callTool("project_export", arguments);
+            ASSERT_TRUE(result.isError);
+            const auto error = toolPayload(result)["error"];
+            ASSERT_EQ(error["code"], 400);
+            ASSERT_TRUE(error["message"].get<std::string>().find("control characters") !=
+                        std::string::npos);
+        }
+    }
+    ASSERT_TRUE(!std::filesystem::exists("builds"));
+}
+
 TEST(Phase5, ReadsTheDetectedPresetsOutOfGodotsRefusal) {
     // What 4.7.2 printed for a preset stranded after a gap, verbatim.
     const std::string refusal =

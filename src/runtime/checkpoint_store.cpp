@@ -1,4 +1,5 @@
 #include "didi/runtime/checkpoint_store.hpp"
+#include "didi/common/atomic_write.hpp"
 #include "didi/common/project_path.hpp"
 #include <array>
 #include <atomic>
@@ -368,6 +369,19 @@ Result<json> CheckpointStore::create(const std::string& label) {
         auto id = newId();
         auto partial = m_store / (".partial-" + id);
         require(fs::create_directory(partial), "Checkpoint already exists");
+        // A snapshot that did not publish is removed rather than left behind,
+        // where it counted against the store's limit until someone deleted it
+        // by hand (#937). One left by a process that died mid-copy still
+        // counts, which is what the limit is for.
+        struct DiscardUnpublished {
+            fs::path path;
+            bool published = false;
+            ~DiscardUnpublished() {
+                if (published) return;
+                std::error_code ignored;
+                fs::remove_all(path, ignored);
+            }
+        } unpublished{partial};
         auto entries = copyTree(m_project, partial / "files", tree);
         auto ms = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
                                             std::chrono::system_clock::now().time_since_epoch())
@@ -386,7 +400,14 @@ Result<json> CheckpointStore::create(const std::string& label) {
                   {"directories", dirs}};
         write(partial / "manifest.json", j.dump(2));
         validateSourceStability(m_project, tree, entries);
-        fs::rename(partial, m_store / id);
+        // With the retry managed restore has. On Windows a scanner or indexer
+        // briefly holding a file just copied failed this rename with "Access
+        // is denied" about one time in twenty in a test that did nothing else
+        // (#937).
+        if (const auto error = files::renameWithRetry(partial, m_store / id, std::chrono::seconds(10))) {
+            throw fs::filesystem_error("rename", partial, m_store / id, error);
+        }
+        unpublished.published = true;
         auto completed = list();
         require(completed.isOk(), "Cannot enumerate checkpoint retention");
         for (size_t i = 5; i < completed.value().size(); ++i) {

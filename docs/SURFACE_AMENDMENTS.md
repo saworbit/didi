@@ -56,8 +56,8 @@ Six amendments are implemented: `runtime_read_output`, `audio_list_buses` and
 `audio_configure_bus`, all recorded below with tri-engine feasibility evidence,
 plus `project_audit_assets`, `project_analyze_impact`,
 `runtime_explore_scene`, `didi_control_room`, `ui_list_controls`,
-`scene_call_method`, `anim_add_library`, `project_add_export_preset` and
-`audio_add_bus`. One
+`scene_call_method`, `anim_add_library`, `project_add_export_preset`,
+`audio_add_bus` and `asset_configure_import`. One
 amendment adds no name and changes an existing contract: `scene_close` reads
 real dirty state where the engine can report it. One is withdrawn: raising the engine floor to
 Godot 4.7, refused in favour of runtime capability detection so that 4.5 and 4.6
@@ -66,6 +66,178 @@ August 2026 competitive review and are proposed, not accepted, in
 [Realignment Implementation Plan](REALIGNMENT_IMPLEMENTATION_PLAN.md):
 `runtime_read_output`, `ui_list_controls`, `godot_api_reference`, and an `until`
 parameter on the existing `runtime_step` (a change, not a new name).
+
+### ACCEPTED (IMPLEMENTED): `asset_configure_import`
+
+| Field | Value |
+| :--- | :--- |
+| **Name** | `asset_configure_import`, and one change to an existing contract: `resource_inspect` reports an imported asset's import options. |
+| **Failing workflow** | *Loop the menu music.* Walked on 4.5.1 and 4.7.2 on 2026-09-25 (#958, `tools/vibe/probes/music_loop_workflow.py`). A track the user dropped into the project imports with `asset_reimport`, a `Music` bus is added with `audio_add_bus`, and a menu gets an `AudioStreamPlayer` on that bus with `autoplay`, all saved correctly. Whether the track loops is an import option, `loop` for OGG and MP3 and `edit/loop_mode` for WAV, and nothing on the surface writes one. `scene_set_property` has no path to the stream, `resource_create` writes an `AudioStreamOggVorbis` with the flag set and no audio in it, `script_create` and `resource_create` both refuse the sidecar, and `asset_reimport` takes no options. Nothing reports the setting either: `resource_inspect` gives the track's type and uid, and `eval_gdscript` refuses the player's stream. In a game launched as the surface leaves it, the track stops at its end on both engines. The one workaround is a script that sets `stream.loop` in `_ready`, which moves the loop out of the asset and into code. Editing the sidecar outside the surface and reimporting with `asset_reimport` makes the same game loop, so the missing piece is the write. It is also Phase 8's last exit line, import changes that are previewable, explicit and verified after reimport, and the shape #770, #771 and #779 had: the read half (`project_audit_assets`) and the act half (`asset_reimport`) shipped, and the configure half did not. |
+| **Execution modes** | `live`. Editor sessions only. With no editor the tool refuses and names `resource_inspect` for reading the options. An offline write is not supported: the editor would notice it only on a scan in a later second than its last import, or at its next start, and nothing would verify the result. A game session is refused, because a game cannot reimport. The `resource_inspect` change is offline, like the rest of that tool. |
+| **Safety class** | `create/set`. Dry run, no confirmation token. It changes values in one existing sidecar. It adds no key, removes none and never changes the importer, and the same call twice leaves the same file. It registers no undo entry. The way back is the same call with the `previous` values the result carries. |
+| **Proving test** | Native, in `tests/test_asset_configure_import.cpp`. `AssetConfigureImport.RequestValidation` covers the rules under **Rules** below against the sidecars 4.5.1, 4.6.2 and 4.7.2 wrote for an OGG and a WAV, each refused with a 400 naming the argument: a missing, empty or over-long `asset_path`, a `.import` path with its asset in `retry_with`, a path under `.godot/`, a missing, empty or non-object `options`, an unknown argument, `loop` given as `1`, `"yes"` and `null`, a negative `loop_offset` and one at the track's length, `edit/loop_mode` given as `5`, `-1`, `2.5`, a word that is not a label and `true`, a negative begin, an end of 0, a window under a mode that ignores it with the mode in `retry_with`, a begin after the end, an end past the stream and a begin at its last frame, a WAV key on an OGG and an OGG key on a WAV each with the other in `retry_with`, a key the table does not hold naming the ones it does, a key the sidecar lacks, and a texture refused on `asset_path` naming its importer. `AssetConfigureImport.SidecarEdit` requires the edited file to equal the original with only the named lines changed, in an LF file, a CRLF file and one with no final newline, refuses a sidecar Godot cannot parse with its line, refuses a key that appears twice or shares its line, and checks both divergence readers against the file and the stream, including Forward loading as loop mode 1. `AssetConfigureImport.Registration` requires `live` only, editor sessions for the tool and for `asset.readImportedStream`, a mutation with `dry_run`, idempotent, and no confirmation token. `AssetConfigureImport.Gated` covers the offline refusal naming `resource_inspect` and a game session refused at the hook. `AssetConfigureImport.DryRunWritesNothing` requires a preview that says it read no stream and leaves the sidecar byte-identical, and a refused preview. `AssetConfigureImport.VerifiesAndRollsBack` drives the call against a scripted editor: a change that holds is reported with what it replaced, and a change the stream does not load with, or a reimport that fails, leaves the sidecar's bytes as they were; with the rollback removed it fails, which is the run that proves it can. `Tools.ResourceInspectReportsImportOptions` reads both sidecars through `resource_inspect`. Godot integration, on 4.5.1, 4.6.2 and 4.7.2, requests 6000 to 6045: a half-second OGG and a WAV are written into the fixture after the editor starts and imported with `asset_reimport`; a detached game on a scene playing the OGG is read at attach and 1.6 seconds later, and must stop, which is the control; then a dry run that asks the editor, `loop` and `loop_offset` on the OGG and a window on the WAV set by the name `forward`, each read back through `resource_inspect` with the uid it had and through the stream the tool loaded; seven refusals, after which both assets still read as the two changes left them; and the same game again, which must still be playing. `music_loop_workflow.py`'s fourth row, with `asset_configure_import`, loops on 4.5.1 and 4.7.2. The engine-output gate stayed clean throughout. |
+| **Reviewer** | Accepted by Shane Wall on 2026-09-25 for #958. It is a mutation, so the security argument is recorded below; nobody else has reviewed it. |
+
+The evidence below comes from `tools/vibe/probes/import_config_engine.py`, run
+on 4.5.1, 4.6.2 and 4.7.2 on 2026-09-25, and from the importers' own option
+declarations at `4.5.1-stable`, `4.6.2-stable` and `4.7.2-stable`. Every row
+was the same on all three lines unless a table says otherwise. The probe needs
+no Didi build. It imports generated assets with `--import`, edits one sidecar
+per case in a copy of the project and imports again, then drives a headless
+editor and a windowed one with a probe plugin.
+
+**What the importers declare.** The three audio importers declare these
+options, in the same text at all three tags. The MP3 importer moved from
+`modules/minimp3` to `modules/mp3` in 4.6 with its options unchanged.
+
+| Importer | Key | Type | Declared range | Default |
+| :--- | :--- | :--- | :--- | :--- |
+| `wav` | `edit/loop_mode` | int | an enum: Detect From WAV, Disabled, Forward, Ping-Pong, Backward | 0 |
+| `wav` | `edit/loop_begin` | int | none | 0 |
+| `wav` | `edit/loop_end` | int | none | -1 |
+| `oggvorbisstr`, `mp3` | `loop` | bool | | false |
+| `oggvorbisstr`, `mp3` | `loop_offset` | float | none | 0 |
+
+No bind reaches these declarations. `ResourceImporterWAV`,
+`ResourceImporterOggVorbis` and `ResourceImporterMP3` are registered classes,
+and on 4.7.2 none of them binds a method that lists its options. The only
+option methods in the API are virtuals a custom `EditorImportPlugin`
+implements. The Import dock reads the declarations from the importer in C++.
+So the table the tool checks against is
+Didi's, taken from the source at each supported tag, and a later engine that
+changes a row needs a contract change with its own probe rows. The option sets
+do differ elsewhere: CSV `compress` is a bool on 4.5 and an int from 4.6, and
+4.7 adds three GLB keys. That is why a key must also be in the sidecar this
+engine wrote before the tool will set it.
+
+**What the engine does with a value.** Each row is one sidecar edited, the
+project imported again, and the resource loaded back with `CACHE_MODE_IGNORE`.
+The WAV is 11025 frames long and the OGG and MP3 are half a second.
+
+| Written | Loads as |
+| :--- | :--- |
+| WAV `edit/loop_mode=2`, `=3`, `=4` | Forward, Ping-Pong, Backward, with `loop_end` at the last frame |
+| `edit/loop_mode=2.0` | Forward |
+| `edit/loop_mode="forward"`, `=true`, `=-1` | 0, no loop |
+| `edit/loop_mode=5`, `=99` | `loop_mode` 4 and 98, values the enum does not have |
+| `edit/loop_begin=1000`, `edit/loop_end=5000`, with a loop mode | that window |
+| `edit/loop_end=999999` | 999999 |
+| `edit/loop_begin=5000`, `edit/loop_end=1000` | both, the begin after the end |
+| `edit/loop_begin=-5` | 11020. A negative begin counts back from the end, which nothing declares |
+| a window under `edit/loop_mode=0`, on a WAV with no loop chunk | no loop. The window is ignored |
+| OGG or MP3 `loop=true`, `loop=1`, `loop="yes"` | true |
+| `loop_offset=0.25`, `=-1.0`, `=99.0` | each exactly as written |
+
+No row printed an ERROR or a WARNING, and none wrote `valid=false`. The same
+held beyond audio: a PNG `compress/mode=9` imported into a texture that fails to
+load, and nothing said so at import. So the engine refuses nothing, and every
+rule below is Didi's.
+
+**What a sidecar edit becomes.** A valid edit reimports and keeps the uid, and
+the engine rewrites the sidecar to the same bytes when the edit was in its own
+spelling. A removed key comes back as its default. An unknown key and a comment
+are dropped. A line the parser cannot start prints a parse error, and the asset
+reimports with every option at its default and a new uid, so every `uid://`
+reference to it stops resolving. That is why the tool refuses a sidecar that
+does not parse rather than editing it.
+
+**How an open editor notices.**
+
+| After the edit | The asset is reimported |
+| :--- | :--- |
+| nothing, for three seconds | no |
+| `scan_sources` or `scan`, the edit in a later second than the last import | yes |
+| `scan_sources` or `scan`, the edit in the same second | no. The editor keeps modified times in whole seconds |
+| `update_file` | no |
+| `reimport_files` | yes, reading the sidecar as it is |
+
+A resource the editor already holds is updated in place after the reimport, so
+the tool needs no cache mode. `reimport_files` is the call. Since #957 it waits
+out the editor's own import pass, and the probe's windowed-editor rows are the
+evidence that fix rests on.
+
+**The game.** From the failing workflow, with the player's `playing` read at
+attach and again 3.5 and 5.5 seconds later, on a two-second track:
+
+| State | 4.5.1 | 4.7.2 |
+| :--- | :--- | :--- |
+| as the surface leaves it | stops | stops |
+| a script setting `stream.loop = true` in `_ready` | loops | loops |
+| the sidecar's `loop=true` written outside the surface, then `asset_reimport` | loops | loops |
+
+**The binds.** Measured with `--dump-extension-api` from each binary:
+
+| Method | 4.5.1 | 4.6.2 | 4.7.2 |
+| :--- | :--- | :--- | :--- |
+| `AudioStream.get_length` | 1740695150 | 1740695150 | 1740695150 |
+| `AudioStreamWAV.get_mix_rate` | 3905245786 | 3905245786 | 3905245786 |
+| `AudioStreamOggVorbis.has_loop` | 36873697 | 36873697 | 36873697 |
+| `AudioStreamOggVorbis.get_loop_offset` | 1740695150 | 1740695150 | 1740695150 |
+| `AudioStreamMP3.has_loop` | 36873697 | 36873697 | 36873697 |
+| `AudioStreamMP3.get_loop_offset` | 1740695150 | 1740695150 | 1740695150 |
+
+As built, only `AudioStream.get_length` is new to the bridge. The loop
+properties of all three stream classes are read by name through `Object.get`,
+2760726917, which was already bound, so `has_loop` and `get_loop_offset` were
+not needed. `EditorFileSystem.reimport_files` and `ResourceLoader.load` were
+already bound too. The read is the bridge method `asset.readImportedStream`,
+which loads the asset with the cache ignored and is admitted to editor sessions
+only.
+
+**Rules.**
+
+- `asset_path` is one `res://` source asset inside the project, with a
+  `.import` sidecar beside it. Without one the call is refused, naming
+  `asset_reimport`, which imports a new asset. A path under `.godot/` and a
+  `.import` path are refused.
+- The sidecar must parse the way Godot's parser does, read with the reader
+  `project_audit_assets` uses. A sidecar that does not is refused with its line.
+- The importer must be `wav`, `oggvorbisstr` or `mp3`. Anything else is refused,
+  naming the three. Widening that list is a contract change with its own probe
+  rows, because each rule below comes from a measurement.
+- `options` holds one or more of the keys below, and each must also be under
+  `[params]` in this sidecar.
+  - `loop` is a JSON boolean. `1` and `"yes"` are refused, though the engine
+    takes both.
+  - `loop_offset` is a number of seconds, at least 0 and below the track's
+    length as `get_length` reads it from the imported stream.
+  - `edit/loop_mode` is an integer from 0 to 4, or one of its labels matched
+    without regard to case and written as the integer, so `"forward"` means 2.
+  - `edit/loop_begin` and `edit/loop_end` are frames. The begin is at least 0,
+    the end is at least 1 or -1 for the last frame, the begin is below the end,
+    and both are inside the stream, its length times its mix rate. A window is
+    refused unless the loop mode after the change is 2, 3 or 4, because the
+    engine ignores it under the others.
+- The write holds the project file's lock under `.didi/locks` from its read to
+  its write (#953). It changes only the named keys' lines and keeps every other
+  byte. A key that appears twice, or shares its line with another key, is
+  refused as `hand_edited_import_metadata`, because Godot never writes one.
+- Then `reimport_files` on the one path, and a wait for that pass to close.
+- Then the result is checked. The sidecar must hold each value in the engine's
+  own spelling, `valid` must not be false, the uid must be unchanged, and the
+  stream loaded fresh must read back what each option decides. If any of that
+  differs, the previous bytes are written back, the asset is imported again, and
+  the call is refused `422` with what diverged and `rolled_back: true`.
+- The result carries `previous` and `options` for each key, `reimported`,
+  `verified`, the uid, and the engine's own lines under `engine_diagnostics`.
+
+**`resource_inspect`.** For a path with a sidecar, the result gains `import`:
+`importer`, `type`, `valid`, `uid`, and `options`, every `[params]` key as the
+engine wrote it, read offline with the same reader. A sidecar that does not
+parse gives the parse error and its line instead. That answers "does this track
+loop" without an editor, and it is what `previous` is checked against.
+
+**What it will not do.** It changes one asset per call. It changes no importer
+and adds or removes no key. It does not touch the texture, font, scene or
+translation importers until an amendment with its own evidence widens the
+table. It never writes under `.godot/`, never creates a sidecar, and refuses
+offline and in a game.
+
+**Security.** It writes one file, the sidecar beside a project-contained asset,
+through the containment and the lock the other project writers use. Every value
+is formatted by Didi as a ConfigFile boolean, integer or number, never a
+caller's string, so nothing a caller sends becomes a new line or a new key. It
+takes no expression or script, and the reimport is the editor's own.
 
 ### ACCEPTED (IMPLEMENTED): `audio_add_bus`
 
@@ -249,6 +421,8 @@ the edited scene's history, so an entry in the global one is out of their
 reach, and `undo_redo_registered: true` would be a claim Didi's own undo tools
 cannot honour while #913 is open against them. The result says
 `undo_redo_registered: false` and names the Audio panel as the way back.
+Since #913 was fixed, the two undo tools run the editor's own Undo and Redo,
+which do reach the global history; the tool still registers no entry.
 
 **What it will not do.** It adds one bus at the end. It does not rename, move
 or remove a bus, add an effect, or change any other bus. It takes no path and

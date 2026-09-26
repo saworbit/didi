@@ -16,13 +16,14 @@ answer in a running game rather than by reading the file:
   answered: a property path through the stream, a property the player does not
   have, a stream resource written with `loop` set, a sidecar written by the
   file writers, and the player's own `finished` signal wired back to `play`.
-* **The game, three times.** Launched detached and attached after each state,
+* **The game, four times.** Launched detached and attached after each state,
   with the player's `playing` read before the track ends and again after it
   should have: as the surface left it (the control, which must stop), with the
-  one workaround that exists (a script that sets `stream.loop` in `_ready`,
-  which moves the loop out of the asset and into code), and with the sidecar
-  edited outside the surface and reimported through `asset_reimport`, which is
-  what the proposed tool would do.
+  one workaround that existed (a script that sets `stream.loop` in `_ready`,
+  which moves the loop out of the asset and into code), with the sidecar
+  edited outside the surface and reimported through `asset_reimport`, and
+  with `asset_configure_import`, the tool #958 asked for, on a build that has
+  it.
 
 Needs a live editor on a sandbox (`sandbox.py --launch`) and ffmpeg on PATH to
 make the track, or `--track` naming an OGG. Everything it writes carries a
@@ -218,7 +219,12 @@ def every_route(session: Session, project: Path) -> None:
                                            "target_node": PLAYER, "target_method": "play"})
     schema_note = "asset_reimport takes paths, dry_run and timeout_ms: no import options"
     print(f"  {schema_note}")
-    note("no tool on the surface changes an import option, so the track cannot be made to loop as an asset")
+    payload, errored = session.call("asset_configure_import",
+                                    {"asset_path": TRACK, "options": {"loop": True}, "dry_run": True})
+    if errored and "not found" in brief(payload, errored).lower():
+        note("no tool on the surface changes an import option, so the track cannot be made to loop as an asset")
+    else:
+        show("asset_configure_import dry run", payload, errored)
     session.call("editor_save_scene", {})
 
 
@@ -307,10 +313,20 @@ def main() -> int:
         results["with the sidecar edited and reimported"] = the_game(session, project, "sidecar edited")
         print(f"  sidecar loop line: {edit_sidecar(project, 'false')} back")
         session.call("asset_reimport", {"paths": [TRACK]})
+        payload, errored = session.call("asset_configure_import",
+                                        {"asset_path": TRACK, "options": {"loop": True}})
+        show("asset_configure_import loop true", payload, errored)
+        if errored:
+            print("  this build has no asset_configure_import, or it refused; the fourth row is not run")
+        else:
+            results["with asset_configure_import"] = the_game(session, project, "asset_configure_import")
+            payload, errored = session.call("asset_configure_import",
+                                            {"asset_path": TRACK, "options": {"loop": False}})
+            show("asset_configure_import loop false, back", payload, errored)
         print()
         print("=== verdict ===")
         expected = {"as the surface leaves it": False, "with a script setting stream.loop": True,
-                    "with the sidecar edited and reimported": True}
+                    "with the sidecar edited and reimported": True, "with asset_configure_import": True}
         for label, looped in results.items():
             mark = "ok  " if looped == expected[label] else "DIFF"
             print(f"  {mark} {label:44} loops={looped} (expected {expected[label]})")

@@ -1642,6 +1642,8 @@ try {
         (Tool-Request 910 "signal_list_connections" @{ target_node = "/root/SmokeRoot" }),
         (Tool-Request 20 "signal_connect" @{ emitter_node = "/root/SmokeRoot"; signal_name = "tree_entered"; target_node = "/root/SmokeRoot/Subject"; target_method = "notify_property_list_changed" }),
         (Tool-Request 911 "signal_list_connections" @{ target_node = "/root/SmokeRoot" }),
+        # The same node named the way signal_connect names it (#769).
+        (Tool-Request 915 "signal_list_connections" @{ emitter_node = "/root/SmokeRoot" }),
         (Tool-Request 912 "signal_disconnect" @{ emitter_node = "/root/SmokeRoot"; signal_name = "tree_entered"; target_node = "/root/SmokeRoot/Subject"; target_method = "notify_property_list_changed" }),
         (Tool-Request 913 "signal_list_connections" @{ target_node = "/root/SmokeRoot" }),
         # Wrong-class rejection for the delivered TileMapLayer read.
@@ -1813,6 +1815,11 @@ try {
             @{ type = "joypad_motion"; axis = 0; axis_value = -0.75; device = 3 }
         ) }),
         (Tool-Request 77 "project_list_input_actions" @{}),
+        # The project's own actions apart from the engine's, and one by name (#775).
+        (Tool-Request 5627 "project_list_input_actions" @{ include_engine_defaults = $false }),
+        (Tool-Request 5628 "project_list_input_actions" @{ action = "phase_two_jump" }),
+        (Tool-Request 5629 "project_list_input_actions" @{ action = "ui_accept" }),
+        (Tool-Request 5630 "project_list_input_actions" @{ action = "no_such_action" }),
         (Tool-Request 78 "project_set_input_action" @{ action = "phase_two_jump"; events = @() }),
         (Tool-Request 79 "project_set_input_action" @{ action = "phase_two_jump"; deadzone = 0.1; events = @(); replace = $true }),
         (Tool-Request 80 "project_list_input_actions" @{}),
@@ -1932,8 +1939,22 @@ try {
         # methods, so a redo has to put them back the same way the first apply
         # did; the file this save writes is the one the assertions read.
         (Tool-Request 2504 "editor_undo" @{}),
+        # That undo went past the save, so the scene now differs from its file.
+        # The editor has to say so: stepping the scene's UndoRedo directly left
+        # its own history behind, and it answered that the scene was saved (#913).
+        (@{ jsonrpc = "2.0"; id = 2508; method = "resources/read"; params = @{ uri = "godot://editor/state" } } | ConvertTo-Json -Compress),
         (Tool-Request 2505 "editor_redo" @{}),
         (Tool-Request 2506 "editor_save_scene" @{}),
+        # A string that starts with a byte-order mark, and one holding a NUL.
+        # Godot's UTF-8 reader dropped the mark and a C string ended at the
+        # NUL, so both reached the engine shorter than they were sent and the
+        # write was still called applied (#948). The close below discards them.
+        # The mark goes on the wire as a JSON escape, because Windows PowerShell
+        # 5.1 pipes a request to a native command as ASCII and the character
+        # itself would arrive as a question mark.
+        ((Tool-Request 2530 "scene_set_property" @{ target_node = "/root/DupRoot"; property_name = "editor_description"; value = "__BOM__note" }).Replace("__BOM__", '\ufeff')),
+        (Tool-Request 2531 "scene_get_property" @{ target_node = "/root/DupRoot"; property_name = "editor_description" }),
+        (Tool-Request 2532 "scene_set_property" @{ target_node = "/root/DupRoot"; property_name = "editor_description"; value = "a$([char]0)b" }),
         (Tool-Request 2507 "scene_close" @{ discard_unsaved = $true }),
         # A resource slot whose declared type is a list. Godot spells the
         # classes a property accepts as one comma-separated hint_string and
@@ -3678,6 +3699,7 @@ try {
     }
     Assert-True ((& $connectionCount $beforeConnect) -eq 0) "Signal listing showed the connection before it was made."
     Assert-True ((& $connectionCount $afterConnect) -eq 1) "signal_list_connections did not observe the new connection."
+    Assert-True ((& $connectionCount (Tool-Payload $byId[915])) -eq 1) "signal_list_connections by emitter_node did not see the connection target_node saw."
     Assert-True (-not $byId[912].result.isError) "signal_disconnect failed against a live editor session."
     Assert-True ((& $connectionCount $afterDisconnect) -eq 0) "signal_disconnect left the connection in place."
 
@@ -4099,6 +4121,17 @@ try {
     Assert-True (@($inputAction.events).Count -eq 4) "Input action did not persist every supported event shape."
     Assert-True ($inputAction.events[0].type -eq "key" -and $inputAction.events[0].shift -eq $true) "Key event was not normalized correctly."
     Assert-True ($inputAction.events[3].type -eq "joypad_motion" -and $inputAction.events[3].axis_value -eq -0.75) "Joypad motion event was not normalized correctly."
+    Assert-True ($inputAction.defined_by_project -eq $true) "The project's own action was not marked defined_by_project."
+    $ownActions = Tool-Payload $byId[5627]
+    Assert-True (@($ownActions.actions.action) -contains "phase_two_jump") "include_engine_defaults: false dropped the project's own action."
+    Assert-True (-not (@($ownActions.actions.action) -contains "ui_accept")) "include_engine_defaults: false still listed ui_accept."
+    Assert-True ($ownActions.omitted_engine_default_count -gt 0) "The listing did not say how many engine defaults it left out."
+    Assert-True (@($ownActions.actions | Where-Object { $_.defined_by_project -ne $true }).Count -eq 0) "A listed action was not marked as the project's own."
+    $namedAction = @((Tool-Payload $byId[5628]).actions)
+    Assert-True ($namedAction.Count -eq 1 -and $namedAction[0].action -eq "phase_two_jump" -and $namedAction[0].deadzone -eq 0.35) "Reading one action by name did not return exactly that action."
+    $engineAction = @((Tool-Payload $byId[5629]).actions)
+    Assert-True ($engineAction.Count -eq 1 -and $engineAction[0].defined_by_project -eq $false) "ui_accept was not marked as the engine's."
+    Assert-True ($byId[5630].result.isError -and $byId[5630].result.content[0].text -match "not found") "An unknown action name was not refused."
     Assert-True $byId[78].result.isError "Existing input action was overwritten without replace: true."
     $replacedInputAction = @((Tool-Payload $byId[80]).actions | Where-Object action -eq "phase_two_jump")[0]
     Assert-True (@($replacedInputAction.events).Count -eq 0) "Explicit input action replacement did not persist."
@@ -4298,8 +4331,21 @@ try {
     Assert-True ((Tool-Payload $byId[2502]).status -eq "success") "A branch with children could not be duplicated: $($byId[2502].result.content[0].text)"
     Assert-True ((Tool-Payload $byId[2503]).status -eq "saved") "The scene holding the duplicated branch could not be saved."
     Assert-True (-not $byId[2504].result.isError) "The duplicate could not be undone."
+    Assert-True ((Tool-Payload $byId[2504]).history -eq "scene") "Undoing the duplicate did not say it moved the scene's history: $((Tool-Payload $byId[2504]) | ConvertTo-Json -Compress)"
+    if ($dirtyStateReadable) {
+        $stateAfterUndo = $byId[2508].result.contents[0].text | ConvertFrom-Json
+        Assert-True (@($stateAfterUndo.unsaved_scenes) -contains "res://duplicate_probe.tscn") "A scene undone past its save read as saved: $($stateAfterUndo.unsaved_scenes | ConvertTo-Json -Compress)"
+    }
     Assert-True (-not $byId[2505].result.isError) "The duplicate could not be redone."
     Assert-True ((Tool-Payload $byId[2506]).status -eq "saved") "The redone duplicate could not be saved."
+    # The answer is read in the console's code page, so the bytes are taken
+    # back out of it and read as the UTF-8 Didi wrote. Compared by code point,
+    # because a culture-aware -eq treats U+FEFF as ignorable.
+    $markedRaw = [string](Tool-Payload $byId[2531]).value
+    $marked = [Text.Encoding]::UTF8.GetString([Console]::OutputEncoding.GetBytes($markedRaw))
+    Assert-True ($marked.Length -eq 5 -and [int]$marked[0] -eq 0xFEFF) "A value that starts with a byte-order mark lost it on the way to the engine: $(([int[]][char[]]$marked) -join ',')"
+    Assert-True ((Tool-Payload $byId[2530]).applied -eq $true) "A value that starts with a byte-order mark was not reported applied: $((Tool-Payload $byId[2530]) | ConvertTo-Json -Compress)"
+    Assert-True ($byId[2532].result.isError -and $byId[2532].result.content[0].text -match "'value' holds a NUL") "A value holding a NUL was not refused by name: $($byId[2532].result.content[0].text)"
     $duplicateProbe = Get-Content -LiteralPath (Join-Path $fixtureRoot "duplicate_probe.tscn") -Raw
     Assert-True ($duplicateProbe -match 'name="DupLeaf" type="Node" parent="DupBranchCopy"') "A duplicated branch reached the saved file without its children: $duplicateProbe"
     Assert-True ($duplicateProbe -match 'name="DupDeep" type="Node" parent="DupBranchCopy/DupLeaf"') "A duplicated branch reached the saved file without its grandchildren: $duplicateProbe"
@@ -4761,6 +4807,138 @@ try {
     Assert-True ($corruptError.data.code -eq "asset_import_failed" -and @($corruptError.data.failed) -contains "res://corrupt_asset.png") "The refused import was not reported as failed: $corruptText"
     Assert-True (@($corruptError.data.engine_diagnostics | Where-Object { $_.message -match "corrupt_asset\.png" }).Count -ge 1) "The refused import did not carry the engine's own reason: $corruptText"
 
+    # A track made to loop through the surface, and proved in a game (#958).
+    # Whether an OGG or a WAV loops is an import option, and nothing on the
+    # surface wrote one, so a menu's music played once and stopped. The assets
+    # are written now, after the editor started, as fresh_asset.png is, so the
+    # editor imports them here and the sidecars are the ones this engine
+    # writes. The OGG is a half-second tone encoded with ffmpeg, because Godot
+    # cannot encode one; the WAV is written here.
+    $loopTrack = Join-Path $fixtureRoot "loop_track.ogg"
+    [System.IO.File]::WriteAllBytes($loopTrack, [System.Convert]::FromBase64String("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"))
+    $loopTone = Join-Path $fixtureRoot "loop_tone.wav"
+    $toneFrames = 11025
+    $toneStream = New-Object System.IO.MemoryStream
+    $toneWriter = New-Object System.IO.BinaryWriter($toneStream)
+    $toneWriter.Write([System.Text.Encoding]::ASCII.GetBytes("RIFF"))
+    $toneWriter.Write([uint32](36 + $toneFrames * 2))
+    $toneWriter.Write([System.Text.Encoding]::ASCII.GetBytes("WAVEfmt "))
+    $toneWriter.Write([uint32]16)
+    $toneWriter.Write([uint16]1)
+    $toneWriter.Write([uint16]1)
+    $toneWriter.Write([uint32]22050)
+    $toneWriter.Write([uint32](22050 * 2))
+    $toneWriter.Write([uint16]2)
+    $toneWriter.Write([uint16]16)
+    $toneWriter.Write([System.Text.Encoding]::ASCII.GetBytes("data"))
+    $toneWriter.Write([uint32]($toneFrames * 2))
+    for ($frame = 0; $frame -lt $toneFrames; $frame++) {
+        $toneWriter.Write([int16](9000 * [Math]::Sin(2 * [Math]::PI * 330 * $frame / 22050)))
+    }
+    $toneWriter.Flush()
+    [System.IO.File]::WriteAllBytes($loopTone, $toneStream.ToArray())
+    $toneWriter.Dispose()
+    # The scene the game plays: the track on a player that starts by itself.
+    [System.IO.File]::WriteAllText((Join-Path $fixtureRoot "loop_music.tscn"),
+        "[gd_scene load_steps=2 format=3]`n`n[ext_resource type=`"AudioStream`" path=`"res://loop_track.ogg`" id=`"1`"]`n`n" +
+        "[node name=`"LoopMusic`" type=`"Node`"]`n`n[node name=`"Music`" type=`"AudioStreamPlayer`" parent=`".`"]`n" +
+        "stream = ExtResource(`"1`")`nautoplay = true`n")
+
+    # The game, launched on that scene and asked whether the track is still
+    # playing once it has had time to end three times over. The profiler read
+    # is the wait: it samples for as long as it is told to and answers after.
+    function Invoke-LoopMusicGame([int]$BaseId) {
+        $gameRequests = @(
+            (@{ jsonrpc = "2.0"; id = $BaseId; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
+            (Tool-Request ($BaseId + 1) "runtime_launch" @{ scene_path = "res://loop_music.tscn"; timeout_seconds = 30; headless = $true; detach = $true }),
+            (Tool-Request ($BaseId + 2) "eval_gdscript" @{ expression = 'node.get("playing")'; context_node = "/root/LoopMusic/Music" }),
+            (Tool-Request ($BaseId + 3) "runtime_read_profiler" @{ duration_ms = 1600; sample_count = 2 }),
+            (Tool-Request ($BaseId + 4) "eval_gdscript" @{ expression = 'node.get("playing")'; context_node = "/root/LoopMusic/Music" }),
+            (Tool-Request ($BaseId + 5) "runtime_stop" @{ exit_code = 0 })
+        )
+        $raw = Invoke-Didi -Requests $gameRequests -Arguments @("--project", $fixtureRoot)
+        $byId = @{}
+        foreach ($response in @($raw | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.PSObject.Properties.Name -contains "id" })) { $byId[[int]$response.id] = $response }
+        return $byId
+    }
+
+    $loopImportRequests = @(
+        (@{ jsonrpc = "2.0"; id = 6000; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
+        (Tool-Request 6001 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
+        (Tool-Request 6002 "asset_reimport" @{ paths = @("res://loop_track.ogg", "res://loop_tone.wav"); timeout_ms = 10000 }),
+        (Tool-Request 6003 "resource_inspect" @{ resource_path = "res://loop_track.ogg" })
+    )
+    $rawLoopImport = Invoke-Didi -Requests $loopImportRequests -Arguments @("--project", $fixtureRoot)
+    $loopImportById = @{}
+    foreach ($response in @($rawLoopImport | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.PSObject.Properties.Name -contains "id" })) { $loopImportById[[int]$response.id] = $response }
+    $loopImported = Tool-Payload $loopImportById[6002]
+    Assert-True ((@($loopImported.imported) -contains "res://loop_track.ogg") -and (@($loopImported.imported) -contains "res://loop_tone.wav")) "The loop fixtures were not imported: $($loopImportById[6002].result.content[0].text)"
+    $trackBefore = Tool-Payload $loopImportById[6003]
+    Assert-True ($trackBefore.import.importer -eq "oggvorbisstr" -and $trackBefore.import.options.loop -eq $false) "resource_inspect did not report the track's import options: $($loopImportById[6003].result.content[0].text)"
+    $trackUid = [string]$trackBefore.import.uid
+
+    # The control, and the failing workflow itself: as the surface leaves it,
+    # the track plays and then stops.
+    $controlGame = Invoke-LoopMusicGame 6010
+    Assert-True ((Tool-Payload $controlGame[6012]).value -eq $true) "The control game's track was not playing at attach: $($controlGame[6012].result.content[0].text)"
+    Assert-True ((Tool-Payload $controlGame[6014]).value -eq $false) "The control game's track was still playing after its end, so the loop check below proves nothing."
+
+    $loopWav = @{ asset_path = "res://loop_tone.wav" }
+    $loopRequests = @(
+        (@{ jsonrpc = "2.0"; id = 6020; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
+        (Tool-Request 6021 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
+        (Tool-Request 6022 "asset_configure_import" @{ asset_path = "res://loop_track.ogg"; options = @{ loop = $true }; dry_run = $true }),
+        (Tool-Request 6023 "asset_configure_import" @{ asset_path = "res://loop_track.ogg"; options = @{ loop = $true; loop_offset = 0.1 } }),
+        (Tool-Request 6024 "resource_inspect" @{ resource_path = "res://loop_track.ogg" }),
+        (Tool-Request 6025 "asset_configure_import" @{ asset_path = "res://loop_tone.wav"; options = @{ "edit/loop_mode" = "forward"; "edit/loop_begin" = 1000; "edit/loop_end" = 5000 } }),
+        (Tool-Request 6026 "resource_inspect" @{ resource_path = "res://loop_tone.wav" }),
+        # Every way to be wrong, each of which Godot would store without a word.
+        (Tool-Request 6027 "asset_configure_import" @{ asset_path = "res://loop_track.ogg"; options = @{ loop = "yes" } }),
+        (Tool-Request 6028 "asset_configure_import" @{ asset_path = "res://loop_tone.wav"; options = @{ "edit/loop_mode" = 5 } }),
+        (Tool-Request 6029 "asset_configure_import" @{ asset_path = "res://loop_tone.wav"; options = @{ "edit/loop_mode" = 2; "edit/loop_end" = 999999 } }),
+        (Tool-Request 6030 "asset_configure_import" @{ asset_path = "res://loop_tone.wav"; options = @{ "edit/loop_mode" = 2; "edit/loop_begin" = 5000; "edit/loop_end" = 1000 } }),
+        (Tool-Request 6031 "asset_configure_import" @{ asset_path = "res://loop_track.ogg"; options = @{ loop_offset = 99.0 } }),
+        (Tool-Request 6032 "asset_configure_import" @{ asset_path = "res://loop_track.ogg"; options = @{ "edit/loop_mode" = 2 } }),
+        (Tool-Request 6033 "asset_configure_import" @{ asset_path = "res://fresh_asset.png"; options = @{ loop = $true } }),
+        (Tool-Request 6034 "resource_inspect" @{ resource_path = "res://loop_track.ogg" }),
+        (Tool-Request 6035 "resource_inspect" @{ resource_path = "res://loop_tone.wav" })
+    )
+    $rawLoop = Invoke-Didi -Requests $loopRequests -Arguments @("--project", $fixtureRoot)
+    $loopById = @{}
+    foreach ($response in @($rawLoop | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.PSObject.Properties.Name -contains "id" })) { $loopById[[int]$response.id] = $response }
+
+    # The dry run asks the editor, and writes nothing: the call after it still
+    # finds loop false to replace.
+    $loopPreview = $loopById[6022].result.content[0].text
+    Assert-True (-not $loopById[6022].result.isError) "The dry run was refused: $loopPreview"
+    Assert-True ($loopPreview -match '"planned_options":\{"loop":true\}' -and $loopPreview -match 'AudioStreamOggVorbis') "The dry run did not preview the change against the stream: $loopPreview"
+    $looped = Tool-Payload $loopById[6023]
+    Assert-True ($looped.status -eq "configured" -and $looped.verified -eq $true) "The OGG loop was not configured and verified: $($loopById[6023].result.content[0].text)"
+    Assert-True ($looped.previous.loop -eq $false -and $looped.options.loop -eq $true) "The OGG change did not report what it replaced: $($loopById[6023].result.content[0].text)"
+    Assert-True ($looped.uid -eq $trackUid -and $looped.stream.properties.loop -eq $true) "The reimported OGG did not keep its uid or load looping: $($loopById[6023].result.content[0].text)"
+    $trackAfter = (Tool-Payload $loopById[6024]).import
+    Assert-True ($trackAfter.options.loop -eq $true -and [double]$trackAfter.options.loop_offset -eq 0.1 -and $trackAfter.uid -eq $trackUid) "resource_inspect did not read the OGG change back: $($loopById[6024].result.content[0].text)"
+    $windowed = Tool-Payload $loopById[6025]
+    Assert-True ($windowed.options.'edit/loop_mode' -eq 2 -and $windowed.stream.properties.loop_mode -eq 1) "The WAV loop mode was not set by its name or did not load as Forward: $($loopById[6025].result.content[0].text)"
+    Assert-True ($windowed.stream.properties.loop_begin -eq 1000 -and $windowed.stream.properties.loop_end -eq 5000) "The WAV loop window did not load: $($loopById[6025].result.content[0].text)"
+    $toneAfter = (Tool-Payload $loopById[6026]).import
+    Assert-True ($toneAfter.options.'edit/loop_mode' -eq 2 -and $toneAfter.options.'edit/loop_begin' -eq 1000 -and $toneAfter.options.'edit/loop_end' -eq 5000) "resource_inspect did not read the WAV change back: $($loopById[6026].result.content[0].text)"
+    foreach ($refusal in @(6027, 6028, 6029, 6030, 6031, 6032, 6033)) {
+        Assert-True $loopById[$refusal].result.isError "asset_configure_import accepted request $refusal, which Godot would have stored without a word: $($loopById[$refusal].result.content[0].text)"
+    }
+    Assert-True (($loopById[6033].result.content[0].text | ConvertFrom-Json).error.data.importer -eq "texture") "A texture was not refused as the importer it is: $($loopById[6033].result.content[0].text)"
+    # No refusal wrote anything: both assets read back as the two successes left them.
+    $trackFinal = (Tool-Payload $loopById[6034]).import
+    $toneFinal = (Tool-Payload $loopById[6035]).import
+    Assert-True ($trackFinal.options.loop -eq $true -and [double]$trackFinal.options.loop_offset -eq 0.1 -and $toneFinal.options.'edit/loop_end' -eq 5000 -and $toneFinal.options.'edit/loop_begin' -eq 1000) "A refused call changed an import option."
+    $trackSidecar = Get-Content -LiteralPath "$loopTrack.import" -Raw
+    Assert-True ($trackSidecar -match '(?m)^loop=true$' -and $trackSidecar -match '(?m)^loop_offset=0\.1$') "The OGG's .import file does not hold the change: $trackSidecar"
+
+    # And the game that stopped now loops.
+    $loopingGame = Invoke-LoopMusicGame 6040
+    Assert-True ((Tool-Payload $loopingGame[6042]).value -eq $true) "The looping game's track was not playing at attach: $($loopingGame[6042].result.content[0].text)"
+    Assert-True ((Tool-Payload $loopingGame[6044]).value -eq $true) "The track still stopped at its end after asset_configure_import set loop."
+
     # The import freshness check reproduces four things Godot does by hand: the
     # digest, the name of the record, where the record lives and what dest_md5
     # is a digest of. Every test of it was written against a .md5 written here,
@@ -5167,7 +5345,6 @@ try {
         @{ Pattern = "Couldn't save project\.godot"; Cause = "requests 201, 203 and 205 deny the project file to prove rollback" },
         @{ Pattern = 'Identifier "SignalProbeState" not declared|Failed to load script "res://signal_uses_autoload\.gd"'; Cause = "signal_uses_autoload.gd does not compile, on purpose, for target_script_not_compiled" },
         @{ Pattern = "corrupt_asset\.png|IHDR: CRC error|ERR_FILE_CORRUPT"; Cause = "request 2700 imports a PNG with a wrong CRC on every chunk" },
-        @{ Pattern = "Inconsistent redo history"; Cause = "known defect #913: editor_undo and editor_redo step the scene's UndoRedo directly" },
         @{ Pattern = "didi_output_canary_warning"; Cause = "the runtime fixture prints a warning canary for runtime_read_output" },
         # The host, not a request. A CI runner has no GPU and no audio device,
         # and the engine says so while its drivers start, before any request is

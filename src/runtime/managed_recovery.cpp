@@ -1,4 +1,5 @@
 #include "didi/runtime/managed_recovery.hpp"
+#include "didi/common/atomic_write.hpp"
 #include "didi/common/logger.hpp"
 #include "didi/common/project_path.hpp"
 #include "didi/common/secure_random.hpp"
@@ -25,23 +26,13 @@ namespace {
 // two processes release the addon's DLL instead of one (#678).
 //
 // Bounded, and the last error is what the caller is told, so a handle that is
-// really held still reports the same refusal it always did.
+// really held still reports the same refusal it always did. The retry itself is
+// shared with checkpoint publication and every staged write (#937).
 void renameWithRetry(const fs::path& from, const fs::path& to) {
-    using namespace std::chrono;
-    constexpr auto kBudget = seconds(10);
-    constexpr auto kPause = milliseconds(50);
-    const auto deadline = steady_clock::now() + kBudget;
-    for (;;) {
-        std::error_code error;
-        fs::rename(from, to, error);
-        if (!error) return;
-        if (steady_clock::now() >= deadline) {
-            // The throwing form, so the caller's catch reports what the
-            // filesystem said, exactly as it did before there was a retry.
-            fs::rename(from, to);
-            return;
-        }
-        std::this_thread::sleep_for(kPause);
+    if (const auto error = files::renameWithRetry(from, to, std::chrono::seconds(10))) {
+        // Thrown, so the caller's catch reports what the filesystem said,
+        // exactly as it did before there was a retry.
+        throw fs::filesystem_error("rename", from, to, error);
     }
 }
 
@@ -318,8 +309,13 @@ json ManagedRecovery::status() {
 }
 Result<json> ManagedRecovery::checkpoint(bool accept) {
     if (m_needsReconciliation && !accept)
-        return recoveryError("An operation needs reconciliation. Inspect files, then explicitly "
-                             "set accept_current_files=true or restore a checkpoint.");
+        // A name of its own, since conflict says nothing about what to do, and
+        // the argument the sentence names under retry_with (#902).
+        return Error(409,
+                     "An operation needs reconciliation. Inspect files, then explicitly "
+                     "set accept_current_files=true or restore a checkpoint.",
+                     json{{"code", "needs_reconciliation"},
+                          {"retry_with", {{"accept_current_files", true}}}});
     const bool uncertain_editor_is_current = !m_operation.is_object() ||
         m_operation.value("editor_session", m_attachedSession) == m_attachedSession;
     if (m_needsReconciliation && uncertain_editor_is_current &&
