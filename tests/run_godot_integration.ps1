@@ -4939,6 +4939,83 @@ try {
     Assert-True ((Tool-Payload $loopingGame[6042]).value -eq $true) "The looping game's track was not playing at attach: $($loopingGame[6042].result.content[0].text)"
     Assert-True ((Tool-Payload $loopingGame[6044]).value -eq $true) "The track still stopped at its end after asset_configure_import set loop."
 
+    # What a localised menu says, asked of a game (#988). A Control translates
+    # its text as it draws it, so the text property holds the key while the
+    # player reads the translation, and ui_list_controls reported the key as
+    # what the control says. The game registers one French string itself and
+    # sets its locale, so nothing in the fixture's project settings moves for
+    # the rest of the run. Each control is a case the engine settled in
+    # tools/vibe/probes/control_text_engine.py: a Label and a Button draw the
+    # translation; a LineEdit draws the key it holds, and so does a Label whose
+    # auto-translation is off; a ColorPickerButton is a Button that draws no
+    # text; and a Label whose text is no key has nothing to translate.
+    $localisedScript = @'
+extends Control
+
+
+func _ready() -> void:
+    var translation := Translation.new()
+    translation.locale = "fr"
+    translation.add_message("DIDI_MENU_START", "Commencer la partie")
+    TranslationServer.add_translation(translation)
+    TranslationServer.set_locale("fr")
+'@
+    [System.IO.File]::WriteAllText((Join-Path $fixtureRoot "localised_ui.gd"), $localisedScript)
+    $localisedScene = @'
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://localised_ui.gd" id="1"]
+
+[node name="LocalisedUi" type="Control"]
+script = ExtResource("1")
+
+[node name="Title" type="Label" parent="."]
+text = "DIDI_MENU_START"
+
+[node name="Play" type="Button" parent="."]
+offset_top = 30.0
+text = "DIDI_MENU_START"
+
+[node name="Name" type="LineEdit" parent="."]
+offset_top = 60.0
+text = "DIDI_MENU_START"
+
+[node name="Swatch" type="ColorPickerButton" parent="."]
+offset_top = 90.0
+text = "DIDI_MENU_START"
+
+[node name="Fixed" type="Label" parent="."]
+offset_top = 120.0
+auto_translate_mode = 2
+text = "DIDI_MENU_START"
+
+[node name="Plain" type="Label" parent="."]
+offset_top = 150.0
+text = "Not a key"
+'@
+    [System.IO.File]::WriteAllText((Join-Path $fixtureRoot "localised_ui.tscn"), $localisedScene)
+    $localisedRequests = @(
+        (@{ jsonrpc = "2.0"; id = 6100; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
+        (Tool-Request 6101 "runtime_launch" @{ scene_path = "res://localised_ui.tscn"; timeout_seconds = 30; headless = $true; detach = $true }),
+        (Tool-Request 6102 "ui_list_controls" @{ root_path = "/root/LocalisedUi"; max_results = 32 }),
+        (Tool-Request 6103 "ui_list_controls" @{ root_path = "/root/LocalisedUi"; include_text = $false; max_results = 32 }),
+        (Tool-Request 6104 "runtime_stop" @{ exit_code = 0 })
+    )
+    $rawLocalised = Invoke-Didi -Requests $localisedRequests -Arguments @("--project", $fixtureRoot)
+    $localisedById = @{}
+    foreach ($response in @($rawLocalised | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.PSObject.Properties.Name -contains "id" })) { $localisedById[[int]$response.id] = $response }
+    $localisedText = $localisedById[6102].result.content[0].text
+    $localised = @{}
+    foreach ($control in @((Tool-Payload $localisedById[6102]).controls)) { $localised[($control.node_path -split "/")[-1]] = $control }
+    $unlisted = @("Title", "Play", "Name", "Swatch", "Fixed", "Plain" | Where-Object { -not $localised.ContainsKey($_) })
+    Assert-True ($unlisted.Count -eq 0) "ui_list_controls in the localised game did not list $($unlisted -join ', '): $localisedText"
+    Assert-True ($localised["Title"].text -eq "DIDI_MENU_START" -and $localised["Title"].displayed_text -eq "Commencer la partie") "A translated Label did not report both the key it holds and what it draws: $localisedText"
+    Assert-True ($localised["Play"].text -eq "DIDI_MENU_START" -and $localised["Play"].displayed_text -eq "Commencer la partie") "A translated Button did not report both the key it holds and what it draws: $localisedText"
+    $undisplayed = @("Name", "Swatch", "Fixed", "Plain" | Where-Object { $localised.ContainsKey($_) -and $localised[$_].PSObject.Properties.Name -contains "displayed_text" })
+    Assert-True ($undisplayed.Count -eq 0) "displayed_text was reported for a control that draws its text as it is, or draws none: $($undisplayed -join ', ') in $localisedText"
+    $textRead = @(@((Tool-Payload $localisedById[6103]).controls) | Where-Object { $_.PSObject.Properties.Name -contains "text" -or $_.PSObject.Properties.Name -contains "displayed_text" })
+    Assert-True ($textRead.Count -eq 0) "include_text false still read a control's text or what it displays: $($localisedById[6103].result.content[0].text)"
+
     # The import freshness check reproduces four things Godot does by hand: the
     # digest, the name of the record, where the record lives and what dest_md5
     # is a digest of. Every test of it was written against a .md5 written here,

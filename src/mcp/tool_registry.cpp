@@ -5061,7 +5061,9 @@ void ToolRegistry::registerAllDefaultTools() {
         t.name = "ui_list_controls";
         t.description =
             "Lists live Control nodes under a root with the viewport-space rectangle each one "
-            "occupies, its class, visibility, mouse filter, and its text where it has any. Editor "
+            "occupies, its class, visibility, mouse filter, and its text where it has any. In a "
+            "localised game text is the key the scene holds; displayed_text, present when it "
+            "differs, is the translation the player reads. Editor "
             "or game, read-only, and no input is injected. This is how a caller finds a control "
             "to act on; ui_hit_test answers the opposite question, which is what sits under a "
             "point it already has.";
@@ -5072,7 +5074,7 @@ void ToolRegistry::registerAllDefaultTools() {
             {"visible_only", {{"type", "boolean"}, {"default", true},
                               {"description", "Skip Controls that are not visible in the tree, and everything beneath them."}}},
             {"include_text", {{"type", "boolean"}, {"default", true},
-                              {"description", "Read the text property where the Control has one. Capped at 256 bytes."}}},
+                              {"description", "Read the text property where the Control has one, and displayed_text where the Control draws it translated. Each is capped at 256 bytes."}}},
             {"class_filter", {{"type", "array"}, {"items", {{"type", "string"}, {"maxLength", 64}}},
                               {"minItems", 1}, {"maxItems", 16},
                               {"description", "Keep only Controls that are one of these classes, inheritance included."}}}
