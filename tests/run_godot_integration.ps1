@@ -5182,6 +5182,57 @@ text = "Not a key"
     Assert-True ($ray3d.hit -eq $true -and $ray3d.collider_class -eq "StaticBody3D") "A 3D editor raycast missed a StaticBody3D standing in its path."
     Assert-True ($ray3d.collider_path -eq "/root/RayProbe3D/Block") "The 3D editor raycast answered with $($ray3d.collider_path), which is not a path the surface takes."
 
+    # A reimport while the editor scans. reimport_files cannot find a file
+    # while a scan runs, so an asset named then was skipped with "Can't find
+    # file ... during file reimport" and still reported as reimported; this gate
+    # met it only on a loaded machine. The flag is not the end of a scan
+    # either: the editor applies what it found on a later frame, in frames of
+    # its own, and a reimport or an answer in between collided with that work
+    # ("Task ... already exists"). A batch holding a file the editor has
+    # never seen asks for a scan, and this fixture scans in a moment. With 500
+    # more scripts indexed the scan outlasts the call every time, as a project
+    # of any real size does; with 300 it did half the time
+    # (tools/vibe/probes/scan_reimport_engine.py). They are indexed 250 at a
+    # time, because the editor's first pass over a new script is the slow part
+    # and 500 in one call would outlast the route deadline on a CI runner. The
+    # SVG's imported texture has to be rewritten, which is the reimport
+    # happening rather than the answer saying it did. The scripts stay: the
+    # fixture is thrown away, and deleting them under an open editor is a test
+    # of its own.
+    $raceFolder = Join-Path $fixtureRoot "reimport_race"
+    New-Item -ItemType Directory -Path $raceFolder -Force | Out-Null
+    foreach ($chunk in 0, 1) {
+        for ($index = $chunk * 250; $index -lt ($chunk + 1) * 250; $index++) {
+            [System.IO.File]::WriteAllText((Join-Path $raceFolder ("filler_{0:D4}.gd" -f $index)),
+                "extends Node`n`nfunc value_$index() -> int:`n`treturn $index`n")
+        }
+        $indexRequests = @(
+            (@{ jsonrpc = "2.0"; id = 6115; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
+            (Tool-Request 6116 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
+            (Tool-Request 6117 "asset_reimport" @{ paths = @(("res://reimport_race/filler_{0:D4}.gd" -f ($chunk * 250))); timeout_ms = 10000 })
+        )
+        $rawIndex = Invoke-Didi -Requests $indexRequests -Arguments @("--project", $fixtureRoot)
+        $indexed = @($rawIndex | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.PSObject.Properties.Name -contains "id" -and $_.id -eq 6117 })
+        Assert-True ($indexed.Count -eq 1 -and -not $indexed[0].result.isError) "The editor did not index the race fixture's scripts ($chunk): $($indexed[0].result.content[0].text)"
+    }
+    [System.IO.File]::WriteAllText((Join-Path $raceFolder "fresh.gd"), "extends Node`n")
+    $probeTexture = @(Get-ChildItem -LiteralPath (Join-Path $fixtureRoot (Join-Path ".godot" "imported")) -Filter "reimport_probe.svg-*.ctex")
+    Assert-True ($probeTexture.Count -eq 1) "The SVG's imported texture was not found under .godot/imported."
+    $textureBefore = $probeTexture[0].LastWriteTimeUtc
+    $raceRequests = @(
+        (@{ jsonrpc = "2.0"; id = 6120; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
+        (Tool-Request 6121 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
+        (Tool-Request 6122 "asset_reimport" @{ paths = @("res://reimport_race/fresh.gd", "res://reimport_probe.svg"); timeout_ms = 10000 })
+    )
+    $rawRace = Invoke-Didi -Requests $raceRequests -Arguments @("--project", $fixtureRoot)
+    $raceById = @{}
+    foreach ($response in @($rawRace | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.PSObject.Properties.Name -contains "id" })) { $raceById[[int]$response.id] = $response }
+    $raceText = $raceById[6122].result.content[0].text
+    Assert-True (-not $raceById[6122].result.isError) "A batch that has to scan before it reimports was refused: $raceText"
+    $textureAfter = (Get-Item -LiteralPath $probeTexture[0].FullName).LastWriteTimeUtc
+    Assert-True ($textureAfter -gt $textureBefore) "asset_reimport answered for res://reimport_probe.svg while a scan ran, and its imported texture was not rewritten: $raceText"
+    Assert-True ($raceText -notmatch "Can't find file") "The engine could not find the asset it was reimporting: $raceText"
+
     $stopRequests = @(
         (@{ jsonrpc = "2.0"; id = 330; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
         (Tool-Request 331 "runtime_attach_session" @{ session_id = $gameSession.session_id }),

@@ -5817,6 +5817,31 @@ static void test_an_import_pass_is_open_from_one_signal_to_the_other() {
     ASSERT_TRUE(importPassOpen(own_call));
 }
 
+static void test_a_scan_is_settled_once_its_results_are_applied() {
+    // Break caught: the scanning flag clears before the editor applies what
+    // the scan found, so a reimport started on the flag had the file index
+    // freed under it and reimported nothing, and a caller answered on it sent
+    // the next request into the work that applies the scan.
+    using didi::godot::ScanSettle;
+    using didi::godot::ScanSettleObservation;
+    using didi::godot::scanSettled;
+
+    ScanSettle editors_scan{4, std::nullopt};
+    ASSERT_TRUE(!scanSettled(editors_scan, ScanSettleObservation{4, 70}));
+    ASSERT_TRUE(scanSettled(editors_scan, ScanSettleObservation{5, 70}));
+
+    // Didi's own scan, started inside the frames that apply an earlier one:
+    // the earlier scan's emission still names the index Didi's replaces.
+    ScanSettle own_scan{4, 70};
+    ASSERT_TRUE(!scanSettled(own_scan, ScanSettleObservation{5, 70}));
+    ASSERT_TRUE(scanSettled(own_scan, ScanSettleObservation{6, 91}));
+
+    // A project whose copy of the addon cannot count sources_changed leaves
+    // the scanning flag and the sidecars to bound the wait.
+    ASSERT_TRUE(scanSettled(own_scan, ScanSettleObservation{}));
+    ASSERT_TRUE(scanSettled(own_scan, ScanSettleObservation{5, std::nullopt}));
+}
+
 static void test_nothing_is_dequeued_inside_an_import_pass() {
     // Break caught: the editor's own import pass re-enters the main-loop
     // callback, and a command queued for Didi runs inside it (#914).
@@ -9093,6 +9118,8 @@ struct RegisterToolTests {
         registerTest("EditorHook.ReimportProgress", test_reimport_progress_requires_two_idle_frames_and_times_out);
         registerTest("EditorHook.ImportPassIsOpenFromOneSignalToTheOther",
                      test_an_import_pass_is_open_from_one_signal_to_the_other);
+        registerTest("EditorHook.ScanIsSettledOnceItsResultsAreApplied",
+                     test_a_scan_is_settled_once_its_results_are_applied);
         registerTest("EditorHook.NothingIsDequeuedInsideAnImportPass",
                      test_nothing_is_dequeued_inside_an_import_pass);
         registerTest("Tools.ShaderWriteAppliedComparesMembers",

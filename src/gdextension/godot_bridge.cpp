@@ -3621,15 +3621,6 @@ GodotBridge& GodotBridge::instance() {
     return bridge;
 }
 
-Result<ReimportBatch> GodotBridge::beginAssetReimport(
-    const std::vector<std::string>& paths) {
-    auto resolved = resolveReimportPaths(paths);
-    if (resolved.isErr()) return resolved.error();
-    auto started = startAssetReimport(resolved.value());
-    if (started.isErr()) return started.error();
-    return resolved;
-}
-
 Result<ReimportBatch> GodotBridge::resolveReimportPaths(
     const std::vector<std::string>& paths) {
     namespace fs = std::filesystem;
@@ -3727,6 +3718,97 @@ bool GodotBridge::assetImportFailed(const std::string& resource_path) {
         }
     }
     return false;
+}
+
+std::vector<std::string> GodotBridge::unindexedAssets(const std::vector<std::string>& resource_paths) {
+    std::vector<std::string> missing;
+    auto editor = editorInterface();
+    if (editor.isErr()) return resource_paths;
+    auto filesystem = callObject(editor.value(), "EditorInterface", "get_resource_filesystem", 780151678LL);
+    if (filesystem.isErr()) return resource_paths;
+    auto filesystem_object = objectFromVariant(filesystem.value());
+    if (filesystem_object.isErr() || !filesystem_object.value()) return resource_paths;
+    for (const auto& resource_path : resource_paths) {
+        const auto slash = resource_path.find_last_of('/');
+        bool listed = false;
+        if (slash != std::string::npos && slash + 1 < resource_path.size()) {
+            auto directory_value = makeString(resource_path.substr(0, slash + 1));
+            auto file_value = makeString(resource_path.substr(slash + 1));
+            if (directory_value.isOk() && file_value.isOk()) {
+                auto found = callObject(filesystem_object.value(), "EditorFileSystem", "get_filesystem_path",
+                                        3188521125LL, {&directory_value.value()});
+                auto directory_object = found.isOk() ? objectFromVariant(found.value())
+                                                     : Result<GDExtensionObjectPtr>(found.error());
+                if (directory_object.isOk() && directory_object.value()) {
+                    auto index = callObject(directory_object.value(), "EditorFileSystemDirectory",
+                                            "find_file_index", 1321353865LL, {&file_value.value()});
+                    auto position = index.isOk()
+                                        ? scalarFromVariant<int64_t>(index.value(), GDEXTENSION_VARIANT_TYPE_INT)
+                                        : Result<int64_t>(index.error());
+                    listed = position.isOk() && position.value() >= 0;
+                }
+            }
+        }
+        if (!listed) missing.push_back(resource_path);
+    }
+    return missing;
+}
+
+namespace {
+
+// The editor's ProgressDialog, found once. On 4.5.1, 4.6.2 and 4.7.2 it is a
+// Control and a direct child of the root window whether or not a task is open,
+// and visible exactly while one is (tools/vibe/probes/scan_reimport_engine.py,
+// the burst part). Main thread only, like every caller.
+GDObjectInstanceID g_progress_dialog_id = 0;
+bool g_progress_dialog_missing_reported = false;
+
+} // namespace
+
+bool GodotBridge::editorProgressOpen() {
+    auto& api = GodotApi::instance();
+    if (!api.object_get_instance_from_id || !api.object_get_instance_id) return false;
+    GDExtensionObjectPtr dialog = g_progress_dialog_id != 0
+                                      ? api.object_get_instance_from_id(g_progress_dialog_id)
+                                      : nullptr;
+    if (!dialog) {
+        g_progress_dialog_id = 0;
+        auto tree = liveSceneTree();
+        if (tree.isErr()) return false;
+        auto root = liveSceneTreeRoot(tree.value());
+        if (root.isErr() || !root.value()) return false;
+        auto include_internal = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(1));
+        if (include_internal.isErr()) return false;
+        auto children = callObject(root.value(), "Node", "get_children", 873284517LL, {&include_internal.value()});
+        if (children.isErr()) return false;
+        auto size_value = callVariant(children.value(), "size");
+        auto size = size_value.isOk() ? scalarFromVariant<int64_t>(size_value.value(), GDEXTENSION_VARIANT_TYPE_INT)
+                                      : Result<int64_t>(size_value.error());
+        if (size.isErr()) return false;
+        for (int64_t i = 0; i < size.value() && !dialog; ++i) {
+            auto index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, i);
+            if (index.isErr()) return false;
+            auto child_variant = callVariant(children.value(), "get", {&index.value()});
+            if (child_variant.isErr()) continue;
+            auto child = objectFromVariant(child_variant.value());
+            if (child.isErr() || !child.value()) continue;
+            auto class_name = nodeString(child.value(), "get_class", 201670096LL);
+            if (class_name.isOk() && class_name.value() == "ProgressDialog") dialog = child.value();
+        }
+        if (!dialog) {
+            if (!g_progress_dialog_missing_reported) {
+                g_progress_dialog_missing_reported = true;
+                DIDI_LOG_WARN("GODOT_BRIDGE", "The editor's ProgressDialog is not a child of the root "
+                              "window, so a reimport cannot wait out the editor's own progress tasks.");
+            }
+            return false;
+        }
+        g_progress_dialog_id = api.object_get_instance_id(dialog);
+    }
+    auto visible = callObject(dialog, "CanvasItem", "is_visible_in_tree", 36873697LL);
+    if (visible.isErr()) return false;
+    auto flag = scalarFromVariant<GDExtensionBool>(visible.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+    return flag.isOk() && flag.value() != 0;
 }
 
 bool GodotBridge::assetImportSettled(const std::string& resource_path) {
@@ -3925,13 +4007,44 @@ void GodotBridge::releaseImportWatch() {
     g_import_watch.reset();
 }
 
-Result<void> GodotBridge::startAssetReimport(const ReimportBatch& batch) {
+std::optional<ScanSettle> GodotBridge::beginScanSettle() {
+    auto editor = editorInterface();
+    if (editor.isErr()) return std::nullopt;
+    auto filesystem = callObject(editor.value(), "EditorInterface", "get_resource_filesystem", 780151678LL);
+    if (filesystem.isErr()) return std::nullopt;
+    ensureImportWatch(filesystem.value());
+    const auto settled = importWatchCount("settled");
+    if (!settled.has_value()) return std::nullopt;
+    return ScanSettle{*settled, std::nullopt};
+}
+
+bool GodotBridge::scanSettled(const ScanSettle& wait) {
+    return ::didi::godot::scanSettled(
+        wait, ScanSettleObservation{importWatchCount("settled"), importWatchCount("settled_index")});
+}
+
+Result<ReimportStart> GodotBridge::startAssetReimport(const ReimportBatch& batch) {
     auto editor = editorInterface();
     if (editor.isErr()) return editor.error();
     auto filesystem = callObject(editor.value(), "EditorInterface", "get_resource_filesystem", 780151678LL);
     if (filesystem.isErr()) return filesystem.error();
     auto object = objectFromVariant(filesystem.value());
     if (object.isErr() || !object.value()) return Error::notConnected("EditorFileSystem is unavailable");
+    // A scan is for what the editor does not have yet: a file it has never
+    // indexed, or an asset whose import is outstanding. A script it already
+    // lists needs update_file and no more, and a full scan asked for one was
+    // the scan a reimport straight after it could not see through. Asked
+    // before update_file, which can add a file to the index without importing
+    // it.
+    bool scan_needed = false;
+    if (batch.needs_scan) {
+        for (const auto& path : batch.refreshed) {
+            if (!assetImportSettled(path)) {
+                scan_needed = true;
+                break;
+            }
+        }
+    }
     // update_file is synchronous and starts no scan, so it goes first and the
     // scanning window the frame loop waits on belongs to the reimport alone.
     // The bind carries hash 83702148 on Godot 4.5.1, 4.6.2 and 4.7.2.
@@ -3950,12 +4063,64 @@ Result<void> GodotBridge::startAssetReimport(const ReimportBatch& batch) {
     // editor_reload_project uses, only re-examines files already indexed. It is
     // asynchronous and sets the scanning flag, which is the window the frame
     // loop already waits on.
-    if (batch.needs_scan) {
+    ReimportStart start;
+    if (scan_needed) {
+        // The index the scan will replace, read before it starts: without
+        // threads the editor applies a scan inside the call. scan() starts
+        // nothing while another scan is running, so the wait is for that one,
+        // and a scan of changes builds no new index, so then any later
+        // emission ends it. One that has finished and is not yet applied also
+        // makes scan() start nothing, and replaces the index all the same.
+        auto scanning_before = isEditorFilesystemScanning();
+        if (scanning_before.isErr()) return scanning_before.error();
+        start.settle = beginScanSettle();
+        if (start.settle.has_value() && !scanning_before.value()) {
+            start.settle->replaced_index = importWatchCount("index_id");
+        }
         auto scanned = callObject(object.value(), "EditorFileSystem", "scan", 3218959716LL);
         if (scanned.isErr()) return scanned.error();
     }
-    if (batch.reimported.empty()) return Result<void>::ok();
-    json path_array = batch.reimported;
+    if (batch.reimported.empty()) return start;
+    // reimport_files looks every file up in the editor's index, and while a
+    // scan runs it cannot find one: the engine prints "Can't find file ...
+    // during file reimport", skips it, and reimports nothing. Started straight
+    // after the scan above, that was every batch mixing a script with an asset
+    // in a project whose scan outlasts the call, and each was reported as
+    // reimported; the harness met it only on a loaded machine. The editor's own
+    // scans do the same to an asset named alone. Asked of the engine on 4.5.1,
+    // 4.6.2 and 4.7.2 by tools/vibe/probes/scan_reimport_engine.py: a scan and
+    // then a reimport at once failed every round with 800 scripts in the
+    // project, and a reimport held until the scan had finished never did. So
+    // the reimport waits, and the frame loop starts it once nothing is scanning
+    // and the editor lists every asset.
+    // The scanning flag clears on the scan's own thread, before a later frame
+    // applies the results, and that work runs frames of its own under progress
+    // tasks. A reimport started before it is over collides with it: the engine
+    // printed hundreds of "Task ... already exists" lines and some rounds
+    // reimported nothing (the same probe's burst part, on all three lines).
+    // So the reimport also waits for sources_changed, which the editor emits
+    // once the results are applied, and for no progress task.
+    auto scanning = isEditorFilesystemScanning();
+    if (scanning.isErr()) return scanning.error();
+    if (scanning.value() && !start.settle.has_value()) start.settle = beginScanSettle();
+    start.held = scanning.value() || editorProgressOpen() ||
+                 (start.settle.has_value() && !scanSettled(*start.settle)) ||
+                 !unindexedAssets(batch.reimported).empty();
+    if (start.held) return start;
+    auto started = reimportIndexedAssets(batch.reimported);
+    if (started.isErr()) return started.error();
+    return start;
+}
+
+Result<void> GodotBridge::reimportIndexedAssets(const std::vector<std::string>& reimported) {
+    if (reimported.empty()) return Result<void>::ok();
+    auto editor = editorInterface();
+    if (editor.isErr()) return editor.error();
+    auto filesystem = callObject(editor.value(), "EditorInterface", "get_resource_filesystem", 780151678LL);
+    if (filesystem.isErr()) return filesystem.error();
+    auto object = objectFromVariant(filesystem.value());
+    if (object.isErr() || !object.value()) return Error::notConnected("EditorFileSystem is unavailable");
+    json path_array = reimported;
     auto godot_paths = makeJsonVariant(path_array);
     if (godot_paths.isErr()) return godot_paths.error();
     ensureImportWatch(filesystem.value());

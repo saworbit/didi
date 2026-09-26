@@ -985,9 +985,17 @@ void EditorHook::scheduleAssetReimport(
         fulfillCommand(promise, control, {{"error", std::move(error)}});
         return;
     }
+    // A held reimport called nothing that runs frames, so no nested frame has
+    // seen the request since it was published. One that was not held did run
+    // them, and a nested frame may have answered on its deadline.
+    if (m_pendingAssetReimport.has_value() && m_pendingAssetReimport->control == control) {
+        m_pendingAssetReimport->reimport_deferred = started.value().held;
+        m_pendingAssetReimport->settle = started.value().settle;
+    }
     DIDI_LOG_INFO("EDITOR_HOOK", "Started bounded asset reimport for ",
                   resolved.value().reimported.size(), " imported and ",
-                  resolved.value().refreshed.size(), " refreshed path(s)");
+                  resolved.value().refreshed.size(), " refreshed path(s)",
+                  started.value().held ? ", the reimport held until the editor's scan is over" : "");
 }
 
 bool EditorHook::scheduleMainScreenCapture(
@@ -1236,6 +1244,70 @@ void EditorHook::processAssetReimportFrame() {
             m_pendingAssetReimport.reset();
             response = {{"error", {{"code", scanning.error().code},
                                     {"message", scanning.error().message}}}};
+        } else if (m_pendingAssetReimport->reimport_deferred) {
+            // The reimport was held because a scan was running or its results
+            // were not applied yet, the editor was inside a progress task, or
+            // an asset was not listed yet. reimport_files cannot find a file
+            // while the editor scans and skipped it with nothing but an engine
+            // line to show, and one started inside the work that applies a
+            // scan collided with it. Nothing has been reimported, so an answer
+            // from here says so.
+            auto& settle = m_pendingAssetReimport->settle;
+            if (scanning.value() && !settle.has_value()) settle = GodotBridge::instance().beginScanSettle();
+            const bool busy = scanning.value() || GodotBridge::instance().editorProgressOpen() ||
+                              (settle.has_value() && !GodotBridge::instance().scanSettled(*settle));
+            if (!busy && ++m_pendingAssetReimport->deferred_idle_frames < 2 &&
+                !m_pendingAssetReimport->progress.expired(now)) {
+                return;
+            }
+            if (busy) {
+                m_pendingAssetReimport->deferred_idle_frames = 0;
+                if (!m_pendingAssetReimport->progress.expired(now)) return;
+                completed = std::move(m_pendingAssetReimport);
+                m_pendingAssetReimport.reset();
+                response = {{"error", {{"code", 504},
+                                        {"message", "The editor was still scanning its files, or finishing "
+                                                    "the work a scan leaves, when the timeout ran out, and "
+                                                    "Godot cannot reimport a file then, so nothing was "
+                                                    "reimported. Retry once the editor is idle."},
+                                        {"data", {{"code", "editor_scanning"},
+                                                   {"outcome", "not_imported"},
+                                                   {"retryable", true},
+                                                   {"route_quarantine", false}}}}}};
+            } else if (const auto unlisted = GodotBridge::instance().unindexedAssets(
+                           m_pendingAssetReimport->reimported);
+                       !unlisted.empty()) {
+                completed = std::move(m_pendingAssetReimport);
+                m_pendingAssetReimport.reset();
+                const json unlisted_json = unlisted;
+                response = {{"error", {{"code", 409},
+                                        {"message", "The editor does not list " + unlisted_json.dump() +
+                                                    " among its files, even with its scan over, so "
+                                                    "Godot cannot reimport them. It skips a directory "
+                                                    "that holds a .gdignore file, for one. Nothing "
+                                                    "was reimported."},
+                                        {"data", {{"code", "asset_not_indexed"},
+                                                   {"not_indexed", unlisted_json},
+                                                   {"outcome", "not_imported"},
+                                                   {"retryable", false}}}}}};
+            } else {
+                // reimport_files runs frames of its own, and a nested frame
+                // must see a reimport under way rather than one still held.
+                m_pendingAssetReimport->reimport_deferred = false;
+                const auto reimported = m_pendingAssetReimport->reimported;
+                auto started = GodotBridge::instance().reimportIndexedAssets(reimported);
+                // A nested frame may have answered, on its deadline.
+                if (!m_pendingAssetReimport.has_value() ||
+                    m_pendingAssetReimport->control != observed_control) {
+                    return;
+                }
+                if (started.isOk()) return;
+                completed = std::move(m_pendingAssetReimport);
+                m_pendingAssetReimport.reset();
+                json error = {{"code", started.error().code}, {"message", started.error().message}};
+                if (!started.error().data.is_null()) error["data"] = started.error().data;
+                response = {{"error", std::move(error)}};
+            }
         } else {
             const auto state = m_pendingAssetReimport->progress.observe(scanning.value(), now);
             if (state == ReimportProgressState::Pending) return;
@@ -1243,6 +1315,14 @@ void EditorHook::processAssetReimportFrame() {
             // its scanning flag before the importer has written the sidecars
             // the answer is about, so the answer waits for those to settle
             // instead, bounded by the same timeout as everything else.
+            // Nor is it finished while the scan's results wait to be applied.
+            // The editor applies them in frames of its own, and a caller
+            // answered from one of those frames sent its next request into
+            // that work.
+            if (state == ReimportProgressState::Idle && m_pendingAssetReimport->settle.has_value() &&
+                !GodotBridge::instance().scanSettled(*m_pendingAssetReimport->settle)) {
+                return;
+            }
             if (state == ReimportProgressState::Idle && m_pendingAssetReimport->needs_scan) {
                 // Ask the editor, do not wait out a guess. The scanning flag
                 // clears before the importer has written its sidecars, so the

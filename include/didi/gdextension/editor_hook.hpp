@@ -2,6 +2,7 @@
 
 #include "didi/common/types.hpp"
 #include "didi/common/json.hpp"
+#include "didi/gdextension/godot_bridge.hpp"
 #include "didi/gdextension/runtime_log.hpp"
 #include "didi/runtime/session_kind_policy.hpp"
 #include "didi/runtime/profiler_collector.hpp"
@@ -288,6 +289,20 @@ private:
         // (#731). The wait then asks the editor whether its work on each path
         // is finished rather than watching the flag.
         bool needs_scan{false};
+        // Set when reimport_files could not be called yet, because the editor
+        // was scanning, had not applied a scan's results, was inside a
+        // progress task, or did not list one of the assets. A reimport while a
+        // scan runs cannot find the file, skips it and was reported as done.
+        // The frame loop starts it once all of that is over.
+        bool reimport_deferred{false};
+        // Frames in a row the editor has not been scanning while the reimport
+        // was held. Two, the same rule that says a reimport has finished.
+        int deferred_idle_frames{0};
+        // Scan work to see finished first: a scan Didi started, or the
+        // editor's own one that held the reimport. The scanning flag clears
+        // before the editor applies what the scan found, in frames of its
+        // own, so neither the reimport nor the answer goes by the flag alone.
+        std::optional<ScanSettle> settle;
     };
 
     struct PendingProfilerRead {
