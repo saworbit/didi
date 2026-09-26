@@ -138,10 +138,14 @@ where it is. Editor or game.
 - Each entry carries `node_path`, `class`, `global_rect`, `visible`,
   `mouse_filter`, and `text` where the Control has a `text` property.
 - `text` is the value the scene holds, not what is drawn. In a localised game a
-  button whose text is the key `MENU_START` reports `MENU_START` while the player
-  reads the translation (#988). Match on `node_path` or on the key, never on the
-  translated string. Do not read a key in `text` as evidence that the game is
-  untranslated; an untranslated game answers the same.
+  button whose text is the key `MENU_START` holds `MENU_START` while the player
+  reads the translation. That translation is `displayed_text`, present only when
+  the control draws something other than `text` (#988). To check that a game is
+  localised, launch it with `internationalization/locale/test` set and look for
+  `displayed_text`; an editor draws keys and never carries it. Match a control on
+  `node_path` or on its key, which stay the same in every locale, rather than on
+  `displayed_text`, which does not. A `LineEdit` or `TextEdit` draws what it
+  holds, so neither carries `displayed_text` even when its text is a key.
 - `visible_only` defaults to true and skips hidden Controls *and everything
   beneath them*, because a hidden Control hides its subtree. Pass false when
   debugging a menu that is not appearing.

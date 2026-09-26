@@ -187,6 +187,22 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **`ui_list_controls` reports what a translated control draws (#988).** A
+  Control translates its text as it draws it. So in a localised game the
+  `text` property holds the key, and the tool reported `MENU_START` for a button
+  that says "Commencer la partie". An untranslated game answered the same, so
+  the answer could not tell a working localisation from a missing one. `text`
+  is unchanged, and each entry gains `displayed_text` when the control draws
+  something else: the control's own `atr(text)`, which follows its
+  auto-translate mode and translation domain. It is present only when it
+  differs, and `include_text: false` leaves it out. Only the classes that draw
+  their text translated carry it: Label, Button, CheckBox, CheckButton,
+  LinkButton, MenuButton, OptionButton and RichTextLabel. These were rendered on
+  4.5.1, 4.6.2 and 4.7.2 by `tools/vibe/probes/control_text_engine.py`. A
+  LineEdit, TextEdit or CodeEdit draws the key it holds, and a ColorPickerButton
+  draws no text, although `atr()` answers a translation for all four, so none of
+  them carries it. An editor draws keys, and an edited scene carries no field.
+
 - **Recovery test imports and stdio fixture cleanup.** The adversarial recovery
   suite now works through both discovery and explicit `tests.<module>` invocation.
   YOLO, elicitation and output-schema fixtures reap their owned subprocesses and

@@ -6792,6 +6792,24 @@ json uiListControls(const json& params, const std::string& session_kind) {
 
     auto text_name = makeStringName("text");
     if (text_name.isErr()) return errorJson(500, "Failed to construct the text property name");
+    // atr()'s context argument, empty, which is what a Control passes as it draws.
+    auto no_context = makeStringName("");
+    if (no_context.isErr()) return errorJson(500, "Failed to construct an empty translation context");
+
+    // The classes that draw their text through atr(), so that in a localised
+    // game the player reads something other than the property (#988). Every
+    // instantiable Control with a text property was rendered on 4.5.1, 4.6.2
+    // and 4.7.2 by tools/vibe/probes/control_text_engine.py, and these eight
+    // drew the translation. LineEdit, TextEdit and CodeEdit drew the key,
+    // because their text is what the user typed, and ColorPickerButton drew no
+    // text at all, although atr() answered a translation for all four. The
+    // class is matched exactly rather than with is_class: a subclass is not
+    // known to draw what its parent does, and ColorPickerButton is the Button
+    // that does not. A script extending one of these reports the native class,
+    // so a scripted Label is still a Label here.
+    static const std::set<std::string> draws_translated_text = {
+        "Button", "CheckBox", "CheckButton", "Label", "LinkButton",
+        "MenuButton", "OptionButton", "RichTextLabel"};
 
     json controls = json::array();
     uint64_t traversed = 0;
@@ -6880,6 +6898,30 @@ json uiListControls(const json& params, const std::string& session_kind) {
                                     const auto bounded = boundUtf8(text.value(), 256);
                                     entry["text"] = bounded.value;
                                     if (bounded.truncated) entry["text_truncated"] = true;
+                                    // What the player reads, where that is not the
+                                    // property. atr() is the call the control makes
+                                    // as it draws, so it follows the node's own
+                                    // auto-translate mode and translation domain; an
+                                    // editor draws keys and atr() there answers the
+                                    // key, so an edited scene carries no field.
+                                    // Present only when it differs, so an
+                                    // untranslated game pays nothing for it.
+                                    if (draws_translated_text.count(class_name.value())) {
+                                        auto shown_value = callObject(
+                                            node, "Node", "atr", 3344478075LL,
+                                            {&text_value.value(), &no_context.value()});
+                                        if (shown_value.isOk()) {
+                                            auto shown = stringFromVariant(
+                                                shown_value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+                                            if (shown.isOk() && shown.value() != text.value()) {
+                                                const auto bounded_shown = boundUtf8(shown.value(), 256);
+                                                entry["displayed_text"] = bounded_shown.value;
+                                                if (bounded_shown.truncated) {
+                                                    entry["displayed_text_truncated"] = true;
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
