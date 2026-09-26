@@ -2056,15 +2056,61 @@ static std::optional<std::string> nulStringPath(const json& value, const std::st
 }
 
 static CallToolResult invalidArgumentsError(const ResolvedToolBinding& binding,
-                                            const std::string& message) {
+                                            const std::string& message,
+                                            const json& extra = json::object()) {
+    json data = {{"tool", binding.invoked_name},
+                 {"canonical_tool", binding.canonical_name},
+                 {"code", "invalid_arguments"},
+                 {"retryable", false}};
+    data.update(extra);
     return CallToolResult::error(json{{"error", {
         {"code", 400},
         {"message", message},
-        {"data", {{"tool", binding.invoked_name},
-                  {"canonical_tool", binding.canonical_name},
-                  {"code", "invalid_arguments"},
-                  {"retryable", false}}}}}}.dump());
+        {"data", std::move(data)}}}}.dump());
 }
+
+// One argument sent under a name this tool does not use, and the one required
+// name it does use missing. The surface spells "the node this call is about"
+// ten ways and "the file" nine, so a first call to an unfamiliar tool is a
+// guess, and the refusal named both halves only in a sentence (#784). This
+// carries the fix as data, and only when moving the value is all the call
+// needs: the call with the value moved has to satisfy the schema. Aliases would
+// have saved the round trip and cost every one of those schemas its required
+// list; this keeps each contract as it is and makes the retry mechanical.
+struct MisnamedArgument {
+    std::string sent;
+    std::string expected;
+};
+
+static std::optional<MisnamedArgument> misnamedArgument(const json& schema,
+                                                        const json& arguments) {
+    if (!schema.is_object() || !arguments.is_object()) return std::nullopt;
+    const auto properties = schema.find("properties");
+    const auto required = schema.find("required");
+    if (properties == schema.end() || !properties->is_object() || required == schema.end() ||
+        !required->is_array()) {
+        return std::nullopt;
+    }
+    std::vector<std::string> unknown;
+    for (auto it = arguments.begin(); it != arguments.end(); ++it) {
+        if (!properties->contains(it.key())) unknown.push_back(it.key());
+    }
+    std::vector<std::string> missing;
+    for (const auto& name : *required) {
+        if (name.is_string() && !arguments.contains(name.get<std::string>())) {
+            missing.push_back(name.get<std::string>());
+        }
+    }
+    if (unknown.size() != 1 || missing.size() != 1) return std::nullopt;
+    json moved = arguments;
+    moved[missing.front()] = moved[unknown.front()];
+    moved.erase(unknown.front());
+    if (validateAgainstSchema(schema, moved)) return std::nullopt;
+    return MisnamedArgument{unknown.front(), missing.front()};
+}
+
+// The caller has the value already, so a long one is not sent back to it.
+constexpr size_t kMaxEchoedArgumentBytes = 1024;
 
 // signal_connect and signal_disconnect call the emitter emitter_node and the
 // receiver target_node. signal_list_connections and signal_emit called their
@@ -2130,6 +2176,18 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
             if (auto refused = offline::exportPlatformRefusal(arguments)) {
                 return CallToolResult::fromError(*refused);
             }
+        }
+        if (const auto misnamed = misnamedArgument(tool->inputSchema, arguments)) {
+            const auto& value = arguments[misnamed->sent];
+            json extra = {{"argument", misnamed->sent}, {"did_you_mean", misnamed->expected}};
+            if (value.dump().size() <= kMaxEchoedArgumentBytes) {
+                extra.update({{"retry_with", {{misnamed->expected, value}}}});
+            }
+            return invalidArgumentsError(
+                binding,
+                *invalid + " Send the value of '" + misnamed->sent + "' as '" +
+                    misnamed->expected + "'.",
+                extra);
         }
         return invalidArgumentsError(binding, *invalid);
     }
