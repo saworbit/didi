@@ -206,8 +206,10 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
   one. When the wait ends without a reimport, the call says so: `409
   asset_not_indexed` for an asset the editor never lists, and `504
   editor_scanning`, retryable, for a scan that outlasts `timeout_ms`, both with
-  `outcome: not_imported`. The harness now pairs a fresh script with the SVG
-  after writing 500 scripts, and fails when the texture is not rewritten.
+  `outcome: not_imported`. The harness now writes 100 scripts with a
+  `class_name`, 25 a call, and fails unless every class is registered when the
+  call answers, then pairs a fresh script with the SVG and fails unless the
+  texture is rewritten.
   `scan_reimport_engine.py` and `mixed_reimport.py` join the vibe probes.
 
 - **`project_set_setting` checks the files an array names (#989).** A `res://`
