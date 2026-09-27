@@ -106,7 +106,13 @@ Keep the guide compact and do not embed project paths, client data or live
 availability in it.
 
 `McpServer.InitializeInstructions` checks the serialized field and resolves
-named routes against the registry. `tests/test_initialize_instructions.py`
+named routes against the registry. It also holds the guide to what discovery
+says about them: a tool the guide tells hosts not to call must still be
+unimplemented, every other tool it names must be implemented, and every
+parameter it spells as `tool(param, ...)` must be in that tool's `inputSchema`.
+Implementing or retiring a tool the guide names, or renaming a parameter it
+cites, fails the test until the guide is updated to match.
+`tests/test_initialize_instructions.py`
 drives the actual binary through malformed-handshake recovery, protocol
 fallback, pipelined/batched requests, concurrent clients and the guide's
 read workflow. Run it with `python -m unittest tests.test_initialize_instructions -v`.
@@ -229,6 +235,8 @@ checks for anything the schema cannot express.
 ### 2. Classify its execution modes
 
 Update `capabilityForTool` in `src/mcp/tool_registry.cpp`. Choose only modes backed by tests: `live`, `offline_fallback`, both, or `unimplemented`.
+
+If the handshake guide (`kServerInstructions` in `src/mcp/mcp_server.cpp`) names the tool, moving it between implemented and unimplemented also means updating the guide; see [Protocol guidance](#protocol-guidance-and-test-fixture-maintenance).
 
 ### 3. Implement the Tool Handler in `src/tools/`
 ```cpp
