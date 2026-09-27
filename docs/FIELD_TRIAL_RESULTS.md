@@ -434,7 +434,7 @@ Coverage cannot answer this, because it counts which tools were reached and not 
 
 ### Findings
 
-Six issues came out of the run and the review after it.
+Eight issues came out of the run and the review after it: six about what the tester met, and two about the trial tooling itself.
 
 - **#1000 (P1).** `project_set_setting.value` declares no JSON type, and the Claude client sends every value for such an argument as a string. So no int, bool or array setting can be written. Offline, the documented addon bootstrap writes a quoted string and reports success. The tester lost the bootstrap to it and hand-edited `project.godot`. Declaring the type list fixes what the client sends, checked on a rebuilt server with the same prompt. `blackboard_write.value` and `blackboard_task_complete.artifacts` have the same gap.
 - **#1001 (P2).** Routes to stopped games keep counting against the eight-route cap, so the seventh launch-and-attach of the run was refused with `429` while its own data said the engine was gone. The tester detached after every stop from then on.
@@ -442,6 +442,8 @@ Six issues came out of the run and the review after it.
 - **#1003 (P3).** `resource_create` has no spelling for a whole-valued float, and a JavaScript client cannot send `0.0`. An Animation value track keyed `[0, 0.45, 0]` played without moving anything, and every diagnostic reported healthy. It cost the tester most of an hour.
 - **#1004 (P3).** Nothing waits for a deferred scene UID to be indexed, so a scene instanced straight after `scene_create` logs invalid-UID warnings on its first launch.
 - **#1005 (P3).** `trial.py` scores the Claude transcript where the client filed it and never keeps a copy, which is why trial 05 cannot be rescored. This run's transcript was copied into its trial directory by hand.
+- **#1007 (P3).** `trial.py`'s `--allowed-tools` list restricts nothing under `bypassPermissions`. This tester also used `PowerShell` and `ToolSearch`, and whatever skills and settings the machine supplies reach every tester, so a run's environment is a variable no artifact records.
+- **#1008 (P3).** A trial can only file its findings live. This run's drafts mode was a hand edit to the brief plus a `gh` stub, and the review it allowed is what caught the wrong diagnosis behind #1000.
 
 One observation was deliberately not filed. Once, just after a `runtime_stop` on the game, the editor process was gone too. There was no Windows crash event, no Didi crash record and no Godot log, because later launches rotated it out of the five Godot keeps. Nothing connects it to `runtime_stop` beyond timing, and the tester drew the same line in its ledger. If it recurs, capture the editor log before relaunching anything.
 
