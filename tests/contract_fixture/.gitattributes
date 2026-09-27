@@ -1,0 +1,3 @@
+# Answers recorded from this project can carry file sizes and line text, so
+# every checkout gets the same bytes whatever the platform's line endings.
+* text eol=lf

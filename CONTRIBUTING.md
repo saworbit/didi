@@ -185,6 +185,18 @@ add noise to the log and change nothing about who is responsible.
    overwrite them, and `--check` reports a skip. Use `--json` to inspect the
    counts on whatever platform you are actually on.
 
+7. **Regenerate the Contract Snapshots** (only if what a client is shown changed):
+   ```bash
+   python tools/contract_snapshots.py --godot <Godot 4.5 exe> --godot <Godot 4.6 exe> --godot <Godot 4.7 exe>
+   ```
+   `tests/contract_snapshots/` records every tool's schema and the answers to
+   a fixed set of read-only calls on each engine line, and CI fails when this
+   build shows a client something they do not. Regenerate in the same pull
+   request and read the diff: it is the review of that change. Without Godot,
+   run it with no `--godot` to rewrite `offline.json`, and take the live
+   snapshots CI records from the failed job's artifact. See
+   [Contract snapshots](docs/DEVELOPER_GUIDE.md#contract-snapshots).
+
 ---
 
 ## 🚦 What CI runs, and when

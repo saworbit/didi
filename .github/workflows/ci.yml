@@ -463,6 +463,18 @@ jobs:
           # mutating tool with neither fails here, before any engine starts (Q2).
           "$DIDI_PYTHON" -m unittest tests.test_observed_post_state -v
 
+      - name: Verify the tool surface matches its committed snapshot
+        shell: bash
+        run: |
+          # tests/contract_snapshots/offline.json is what this build shows a
+          # client with no engine attached: the handshake, every tool's schema,
+          # description, annotations and _meta, and the resources and prompts.
+          # A change to any of it fails here until the snapshot is regenerated
+          # in the same pull request, so a reviewer sees it as a diff rather
+          # than a client finding it (Q3). The same module holds calls.json to
+          # every read-only tool; the live answers are checked in the Godot job.
+          "$DIDI_PYTHON" -m unittest tests.test_contract_snapshots -v
+
       - name: Run End-to-End MCP Integration Test
         shell: bash
         run: |
@@ -555,6 +567,7 @@ jobs:
           max-size: 500M
 
       - name: Configure and Build
+        id: build
         shell: bash
         run: |
           cmake -B build -S . -G Ninja \
@@ -634,6 +647,27 @@ jobs:
           $env:PYTHONPATH = Join-Path $PWD 'tests'
           python -m unittest tests.test_managed_recovery_live tests.test_managed_recovery_adversarial -v
 
+      # tests/contract_snapshots/live-<line>.json: the listings once an editor
+      # on this line is attached, and the answers to the read-only calls in
+      # calls.json against tests/contract_fixture (Q3). It runs whenever the
+      # build did, even after a red step above, because it answers a different
+      # question and its diff is what a reviewer needs either way. What it
+      # recorded goes up with the logs below, so a contributor without Godot
+      # can inspect or adopt it.
+      - name: Verify the live answers match their committed snapshot
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        shell: pwsh
+        env:
+          GODOT_VERSION: ${{ matrix.godot-version }}
+        run: |
+          # The console build, which the recorder starts headless on a fresh
+          # copy of the fixture with its own session directory.
+          $godot = Get-ChildItem -Path godot-bin -Filter "Godot_v${env:GODOT_VERSION}-stable_win64_console.exe" |
+                   Select-Object -First 1
+          if (-not $godot) { throw "Godot console executable not found under godot-bin" }
+          python tools/contract_snapshots.py --check --binary build/didi.exe --godot $godot.FullName --out build/contract_snapshots
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       # Evidence from a crash that was retried past is worth keeping even when
       # the run then goes green: it is the only record of how often the engine
       # bug still fires.
@@ -649,6 +683,7 @@ jobs:
             build/godot_*.dmp
             build/recovery-artifacts/
             build/phase7_signal_sessions/
+            build/contract_snapshots/
           if-no-files-found: ignore
 
   # The option landed with #38; this is the job that uses it. ASan and UBSan see
