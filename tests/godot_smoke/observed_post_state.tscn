@@ -1,0 +1,46 @@
+[gd_scene load_steps=9 format=3]
+
+[ext_resource type="Script" path="res://observed_witness.gd" id="1_witness"]
+[ext_resource type="Texture2D" path="res://reimport_probe.svg" id="2_tile_texture"]
+[ext_resource type="Shader" path="res://probe_uniforms.gdshader" id="3_shader"]
+
+[sub_resource type="ShaderMaterial" id="shaded_material"]
+shader = ExtResource("3_shader")
+shader_parameter/strength = 0.75
+
+[sub_resource type="TileSetAtlasSource" id="tile_atlas"]
+texture = ExtResource("2_tile_texture")
+texture_region_size = Vector2i(16, 16)
+0:0/0 = 0
+
+[sub_resource type="TileSet" id="tile_set"]
+tile_size = Vector2i(16, 16)
+sources/0 = SubResource("tile_atlas")
+
+[sub_resource type="BoxMesh" id="grid_mesh"]
+
+[sub_resource type="MeshLibrary" id="mesh_library"]
+item/0/name = "Observed Cube"
+item/0/mesh = SubResource("grid_mesh")
+
+[node name="ObservedRoot" type="Node3D"]
+
+[node name="Witness" type="Node" parent="."]
+script = ExtResource("1_witness")
+
+[node name="Subject" type="Node3D" parent="."]
+
+[node name="Camera" type="Camera3D" parent="."]
+position = Vector3(0, 1, 4)
+fov = 70.0
+
+[node name="Tiles" type="TileMapLayer" parent="."]
+tile_set = SubResource("tile_set")
+
+[node name="Grid" type="GridMap" parent="."]
+mesh_library = SubResource("mesh_library")
+
+[node name="Shaded" type="MeshInstance3D" parent="."]
+material_override = SubResource("shaded_material")
+
+[node name="Player" type="AnimationPlayer" parent="."]

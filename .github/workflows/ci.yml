@@ -454,6 +454,15 @@ jobs:
           # version, so nothing about the failure says what went wrong.
           "$DIDI_PYTHON" -m unittest tests.test_didi_binary -v
 
+      - name: Verify every mutating tool is checked for what it observed
+        shell: bash
+        run: |
+          # tests/observed_post_state.json names, for each tool this build
+          # classifies as a mutation, the answer fields the live harness compares
+          # with the engine, or an exemption and the issue tracking it. A new
+          # mutating tool with neither fails here, before any engine starts (Q2).
+          "$DIDI_PYTHON" -m unittest tests.test_observed_post_state -v
+
       - name: Run End-to-End MCP Integration Test
         shell: bash
         run: |

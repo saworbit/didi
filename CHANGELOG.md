@@ -51,6 +51,21 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Added
 
+- **Every mutating tool is checked for what it observed (Q2, #1010).**
+  `tests/observed_post_state.json` gives each of the 63 mutating tools either
+  the answer fields that carry the state it read back after the write, or an
+  exemption with its reason and the issue that tracks it. The live harness
+  keeps every answer from a checked tool across the run and fails on one
+  without its fields. It also drives 25 tools against
+  `tests/godot_smoke/observed_post_state.tscn` and the attached game, and
+  compares each answer with the engine as read by `observed_witness.gd` or the
+  game's own tree. The witness loads files with `CACHE_MODE_IGNORE`, so it reads
+  what is on disk. One case sets a property the engine discards, so a tool that
+  repeated its request would fail there. `didi --dump-tool-manifest` lists the
+  mutating tools under `names.mutating`, and `tests/test_observed_post_state.py`
+  fails the build when one has neither a check nor an exemption. 22 tools answer
+  with the request or with state read before the write (#1019), and 16 have no
+  case yet (#1020).
 - **A field trial is scored on how it called tools, not only which.**
   `tools/field-trial/guide_rules.py` reads the tester's transcript for every
   failed call and the cause its answer gives, failing calls sent again

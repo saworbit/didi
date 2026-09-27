@@ -168,6 +168,7 @@ if (-not $fixtureRoot.StartsWith($buildRoot + [IO.Path]::DirectorySeparatorChar,
 # The step before this one in CI runs an editor too, so the previous fixture's
 # extension copy can still be locked; see remove_test_directory.ps1.
 . (Join-Path $PSScriptRoot 'remove_test_directory.ps1')
+. (Join-Path $PSScriptRoot 'observed_post_state.ps1')
 Remove-TestDirectory -Path $fixtureRoot
 Copy-Item -LiteralPath $sourceFixtureRoot -Destination $fixtureRoot -Recurse
 
@@ -304,7 +305,11 @@ function Invoke-Didi {
         [string[]]$Arguments = @()
     )
     $ErrorActionPreference = "Continue"
-    $Requests | & $didiExecutable @Arguments
+    $lines = @($Requests | & $didiExecutable @Arguments)
+    # Every answer from a tool observed_post_state.json checks is kept, so the
+    # end of the run can say whether each one carried its observed fields.
+    Add-ObservedExchanges -Requests $Requests -Lines $lines
+    $lines
 }
 
 function Tool-Request([int]$Id, [string]$Name, [hashtable]$Arguments) {
@@ -320,6 +325,10 @@ function Tool-Payload($Response) {
     Assert-True (-not $Response.result.isError) "Tool request $($Response.id) failed: $($Response.result.content[0].text)"
     return $Response.result.content[0].text | ConvertFrom-Json
 }
+
+# Before any live work: a mutating tool the registry does not account for is a
+# surface change, and it should fail in seconds rather than after the run.
+Assert-ObservedPostStateCoverage ((& $didiExecutable --dump-tool-manifest) -join "`n")
 
 function Runtime-InputCounter($TreePayload) {
     $counterNode = @($TreePayload.scene_tree.children | Where-Object { $_.name -match '^InputCounter_(\d+)$' })[0]
@@ -5290,6 +5299,10 @@ text = "Not a key"
     Assert-True ($textureAfter -gt $textureBefore) "asset_reimport answered for res://reimport_probe.svg while a scan ran, and its imported texture was not rewritten: $raceText"
     Assert-True ($raceText -notmatch "Can't find file") "The engine could not find the asset it was reimporting: $raceText"
 
+    # Last, while the editor and the game are both still attached, so no block
+    # after it depends on what its cases leave behind. Q2 in docs/BUILD_QUEUE.md.
+    Invoke-ObservedPostStateCases -FixtureRoot $fixtureRoot -EditorSessionId $editorSession.session_id -GameSessionId $gameSession.session_id
+
     $stopRequests = @(
         (@{ jsonrpc = "2.0"; id = 330; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
         (Tool-Request 331 "runtime_attach_session" @{ session_id = $gameSession.session_id }),
@@ -5595,6 +5608,7 @@ text = "Not a key"
         $_.Name -in @("packed_branch.tscn", "created_phase2.tscn", "transient_probe.tscn", "instance_host.tscn", "anim_library_host.tscn")
     })
     Assert-True ($unexpectedSourceArtifacts.Count -eq 0) "Integration generated artifacts in the checked-in source fixture."
+    Assert-ObservedAnswersRecorded
     $integrationSucceeded = $true
     Write-Output "Godot integration passed: Phases 1-6 editor/runtime workflows, deep diagnostics, project isolation, export, MeshLibrary, live UI hit-testing, and live Control listing."
 }
