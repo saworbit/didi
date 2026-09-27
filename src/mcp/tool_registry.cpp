@@ -4501,8 +4501,9 @@ void ToolRegistry::registerAllDefaultTools() {
         t.inputSchema = {
             {"type", "object"},
             {"properties", {
-                // The type beside the oneOf is for the host. Without it a
-                // Claude host sends index 1 as "1", which names a bus.
+                // The type beside the oneOf is for a host that reads only
+                // `type`, which would send index 1 as "1", a bus name. Claude
+                // Code reads the oneOf too and sent the integer without it.
                 {"bus", {{"type", json::array({"string", "integer"})},
                          {"description", "The bus name or its index."},
                          {"oneOf", json::array({json{{"type", "string"}, {"minLength", 1}, {"maxLength", 128}},

@@ -523,8 +523,8 @@ std::optional<std::string> checkValue(const json& schema, const json& value,
         // this check: a host fills a missing one its own way (#1000). Beside a
         // const or a oneOf of object shapes, the rest of the schema says more
         // than the type does, so a value the type refuses is answered the way
-        // it was before the type was there: with the value it must be and why,
-        // or with the properties each shape needs (#489).
+        // it was before the type was there: with the value it must be and why
+        // (#654), or with the properties each shape needs (#489).
         if (fixed != schema.end()) return where + " must be " + fixed->dump() + "." + pinReason();
         if (oneOfNamesObjectShapes(schema, root)) {
             if (auto shaped = checkOneOf(schema, value, where, depth, root)) return shaped;
