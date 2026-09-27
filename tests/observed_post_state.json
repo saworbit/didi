@@ -1,0 +1,315 @@
+{
+  "schema": 1,
+  "tools": {
+    "anim_add_library": {
+      "observed": [
+        "library_names"
+      ],
+      "witness": "AnimationPlayer.get_animation_library_list() through observed_witness.gd"
+    },
+    "anim_play_track": {
+      "observed": [
+        "playing"
+      ],
+      "witness": "The game's AnimationPlayer current_animation, through eval_gdscript"
+    },
+    "asset_configure_import": {
+      "observed": [
+        "stream"
+      ],
+      "witness": "The asset loaded with CACHE_MODE_IGNORE through observed_witness.gd"
+    },
+    "asset_reimport": {
+      "exempt": "Its answer comes from the editor's own import pass (#994), and no case reads the imported files independently of it.",
+      "issue": 1020
+    },
+    "audio_add_bus": {
+      "observed": [
+        "after",
+        "bus_count"
+      ],
+      "witness": "AudioServer through observed_witness.gd"
+    },
+    "audio_configure_bus": {
+      "observed": [
+        "after"
+      ],
+      "witness": "AudioServer through observed_witness.gd"
+    },
+    "blackboard_clear": {
+      "exempt": "removed_keys and revision come from the in-memory board before it is saved, and the saved board is never reloaded.",
+      "issue": 1019
+    },
+    "blackboard_patch": {
+      "exempt": "operations_applied counts the request and revision comes from memory before the save, and the saved board is never reloaded.",
+      "issue": 1019
+    },
+    "blackboard_task_claim": {
+      "exempt": "task is the in-memory record before the board is saved, and the saved board is never reloaded.",
+      "issue": 1019
+    },
+    "blackboard_task_complete": {
+      "exempt": "task is the in-memory record before the board is saved, and the saved board is never reloaded.",
+      "issue": 1019
+    },
+    "blackboard_task_create": {
+      "exempt": "task is the in-memory record before the board is saved, and the saved board is never reloaded.",
+      "issue": 1019
+    },
+    "blackboard_task_update": {
+      "exempt": "task is captured before the refresh that runs ahead of the save, so it can differ from what is stored, and the saved board is never reloaded.",
+      "issue": 1019
+    },
+    "blackboard_write": {
+      "exempt": "revision and metadata come from the in-memory board before it is saved, and the saved board is never reloaded.",
+      "issue": 1019
+    },
+    "editor_redo": {
+      "observed": [
+        "history"
+      ],
+      "witness": "The property the redone action set, through observed_witness.gd"
+    },
+    "editor_reload_project": {
+      "exempt": "Reloads the editor's project, which the live harness cannot continue past, so nothing drives it.",
+      "issue": 1020
+    },
+    "editor_save_scene": {
+      "exempt": "Answers status saved from save_scene's return code, which the engine reports as OK whether or not the file was written, and reads nothing from the file.",
+      "issue": 1019
+    },
+    "editor_undo": {
+      "observed": [
+        "history"
+      ],
+      "witness": "The property the undone action set, through observed_witness.gd"
+    },
+    "gridmap_export_mesh_library": {
+      "exempt": "Runs a separate Godot process, and no case loads the library it wrote.",
+      "issue": 1020
+    },
+    "gridmap_set_cells": {
+      "exempt": "changed_cells and unchanged_cells are counted before the write. The cells are read again afterwards and a mismatch is refused, but what they hold is not in the answer.",
+      "issue": 1019
+    },
+    "project_add_export_preset": {
+      "observed": [
+        "preset",
+        "preset_count"
+      ],
+      "witness": "export_presets.cfg parsed by Godot's ConfigFile through observed_witness.gd"
+    },
+    "project_apply_changes": {
+      "exempt": "Runs in a git sandbox the conformance block does not set up, and no case compares its answer with the files it wrote.",
+      "issue": 1020
+    },
+    "project_export": {
+      "exempt": "Needs an export preset and a separate Godot process, and no case compares size_bytes with the file on disk.",
+      "issue": 1020
+    },
+    "project_remove_autoload": {
+      "exempt": "removed is the request and persisted is the save's return code; project.godot is not read back.",
+      "issue": 1019
+    },
+    "project_remove_input_action": {
+      "exempt": "deadzone and event_count are read before the removal, and nothing is read afterwards.",
+      "issue": 1019
+    },
+    "project_rename_references": {
+      "exempt": "Nothing in the live harness drives it.",
+      "issue": 1020
+    },
+    "project_set_autoload": {
+      "exempt": "name, path and singleton are the request and persisted is the save's return code; project.godot is not read back.",
+      "issue": 1019
+    },
+    "project_set_input_action": {
+      "exempt": "deadzone and event_count are the request and persisted is the save's return code; the action is not read back.",
+      "issue": 1019
+    },
+    "project_set_setting": {
+      "exempt": "setting and removed are the request and persisted is the save's return code; the value written is never read back, live or offline (#1016).",
+      "issue": 1019
+    },
+    "resource_create": {
+      "exempt": "Writes the file and never loads it back. properties_written lists the keys it rendered, and property_check is a type check made before the write.",
+      "issue": 1019
+    },
+    "runtime_checkpoint": {
+      "exempt": "Managed mode only, which the live harness does not start; tests/test_managed_recovery_live.py drives it without comparing the answer with the engine.",
+      "issue": 1020
+    },
+    "runtime_explore_scene": {
+      "exempt": "A timed exploration of a running game, and no case compares its answer with an independent read.",
+      "issue": 1020
+    },
+    "runtime_inject_input": {
+      "exempt": "dispatched_event_count counts parse_input_event calls, which return nothing, and delivery is chosen from a pause state read before dispatch; what the game received is not read.",
+      "issue": 1019
+    },
+    "runtime_launch": {
+      "exempt": "Starts a game process, and the conformance block works against the game the harness already attached.",
+      "issue": 1020
+    },
+    "runtime_recover_editor": {
+      "exempt": "Managed mode only, which the live harness does not start; tests/test_managed_recovery_live.py drives it without comparing the answer with the engine.",
+      "issue": 1020
+    },
+    "runtime_restore_checkpoint": {
+      "exempt": "Managed mode only, which the live harness does not start; tests/test_managed_recovery_live.py drives it without comparing the answer with the engine.",
+      "issue": 1020
+    },
+    "runtime_set_paused": {
+      "observed": [
+        "paused"
+      ],
+      "witness": "runtime_get_tree's paused"
+    },
+    "runtime_step": {
+      "observed": [
+        "paused"
+      ],
+      "witness": "runtime_get_tree's paused"
+    },
+    "runtime_stop": {
+      "exempt": "Ends the game the rest of the harness uses. The stop block checks the exit, not the answer's fields.",
+      "issue": 1020
+    },
+    "runtime_watch_invariants": {
+      "exempt": "A timed watch of a running game, and no case compares its answer with an independent read.",
+      "issue": 1020
+    },
+    "scene_add_to_group": {
+      "exempt": "added is a constant, group and target_node are the request, and membership is read before the write, never after.",
+      "issue": 1019
+    },
+    "scene_call_method": {
+      "exempt": "Runs a project method whose effects only the project knows. returned is the method's own value, and there may be no state to read back; the issue decides whether this stays exempt.",
+      "issue": 1020
+    },
+    "scene_close": {
+      "exempt": "closed is a constant, and scene_path and dirty_state are read before the scene closes; nothing is read afterwards.",
+      "issue": 1019
+    },
+    "scene_create": {
+      "observed": [
+        "uid",
+        "uid_registered"
+      ],
+      "witness": "The new scene loaded with CACHE_MODE_IGNORE, and ResourceUID, through observed_witness.gd"
+    },
+    "scene_duplicate_node": {
+      "observed": [
+        "duplicated_node"
+      ],
+      "witness": "The parent's children before and after, through observed_witness.gd"
+    },
+    "scene_instantiate_node": {
+      "observed": [
+        "node_path"
+      ],
+      "witness": "The parent's children before and after, through observed_witness.gd"
+    },
+    "scene_open": {
+      "observed": [
+        "scene_path"
+      ],
+      "witness": "The edited scene root's scene_file_path through observed_witness.gd"
+    },
+    "scene_pack_branch": {
+      "observed": [
+        "uid",
+        "uid_registered"
+      ],
+      "witness": "The packed scene loaded with CACHE_MODE_IGNORE, and ResourceUID, through observed_witness.gd"
+    },
+    "scene_remove_from_group": {
+      "exempt": "removed is a constant, group and target_node are the request, and membership is read before the write, never after.",
+      "issue": 1019
+    },
+    "scene_remove_node": {
+      "exempt": "Answers action remove_node and reads nothing after the commit, so nothing in the answer says the node left the tree.",
+      "issue": 1019
+    },
+    "scene_reparent_node": {
+      "exempt": "Answers action reparent_node and reads nothing after the commit; the node's new path is not in the answer.",
+      "issue": 1019
+    },
+    "scene_set_property": {
+      "observed": [
+        "value",
+        "applied"
+      ],
+      "witness": "Object.get on the node through observed_witness.gd"
+    },
+    "script_attach_to_node": {
+      "observed": [
+        "script_path"
+      ],
+      "witness": "Node.get_script() through observed_witness.gd"
+    },
+    "script_create": {
+      "observed": [
+        "diagnostics",
+        "has_errors"
+      ],
+      "witness": "The script loaded with CACHE_MODE_IGNORE through observed_witness.gd, whose method list is empty when it did not compile"
+    },
+    "script_detach_from_node": {
+      "observed": [
+        "script_path"
+      ],
+      "witness": "Node.get_script() through observed_witness.gd"
+    },
+    "script_patch_method": {
+      "observed": [
+        "diagnostics",
+        "has_errors"
+      ],
+      "witness": "The script loaded with CACHE_MODE_IGNORE through observed_witness.gd, whose method list is empty when it did not compile"
+    },
+    "shader_set_uniform": {
+      "observed": [
+        "value",
+        "applied"
+      ],
+      "witness": "ShaderMaterial.get_shader_parameter through observed_witness.gd"
+    },
+    "signal_connect": {
+      "observed": [
+        "connected"
+      ],
+      "witness": "Object.get_signal_connection_list through observed_witness.gd"
+    },
+    "signal_disconnect": {
+      "observed": [
+        "disconnected"
+      ],
+      "witness": "Object.get_signal_connection_list through observed_witness.gd"
+    },
+    "signal_emit": {
+      "exempt": "Runs the project's connected methods. emitted and connection_count describe the emit, not a state to read back; the issue decides whether this stays exempt.",
+      "issue": 1020
+    },
+    "tilemap_set_cells": {
+      "exempt": "changed_cells and unchanged_cells are counted before the write. The cells are read again afterwards and a mismatch is refused, but what they hold is not in the answer.",
+      "issue": 1019
+    },
+    "viewport_create_test_lab": {
+      "exempt": "Nothing in the live harness drives it.",
+      "issue": 1020
+    },
+    "viewport_set_camera_transform": {
+      "observed": [
+        "new"
+      ],
+      "witness": "The camera's position, rotation_degrees and fov through observed_witness.gd"
+    },
+    "viewport_toggle_debug_draw": {
+      "observed": [
+        "observed"
+      ],
+      "witness": "The editor tree's debug hints through observed_witness.gd"
+    }
+  }
+}

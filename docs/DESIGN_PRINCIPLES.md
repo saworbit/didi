@@ -38,9 +38,13 @@ autoload, and a check that cries wolf teaches the agent to stop reading it.
 - Say what was not verified. `unknown_outcome`, `limitation` and `not_applied`
   exist for exactly this.
 
-**Enforced by.** Each newer tool, one at a time.
-[Q2](BUILD_QUEUE.md#q2-observed-not-asserted) turns it into one conformance
-test every mutating tool must pass.
+**Enforced by.** `tests/observed_post_state.json`, from
+[Q2](BUILD_QUEUE.md#q2-observed-not-asserted). Every mutating tool either names
+the answer fields that carry what it read back, which the live harness compares
+with the engine on all three engine lines, or is exempted with the issue that
+tracks the gap. `tests/test_observed_post_state.py` fails the build when a
+mutating tool has neither. The exemptions are findings: #1019 lists the tools
+that answer with the request, and #1020 the ones no case drives yet.
 
 ## P2. Reject what cannot be interpreted
 

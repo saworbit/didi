@@ -1436,13 +1436,15 @@ json ToolManifest::toJson() const {
             {"legacy", legacy.size()},
             {"implemented", implemented.size()},
             {"unimplemented", unimplemented.size()},
+            {"mutating", mutating.size()},
             {"total", canonical.size() + legacy.size()}
         }},
         {"names", {
             {"canonical", canonical},
             {"legacy", legacy},
             {"implemented", implemented},
-            {"unimplemented", unimplemented}
+            {"unimplemented", unimplemented},
+            {"mutating", mutating}
         }},
         {"required", required}
     };
@@ -1459,6 +1461,9 @@ ToolManifest ToolRegistry::buildManifest() const {
         manifest.canonical.push_back(tool.name);
         if (tool.capability.implemented) {
             manifest.implemented.push_back(tool.name);
+            if (MutationSafety::isMutation(resolveAliasBinding(tool.name, json::object()))) {
+                manifest.mutating.push_back(tool.name);
+            }
             std::vector<std::string> required;
             const auto& schema = tool.inputSchema;
             if (schema.is_object() && schema.contains("required") &&
@@ -1480,6 +1485,7 @@ ToolManifest ToolRegistry::buildManifest() const {
     std::sort(manifest.legacy.begin(), manifest.legacy.end());
     std::sort(manifest.implemented.begin(), manifest.implemented.end());
     std::sort(manifest.unimplemented.begin(), manifest.unimplemented.end());
+    std::sort(manifest.mutating.begin(), manifest.mutating.end());
     return manifest;
 }
 

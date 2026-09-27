@@ -262,6 +262,14 @@ Route the method from `EditorHook::executeOnMainThread` into a bounded implement
 
 - Add native tests for capability metadata, offline behavior, and error propagation.
 - Add a real Godot integration case for live behavior and UndoRedo where relevant.
+- If the tool mutates, which is what gives it `dry_run`, give it an entry in
+  `tests/observed_post_state.json`. Either list the answer fields it reads back
+  after the write and add a case to `tests/observed_post_state.ps1` that reads
+  the same state through `tests/godot_smoke/observed_witness.gd`, or exempt it
+  with the reason and the issue that tracks the gap. A field copied from the
+  request or read before the write is not observed, whatever its name.
+  `tests/test_observed_post_state.py` fails the build until the entry exists,
+  and the live harness fails when an answer disagrees with the engine.
 - Update [Current Capability Matrix](CAPABILITIES.md) and [Tool Reference](TOOL_REFERENCE.md).
 
 ## Phase 3 and managed recovery implementation map

@@ -25,6 +25,12 @@ struct ToolManifest {
     std::vector<std::string> legacy;         // registrations from kLegacyToolNames
     std::vector<std::string> implemented;    // canonical names with a real execution path
     std::vector<std::string> unimplemented;  // canonical names reserved for compatibility
+    // Implemented canonical names that MutationSafety classifies as mutations,
+    // which is the set that takes dry_run. tests/observed_post_state.json has
+    // to account for every one of them (Q2), so the list comes from the same
+    // classification the dry-run and confirmation contracts use rather than
+    // from annotations a second derivation could move.
+    std::vector<std::string> mutating;
     // Required request fields per implemented canonical tool, so documentation
     // can be checked against the schema a caller actually has to satisfy
     // rather than against prose about it. dry_run is excluded: it is on every

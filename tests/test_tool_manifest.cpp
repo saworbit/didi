@@ -119,6 +119,38 @@ static void test_manifest_json_counts_agree_with_names() {
 
     ASSERT_EQ(doc["names"]["canonical"].size(), manifest.canonical.size());
     ASSERT_EQ(doc["names"]["legacy"].size(), manifest.legacy.size());
+    ASSERT_EQ(doc["counts"]["mutating"].get<size_t>(), manifest.mutating.size());
+    ASSERT_EQ(doc["names"]["mutating"].size(), manifest.mutating.size());
+}
+
+// The mutating list is what tests/observed_post_state.json has to account for,
+// one entry per name (Q2). It is exactly the implemented canonical tools that
+// take dry_run, because that is the property that makes a tool a mutation to
+// every other contract on the surface; a list derived some other way could
+// leave a mutation out of the conformance check without anything noticing.
+static void test_manifest_mutating_is_the_implemented_dry_run_set() {
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    const auto manifest = registry.buildManifest();
+    size_t expected = 0;
+    for (const auto& name : manifest.implemented) {
+        const auto* tool = registry.getTool(name);
+        ASSERT_TRUE(tool != nullptr);
+        const auto& schema = tool->inputSchema;
+        const bool takes_dry_run = schema.is_object() && schema.contains("properties") &&
+                                   schema.at("properties").contains("dry_run");
+        ASSERT_EQ(contains(manifest.mutating, name), takes_dry_run);
+        if (takes_dry_run) ++expected;
+    }
+    for (const auto& name : manifest.mutating) {
+        ASSERT_TRUE(contains(manifest.implemented, name));
+    }
+    ASSERT_EQ(manifest.mutating.size(), expected);
+    // A reserved mutation is not in the list, because nothing can be driven.
+    ASSERT_TRUE(!contains(manifest.mutating, "physics_simulate_step"));
+    ASSERT_TRUE(contains(manifest.mutating, "scene_set_property"));
+    // Session attachment writes server state and takes no dry run.
+    ASSERT_TRUE(!contains(manifest.mutating, "runtime_attach_session"));
 }
 
 // Manifest name lists are sorted, so the generated artifact is stable across
@@ -129,6 +161,7 @@ static void test_manifest_names_are_sorted() {
     ASSERT_TRUE(std::is_sorted(manifest.legacy.begin(), manifest.legacy.end()));
     ASSERT_TRUE(std::is_sorted(manifest.implemented.begin(), manifest.implemented.end()));
     ASSERT_TRUE(std::is_sorted(manifest.unimplemented.begin(), manifest.unimplemented.end()));
+    ASSERT_TRUE(std::is_sorted(manifest.mutating.begin(), manifest.mutating.end()));
 }
 
 // --- Tool annotations and structured results -------------------------------
@@ -885,6 +918,8 @@ struct RegisterToolManifestTests {
                      test_manifest_json_counts_agree_with_names);
         registerTest("tool_manifest.names_sorted",
                      test_manifest_names_are_sorted);
+        registerTest("tool_manifest.mutating_is_implemented_dry_run_set",
+                     test_manifest_mutating_is_the_implemented_dry_run_set);
         registerTest("tool_annotations.read_only_tools",
                      test_read_only_tools_are_annotated_read_only);
         registerTest("tool_annotations.project_code_is_open_world",
