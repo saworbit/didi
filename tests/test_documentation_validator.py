@@ -343,6 +343,7 @@ Second section.
         omitted_phase_field: tuple[int, str] | None = None,
         completed_phase: int | None = None,
         omitted_completion_field: str | None = None,
+        phase_statuses: dict[int, str] | None = None,
     ) -> str:
         phase_fields = {
             "scope": "**Scope:** Define this phase's capability boundary.",
@@ -361,7 +362,7 @@ Second section.
             lines.extend([f"## Phase {phase}: Future Work", ""])
             lines.extend(
                 [
-                    f"**Status:** `{'PARTIAL_DELIVERY' if phase == 7 else 'PLANNED'}`",
+                    f"**Status:** `{(phase_statuses or {}).get(phase, 'PARTIAL_DELIVERY' if phase == 7 else 'PLANNED')}`",
                     "",
                 ]
             )
@@ -1788,7 +1789,8 @@ Second section.
                 self.write(
                     "docs/FUTURE_PHASES_DESIGN.md",
                     self.make_future_phase_governance(
-                        completed_phase=8 if status == "COMPLETE" else None
+                        completed_phase=8 if status == "COMPLETE" else None,
+                        phase_statuses={8: status},
                     ),
                 )
 
@@ -1814,6 +1816,27 @@ Second section.
                     f"docs/ROADMAP.md Phase 8 has invalid status '{status}'",
                     errors,
                 )
+
+    def test_design_phase_status_must_agree_with_roadmap(self):
+        roadmap = self.make_future_phase_roadmap(phase_statuses={8: "IN PROGRESS"})
+        cases = (
+            ("PLANNED", True),
+            ("IN PROGRESS", False),
+        )
+        for design_status, disagrees in cases:
+            with self.subTest(design_status=design_status):
+                errors = VALIDATOR.validate_future_phase_governance(
+                    self.make_future_phase_governance(phase_statuses={8: design_status}),
+                    roadmap,
+                )
+                message = (
+                    f"docs/FUTURE_PHASES_DESIGN.md Phase 8 status '{design_status}' "
+                    "disagrees with docs/ROADMAP.md 'IN PROGRESS'"
+                )
+                if disagrees:
+                    self.assertIn(message, errors)
+                else:
+                    self.assertEqual([], errors)
 
     def test_rejects_duplicate_phase_declaration(self):
         roadmap = self.make_future_phase_roadmap(duplicate_phase=8)
