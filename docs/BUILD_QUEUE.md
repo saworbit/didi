@@ -22,11 +22,13 @@ Each item below names the principles it serves.
 6. The pull request that starts the work sets the row to `IN PROGRESS`. The
    pull request that meets the item's **Done when** sets it to
    `COMPLETE (#<pull request>)`, closes the issue, and updates the phase status
-   in [ROADMAP.md](ROADMAP.md) if the phase moved.
+   in both [ROADMAP.md](ROADMAP.md) and
+   [FUTURE_PHASES_DESIGN.md](FUTURE_PHASES_DESIGN.md) if the phase moved.
 
 `tools/validate_documentation.py` checks the table: items numbered in order,
 known statuses, a pull request on every `COMPLETE` row, dependencies that
-exist, phases the roadmap declares, and the four fields in every item.
+exist, phases the roadmap declares, and the four fields in every item. It also
+fails when a phase's status differs between the roadmap and the phase design.
 
 ## Queue
 

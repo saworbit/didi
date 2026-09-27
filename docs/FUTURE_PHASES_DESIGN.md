@@ -367,7 +367,7 @@ above, two were delivered by later work and one remains open; see the note there
 
 ## Phase 13: Surface Contracts
 
-**Status:** `PLANNED`
+**Status:** `IN PROGRESS`
 
 **Goal:** Turn the guarantees individual tools make into contracts every tool keeps, and make the surface cheaper to carry. See [Design Principles](DESIGN_PRINCIPLES.md) P1 to P5.
 

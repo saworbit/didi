@@ -196,6 +196,14 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **The phase design no longer calls Phase 13 planned while the roadmap says it
+  is in progress.** Delivering the first Build Queue item moved Phase 13 in
+  `docs/ROADMAP.md`, and `docs/FUTURE_PHASES_DESIGN.md` kept saying `PLANNED`,
+  because the queue's own steps named only the roadmap and nothing compared the
+  two. The steps in the queue, `AGENTS.md` and `CONTRIBUTING.md` now name both
+  files, and `tools/validate_documentation.py` fails when a phase's status
+  differs between them.
+
 - **Every argument declares a JSON type, so a Claude host can send an int, a
   bool or an array (#1000).** `project_set_setting.value`, `blackboard_write.value`
   and `blackboard_task_complete.artifacts` published no type at all, and Claude

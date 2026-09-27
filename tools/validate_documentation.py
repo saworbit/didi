@@ -1209,6 +1209,20 @@ def validate_future_phase_governance(
                 f"'{PHASE7_STATUS}'"
             )
 
+        # The roadmap and the design record each state a phase's status. Only
+        # the roadmap's was ever read, so when a queue item moved Phase 13 to
+        # IN PROGRESS the design record went on saying PLANNED unnoticed.
+        roadmap_statuses = [
+            status for status in roadmap_declarations.get(phase, []) if status is not None
+        ]
+        if status_match is not None and roadmap_statuses:
+            design_status = status_match.group(1).strip()
+            if design_status not in roadmap_statuses:
+                errors.append(
+                    f"docs/FUTURE_PHASES_DESIGN.md Phase {phase} status '{design_status}' "
+                    f"disagrees with docs/ROADMAP.md '{roadmap_statuses[0]}'"
+                )
+
         phase_is_complete = "COMPLETE" in roadmap_declarations.get(phase, [])
         if phase_is_complete:
             for field in FUTURE_PHASE_COMPLETION_FIELDS:

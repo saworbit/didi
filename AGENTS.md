@@ -16,5 +16,6 @@ Pointers for anyone, person or coding agent, asked to pick up work on Didi.
   [CONTRIBUTING.md](CONTRIBUTING.md).
 - **Finishing a queue item.** The pull request that meets the item's
   **Done when** sets its row to `COMPLETE (#<pull request>)`, closes its issue,
-  and updates the phase status in [docs/ROADMAP.md](docs/ROADMAP.md) if the
-  phase moved.
+  and updates the phase status in both [docs/ROADMAP.md](docs/ROADMAP.md) and
+  [docs/FUTURE_PHASES_DESIGN.md](docs/FUTURE_PHASES_DESIGN.md) if the phase
+  moved.
