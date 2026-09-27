@@ -694,6 +694,9 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
   Phases 13 (Surface Contracts) and 14 (Reach and Proof) are defined, Gogo and
   further coordination work are paused, and `tools/validate_documentation.py`
   checks the queue's numbering, statuses, dependencies, phases and item fields.
+  The contributor contract, the pull request template, the developer guide and
+  the website point at the queue, and the developer guide now says a new tool
+  name needs an accepted Surface Amendment first.
 
 - **The roadmap and the amendment log describe the surface as it stands (#990).**
   The roadmap opened on a 115-tool canonical surface, and the tool count is 120.

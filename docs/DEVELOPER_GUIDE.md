@@ -195,6 +195,8 @@ the native test boundary, so it is worked on differently from the rest.
 
 Do not register a success stub. A new name must either have a tested execution path or be classified as `unimplemented` and rejected.
 
+A new name needs an accepted entry in [Surface Amendments](SURFACE_AMENDMENTS.md) before it is registered. New capabilities normally arrive as an item in the [Build Queue](BUILD_QUEUE.md), whose section says what the tool has to do and when it is done, and whose [Design Principles](DESIGN_PRINCIPLES.md) are the rules it has to keep.
+
 To add a new tool (e.g. `export_mesh_glb`):
 
 ### 1. Register Tool Schema in `src/mcp/tool_registry.cpp`
