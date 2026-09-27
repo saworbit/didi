@@ -160,9 +160,9 @@ static void test_mcp_initialize_instructions() {
     req.params = didi::json::object();
     const auto listed = server.handleRequest(req);
     ASSERT_TRUE(!listed.error.has_value());
-    didi::json names = didi::json::object();
+    didi::json tools = didi::json::object();
     for (const auto& tool : listed.result["tools"]) {
-        names[tool["name"].get<std::string>()] = true;
+        tools[tool["name"].get<std::string>()] = tool;
     }
     // Tool identifiers in the guide contain underscores. Other underscored
     // words are schema fields or result metadata, listed explicitly here.
@@ -172,25 +172,61 @@ static void test_mcp_initialize_instructions() {
         "max_nodes", "omitted_fields", "target_node", "property_name",
         "file_path", "source_text", "engine_checked", "is_live_frame"
     };
-    std::istringstream words(instructions);
-    std::string word;
-    while (words >> word) {
-        size_t start = 0;
-        while (start < word.size()) {
-            start = word.find_first_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_", start);
-            if (start == std::string::npos) break;
-            const auto end = word.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_", start);
-            const auto identifier = word.substr(start, end - start);
-            if (identifier.find('_') != std::string::npos &&
-                std::find(fields.begin(), fields.end(), identifier) == fields.end()) {
-                if (!names.contains(identifier)) {
-                    throw std::runtime_error("Instructions name an unregistered tool: " + identifier);
-                }
+    // One sentence names the tools hosts must not call. Each tool it names
+    // must still be unimplemented, and every tool named anywhere else is a
+    // route, so it must be implemented. Shipping or retiring a tool fails
+    // here until the guide says so.
+    const auto forbidden_start = instructions.find("do not call ");
+    const auto forbidden_end = instructions.find(" while discovery marks them unimplemented");
+    ASSERT_TRUE(forbidden_start != std::string::npos);
+    ASSERT_TRUE(forbidden_end != std::string::npos && forbidden_start < forbidden_end);
+    const char* identifier_chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_";
+    size_t forbidden_count = 0;
+    size_t start = 0;
+    while ((start = instructions.find_first_of(identifier_chars, start)) != std::string::npos) {
+        auto end = instructions.find_first_not_of(identifier_chars, start);
+        if (end == std::string::npos) end = instructions.size();
+        const auto identifier = instructions.substr(start, end - start);
+        if (identifier.find('_') != std::string::npos &&
+            std::find(fields.begin(), fields.end(), identifier) == fields.end()) {
+            if (!tools.contains(identifier)) {
+                throw std::runtime_error("Instructions name an unregistered tool: " + identifier);
             }
-            if (end == std::string::npos) break;
-            start = end + 1;
+            const bool forbidden = start > forbidden_start && start < forbidden_end;
+            if (forbidden) ++forbidden_count;
+            if (tools.at(identifier).at("_meta").at("didi").at("implemented").get<bool>() == forbidden) {
+                throw std::runtime_error(std::string("Instructions ") +
+                    (forbidden ? "forbid an implemented" : "route to an unimplemented") +
+                    " tool: " + identifier);
+            }
+        }
+        start = end;
+    }
+    ASSERT_TRUE(forbidden_count > 0);
+    // A parameter spelled tool(param, ...) must be in that tool's
+    // inputSchema, so a renamed argument cannot leave the guide sending
+    // hosts a field the tool rejects.
+    size_t cited = 0;
+    for (auto open = instructions.find('('); open != std::string::npos;
+         open = instructions.find('(', open + 1)) {
+        const auto name_start = instructions.find_last_not_of(identifier_chars, open - 1) + 1;
+        const auto name = instructions.substr(name_start, open - name_start);
+        if (!tools.contains(name)) continue;
+        const auto close = instructions.find(')', open);
+        ASSERT_TRUE(close != std::string::npos);
+        const auto& properties = tools.at(name).at("inputSchema").at("properties");
+        std::istringstream params(instructions.substr(open + 1, close - open - 1));
+        for (std::string param; std::getline(params, param, ',');) {
+            const auto first = param.find_first_not_of(' ');
+            param = param.substr(first, param.find_first_of("= ", first) - first);
+            if (!properties.contains(param)) {
+                throw std::runtime_error("Instructions cite a parameter " + name +
+                                         " does not take: " + param);
+            }
+            ++cited;
         }
     }
+    ASSERT_TRUE(cited > 0);
     for (const auto* name : {"scene_get_hierarchy", "scene_get_property",
                             "project_get_setting", "script_get_symbols", "script_check_syntax"}) {
         ASSERT_TRUE(instructions.find(name) != std::string::npos);
