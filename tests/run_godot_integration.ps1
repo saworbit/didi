@@ -1782,6 +1782,13 @@ try {
         (Tool-Request 471 "project_set_setting" @{ setting = "application/config/name"; value = 42 }),
         (Tool-Request 472 "project_set_setting" @{ setting = "application/run/main_scene"; value = "res://nope.tscn" }),
         (Tool-Request 473 "project_get_setting" @{ setting = "application/run/main_scene" }),
+        (Tool-Request 1016 "project_get_setting" @{ setting = "display/window/size/viewport_width" }),
+        (Tool-Request 1017 "project_set_setting" @{ setting = "application/boot_splash/show_image"; value = $false }),
+        (Tool-Request 1018 "project_get_setting" @{ setting = "application/boot_splash/show_image" }),
+        (Tool-Request 1019 "project_set_setting" @{ setting = "application/config/tags"; value = @("didi_typed_a", "didi_typed_b") }),
+        (Tool-Request 1020 "project_get_setting" @{ setting = "application/config/tags" }),
+        (Tool-Request 1021 "project_set_setting" @{ setting = "application/boot_splash/show_image"; value = $true }),
+        (Tool-Request 1022 "project_set_setting" @{ setting = "application/config/tags"; value = @() }),
         (Tool-Request 51 "script_attach_to_node" @{ target_node = "/root/SmokeRoot/Subject"; script_path = "res://subject.gd" }),
         (Tool-Request 52 "script_detach_from_node" @{ target_node = "/root/SmokeRoot/Subject" }),
         (Tool-Request 53 "editor_undo" @{}),
@@ -2129,6 +2136,22 @@ try {
     # The live path names the edited scene, and that name is in the contract.
     Assert-True ($declared -contains "scene_file_path") "The hierarchy contract does not declare the edited scene identity a live answer carries."
     Assert-True ($hierarchy.PSObject.Properties.Name -contains "node_count") "A live hierarchy answer did not report node_count."
+
+    # A host fills a gap in a schema its own way: Claude Code sent every value
+    # for an untyped top-level argument as a string, so no int, bool or array
+    # project setting could be written from one (#1000). The native suite holds
+    # the registry to the rule; this is the tools/list a host actually reads,
+    # from a server with an editor attached.
+    $untypedArguments = @()
+    foreach ($listed in $byId[2002].result.tools) {
+        if ($null -eq $listed.inputSchema.properties) { continue }
+        foreach ($argument in @($listed.inputSchema.properties.PSObject.Properties)) {
+            if ($null -eq $argument.Value.type) { $untypedArguments += "$($listed.name).$($argument.Name)" }
+        }
+    }
+    Assert-True ($untypedArguments.Count -eq 0) "tools/list published arguments with no JSON type: $($untypedArguments -join ', ')"
+    $settingValueTypes = @($listedTools["project_set_setting"].inputSchema.properties.value.type | Sort-Object)
+    Assert-True (($settingValueTypes -join ",") -eq "array,boolean,integer,null,number,object,string") "project_set_setting.value declares '$($settingValueTypes -join ',')' rather than every JSON type."
 
 
     Assert-True ((Tool-Payload $byId[3]).value -eq 7) "Fixture property did not start at 7; actual=$((Tool-Payload $byId[3]).value)."
@@ -4074,6 +4097,21 @@ try {
     Assert-True ($byId[472].result.content[0].text -match "nope.tscn") "The missing-resource refusal did not name the path."
     Assert-True (-not $byId[473].result.isError) "The refused main scene write damaged the setting anyway."
     Assert-True ((Tool-Payload $byId[473]).value -ne "res://nope.tscn") "The refused main scene value reached project.godot."
+
+    # An int, a bool and an array, the three a Claude host could not send while
+    # value published no JSON type (#1000), each read back from the engine
+    # rather than taken from the write's answer. The type test matters: in
+    # PowerShell "false" -eq $false is true, so a stringified value would pass
+    # a bare comparison.
+    $intSetting = (Tool-Payload $byId[1016]).value
+    Assert-True ($intSetting -is [ValueType] -and $intSetting -eq 1280) "viewport_width did not read back as the integer 1280: $($byId[1016].result.content[0].text)"
+    Assert-True ((Tool-Payload $byId[1017]).persisted -eq $true) "A boolean was not written into a bool setting: $($byId[1017].result.content[0].text)"
+    $boolSetting = (Tool-Payload $byId[1018]).value
+    Assert-True ($boolSetting -is [bool] -and -not $boolSetting) "show_image did not read back as the boolean false: $($byId[1018].result.content[0].text)"
+    Assert-True ((Tool-Payload $byId[1019]).persisted -eq $true) "An array was not written into a PackedStringArray setting: $($byId[1019].result.content[0].text)"
+    $arraySetting = (Tool-Payload $byId[1020]).value
+    Assert-True ($arraySetting -is [array] -and $arraySetting.Count -eq 2 -and $arraySetting[1] -eq "didi_typed_b") "config/tags did not read back as the two-element array: $($byId[1020].result.content[0].text)"
+    Assert-True (-not $byId[1021].result.isError -and -not $byId[1022].result.isError) "Restoring show_image or config/tags failed: $($byId[1021].result.content[0].text) $($byId[1022].result.content[0].text)"
 
     Assert-True ((Tool-Payload $byId[51]).undo_redo_registered) "Script attachment bypassed UndoRedo."
     Assert-True ((Tool-Payload $byId[52]).detached -eq $true) "Script detachment was not observed."
