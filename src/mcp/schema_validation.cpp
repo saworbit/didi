@@ -379,6 +379,29 @@ std::optional<std::string> checkOneOf(const json& schema, const json& value,
     return where + " does not match any accepted shape. One of these is needed: " + shapes + ".";
 }
 
+// Whether every branch of a oneOf is an object shape that names the properties
+// it needs, which is when the branches describe a refused value better than a
+// type can. A oneOf of scalars has nothing to add: its branches would read "no
+// required properties", and the type already says what they would.
+bool oneOfNamesObjectShapes(const json& schema, const json& root) {
+    const auto branches = schema.find("oneOf");
+    if (branches == schema.end() || !branches->is_array() || branches->empty()) return false;
+    for (const auto& branch : *branches) {
+        if (!branch.is_object()) return false;
+        const json* shape = &branch;
+        if (branch.find("type") == branch.end()) {
+            if (const json* referenced = resolveLocalRef(branch, root)) shape = referenced;
+        }
+        const auto type = shape->find("type");
+        const auto required = shape->find("required");
+        if (type == shape->end() || *type != "object" || required == shape->end() ||
+            !required->is_array() || required->empty()) {
+            return false;
+        }
+    }
+    return true;
+}
+
 std::optional<std::string> checkObject(const json& schema, const json& value,
                                        const std::string& where, int depth,
                                        const json& root) {
@@ -482,8 +505,6 @@ std::optional<std::string> checkValue(const json& schema, const json& value,
             }
         }
     }
-    if (auto problem = checkType(schema, value, where)) return problem;
-
     // A fixed value, which is how a schema spells a discriminator: the erase
     // form of a tilemap cell is the one whose `erase` is const true.
     // The reason, not only the rule. A parameter pinned to one value is pinned
@@ -495,8 +516,22 @@ std::optional<std::string> checkValue(const json& schema, const json& value,
         if (description == schema.end() || !description->is_string()) return std::string();
         return " " + description->get<std::string>();
     };
-
     const auto fixed = schema.find("const");
+
+    if (auto problem = checkType(schema, value, where)) {
+        // Every top-level argument declares a type, for the host rather than for
+        // this check: a host fills a missing one its own way (#1000). Beside a
+        // const or a oneOf of object shapes, the rest of the schema says more
+        // than the type does, so a value the type refuses is answered the way
+        // it was before the type was there: with the value it must be and why
+        // (#654), or with the properties each shape needs (#489).
+        if (fixed != schema.end()) return where + " must be " + fixed->dump() + "." + pinReason();
+        if (oneOfNamesObjectShapes(schema, root)) {
+            if (auto shaped = checkOneOf(schema, value, where, depth, root)) return shaped;
+        }
+        return problem;
+    }
+
     if (fixed != schema.end() && *fixed != value) {
         return where + " must be " + fixed->dump() + "." + pinReason();
     }

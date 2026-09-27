@@ -501,16 +501,221 @@ static void test_instantiate_node_property_values_are_described() {
     ASSERT_TRUE(declared == accepted);
 }
 
+static const std::vector<std::string> kEveryJsonType = {
+    "array", "boolean", "integer", "null", "number", "object", "string"};
+
 // The converse guard. A genuinely free-form value -- the memory store keeps
-// whatever JSON it is handed, verbatim -- is correctly untyped, and narrowing
-// it to the scalar property set would be a regression, not a fix.
-static void test_free_form_values_stay_untyped() {
+// whatever JSON it is handed, verbatim -- takes every JSON type, and narrowing
+// it to the scalar property set would be a regression, not a fix. It declares
+// all seven rather than none: to a validator the two are the same, and to a
+// host they are not. Claude Code sent each of these as a string while it was
+// untyped, so no int, bool or array project setting could be written (#1000).
+static void test_free_form_values_declare_every_json_type() {
     auto& registry = didi::mcp::ToolRegistry::instance();
     registry.registerAllDefaultTools();
-    const auto* tool = registry.getTool("blackboard_write");
-    ASSERT_TRUE(tool != nullptr);
-    const auto& value = tool->inputSchema.at("properties").at("value");
-    ASSERT_TRUE(!value.contains("type"));
+    const std::vector<std::pair<std::string, std::string>> free_form = {
+        {"blackboard_write", "value"},
+        {"blackboard_task_complete", "artifacts"},
+        {"project_set_setting", "value"},
+    };
+    for (const auto& [name, argument] : free_form) {
+        const auto* tool = registry.getTool(name);
+        ASSERT_TRUE(tool != nullptr);
+        const auto& value = tool->inputSchema.at("properties").at(argument);
+        ASSERT_TRUE(value.contains("type"));
+        ASSERT_TRUE(value.at("type").is_array());
+        auto declared = value.at("type").get<std::vector<std::string>>();
+        std::sort(declared.begin(), declared.end());
+        if (declared != kEveryJsonType) {
+            throw std::runtime_error(name + "." + argument +
+                                     " takes any JSON value and declares only " +
+                                     value.at("type").dump());
+        }
+    }
+}
+
+namespace {
+
+// The JSON types a value satisfies, as a schema's `type` spells them. A whole
+// number satisfies both integer and number.
+std::set<std::string> typesOfValue(const didi::json& value) {
+    if (value.is_null()) return {"null"};
+    if (value.is_boolean()) return {"boolean"};
+    if (value.is_number_integer()) return {"integer", "number"};
+    if (value.is_number()) return {"number"};
+    if (value.is_string()) return {"string"};
+    if (value.is_array()) return {"array"};
+    return {"object"};
+}
+
+// What a schema declares in `type`, after following a local $ref the way the
+// server's validator does. Empty when it declares nothing.
+std::set<std::string> declaredTypes(const didi::json& schema, const didi::json& root) {
+    const didi::json* subject = &schema;
+    if (!schema.contains("type") && schema.contains("$ref") && schema["$ref"].is_string()) {
+        const auto pointer = schema["$ref"].get<std::string>();
+        const std::string prefix = "#/$defs/";
+        if (pointer.rfind(prefix, 0) == 0 && root.contains("$defs") &&
+            root["$defs"].contains(pointer.substr(prefix.size()))) {
+            subject = &root["$defs"][pointer.substr(prefix.size())];
+        }
+    }
+    const auto type = subject->find("type");
+    if (type == subject->end()) return {};
+    if (type->is_string()) return {type->get<std::string>()};
+    std::set<std::string> names;
+    if (type->is_array()) {
+        for (const auto& entry : *type) {
+            if (entry.is_string()) names.insert(entry.get<std::string>());
+        }
+    }
+    return names;
+}
+
+// Whether every type in `narrower` is admitted by `wider`. An integer is a
+// number, so a number declaration admits an integer branch.
+bool admits(const std::set<std::string>& wider, const std::set<std::string>& narrower) {
+    for (const auto& name : narrower) {
+        if (wider.count(name)) continue;
+        if (name == "integer" && wider.count("number")) continue;
+        return false;
+    }
+    return true;
+}
+
+// Why an argument's declared type is missing or contradicts the rest of its
+// schema, or empty when it is sound.
+std::string argumentTypeProblem(const didi::json& argument, const didi::json& root) {
+    if (!argument.contains("type")) return "declares no type";
+    const auto& type = argument["type"];
+    if (!type.is_string() && !(type.is_array() && !type.empty())) {
+        return "declares a type that is neither a name nor a list of names";
+    }
+    const auto declared = declaredTypes(argument, root);
+    for (const auto& name : declared) {
+        if (std::find(kEveryJsonType.begin(), kEveryJsonType.end(), name) ==
+            kEveryJsonType.end()) {
+            return "declares \"" + name + "\", which is not a JSON type";
+        }
+    }
+    // The server's validator checks the declared type as well as the oneOf,
+    // $ref, const or enum beside it. A declaration that leaves out something
+    // those accept would start refusing a value that passed before.
+    const auto satisfies = [&declared](const didi::json& value) {
+        const auto types = typesOfValue(value);
+        return std::any_of(types.begin(), types.end(),
+                           [&declared](const std::string& name) { return declared.count(name) > 0; });
+    };
+    if (argument.contains("const") && !satisfies(argument["const"])) {
+        return "is pinned to " + argument["const"].dump() + " but declares " + type.dump();
+    }
+    if (argument.contains("enum") && argument["enum"].is_array()) {
+        for (const auto& option : argument["enum"]) {
+            if (!satisfies(option)) return "allows " + option.dump() + " but declares " + type.dump();
+        }
+    }
+    if (argument.contains("$ref")) {
+        didi::json referenced = argument;
+        referenced.erase("type");
+        const auto target = declaredTypes(referenced, root);
+        if (target.empty() || !admits(declared, target)) {
+            return "refers to " + argument["$ref"].dump() + " but declares " + type.dump();
+        }
+    }
+    for (const char* keyword : {"oneOf", "anyOf"}) {
+        if (!argument.contains(keyword) || !argument[keyword].is_array()) continue;
+        for (const auto& branch : argument[keyword]) {
+            const auto accepted = declaredTypes(branch, root);
+            if (accepted.empty() || !admits(declared, accepted)) {
+                return std::string("has a ") + keyword + " branch " + branch.dump() +
+                       " that its declared " + type.dump() + " does not admit";
+            }
+        }
+    }
+    return {};
+}
+
+} // namespace
+
+// Break caught: three top-level arguments published no type at all, and a
+// Claude host sent every value for them as a string, whatever the caller
+// meant. project_set_setting could then write no int, bool or array setting,
+// and offline it wrote the quoted string and reported success (#1000). A
+// client fills a gap in a schema its own way, so the rule is that there is no
+// gap to fill: every top-level argument of every tool, legacy names included,
+// declares a JSON type or a list of them.
+//
+// A declaration also has to agree with the rest of the argument's schema,
+// because the validator checks both. A type beside a oneOf that left out one
+// of its branches would refuse values that pass today.
+static void test_every_argument_declares_its_json_type() {
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    std::vector<std::string> problems;
+    for (const auto& tool : registry.listTools()) {
+        const auto schema = tool.toJson().value("inputSchema", didi::json::object());
+        if (!schema.is_object() || !schema.contains("properties")) continue;
+        const auto& properties = schema["properties"];
+        if (!properties.is_object()) continue;
+        for (auto it = properties.begin(); it != properties.end(); ++it) {
+            if (!it.value().is_object()) {
+                problems.push_back(tool.name + "." + it.key() + " is not a schema object");
+                continue;
+            }
+            const auto problem = argumentTypeProblem(it.value(), schema);
+            if (!problem.empty()) problems.push_back(tool.name + "." + it.key() + " " + problem);
+        }
+    }
+    if (!problems.empty()) {
+        std::string report;
+        for (size_t i = 0; i < problems.size() && i < 20; ++i) {
+            if (i > 0) report += "; ";
+            report += problems[i];
+        }
+        throw std::runtime_error(
+            std::to_string(problems.size()) +
+            " tool argument(s) have no sound JSON type. Declare the type, or the list of "
+            "types, the argument accepts; a host sends an untyped one however it likes: " +
+            report);
+    }
+}
+
+// The check above has to be able to fail, on each shape it reads.
+static void test_the_argument_type_check_sees_each_gap() {
+    const didi::json root = {
+        {"$defs", {{"vector2", {{"type", "object"}}}, {"index", {{"type", "integer"}}}}}};
+    const auto problem = [&root](const didi::json& argument) {
+        return argumentTypeProblem(argument, root);
+    };
+    // Untyped, whatever else the argument says.
+    ASSERT_TRUE(!problem({{"description", "Any JSON value."}}).empty());
+    ASSERT_TRUE(!problem({{"$ref", "#/$defs/vector2"}}).empty());
+    ASSERT_TRUE(!problem({{"const", false}}).empty());
+    ASSERT_TRUE(!problem({{"oneOf", didi::json::array({{{"type", "string"}}})}}).empty());
+    // Not a JSON type, or no names at all.
+    ASSERT_TRUE(!problem({{"type", "vector"}}).empty());
+    ASSERT_TRUE(!problem({{"type", didi::json::array()}}).empty());
+    // A declaration that contradicts what the argument already accepts.
+    ASSERT_TRUE(!problem({{"type", "string"}, {"const", false}}).empty());
+    ASSERT_TRUE(!problem({{"type", "string"}, {"enum", didi::json::array({"a", 2})}}).empty());
+    ASSERT_TRUE(!problem({{"type", "string"}, {"$ref", "#/$defs/vector2"}}).empty());
+    ASSERT_TRUE(!problem({{"type", "string"},
+                          {"oneOf", didi::json::array({{{"type", "string"}},
+                                                       {{"type", "integer"}}})}})
+                     .empty());
+    ASSERT_TRUE(!problem({{"type", "object"},
+                          {"oneOf", didi::json::array({{{"description", "untyped"}}})}})
+                     .empty());
+    // And the sound shapes pass, an integer branch under number included.
+    ASSERT_TRUE(problem({{"type", "boolean"}, {"const", false}}).empty());
+    ASSERT_TRUE(problem({{"type", "object"}, {"$ref", "#/$defs/vector2"}}).empty());
+    ASSERT_TRUE(problem({{"type", didi::json::array({"string", "integer"})},
+                         {"oneOf", didi::json::array({{{"type", "string"}},
+                                                      {{"$ref", "#/$defs/index"}}})}})
+                    .empty());
+    ASSERT_TRUE(problem({{"type", "number"}, {"oneOf", didi::json::array({{{"type", "integer"}}})}})
+                    .empty());
+    ASSERT_TRUE(problem({{"type", "number"}, {"enum", didi::json::array({1, 2.5})}}).empty());
 }
 
 // A tool that cannot execute has no observed shape, so it must not promise one.
@@ -720,7 +925,11 @@ struct RegisterToolManifestTests {
                      test_an_alias_documents_its_parameters_like_the_tool_it_resolves_to);
         registerTest("tool_input_schema.awkward_names_spelled_out",
                      test_the_names_that_are_not_the_obvious_guess_are_spelled_out);
-        registerTest("tool_input_schema.free_form_values_untyped",
-                     test_free_form_values_stay_untyped);
+        registerTest("tool_input_schema.free_form_values_take_every_type",
+                     test_free_form_values_declare_every_json_type);
+        registerTest("tool_input_schema.every_argument_typed",
+                     test_every_argument_declares_its_json_type);
+        registerTest("tool_input_schema.argument_type_check_sees_each_gap",
+                     test_the_argument_type_check_sees_each_gap);
     }
 } g_register_tool_manifest_tests;

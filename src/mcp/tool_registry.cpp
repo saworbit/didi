@@ -344,6 +344,15 @@ CallToolResult handleEditorReloadProject(const json& args, std::shared_ptr<ipc::
 
 namespace {
 
+// Every JSON type, for an argument that takes any value. Declaring all seven
+// says the same thing as declaring none to a validator, and something different
+// to a host: a host fills a missing type its own way, and Claude Code sends an
+// untyped top-level argument as a string whatever the caller meant, so no int,
+// bool or array project setting could be written from one (#1000).
+json anyJsonType() {
+    return json::array({"null", "boolean", "integer", "number", "string", "array", "object"});
+}
+
 Error normalizeLiveRouteError(Error error,
                               const std::optional<runtime::SessionDescriptor>& session = {}) {
     // The caller below reads route_quarantine back out to decide whether to
@@ -4045,6 +4054,7 @@ void ToolRegistry::registerAllDefaultTools() {
                 {"resource_type", {{"type", "string"}, {"default", "StandardMaterial3D"}}},
                 {"save_path", {{"type", "string"}, {"description", "Target res:// path ending in .tres. A .res is Godot's binary format and is refused."}}},
                 {"properties", {
+                    {"type", json::array({"object", "array"})},
                     {"description",
                      "An object, whose keys are written in sorted order, or an array of "
                      "{name, value} entries written in the order given. Use the array when order "
@@ -4213,7 +4223,8 @@ void ToolRegistry::registerAllDefaultTools() {
                            {"description", "Board name. Letters, digits, underscore and hyphen. Separate boards do not see each other."}}},
                 {"path", {{"type", "string"}, {"minLength", 1}, {"maxLength", 512},
                           {"description", "Dot or slash path such as architecture.inventory.slots. Segments cannot be empty, '.' or '..'."}}},
-                {"value", {{"description", "Any JSON value. Stored and returned verbatim; Didi never interprets or executes it."}}},
+                {"value", {{"type", anyJsonType()},
+                           {"description", "Any JSON value. Stored and returned verbatim; Didi never interprets or executes it."}}},
                 {"author", {{"type", "string"}, {"maxLength", 128},
                             {"description", "Who wrote it. Recorded as metadata, never verified. The task tools call the same idea agent_id, because there it is an identity a lease is checked against rather than provenance."}}},
                 {"reason", {{"type", "string"}, {"maxLength", 512},
@@ -4401,7 +4412,8 @@ void ToolRegistry::registerAllDefaultTools() {
                 {"task_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", 128}}},
                 {"agent_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", 128},
                               {"description", "Must hold the live lease."}}},
-                {"artifacts", {{"description", "Free-form record of what changed: files, node paths, board keys. Stored and returned verbatim."}}}
+                {"artifacts", {{"type", anyJsonType()},
+                               {"description", "Free-form record of what changed: files, node paths, board keys. Stored and returned verbatim."}}}
             }},
             {"required", json::array({"task_id", "agent_id"})},
             {"additionalProperties", false}
@@ -4489,7 +4501,11 @@ void ToolRegistry::registerAllDefaultTools() {
         t.inputSchema = {
             {"type", "object"},
             {"properties", {
-                {"bus", {{"description", "The bus name or its index."},
+                // The type beside the oneOf is for a host that reads only
+                // `type`, which would send index 1 as "1", a bus name. Claude
+                // Code reads the oneOf too and sent the integer without it.
+                {"bus", {{"type", json::array({"string", "integer"})},
+                         {"description", "The bus name or its index."},
                          {"oneOf", json::array({json{{"type", "string"}, {"minLength", 1}, {"maxLength", 128}},
                                                 json{{"type", "integer"}, {"minimum", 0}}})}}},
                 {"volume_db", {{"type", "number"}, {"minimum", -80}, {"maximum", 24}}},
@@ -4914,7 +4930,7 @@ void ToolRegistry::registerAllDefaultTools() {
         {{"type", "object"}, {"properties", {
             {"setting", {{"type", "string"},
                          {"description", "Slash-delimited ProjectSettings name, such as display/window/size/viewport_width. Use the typed autoload and InputMap tools for those namespaces."}}},
-            {"value", json::object()},
+            {"value", {{"type", anyJsonType()}}},
             {"remove", {{"type", "boolean"}, {"default", false},
                         {"description", "Remove the setting instead of writing a value. Pass this or value, not both."}}},
             {"create", {{"type", "boolean"}, {"default", false},

@@ -5656,6 +5656,45 @@ static void test_oneof_branches_behind_a_ref_say_what_they_need() {
     ASSERT_TRUE(cells.find("coords") != std::string::npos);
 }
 
+// Break caught: declaring a type beside a oneOf or a const, so a host stops
+// sending those arguments however it likes (#1000), put the type check first,
+// and it answered for the whole schema. A ray sent as [0, 0, 0] was told only
+// "must be an object", losing the x, y or x, y, z that #489 put there, and a
+// pinned argument lost the reason #654 gave it. Where the type is all there is
+// to say, it still says it.
+static void test_a_declared_type_does_not_hide_what_the_schema_says() {
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+
+    const auto messageFor = [&](const char* tool, const didi::json& arguments) {
+        const auto result = registry.callTool(tool, arguments);
+        ASSERT_TRUE(result.isError);
+        const auto payload = didi::json::parse(result.content[0].text, nullptr, false);
+        ASSERT_TRUE(!payload.is_discarded());
+        return payload["error"]["message"].get<std::string>();
+    };
+
+    // A oneOf of object shapes names what each shape needs.
+    const auto ray = messageFor("physics_raycast_query",
+        {{"from", didi::json::array({0, 0, 0})}, {"to", didi::json::array({0, 0, 10})}});
+    ASSERT_TRUE(ray.find("x, y; or x, y, z") != std::string::npos);
+
+    // A pinned argument says the value and why, even when the type is wrong too.
+    const auto pinned = messageFor("viewport_toggle_debug_draw", {{"wireframe", "false"}});
+    ASSERT_TRUE(pinned.find("must be false") != std::string::npos);
+    ASSERT_TRUE(pinned.find("must be a boolean") == std::string::npos);
+
+    // A oneOf of scalars has nothing to add, so the type answers.
+    const auto bus = messageFor("audio_configure_bus", {{"bus", 1.5}});
+    ASSERT_TRUE(bus.find("string, integer") != std::string::npos);
+    ASSERT_TRUE(bus.find("no required properties") == std::string::npos);
+
+    // And an object-or-array argument sent as text is told both forms.
+    const auto properties = messageFor("resource_create",
+        {{"save_path", "res://typed.tres"}, {"properties", "{\"a\": 1}"}});
+    ASSERT_TRUE(properties.find("object, array") != std::string::npos);
+}
+
 static void test_project_search_public_validation_and_schema() {
     // Break caught: public search accepts coercible/unbounded inputs or advertises a live route.
     auto& reg = didi::mcp::ToolRegistry::instance();
@@ -9104,6 +9143,8 @@ struct RegisterToolTests {
                      test_depth_cut_reports_what_it_stopped_on);
         registerTest("Hierarchy.SchemaBoundsDepthAndDropsInertFlags",
                      test_hierarchy_schema_bounds_its_depth_and_drops_inert_flags);
+        registerTest("Schema.DeclaredTypeDoesNotHideWhatTheSchemaSays",
+                     test_a_declared_type_does_not_hide_what_the_schema_says);
         registerTest("Schema.OneOfBranchesBehindARefSayWhatTheyNeed",
                      test_oneof_branches_behind_a_ref_say_what_they_need);
         registerTest("ErrorData.FloorFillsCodeToolAndRetryable",

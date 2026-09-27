@@ -10,14 +10,14 @@ Every number here is derived from the suites themselves rather than written down
 
 | Measure | Count |
 | --- | ---: |
-| Automated tests | **1380** |
-| Live-harness assertions | 1317 |
+| Automated tests | **1383** |
+| Live-harness assertions | 1325 |
 
 The badge in the [README](../README.md) shows the automated test total. Harness assertions are counted separately because they are assertions inside one live scenario, not independently runnable cases; adding them together would flatter the number.
 
 ## Native C++ suite (`didi_tests`)
 
-**887 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
+**890 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
 
 | Suite | Tests |
 | --- | ---: |
@@ -69,7 +69,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `RuntimeTree` | 1 |
 | `SceneCallMethod` | 6 |
 | `SceneExploration` | 12 |
-| `Schema` | 1 |
+| `Schema` | 2 |
 | `Segmentation` | 5 |
 | `SpeculativeVerify` | 8 |
 | `TestRunner` | 2 |
@@ -89,7 +89,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `resource_create` | 5 |
 | `resource_references` | 15 |
 | `tool_annotations` | 10 |
-| `tool_input_schema` | 6 |
+| `tool_input_schema` | 8 |
 | `tool_manifest` | 7 |
 | `tool_modes` | 1 |
 | `tool_output_schema` | 3 |
@@ -131,11 +131,11 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 
 ## Live Godot harness (`tests/*.ps1`)
 
-**1317 assertions.** Derived from `Assert-True` call sites. The harness is one long live scenario rather than a set of named cases, so this counts assertions and says so.
+**1325 assertions.** Derived from `Assert-True` call sites. The harness is one long live scenario rather than a set of named cases, so this counts assertions and says so.
 
 | File | Assertions |
 | --- | ---: |
-| `run_godot_integration.ps1` | 1317 |
+| `run_godot_integration.ps1` | 1325 |
 
 ## What is not counted here
 
