@@ -131,6 +131,50 @@ See the [2026-09-25 exploratory report](EXPLORATORY_MCP_INSTRUCTIONS.md) for
 measured latency, cross-version live coverage, harness fixes and outstanding
 issues. Its local results do not substitute for cross-platform CI.
 
+### Contract snapshots
+
+`tests/contract_snapshots/` holds what a client is shown, so a change to it is a
+diff a reviewer reads rather than a surprise a client finds
+([Q3](BUILD_QUEUE.md#q3-contract-snapshots)).
+
+- `offline.json`: `initialize`, `tools/list`, `resources/list`,
+  `resources/templates/list` and `prompts/list` from a server with no engine.
+  Entries are keyed by name, because the wire order is a hash map's and differs
+  between standard libraries.
+- `live-<line>.json`, one for each engine line in CI's matrix: what attaching an
+  editor changes in those listings, and the answers to the calls in
+  `calls.json`. The calls run against a fresh copy of `tests/contract_fixture/`
+  in a headless editor with its own session directory and editor settings.
+- `calls.json`: the read-only calls, and every implemented read-only tool that
+  is not called, with the reason. A call that should be refused carries
+  `"expect_error": true`; any other error fails the recording.
+
+Session ids, pids, the pipe endpoint, the build id, the server version,
+temporary paths, durations and timestamps become placeholders. Identities are
+replaced by value, taken from the session Didi reports, so they are caught
+wherever they appear. A text block that repeats `structuredContent` is stored
+as a marker, and any other JSON text, which includes every error, is stored
+parsed under `text_json`.
+
+When a change to a schema or an answer is intended, regenerate in the same pull
+request and read the diff:
+
+```bash
+python tools/contract_snapshots.py --godot <Godot 4.5 exe> --godot <Godot 4.6 exe> --godot <Godot 4.7 exe>
+```
+
+Regenerating records everything twice, each time from a fresh editor, and
+writes nothing when the two disagree. The error names the JSON path that moved:
+a value the recorder does not yet normalise, which belongs in
+`tools/contract_snapshots.py` rather than in a snapshot. `--check` records once
+and prints a diff, and without `--godot` only `offline.json` is recorded.
+
+CI checks `offline.json` in `tests.test_contract_snapshots` on all three build
+platforms, and each `live-<line>.json` in the Godot job for that line. A failed
+live check uploads what it recorded with the job's logs, so a contributor
+without Godot can read it or adopt it. A change to the fixture changes every
+live snapshot, so regenerate all three lines.
+
 ### Opt-in live verification
 
 The opt-in Python recovery suites launch real Godot through MCP stdio and cover owned-child crashes, saved-file persistence, the single restart, no replay, restore, source preservation, previews, and corrupt snapshots. Set `DIDI_TEST_BINARY` to the built host and `DIDI_RECOVERY_GODOT` to an absolute Godot executable:
@@ -270,6 +314,11 @@ Route the method from `EditorHook::executeOnMainThread` into a bounded implement
   request or read before the write is not observed, whatever its name.
   `tests/test_observed_post_state.py` fails the build until the entry exists,
   and the live harness fails when an answer disagrees with the engine.
+- Regenerate the [contract snapshots](#contract-snapshots), because a new tool
+  changes `tools/list`. If the tool only reads, also give it a call in
+  `tests/contract_snapshots/calls.json`, or an exclusion with the reason it
+  cannot be recorded; `tests/test_contract_snapshots.py` fails the build until
+  it has one.
 - Update [Current Capability Matrix](CAPABILITIES.md) and [Tool Reference](TOOL_REFERENCE.md).
 
 ## Phase 3 and managed recovery implementation map

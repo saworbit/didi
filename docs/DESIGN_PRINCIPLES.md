@@ -224,8 +224,13 @@ Hand-kept counts go stale; the amendment log's own count did (#990).
 - A feature that serves one game, one genre or one side business stays out of
   the core.
 
-**Enforced by.** `tools/validate_documentation.py`, the test inventory gate, and
-the [Surface Amendments](SURFACE_AMENDMENTS.md) record.
+**Enforced by.** `tools/validate_documentation.py`, the test inventory gate, the
+[Surface Amendments](SURFACE_AMENDMENTS.md) record, and the contract snapshots
+in `tests/contract_snapshots/`, from
+[Q3](BUILD_QUEUE.md#q3-contract-snapshots). What a client is shown, offline and
+with an editor attached on each engine line, is recorded by a tool rather than
+written by hand, and CI fails when it changes without the snapshot changing in
+the same pull request.
 
 ## Refusals
 

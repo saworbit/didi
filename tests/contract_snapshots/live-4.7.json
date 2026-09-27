@@ -1,0 +1,3998 @@
+{
+  "calls": [
+    {
+      "arguments": {
+        "project_path": "<project>"
+      },
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "descriptor_directory": "<work>\\sessions",
+          "diagnostics": [],
+          "execution_mode": "local_session_management",
+          "sessions": [
+            {
+              "alive": true,
+              "build_id": "<build_id>",
+              "endpoint": "<endpoint>",
+              "engine_version": "Godot Engine v4.7.2.stable.official",
+              "kind": "editor",
+              "pid": "<pid>",
+              "project_path": "<project>",
+              "protocol_version": "1.3",
+              "schema_version": 1,
+              "session_id": "<session_id>",
+              "stale": false,
+              "started_at_ms": "<started_at_ms>"
+            }
+          ]
+        }
+      },
+      "tool": "runtime_list_sessions"
+    },
+    {
+      "arguments": {},
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "connected": true,
+          "execution_mode": "local_session_management",
+          "handshake": {
+            "build_id": "<build_id>",
+            "endpoint": "<endpoint>",
+            "engine_version": "Godot Engine v4.7.2.stable.official",
+            "kind": "editor",
+            "pid": "<pid>",
+            "project_path": "<project>",
+            "protocol_version": "1.3",
+            "schema_version": 1,
+            "session_id": "<session_id>",
+            "started_at_ms": "<started_at_ms>",
+            "status": "ok"
+          },
+          "server_build_id": "<build_id>",
+          "session": {
+            "build_id": "<build_id>",
+            "endpoint": "<endpoint>",
+            "engine_version": "Godot Engine v4.7.2.stable.official",
+            "kind": "editor",
+            "pid": "<pid>",
+            "project_path": "<project>",
+            "protocol_version": "1.3",
+            "schema_version": 1,
+            "session_id": "<session_id>",
+            "started_at_ms": "<started_at_ms>"
+          }
+        }
+      },
+      "tool": "runtime_get_session"
+    },
+    {
+      "arguments": {},
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "execution_mode": "live",
+          "is_live_engine": true,
+          "max_nodes": 100000,
+          "max_response_bytes": 8388608,
+          "message": "Use focused property/signal tools for fields omitted from hierarchy traversal.",
+          "node_count": 12,
+          "omitted_fields": [
+            "bulk_properties",
+            "signals",
+            "scripts"
+          ],
+          "root_path": "/root",
+          "scene_file_path": "res://main.tscn",
+          "scene_tree": {
+            "children": [
+              {
+                "children": [
+                  {
+                    "children": [],
+                    "name": "Body",
+                    "owned_by_scene": true,
+                    "path": "/root/Main/Player/Body",
+                    "properties": {},
+                    "type": "CollisionShape2D"
+                  }
+                ],
+                "name": "Player",
+                "owned_by_scene": true,
+                "path": "/root/Main/Player",
+                "properties": {},
+                "type": "CharacterBody2D"
+              },
+              {
+                "children": [],
+                "name": "Enemy1",
+                "owned_by_scene": true,
+                "path": "/root/Main/Enemy1",
+                "properties": {},
+                "type": "Node2D"
+              },
+              {
+                "children": [],
+                "name": "Enemy2",
+                "owned_by_scene": true,
+                "path": "/root/Main/Enemy2",
+                "properties": {},
+                "type": "Node2D"
+              },
+              {
+                "children": [
+                  {
+                    "children": [],
+                    "name": "Title",
+                    "owned_by_scene": true,
+                    "path": "/root/Main/HUD/Title",
+                    "properties": {},
+                    "type": "Label"
+                  },
+                  {
+                    "children": [],
+                    "name": "Start",
+                    "owned_by_scene": true,
+                    "path": "/root/Main/HUD/Start",
+                    "properties": {},
+                    "type": "Button"
+                  },
+                  {
+                    "children": [],
+                    "name": "Tint",
+                    "owned_by_scene": true,
+                    "path": "/root/Main/HUD/Tint",
+                    "properties": {},
+                    "type": "ColorRect"
+                  },
+                  {
+                    "children": [],
+                    "name": "Graph",
+                    "owned_by_scene": true,
+                    "path": "/root/Main/HUD/Graph",
+                    "properties": {},
+                    "type": "ColorRect"
+                  }
+                ],
+                "name": "HUD",
+                "owned_by_scene": true,
+                "path": "/root/Main/HUD",
+                "properties": {},
+                "type": "Control"
+              },
+              {
+                "children": [],
+                "name": "Tiles",
+                "owned_by_scene": true,
+                "path": "/root/Main/Tiles",
+                "properties": {},
+                "type": "TileMapLayer"
+              },
+              {
+                "children": [],
+                "name": "AnimationPlayer",
+                "owned_by_scene": true,
+                "path": "/root/Main/AnimationPlayer",
+                "properties": {},
+                "type": "AnimationPlayer"
+              }
+            ],
+            "name": "Main",
+            "owned_by_scene": true,
+            "path": "/root/Main",
+            "properties": {},
+            "type": "Node2D"
+          },
+          "session": {
+            "build_id": "<build_id>",
+            "endpoint": "<endpoint>",
+            "engine_version": "Godot Engine v4.7.2.stable.official",
+            "kind": "editor",
+            "pid": "<pid>",
+            "project_path": "<project>",
+            "protocol_version": "1.3",
+            "schema_version": 1,
+            "session_id": "<session_id>",
+            "started_at_ms": "<started_at_ms>"
+          },
+          "source": "live_scene_tree"
+        }
+      },
+      "tool": "scene_get_hierarchy"
+    },
+    {
+      "arguments": {
+        "include_properties": true,
+        "root_path": "HUD"
+      },
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "execution_mode": "live",
+          "is_live_engine": true,
+          "max_nodes": 100000,
+          "max_response_bytes": 8388608,
+          "message": "Use focused property/signal tools for fields omitted from hierarchy traversal.",
+          "node_count": 5,
+          "omitted_fields": [
+            "bulk_properties",
+            "signals",
+            "scripts"
+          ],
+          "root_path": "HUD",
+          "scene_file_path": "res://main.tscn",
+          "scene_tree": {
+            "children": [
+              {
+                "children": [],
+                "name": "Title",
+                "owned_by_scene": true,
+                "path": "/root/Main/HUD/Title",
+                "properties": {},
+                "type": "Label"
+              },
+              {
+                "children": [],
+                "name": "Start",
+                "owned_by_scene": true,
+                "path": "/root/Main/HUD/Start",
+                "properties": {},
+                "type": "Button"
+              },
+              {
+                "children": [],
+                "name": "Tint",
+                "owned_by_scene": true,
+                "path": "/root/Main/HUD/Tint",
+                "properties": {},
+                "type": "ColorRect"
+              },
+              {
+                "children": [],
+                "name": "Graph",
+                "owned_by_scene": true,
+                "path": "/root/Main/HUD/Graph",
+                "properties": {},
+                "type": "ColorRect"
+              }
+            ],
+            "name": "HUD",
+            "owned_by_scene": true,
+            "path": "/root/Main/HUD",
+            "properties": {},
+            "type": "Control"
+          },
+          "session": {
+            "build_id": "<build_id>",
+            "endpoint": "<endpoint>",
+            "engine_version": "Godot Engine v4.7.2.stable.official",
+            "kind": "editor",
+            "pid": "<pid>",
+            "project_path": "<project>",
+            "protocol_version": "1.3",
+            "schema_version": 1,
+            "session_id": "<session_id>",
+            "started_at_ms": "<started_at_ms>"
+          },
+          "source": "live_scene_tree"
+        }
+      },
+      "tool": "scene_get_hierarchy"
+    },
+    {
+      "arguments": {
+        "property_name": "position",
+        "target_node": "Player"
+      },
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "execution_mode": "live",
+          "is_live_engine": true,
+          "property_name": "position",
+          "session": {
+            "build_id": "<build_id>",
+            "endpoint": "<endpoint>",
+            "engine_version": "Godot Engine v4.7.2.stable.official",
+            "kind": "editor",
+            "pid": "<pid>",
+            "project_path": "<project>",
+            "protocol_version": "1.3",
+            "schema_version": 1,
+            "session_id": "<session_id>",
+            "started_at_ms": "<started_at_ms>"
+          },
+          "status": "success",
+          "target_node": "Player",
+          "value": {
+            "x": 64.0,
+            "y": 32.0
+          }
+        }
+      },
+      "tool": "scene_get_property"
+    },
+    {
+      "arguments": {
+        "property_name": "text",
+        "target_node": "HUD/Title"
+      },
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "execution_mode": "live",
+          "is_live_engine": true,
+          "property_name": "text",
+          "session": {
+            "build_id": "<build_id>",
+            "endpoint": "<endpoint>",
+            "engine_version": "Godot Engine v4.7.2.stable.official",
+            "kind": "editor",
+            "pid": "<pid>",
+            "project_path": "<project>",
+            "protocol_version": "1.3",
+            "schema_version": 1,
+            "session_id": "<session_id>",
+            "started_at_ms": "<started_at_ms>"
+          },
+          "status": "success",
+          "target_node": "HUD/Title",
+          "value": "Contract fixture"
+        }
+      },
+      "tool": "scene_get_property"
+    },
+    {
+      "arguments": {
+        "property_name": "speed",
+        "target_node": "Player"
+      },
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "execution_mode": "live",
+          "is_live_engine": true,
+          "property_name": "speed",
+          "session": {
+            "build_id": "<build_id>",
+            "endpoint": "<endpoint>",
+            "engine_version": "Godot Engine v4.7.2.stable.official",
+            "kind": "editor",
+            "pid": "<pid>",
+            "project_path": "<project>",
+            "protocol_version": "1.3",
+            "schema_version": 1,
+            "session_id": "<session_id>",
+            "started_at_ms": "<started_at_ms>"
+          },
+          "status": "success",
+          "target_node": "Player",
+          "value": 120.0
+        }
+      },
+      "tool": "scene_get_property"
+    },
+    {
+      "arguments": {},
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "count": 0,
+          "execution_mode": "live",
+          "is_live_engine": true,
+          "scene_file_path": "res://main.tscn",
+          "selected": [],
+          "selected_total": 0,
+          "session": {
+            "build_id": "<build_id>",
+            "endpoint": "<endpoint>",
+            "engine_version": "Godot Engine v4.7.2.stable.official",
+            "kind": "editor",
+            "pid": "<pid>",
+            "project_path": "<project>",
+            "protocol_version": "1.3",
+            "schema_version": 1,
+            "session_id": "<session_id>",
+            "started_at_ms": "<started_at_ms>"
+          },
+          "status": "success",
+          "truncated": false
+        }
+      },
+      "tool": "scene_get_selection"
+    },
+    {
+      "arguments": {
+        "target_node": "Player"
+      },
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "execution_mode": "live",
+          "groups": [
+            "players"
+          ],
+          "is_live_engine": true,
+          "session": {
+            "build_id": "<build_id>",
+            "endpoint": "<endpoint>",
+            "engine_version": "Godot Engine v4.7.2.stable.official",
+            "kind": "editor",
+            "pid": "<pid>",
+            "project_path": "<project>",
+            "protocol_version": "1.3",
+            "schema_version": 1,
+            "session_id": "<session_id>",
+            "started_at_ms": "<started_at_ms>"
+          },
+          "status": "success",
+          "target_node": "Player"
+        }
+      },
+      "tool": "scene_list_groups"
+    },
+    {
+      "arguments": {
+        "group": "enemies"
+      },
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "execution_mode": "live",
+          "group": "enemies",
+          "group_exists": true,
+          "is_live_engine": true,
+          "known_groups": [
+            "enemies",
+            "players"
+          ],
+          "known_groups_truncated": false,
+          "members": [
+            "/root/Main/Enemy1",
+            "/root/Main/Enemy2"
+          ],
+          "session": {
+            "build_id": "<build_id>",
+            "endpoint": "<endpoint>",
+            "engine_version": "Godot Engine v4.7.2.stable.official",
+            "kind": "editor",
+            "pid": "<pid>",
+            "project_path": "<project>",
+            "protocol_version": "1.3",
+            "schema_version": 1,
+            "session_id": "<session_id>",
+            "started_at_ms": "<started_at_ms>"
+          },
+          "status": "success"
+        }
+      },
+      "tool": "scene_get_group_members"
+    },
+    {
+      "arguments": {
+        "emitter_node": "HUD/Start"
+      },
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "canonical_tool": "signal_list_connections",
+          "editor_connections": 5,
+          "engine_connections": 0,
+          "execution_mode": "live",
+          "is_live_engine": true,
+          "session": {
+            "build_id": "<build_id>",
+            "endpoint": "<endpoint>",
+            "engine_version": "Godot Engine v4.7.2.stable.official",
+            "kind": "editor",
+            "pid": "<pid>",
+            "project_path": "<project>",
+            "protocol_version": "1.3",
+            "schema_version": 1,
+            "session_id": "<session_id>",
+            "started_at_ms": "<started_at_ms>"
+          },
+          "signals": [
+            {
+              "arguments": [],
+              "connections": [],
+              "name": "_desired_size_changed"
+            },
+            {
+              "arguments": [],
+              "connections": [],
+              "name": "_layout_pending_finished"
+            },
+            {
+              "arguments": [],
+              "connections": [],
+              "name": "button_down"
+            },
+            {
+              "arguments": [],
+              "connections": [],
+              "name": "button_up"
+            },
+            {
+              "arguments": [
+                {
+                  "name": "node",
+                  "type_id": 24,
+                  "type_name": "object"
+                }
+              ],
+              "connections": [],
+              "name": "child_entered_tree"
+            },
+            {
+              "arguments": [
+                {
+                  "name": "node",
+                  "type_id": 24,
+                  "type_name": "object"
+                }
+              ],
+              "connections": [],
+              "name": "child_exiting_tree"
+            },
+            {
+              "arguments": [],
+              "connections": [
+                {
+                  "flags": 0,
+                  "origin": "editor",
+                  "target_method": "SceneTreeEditor::_node_child_order_changed",
+                  "target_node": null
+                }
+              ],
+              "name": "child_order_changed"
+            },
+            {
+              "arguments": [],
+              "connections": [],
+              "name": "draw"
+            },
+            {
+              "arguments": [
+                {
+                  "name": "node",
+                  "type_id": 24,
+                  "type_name": "object"
+                }
+              ],
+              "connections": [
+                {
+                  "flags": 0,
+                  "origin": "editor",
+                  "target_method": "SceneTreeEditor::_queue_update_node_tooltip",
+                  "target_node": null
+                }
+              ],
+              "name": "editor_description_changed"
+            },
+            {
+              "arguments": [],
+              "connections": [
+                {
+                  "flags": 0,
+                  "origin": "editor",
+                  "target_method": "SceneTreeEditor::_node_editor_state_changed",
+                  "target_node": null
+                }
+              ],
+              "name": "editor_state_changed"
+            },
+            {
+              "arguments": [],
+              "connections": [],
+              "name": "focus_entered"
+            },
+            {
+              "arguments": [],
+              "connections": [],
+              "name": "focus_exited"
+            },
+            {
+              "arguments": [
+                {
+                  "name": "event",
+                  "type_id": 24,
+                  "type_name": "object"
+                }
+              ],
+              "connections": [],
+              "name": "gui_input"
+            },
+            {
+              "arguments": [],
+              "connections": [],
+              "name": "hidden"
+            },
+            {
+              "arguments": [],
+              "connections": [],
+              "name": "item_rect_changed"
+            },
+            {
+              "arguments": [],
+              "connections": [],
+              "name": "maximum_size_changed"
+            },
+            {
+              "arguments": [],
+              "connections": [],
+              "name": "minimum_size_changed"
+            },
+            {
+              "arguments": [],
+              "connections": [],
+              "name": "mouse_entered"
+            },
+            {
+              "arguments": [],
+              "connections": [],
+              "name": "mouse_exited"
+            },
+            {
+              "arguments": [],
+              "connections": [
+                {
+                  "flags": 2,
+                  "origin": "scene",
+                  "target_method": "_on_start_pressed",
+                  "target_node": "/root/Main"
+                }
+              ],
+              "name": "pressed"
+            },
+            {
+              "arguments": [],
+              "connections": [],
+              "name": "property_list_changed"
+            },
+            {
+              "arguments": [],
+              "connections": [],
+              "name": "ready"
+            },
+            {
+              "arguments": [],
+              "connections": [],
+              "name": "renamed"
+            },
+            {
+              "arguments": [
+                {
+                  "name": "node",
+                  "type_id": 24,
+                  "type_name": "object"
+                }
+              ],
+              "connections": [],
+              "name": "replacing_by"
+            },
+            {
+              "arguments": [],
+              "connections": [],
+              "name": "resized"
+            },
+            {
+              "arguments": [],
+              "connections": [
+                {
+                  "flags": 0,
+                  "origin": "editor",
+                  "target_method": "SceneTreeEditor::_node_script_changed",
+                  "target_node": null
+                }
+              ],
+              "name": "script_changed"
+            },
+            {
+              "arguments": [],
+              "connections": [],
+              "name": "size_flags_changed"
+            },
+            {
+              "arguments": [],
+              "connections": [],
+              "name": "theme_changed"
+            },
+            {
+              "arguments": [
+                {
+                  "name": "toggled_on",
+                  "type_id": 1,
+                  "type_name": "bool"
+                }
+              ],
+              "connections": [],
+              "name": "toggled"
+            },
+            {
+              "arguments": [],
+              "connections": [],
+              "name": "tree_entered"
+            },
+            {
+              "arguments": [],
+              "connections": [],
+              "name": "tree_exited"
+            },
+            {
+              "arguments": [],
+              "connections": [],
+              "name": "tree_exiting"
+            },
+            {
+              "arguments": [],
+              "connections": [
+                {
+                  "flags": 0,
+                  "origin": "editor",
+                  "target_method": "SceneTreeEditor::_node_visibility_changed",
+                  "target_node": null
+                }
+              ],
+              "name": "visibility_changed"
+            }
+          ],
+          "target_node": "HUD/Start",
+          "tool": "signal_list_connections",
+          "truncated": false,
+          "truncated_at": null
+        }
+      },
+      "tool": "signal_list_connections"
+    },
+    {
+      "arguments": {},
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "controls": [
+            {
+              "class": "Control",
+              "depth": 1,
+              "global_rect": {
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "size": {
+                  "x": 320.0,
+                  "y": 180.0
+                }
+              },
+              "mouse_filter": "stop",
+              "mouse_filter_value": 0,
+              "node_path": "/root/Main/HUD",
+              "visible": true
+            },
+            {
+              "class": "Label",
+              "depth": 2,
+              "global_rect": {
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "size": {
+                  "x": 160.0,
+                  "y": 24.0
+                }
+              },
+              "mouse_filter": "ignore",
+              "mouse_filter_value": 2,
+              "node_path": "/root/Main/HUD/Title",
+              "text": "Contract fixture",
+              "visible": true
+            },
+            {
+              "class": "Button",
+              "depth": 2,
+              "global_rect": {
+                "position": {
+                  "x": 0.0,
+                  "y": 40.0
+                },
+                "size": {
+                  "x": 96.0,
+                  "y": 32.0
+                }
+              },
+              "mouse_filter": "stop",
+              "mouse_filter_value": 0,
+              "node_path": "/root/Main/HUD/Start",
+              "text": "Start",
+              "visible": true
+            },
+            {
+              "class": "ColorRect",
+              "depth": 2,
+              "global_rect": {
+                "position": {
+                  "x": 0.0,
+                  "y": 100.0
+                },
+                "size": {
+                  "x": 64.0,
+                  "y": 64.0
+                }
+              },
+              "mouse_filter": "stop",
+              "mouse_filter_value": 0,
+              "node_path": "/root/Main/HUD/Tint",
+              "visible": true
+            },
+            {
+              "class": "ColorRect",
+              "depth": 2,
+              "global_rect": {
+                "position": {
+                  "x": 80.0,
+                  "y": 100.0
+                },
+                "size": {
+                  "x": 64.0,
+                  "y": 64.0
+                }
+              },
+              "mouse_filter": "stop",
+              "mouse_filter_value": 0,
+              "node_path": "/root/Main/HUD/Graph",
+              "visible": true
+            }
+          ],
+          "execution_mode": "live",
+          "input_injected": false,
+          "is_live_engine": true,
+          "match_count_total": 5,
+          "ordering": "scene_tree_order",
+          "returned_count": 5,
+          "root_path": "/root/Main",
+          "session": {
+            "build_id": "<build_id>",
+            "endpoint": "<endpoint>",
+            "engine_version": "Godot Engine v4.7.2.stable.official",
+            "kind": "editor",
+            "pid": "<pid>",
+            "project_path": "<project>",
+            "protocol_version": "1.3",
+            "schema_version": 1,
+            "session_id": "<session_id>",
+            "started_at_ms": "<started_at_ms>"
+          },
+          "traversal_limit_hit": false,
+          "traversed_nodes": 12,
+          "truncated": false,
+          "visible_only": true
+        }
+      },
+      "tool": "ui_list_controls"
+    },
+    {
+      "arguments": {
+        "point": {
+          "x": 20,
+          "y": 50
+        }
+      },
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "execution_mode": "live",
+          "hit_count_total": 2,
+          "hits": [
+            {
+              "canvas_layer": 0,
+              "class": "Button",
+              "draw_order": 7,
+              "effective_z_index": 0,
+              "global_rect": {
+                "position": {
+                  "x": 0.0,
+                  "y": 40.0
+                },
+                "size": {
+                  "x": 96.0,
+                  "y": 32.0
+                }
+              },
+              "local_point": {
+                "x": 20.0,
+                "y": 10.0
+              },
+              "mouse_filter": "stop",
+              "mouse_filter_value": 0,
+              "node_path": "/root/Main/HUD/Start"
+            },
+            {
+              "canvas_layer": 0,
+              "class": "Control",
+              "draw_order": 5,
+              "effective_z_index": 0,
+              "global_rect": {
+                "position": {
+                  "x": 0.0,
+                  "y": 0.0
+                },
+                "size": {
+                  "x": 320.0,
+                  "y": 180.0
+                }
+              },
+              "local_point": {
+                "x": 20.0,
+                "y": 50.0
+              },
+              "mouse_filter": "stop",
+              "mouse_filter_value": 0,
+              "node_path": "/root/Main/HUD"
+            }
+          ],
+          "input_injected": false,
+          "is_live_engine": true,
+          "ordering": "canvas_layer_desc,effective_z_index_desc,scene_draw_order_desc",
+          "point": {
+            "x": 20.0,
+            "y": 50.0
+          },
+          "returned_count": 2,
+          "root_path": "/root/Main",
+          "session": {
+            "build_id": "<build_id>",
+            "endpoint": "<endpoint>",
+            "engine_version": "Godot Engine v4.7.2.stable.official",
+            "kind": "editor",
+            "pid": "<pid>",
+            "project_path": "<project>",
+            "protocol_version": "1.3",
+            "schema_version": 1,
+            "session_id": "<session_id>",
+            "started_at_ms": "<started_at_ms>"
+          },
+          "topmost": {
+            "canvas_layer": 0,
+            "class": "Button",
+            "draw_order": 7,
+            "effective_z_index": 0,
+            "global_rect": {
+              "position": {
+                "x": 0.0,
+                "y": 40.0
+              },
+              "size": {
+                "x": 96.0,
+                "y": 32.0
+              }
+            },
+            "local_point": {
+              "x": 20.0,
+              "y": 10.0
+            },
+            "mouse_filter": "stop",
+            "mouse_filter_value": 0,
+            "node_path": "/root/Main/HUD/Start"
+          },
+          "traversed_nodes": 12,
+          "truncated": false
+        }
+      },
+      "tool": "ui_hit_test"
+    },
+    {
+      "arguments": {
+        "animation_player_path": "AnimationPlayer"
+      },
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "animations": [
+            {
+              "length": 1.0,
+              "loop_mode_id": 0,
+              "loop_mode_name": "none",
+              "name": "bob",
+              "tracks": [
+                {
+                  "index": 0,
+                  "key_times": [
+                    0.0,
+                    0.5
+                  ],
+                  "path": "Player:position",
+                  "truncated": false,
+                  "type_id": 0,
+                  "type_name": "value"
+                }
+              ],
+              "truncated": false
+            }
+          ],
+          "canonical_tool": "anim_list_tracks",
+          "execution_mode": "live",
+          "is_live_engine": true,
+          "session": {
+            "build_id": "<build_id>",
+            "endpoint": "<endpoint>",
+            "engine_version": "Godot Engine v4.7.2.stable.official",
+            "kind": "editor",
+            "pid": "<pid>",
+            "project_path": "<project>",
+            "protocol_version": "1.3",
+            "schema_version": 1,
+            "session_id": "<session_id>",
+            "started_at_ms": "<started_at_ms>"
+          },
+          "tool": "anim_list_tracks",
+          "truncated": false,
+          "truncated_at": null
+        }
+      },
+      "tool": "anim_list_tracks"
+    },
+    {
+      "arguments": {},
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "bus_count": 1,
+          "buses": [
+            {
+              "bypass_effects": false,
+              "effects": [],
+              "index": 0,
+              "mute": false,
+              "name": "Master",
+              "send": "",
+              "solo": false,
+              "volume_db": 0.0
+            }
+          ],
+          "execution_mode": "live",
+          "is_live_engine": true,
+          "session": {
+            "build_id": "<build_id>",
+            "endpoint": "<endpoint>",
+            "engine_version": "Godot Engine v4.7.2.stable.official",
+            "kind": "editor",
+            "pid": "<pid>",
+            "project_path": "<project>",
+            "protocol_version": "1.3",
+            "schema_version": 1,
+            "session_id": "<session_id>",
+            "started_at_ms": "<started_at_ms>"
+          },
+          "status": "success"
+        }
+      },
+      "tool": "audio_list_buses"
+    },
+    {
+      "arguments": {
+        "property_name": "material",
+        "target_node": "HUD/Tint"
+      },
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "canonical_tool": "shader_list_uniforms",
+          "execution_mode": "live",
+          "is_live_engine": true,
+          "property_name": "material",
+          "session": {
+            "build_id": "<build_id>",
+            "endpoint": "<endpoint>",
+            "engine_version": "Godot Engine v4.7.2.stable.official",
+            "kind": "editor",
+            "pid": "<pid>",
+            "project_path": "<project>",
+            "protocol_version": "1.3",
+            "schema_version": 1,
+            "session_id": "<session_id>",
+            "started_at_ms": "<started_at_ms>"
+          },
+          "shader_mode": "canvas_item",
+          "shader_path": "res://content/tint.gdshader",
+          "target_node": "HUD/Tint",
+          "tool": "shader_list_uniforms",
+          "truncated": false,
+          "uniform_count": 2,
+          "uniforms": [
+            {
+              "hint": {
+                "hint_string": "0.0,1.0,0.0010000000475",
+                "kind": "range",
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "or_greater": false,
+                "or_less": false,
+                "step": 0.0010000000475
+              },
+              "name": "strength",
+              "settable": true,
+              "type": "float",
+              "value": 0.25
+            },
+            {
+              "hint": null,
+              "name": "tint_color",
+              "settable": true,
+              "type": "Color",
+              "value": null
+            }
+          ]
+        }
+      },
+      "tool": "shader_list_uniforms"
+    },
+    {
+      "arguments": {
+        "property_name": "material",
+        "target_node": "HUD/Graph"
+      },
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "canonical_tool": "shader_get_visual_graph",
+          "execution_mode": "live",
+          "is_live_engine": true,
+          "property_name": "material",
+          "session": {
+            "build_id": "<build_id>",
+            "endpoint": "<endpoint>",
+            "engine_version": "Godot Engine v4.7.2.stable.official",
+            "kind": "editor",
+            "pid": "<pid>",
+            "project_path": "<project>",
+            "protocol_version": "1.3",
+            "schema_version": 1,
+            "session_id": "<session_id>",
+            "started_at_ms": "<started_at_ms>"
+          },
+          "shader_mode": "canvas_item",
+          "shader_path": "res://content/graph.tres",
+          "shader_types": [
+            {
+              "connection_count": 0,
+              "connections": [],
+              "node_count": 1,
+              "nodes": [
+                {
+                  "class": "VisualShaderNodeOutput",
+                  "id": 0,
+                  "position": {
+                    "x": 400.0,
+                    "y": 150.0
+                  }
+                }
+              ],
+              "truncated": false,
+              "type": "vertex"
+            },
+            {
+              "connection_count": 1,
+              "connections": [
+                {
+                  "from_node": 2,
+                  "from_port": 0,
+                  "to_node": 0,
+                  "to_port": 0
+                }
+              ],
+              "node_count": 2,
+              "nodes": [
+                {
+                  "class": "VisualShaderNodeOutput",
+                  "id": 0,
+                  "position": {
+                    "x": 400.0,
+                    "y": 150.0
+                  }
+                },
+                {
+                  "class": "VisualShaderNodeColorConstant",
+                  "id": 2,
+                  "position": {
+                    "x": -200.0,
+                    "y": 150.0
+                  }
+                }
+              ],
+              "truncated": false,
+              "type": "fragment"
+            },
+            {
+              "connection_count": 0,
+              "connections": [],
+              "node_count": 1,
+              "nodes": [
+                {
+                  "class": "VisualShaderNodeOutput",
+                  "id": 0,
+                  "position": {
+                    "x": 400.0,
+                    "y": 150.0
+                  }
+                }
+              ],
+              "truncated": false,
+              "type": "light"
+            },
+            {
+              "connection_count": 0,
+              "connections": [],
+              "node_count": 1,
+              "nodes": [
+                {
+                  "class": "VisualShaderNodeParticleOutput",
+                  "id": 0,
+                  "position": {
+                    "x": 400.0,
+                    "y": 150.0
+                  }
+                }
+              ],
+              "truncated": false,
+              "type": "start"
+            },
+            {
+              "connection_count": 0,
+              "connections": [],
+              "node_count": 1,
+              "nodes": [
+                {
+                  "class": "VisualShaderNodeParticleOutput",
+                  "id": 0,
+                  "position": {
+                    "x": 400.0,
+                    "y": 150.0
+                  }
+                }
+              ],
+              "truncated": false,
+              "type": "process"
+            },
+            {
+              "connection_count": 0,
+              "connections": [],
+              "node_count": 1,
+              "nodes": [
+                {
+                  "class": "VisualShaderNodeParticleOutput",
+                  "id": 0,
+                  "position": {
+                    "x": 400.0,
+                    "y": 150.0
+                  }
+                }
+              ],
+              "truncated": false,
+              "type": "collide"
+            },
+            {
+              "connection_count": 0,
+              "connections": [],
+              "node_count": 1,
+              "nodes": [
+                {
+                  "class": "VisualShaderNodeParticleOutput",
+                  "id": 0,
+                  "position": {
+                    "x": 400.0,
+                    "y": 150.0
+                  }
+                }
+              ],
+              "truncated": false,
+              "type": "start_custom"
+            },
+            {
+              "connection_count": 0,
+              "connections": [],
+              "node_count": 1,
+              "nodes": [
+                {
+                  "class": "VisualShaderNodeParticleOutput",
+                  "id": 0,
+                  "position": {
+                    "x": 400.0,
+                    "y": 150.0
+                  }
+                }
+              ],
+              "truncated": false,
+              "type": "process_custom"
+            },
+            {
+              "connection_count": 0,
+              "connections": [],
+              "node_count": 1,
+              "nodes": [
+                {
+                  "class": "VisualShaderNodeOutput",
+                  "id": 0,
+                  "position": {
+                    "x": 400.0,
+                    "y": 150.0
+                  }
+                }
+              ],
+              "truncated": false,
+              "type": "sky"
+            },
+            {
+              "connection_count": 0,
+              "connections": [],
+              "node_count": 1,
+              "nodes": [
+                {
+                  "class": "VisualShaderNodeOutput",
+                  "id": 0,
+                  "position": {
+                    "x": 400.0,
+                    "y": 150.0
+                  }
+                }
+              ],
+              "truncated": false,
+              "type": "fog"
+            }
+          ],
+          "target_node": "HUD/Graph",
+          "tool": "shader_get_visual_graph",
+          "truncated": false
+        }
+      },
+      "tool": "shader_get_visual_graph"
+    },
+    {
+      "arguments": {
+        "tilemap_path": "Tiles"
+      },
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "canonical_tool": "tilemap_get_used_rect",
+          "end": {
+            "x": 4,
+            "y": 3
+          },
+          "execution_mode": "live",
+          "is_live_engine": true,
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "session": {
+            "build_id": "<build_id>",
+            "endpoint": "<endpoint>",
+            "engine_version": "Godot Engine v4.7.2.stable.official",
+            "kind": "editor",
+            "pid": "<pid>",
+            "project_path": "<project>",
+            "protocol_version": "1.3",
+            "schema_version": 1,
+            "session_id": "<session_id>",
+            "started_at_ms": "<started_at_ms>"
+          },
+          "size": {
+            "x": 4,
+            "y": 3
+          },
+          "tilemap_path": "Tiles",
+          "tool": "tilemap_get_used_rect"
+        }
+      },
+      "tool": "tilemap_get_used_rect"
+    },
+    {
+      "arguments": {
+        "expression": "1 + 2"
+      },
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "context_node": "/root/Main",
+          "elapsed_ms": "<measured>",
+          "execution_mode": "live",
+          "is_live_engine": true,
+          "read_only": true,
+          "sandbox_profile": "expression_const_v1",
+          "session": {
+            "build_id": "<build_id>",
+            "endpoint": "<endpoint>",
+            "engine_version": "Godot Engine v4.7.2.stable.official",
+            "kind": "editor",
+            "pid": "<pid>",
+            "project_path": "<project>",
+            "protocol_version": "1.3",
+            "schema_version": 1,
+            "session_id": "<session_id>",
+            "started_at_ms": "<started_at_ms>"
+          },
+          "session_kind": "editor",
+          "timeout_ms": 1000,
+          "value": 3,
+          "value_type": "int"
+        }
+      },
+      "tool": "eval_gdscript"
+    },
+    {
+      "arguments": {
+        "from": {
+          "x": 0,
+          "y": 32
+        },
+        "to": {
+          "x": 200,
+          "y": 32
+        }
+      },
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "canonical_tool": "physics_raycast_query",
+          "collider_class": "CharacterBody2D",
+          "collider_path": "/root/Main/Player",
+          "collision_layer": 1,
+          "dimension": 2,
+          "execution_mode": "live",
+          "hit": true,
+          "is_live_engine": true,
+          "normal": {
+            "x": -1.0,
+            "y": 0.0
+          },
+          "position": {
+            "x": 56.0,
+            "y": 32.0
+          },
+          "session": {
+            "build_id": "<build_id>",
+            "endpoint": "<endpoint>",
+            "engine_version": "Godot Engine v4.7.2.stable.official",
+            "kind": "editor",
+            "pid": "<pid>",
+            "project_path": "<project>",
+            "protocol_version": "1.3",
+            "schema_version": 1,
+            "session_id": "<session_id>",
+            "started_at_ms": "<started_at_ms>"
+          },
+          "tool": "physics_raycast_query"
+        }
+      },
+      "tool": "physics_raycast_query"
+    },
+    {
+      "arguments": {
+        "rays": [
+          {
+            "from": {
+              "x": 0,
+              "y": 32
+            },
+            "to": {
+              "x": 200,
+              "y": 32
+            }
+          },
+          {
+            "from": {
+              "x": 0,
+              "y": 120
+            },
+            "to": {
+              "x": 200,
+              "y": 120
+            }
+          }
+        ]
+      },
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "canonical_tool": "spatial_query_raycast_batch",
+          "dimension": 2,
+          "execution_mode": "live",
+          "hit_count": 1,
+          "is_live_engine": true,
+          "requested_rays": 2,
+          "results": [
+            {
+              "collider_class": "CharacterBody2D",
+              "collider_path": "/root/Main/Player",
+              "collision_layer": 1,
+              "dimension": 2,
+              "hit": true,
+              "index": 0,
+              "normal": {
+                "x": -1.0,
+                "y": 0.0
+              },
+              "position": {
+                "x": 56.0,
+                "y": 32.0
+              }
+            },
+            {
+              "collider_class": null,
+              "collider_path": null,
+              "collision_layer": null,
+              "dimension": 2,
+              "hit": false,
+              "index": 1,
+              "normal": null,
+              "position": null
+            }
+          ],
+          "session": {
+            "build_id": "<build_id>",
+            "endpoint": "<endpoint>",
+            "engine_version": "Godot Engine v4.7.2.stable.official",
+            "kind": "editor",
+            "pid": "<pid>",
+            "project_path": "<project>",
+            "protocol_version": "1.3",
+            "schema_version": 1,
+            "session_id": "<session_id>",
+            "started_at_ms": "<started_at_ms>"
+          },
+          "tool": "spatial_query_raycast_batch"
+        }
+      },
+      "tool": "spatial_query_raycast_batch"
+    },
+    {
+      "arguments": {
+        "from": {
+          "x": 0,
+          "y": 32
+        },
+        "shape": {
+          "kind": "sphere",
+          "radius": 4
+        },
+        "to": {
+          "x": 200,
+          "y": 32
+        }
+      },
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "canonical_tool": "spatial_query_clearance",
+          "clear": false,
+          "collide_with_areas": false,
+          "dimension": 2,
+          "execution_mode": "live",
+          "is_live_engine": true,
+          "safe_fraction": 0.2578125,
+          "safe_position": {
+            "x": 51.5625,
+            "y": 32.0
+          },
+          "session": {
+            "build_id": "<build_id>",
+            "endpoint": "<endpoint>",
+            "engine_version": "Godot Engine v4.7.2.stable.official",
+            "kind": "editor",
+            "pid": "<pid>",
+            "project_path": "<project>",
+            "protocol_version": "1.3",
+            "schema_version": 1,
+            "session_id": "<session_id>",
+            "started_at_ms": "<started_at_ms>"
+          },
+          "tool": "spatial_query_clearance",
+          "unsafe_fraction": 0.26171875
+        }
+      },
+      "tool": "spatial_query_clearance"
+    },
+    {
+      "arguments": {
+        "previews": [
+          {
+            "label": "probe",
+            "position": {
+              "x": 32,
+              "y": 32
+            },
+            "size": {
+              "x": 16,
+              "y": 16
+            }
+          }
+        ]
+      },
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "canonical_tool": "editor_render_ghost_preview",
+          "dimension": 2,
+          "drawn": 1,
+          "execution_mode": "live",
+          "is_live_engine": true,
+          "live_shapes": 1,
+          "preview_id": "ghost_1",
+          "previews": [
+            {
+              "color": {
+                "b": 1.0,
+                "g": 1.0,
+                "r": 0.0
+              },
+              "color_defaulted": true,
+              "index": 0,
+              "kind": "addition",
+              "label": "probe"
+            }
+          ],
+          "replaced_shapes": 0,
+          "scene_modified": false,
+          "session": {
+            "build_id": "<build_id>",
+            "endpoint": "<endpoint>",
+            "engine_version": "Godot Engine v4.7.2.stable.official",
+            "kind": "editor",
+            "pid": "<pid>",
+            "project_path": "<project>",
+            "protocol_version": "1.3",
+            "schema_version": 1,
+            "session_id": "<session_id>",
+            "started_at_ms": "<started_at_ms>"
+          },
+          "tool": "editor_render_ghost_preview"
+        }
+      },
+      "tool": "editor_render_ghost_preview"
+    },
+    {
+      "arguments": {},
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "canonical_tool": "editor_clear_ghost_previews",
+          "cleared_previews": 1,
+          "cleared_shapes": 1,
+          "execution_mode": "live",
+          "is_live_engine": true,
+          "live_shapes": 0,
+          "scene_modified": false,
+          "session": {
+            "build_id": "<build_id>",
+            "endpoint": "<endpoint>",
+            "engine_version": "Godot Engine v4.7.2.stable.official",
+            "kind": "editor",
+            "pid": "<pid>",
+            "project_path": "<project>",
+            "protocol_version": "1.3",
+            "schema_version": 1,
+            "session_id": "<session_id>",
+            "started_at_ms": "<started_at_ms>"
+          },
+          "tool": "editor_clear_ghost_previews"
+        }
+      },
+      "tool": "editor_clear_ghost_previews"
+    },
+    {
+      "arguments": {},
+      "result": {
+        "content": [
+          {
+            "text_json": {
+              "error": {
+                "code": 409,
+                "data": {
+                  "canonical_tool": "viewport_capture_frame",
+                  "code": "headless_engine",
+                  "display_driver": "headless",
+                  "relaunch_argument": null,
+                  "retryable": false,
+                  "session_kind": "editor",
+                  "tool": "viewport_capture_frame"
+                },
+                "message": "This editor is running headless (display driver 'headless'), so there is no rendering device behind its viewports and no frame to capture. Nothing about the request can fix that. Run the editor with a display, or detach and call again with no editor attached to get the synthesised preview."
+              },
+              "execution_mode": "live",
+              "session": {
+                "build_id": "<build_id>",
+                "engine_version": "Godot Engine v4.7.2.stable.official",
+                "kind": "editor",
+                "pid": "<pid>",
+                "project_path": "<project>",
+                "protocol_version": "1.3",
+                "schema_version": 1,
+                "session_id": "<session_id>",
+                "started_at_ms": "<started_at_ms>"
+              }
+            },
+            "type": "text"
+          }
+        ],
+        "isError": true,
+        "resultType": "complete"
+      },
+      "tool": "viewport_capture_frame"
+    },
+    {
+      "arguments": {
+        "setting": "application/config/name"
+      },
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "execution_mode": "live",
+          "is_live_engine": true,
+          "session": {
+            "build_id": "<build_id>",
+            "endpoint": "<endpoint>",
+            "engine_version": "Godot Engine v4.7.2.stable.official",
+            "kind": "editor",
+            "pid": "<pid>",
+            "project_path": "<project>",
+            "protocol_version": "1.3",
+            "schema_version": 1,
+            "session_id": "<session_id>",
+            "started_at_ms": "<started_at_ms>"
+          },
+          "setting": "application/config/name",
+          "status": "success",
+          "value": "Didi Contract Fixture"
+        }
+      },
+      "tool": "project_get_setting"
+    },
+    {
+      "arguments": {},
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "autoloads": [
+            {
+              "name": "GameState",
+              "path": "res://content/game_state.gd",
+              "singleton": true
+            }
+          ],
+          "execution_mode": "live",
+          "is_live_engine": true,
+          "session": {
+            "build_id": "<build_id>",
+            "endpoint": "<endpoint>",
+            "engine_version": "Godot Engine v4.7.2.stable.official",
+            "kind": "editor",
+            "pid": "<pid>",
+            "project_path": "<project>",
+            "protocol_version": "1.3",
+            "schema_version": 1,
+            "session_id": "<session_id>",
+            "started_at_ms": "<started_at_ms>"
+          },
+          "status": "success"
+        }
+      },
+      "tool": "project_list_autoloads"
+    },
+    {
+      "arguments": {
+        "include_engine_defaults": false
+      },
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "actions": [
+            {
+              "action": "jump",
+              "deadzone": 0.2,
+              "defined_by_project": true,
+              "events": [
+                {
+                  "alt": false,
+                  "alt_pressed": false,
+                  "ctrl": false,
+                  "ctrl_pressed": false,
+                  "device": -1,
+                  "keycode": 0,
+                  "meta": false,
+                  "meta_pressed": false,
+                  "physical_keycode": 32,
+                  "shift": false,
+                  "shift_pressed": false,
+                  "type": "key",
+                  "unicode": 32
+                }
+              ]
+            }
+          ],
+          "execution_mode": "live",
+          "is_live_engine": true,
+          "omitted_engine_default_count": 91,
+          "session": {
+            "build_id": "<build_id>",
+            "endpoint": "<endpoint>",
+            "engine_version": "Godot Engine v4.7.2.stable.official",
+            "kind": "editor",
+            "pid": "<pid>",
+            "project_path": "<project>",
+            "protocol_version": "1.3",
+            "schema_version": 1,
+            "session_id": "<session_id>",
+            "started_at_ms": "<started_at_ms>"
+          },
+          "status": "success"
+        }
+      },
+      "tool": "project_list_input_actions"
+    },
+    {
+      "arguments": {},
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "detected_count": 1,
+          "execution_mode": "local",
+          "preset_count": 1,
+          "presets": [
+            {
+              "detected": true,
+              "export_filter": "all_resources",
+              "export_path": "build/fixture.exe",
+              "index": 0,
+              "name": "Fixture Windows",
+              "platform": "Windows Desktop",
+              "runnable": true
+            }
+          ],
+          "presets_file_exists": true,
+          "sensitive_options_omitted": true
+        }
+      },
+      "tool": "project_list_export_presets"
+    },
+    {
+      "arguments": {
+        "search_path": "res://content"
+      },
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "execution_mode": "local",
+          "resources": [
+            {
+              "dependencies": [],
+              "file_size": 90,
+              "filename": "game_state.gd",
+              "path": "res://content/game_state.gd",
+              "type": "GDScript",
+              "uid": "uid://csv2fxsu2o4uf"
+            },
+            {
+              "dependencies": [],
+              "file_size": 20,
+              "filename": "game_state.gd.uid",
+              "path": "res://content/game_state.gd.uid",
+              "type": "GenericResource",
+              "uid": ""
+            },
+            {
+              "dependencies": [],
+              "file_size": 650,
+              "filename": "graph.tres",
+              "path": "res://content/graph.tres",
+              "resource_type": "VisualShader",
+              "type": "Resource",
+              "uid": "uid://bnvmtsy4rphe2"
+            },
+            {
+              "dependencies": [],
+              "file_size": 139,
+              "filename": "main.gd",
+              "path": "res://content/main.gd",
+              "type": "GDScript",
+              "uid": "uid://busv4yqs2vgys"
+            },
+            {
+              "dependencies": [],
+              "file_size": 20,
+              "filename": "main.gd.uid",
+              "path": "res://content/main.gd.uid",
+              "type": "GenericResource",
+              "uid": ""
+            },
+            {
+              "dependencies": [],
+              "file_size": 231,
+              "filename": "panel_style.tres",
+              "path": "res://content/panel_style.tres",
+              "resource_type": "StyleBoxFlat",
+              "type": "Resource",
+              "uid": "uid://77tcofdi24bg"
+            },
+            {
+              "dependencies": [],
+              "file_size": 290,
+              "filename": "player.gd",
+              "path": "res://content/player.gd",
+              "type": "GDScript",
+              "uid": "uid://cq44b66ykuxvc"
+            },
+            {
+              "dependencies": [],
+              "file_size": 20,
+              "filename": "player.gd.uid",
+              "path": "res://content/player.gd.uid",
+              "type": "GenericResource",
+              "uid": ""
+            },
+            {
+              "dependencies": [],
+              "file_size": 457,
+              "filename": "tiles.tres",
+              "path": "res://content/tiles.tres",
+              "resource_type": "TileSet",
+              "type": "Resource",
+              "uid": "uid://5xe0oksmy78j"
+            },
+            {
+              "dependencies": [],
+              "file_size": 211,
+              "filename": "tint.gdshader",
+              "path": "res://content/tint.gdshader",
+              "type": "Shader",
+              "uid": "uid://bluq76lcs6ipa"
+            },
+            {
+              "dependencies": [],
+              "file_size": 20,
+              "filename": "tint.gdshader.uid",
+              "path": "res://content/tint.gdshader.uid",
+              "type": "GenericResource",
+              "uid": ""
+            }
+          ],
+          "total_found": 11
+        }
+      },
+      "tool": "project_list_resources"
+    },
+    {
+      "arguments": {
+        "query": "jump",
+        "search_path": "res://content"
+      },
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "diagnostics": [],
+          "execution_mode": "local",
+          "lexical": false,
+          "matches": [
+            {
+              "column": 8,
+              "line": 5,
+              "path": "res://content/player.gd",
+              "preview": "signal jumped(height: float)"
+            },
+            {
+              "column": 5,
+              "line": 11,
+              "path": "res://content/player.gd",
+              "preview": "var jumps_taken := 0"
+            },
+            {
+              "column": 6,
+              "line": 14,
+              "path": "res://content/player.gd",
+              "preview": "func jump() -> void:"
+            },
+            {
+              "column": 2,
+              "line": 15,
+              "path": "res://content/player.gd",
+              "preview": "\tjumps_taken += 1"
+            },
+            {
+              "column": 2,
+              "line": 16,
+              "path": "res://content/player.gd",
+              "preview": "\tjumped.emit(JUMP_HEIGHT)"
+            }
+          ],
+          "project_root": "<project>",
+          "scanned_bytes": 2068,
+          "scanned_files": 7,
+          "search_kind": "text",
+          "skipped_files": 0,
+          "truncated": false,
+          "unsearchable_extensions": [
+            ".uid"
+          ],
+          "unsearchable_files": 4
+        }
+      },
+      "tool": "project_search_text"
+    },
+    {
+      "arguments": {
+        "query": "jump",
+        "search_path": "res://content"
+      },
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "diagnostics": [],
+          "execution_mode": "local",
+          "lexical": true,
+          "matches": [
+            {
+              "column": 8,
+              "kind": "signal",
+              "language": "gdscript",
+              "line": 5,
+              "name": "jumped",
+              "path": "res://content/player.gd",
+              "preview": "signal jumped(height: float)"
+            },
+            {
+              "column": 5,
+              "kind": "variable",
+              "language": "gdscript",
+              "line": 11,
+              "name": "jumps_taken",
+              "path": "res://content/player.gd",
+              "preview": "var jumps_taken := 0"
+            },
+            {
+              "column": 6,
+              "kind": "function",
+              "language": "gdscript",
+              "line": 14,
+              "name": "jump",
+              "path": "res://content/player.gd",
+              "preview": "func jump() -> void:"
+            }
+          ],
+          "project_root": "<project>",
+          "scanned_bytes": 519,
+          "scanned_files": 3,
+          "search_kind": "symbols",
+          "skipped_files": 0,
+          "truncated": false,
+          "unsearchable_extensions": [
+            ".gdshader",
+            ".tres",
+            ".uid"
+          ],
+          "unsearchable_files": 8
+        }
+      },
+      "tool": "project_search_symbols"
+    },
+    {
+      "arguments": {
+        "target": "res://content/player.gd"
+      },
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "counts_by_kind": {
+            "ext_resource": 1
+          },
+          "execution_mode": "local",
+          "impact_count": 1,
+          "impacts": [
+            {
+              "detail": "[ext_resource type=\"Script\" uid=\"uid://cq44b66ykuxvc\" path=\"res://content/player.gd\" id=\"2_player\"]",
+              "kind": "ext_resource",
+              "line": 4,
+              "path": "res://main.tscn"
+            }
+          ],
+          "limitations": [
+            "A name built at runtime cannot be followed, so an empty impact list is not proof that nothing depends on the target.",
+            "A name match is lexical and whole-word. A local variable that happens to share the name is reported as a code_reference.",
+            "A node path built dynamically or stored in a variable cannot be followed; node-path results cover only static serialized paths and direct code literals."
+          ],
+          "resolved_kind": "file",
+          "scanned_files": 18,
+          "target": "res://content/player.gd",
+          "target_exists": true,
+          "truncated": false
+        }
+      },
+      "tool": "project_analyze_impact"
+    },
+    {
+      "arguments": {},
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "addon_orphans_included": false,
+          "broken_connections": [],
+          "broken_references": [],
+          "dead_signals": [],
+          "excluded_addon_orphans": 0,
+          "execution_mode": "local",
+          "import_issue_count": 0,
+          "import_issues": [],
+          "limitations": [
+            "A path a script builds at runtime cannot be followed, so an asset in use may still be listed as an orphan.",
+            "Files under res://addons/ are third-party and are not counted as orphans by default. excluded_addon_orphans says how many were left out; pass include_addon_orphans to see them.",
+            "A signal is reported as dead only when no file emits it, connects to it, or wires it in a scene. A connection made through a variable name cannot be seen, and neither can a member call written with the name and the .connect on different lines.",
+            "broken_connections reports only what it can prove. A connection whose receiving node sits inside an instanced or inherited scene, has a built-in or non-GDScript script, or extends something outside the project or the class reference is not judged, so an empty list is not a promise that every connection resolves.",
+            "source_changed_since_import and output_changed_since_import compare the source and the outputs against the source_md5 and dest_md5 Godot recorded in the .md5 it wrote beside the output. Those are two of the three questions the engine asks; it also checks the importer's version, which is not checked here, so no finding is not a promise that Godot will leave the asset alone. import_freshness_unchecked says a record is there and a half of it was not compared, and its detail says which half and why. source_newer_than_output is the fallback where there is no record at all: it compares modification times, which a clone, a checkout or a worktree does not preserve, so it is evidence rather than a verdict, and the remedy is to open the project in the editor once so a record exists.",
+            "project_settings_issues reports the three states of project.godot that a reader can see without the engine: a file that ends part-way through a value, a value the parser cannot start, and a setting registered under a name the join built. It is not a full parse, so a constructor with the wrong arity, one the engine does not know, and a Resource() whose file is missing are all ERR_PARSE_ERROR and none of them is reported. An empty list is not a promise that Godot will load the file; a finding is a promise that it will not."
+          ],
+          "max_findings": 500,
+          "orphan_bytes": 0,
+          "orphans": [],
+          "project_settings_issue_count": 0,
+          "project_settings_issues": [],
+          "reference_verification": {
+            "checked": 0,
+            "mode": "not_needed",
+            "truncated": false
+          },
+          "scan_source": "project_files",
+          "scanned_import_metadata": 3,
+          "scanned_resources": 43,
+          "scanned_text_files": 19,
+          "skipped_text_files": 0
+        }
+      },
+      "tool": "project_audit_assets"
+    },
+    {
+      "arguments": {
+        "resource_path": "res://content/panel_style.tres"
+      },
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "dependencies": [],
+          "execution_mode": "local",
+          "file_size": 231,
+          "filename": "panel_style.tres",
+          "path": "res://content/panel_style.tres",
+          "resource_type": "StyleBoxFlat",
+          "type": "Resource",
+          "uid": "uid://77tcofdi24bg"
+        }
+      },
+      "tool": "resource_inspect"
+    },
+    {
+      "arguments": {
+        "file_path": "res://content/player.gd"
+      },
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "attached_engine_version": "Godot Engine v4.7.2.stable.official",
+          "diagnostics": [],
+          "diagnostics_count": 0,
+          "engine_available": true,
+          "engine_checked": true,
+          "engine_duration_seconds": "<measured>",
+          "engine_executable": "<godot>",
+          "engine_exit_code": 0,
+          "engine_version": "Godot Engine v4.7.2.stable.official",
+          "execution_mode": "local",
+          "file_path": "res://content/player.gd",
+          "has_errors": false,
+          "matches_attached_engine": true
+        }
+      },
+      "tool": "script_check_syntax"
+    },
+    {
+      "arguments": {
+        "file_path": "res://content/player.gd"
+      },
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "classes": [
+            {
+              "line": 1,
+              "name": "FixturePlayer"
+            }
+          ],
+          "constants": [
+            {
+              "line": 7,
+              "name": "JUMP_HEIGHT",
+              "type": "Variant",
+              "value": "48.0"
+            }
+          ],
+          "enums": [],
+          "execution_mode": "local",
+          "file_path": "res://content/player.gd",
+          "functions": [
+            {
+              "line": 14,
+              "name": "jump",
+              "parameters": "",
+              "return_type": "void"
+            }
+          ],
+          "max_response_bytes": 8388608,
+          "max_symbols": 2000,
+          "returned_count": 6,
+          "signals": [
+            {
+              "arguments": "height: float",
+              "line": 5,
+              "name": "jumped"
+            }
+          ],
+          "symbol_count_total": 6,
+          "truncated": false,
+          "variables": [
+            {
+              "exported": true,
+              "line": 9,
+              "name": "speed",
+              "type": "float"
+            },
+            {
+              "exported": false,
+              "line": 11,
+              "name": "jumps_taken",
+              "type": "Variant"
+            }
+          ]
+        }
+      },
+      "tool": "script_get_symbols"
+    },
+    {
+      "arguments": {
+        "class_name": "Timer"
+      },
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "api_version": "Godot Engine v4.7.stable.official",
+          "api_version_matches_attached_engine": true,
+          "attached_engine_version": "Godot Engine v4.7.2.stable.official",
+          "class_name": "Timer",
+          "description": "Godot engine class Timer read from the class reference pinned to Godot Engine v4.7.stable.official. This is a shipped dump of the engine API, not the running engine, so it cannot see script classes or anything a different engine version changed.",
+          "enums": {
+            "TimerProcessCallback": {
+              "TIMER_PROCESS_IDLE": 1,
+              "TIMER_PROCESS_PHYSICS": 0
+            }
+          },
+          "execution_mode": "local",
+          "inherits": "Node",
+          "is_instantiable": true,
+          "is_known_class": true,
+          "methods": {
+            "get_time_left": {
+              "args": [],
+              "const": true,
+              "returns": "float"
+            },
+            "get_timer_process_callback": {
+              "args": [],
+              "const": true,
+              "returns": "enum::Timer.TimerProcessCallback"
+            },
+            "get_wait_time": {
+              "args": [],
+              "const": true,
+              "returns": "float"
+            },
+            "has_autostart": {
+              "args": [],
+              "const": true,
+              "returns": "bool"
+            },
+            "is_ignoring_time_scale": {
+              "args": [],
+              "returns": "bool"
+            },
+            "is_one_shot": {
+              "args": [],
+              "const": true,
+              "returns": "bool"
+            },
+            "is_paused": {
+              "args": [],
+              "const": true,
+              "returns": "bool"
+            },
+            "is_stopped": {
+              "args": [],
+              "const": true,
+              "returns": "bool"
+            },
+            "set_autostart": {
+              "args": [
+                "enable: bool"
+              ],
+              "returns": "void"
+            },
+            "set_ignore_time_scale": {
+              "args": [
+                "ignore: bool"
+              ],
+              "returns": "void"
+            },
+            "set_one_shot": {
+              "args": [
+                "enable: bool"
+              ],
+              "returns": "void"
+            },
+            "set_paused": {
+              "args": [
+                "paused: bool"
+              ],
+              "returns": "void"
+            },
+            "set_timer_process_callback": {
+              "args": [
+                "callback: enum::Timer.TimerProcessCallback"
+              ],
+              "returns": "void"
+            },
+            "set_wait_time": {
+              "args": [
+                "time_sec: float"
+              ],
+              "returns": "void"
+            },
+            "start": {
+              "args": [
+                "time_sec: float = -1"
+              ],
+              "returns": "void"
+            },
+            "stop": {
+              "args": [],
+              "returns": "void"
+            }
+          },
+          "properties": {
+            "autostart": {
+              "type": "bool"
+            },
+            "ignore_time_scale": {
+              "type": "bool"
+            },
+            "one_shot": {
+              "type": "bool"
+            },
+            "paused": {
+              "type": "bool"
+            },
+            "process_callback": {
+              "type": "int"
+            },
+            "time_left": {
+              "read_only": true,
+              "type": "float"
+            },
+            "wait_time": {
+              "type": "float"
+            }
+          },
+          "signals": [
+            "timeout"
+          ],
+          "source": "extension_api"
+        }
+      },
+      "tool": "script_reflect_class"
+    },
+    {
+      "arguments": {
+        "shader_path": "res://content/tint.gdshader"
+      },
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "attached_engine_version": "Godot Engine v4.7.2.stable.official",
+          "diagnostics": [],
+          "diagnostics_count": 0,
+          "duration_seconds": "<measured>",
+          "engine_executable": "<godot>",
+          "engine_version": "Godot Engine v4.7.2.stable.official",
+          "execution_mode": "local",
+          "exit_code": 0,
+          "has_errors": false,
+          "matches_attached_engine": true,
+          "output_truncated": false,
+          "raw_output": "[<timestamp>] [INFO ] [GDEXTENSION] Didi runtime disabled for isolated offline helper\r\nGodot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org\r\n\r\nDIDI_PHASE5_SHADER_OK\r\n",
+          "shader_path": "res://content/tint.gdshader",
+          "success": true
+        }
+      },
+      "tool": "shader_check_compile"
+    },
+    {
+      "arguments": {},
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "board": "default",
+          "execution_mode": "local",
+          "keys": [],
+          "prefix": "",
+          "returned": 0,
+          "total": 0,
+          "truncated": false
+        }
+      },
+      "tool": "blackboard_list_keys"
+    },
+    {
+      "arguments": {},
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "board": "default",
+          "deep": true,
+          "execution_mode": "local",
+          "found": true,
+          "path": "",
+          "revision": 0,
+          "value": {}
+        }
+      },
+      "tool": "blackboard_read"
+    },
+    {
+      "arguments": {},
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "board": "default",
+          "execution_mode": "local",
+          "returned": 0,
+          "tasks": [],
+          "total": 0,
+          "truncated": false
+        }
+      },
+      "tool": "blackboard_task_list"
+    }
+  ],
+  "engine": "4.7.2.stable.official.ed1daf0bf",
+  "listings_when_attached": {
+    "resources/list": {
+      "resources": {
+        "blackboard://default/state": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "blackboard://default/tasks": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "godot://editor/state": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "godot://project/tree": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "godot://runtime/logs": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        }
+      }
+    },
+    "tools/list": {
+      "tools": {
+        "analyze_script_diagnostics": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "anim_add_library": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "anim_list_tracks": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "anim_play_track": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "asset_configure_import": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "asset_reimport": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "audio_add_bus": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "audio_configure_bus": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "audio_list_buses": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "blackboard_clear": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "blackboard_list_keys": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "blackboard_patch": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "blackboard_read": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "blackboard_task_claim": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "blackboard_task_complete": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "blackboard_task_create": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "blackboard_task_list": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "blackboard_task_update": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "blackboard_write": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "capture_viewport": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "create_visual_test_lab": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "csharp_check_build": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "didi_control_room": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "editor_clear_ghost_previews": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "editor_redo": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "editor_reload_project": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "editor_render_ghost_preview": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "editor_save_scene": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "editor_undo": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "eval_gdscript": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "execute_test_session": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "get_scene_hierarchy": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "gridmap_export_mesh_library": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "gridmap_set_cells": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "inject_input_event": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "instantiate_asset": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "mutate_scene_tree": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "nav_bake_mesh": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "nav_query_path": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "patch_script_symbols": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "physics_raycast_query": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "physics_simulate_step": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "project_add_export_preset": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "project_analyze_impact": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "project_apply_changes": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "project_audit_assets": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "project_export": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "project_get_setting": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "project_get_uid_map": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "project_list_autoloads": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "project_list_export_presets": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "project_list_input_actions": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "project_list_resources": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "project_remove_autoload": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "project_remove_input_action": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "project_rename_references": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "project_search_symbols": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "project_search_text": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "project_set_autoload": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "project_set_input_action": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "project_set_setting": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "project_verify_changes": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "query_project_resources": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "resource_create": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "resource_inspect": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "runtime_attach_session": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "runtime_checkpoint": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "runtime_detach_session": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "runtime_explore_scene": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "runtime_get_call_stack": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "runtime_get_session": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "runtime_get_tree": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "runtime_inject_input": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "runtime_launch": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "runtime_list_sessions": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "runtime_read_logs": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "runtime_read_output": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "runtime_read_profiler": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "runtime_recover_editor": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "runtime_recovery_status": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "runtime_restore_checkpoint": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "runtime_set_paused": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "runtime_step": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "runtime_stop": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "runtime_watch_invariants": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "scene_add_to_group": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "scene_call_method": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "scene_close": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "scene_create": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "scene_duplicate_node": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "scene_get_group_members": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "scene_get_hierarchy": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "scene_get_property": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "scene_get_selection": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "scene_instantiate_node": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "scene_list_groups": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "scene_open": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "scene_pack_branch": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "scene_remove_from_group": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "scene_remove_node": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "scene_reparent_node": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "scene_set_property": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "script_attach_to_node": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "script_check_syntax": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "script_create": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "script_detach_from_node": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "script_get_symbols": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "script_patch_method": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "script_reflect_class": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "shader_check_compile": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "shader_get_visual_graph": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "shader_list_uniforms": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "shader_set_uniform": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "signal_connect": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "signal_disconnect": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "signal_emit": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "signal_list_connections": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "spatial_query_clearance": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "spatial_query_frustum": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "spatial_query_raycast_batch": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "tilemap_get_used_rect": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "tilemap_set_cells": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "ui_hit_test": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "ui_list_controls": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "viewport_capture_frame": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "viewport_capture_passes": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "viewport_create_test_lab": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "viewport_diff_capture": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "viewport_set_camera_transform": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "viewport_toggle_debug_draw": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        }
+      }
+    }
+  },
+  "schema": 1
+}

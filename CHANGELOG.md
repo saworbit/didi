@@ -51,6 +51,25 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Added
 
+- **What a client is shown is committed, and CI fails when it moves (Q3, #1011).**
+  `tests/contract_snapshots/offline.json` records the handshake, every tool's
+  schema, description, annotations and `_meta`, and the resources and prompts,
+  from a server with no engine. `live-4.5.json`, `live-4.6.json` and
+  `live-4.7.json` record what attaching an editor on that line changes in those
+  listings, and the answers to 42 read-only calls against
+  `tests/contract_fixture`, a small project kept for them. Session ids, pids,
+  paths, the build id, durations and timestamps become placeholders, replaced
+  by value so an identity is caught wherever it appears. `python
+  tools/contract_snapshots.py --godot <exe> ...` regenerates them, recording
+  twice from fresh editors and writing nothing if the two disagree. CI checks
+  `offline.json` on all three build platforms and each live snapshot in its
+  Godot job, and a failed live check uploads what it recorded.
+  `tests/contract_snapshots/calls.json` must call every implemented read-only
+  tool or exclude it with a reason, so a new one fails the build until it does.
+  The recording already shows one engine difference reaching an answer: from
+  4.7, `signal_list_connections` on a `Button` lists two more signals. Q4 and
+  Q5 will change what the tools list and answer, and each of those changes now
+  arrives as a diff in its pull request.
 - **Every mutating tool is checked for what it observed (Q2, #1010).**
   `tests/observed_post_state.json` gives each of the 63 mutating tools either
   the answer fields that carry the state it read back after the write, or an
