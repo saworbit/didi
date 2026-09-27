@@ -2,7 +2,8 @@
   "initialize": {
     "_meta": {
       "didi": {
-        "confirmationsSkipped": false
+        "confirmationsSkipped": false,
+        "toolProfile": "full"
       }
     },
     "capabilities": {
@@ -589,7 +590,7 @@
               "type": "boolean"
             },
             "paths": {
-              "description": "The res:// source assets to act on, 1 to 256 of them, each a normalized project-owned path. Duplicates are refused rather than silently collapsed.",
+              "description": "The res:// source assets to act on, each a normalized project-owned path. Duplicates are refused rather than silently collapsed.",
               "items": {
                 "maxLength": 1024,
                 "minLength": 7,
@@ -602,7 +603,7 @@
             },
             "timeout_ms": {
               "default": 10000,
-              "description": "How long to wait for the editor to finish reimporting, and to apply any scan the batch needed, 1 to 10000 milliseconds. A timeout's error.data says whether the editor was still scanning (editor_scanning) or applying the scan (scan_applied).",
+              "description": "How long to wait for the editor to finish reimporting, and to apply any scan the batch needed, in milliseconds. A timeout's error.data says whether the editor was still scanning (editor_scanning) or applying the scan (scan_applied).",
               "maximum": 10000,
               "minimum": 1,
               "type": "integer"
@@ -1480,7 +1481,7 @@
               "type": "string"
             },
             "progress": {
-              "description": "How far along the task is, as a whole percentage from 0 to 100. A completed task reports 100.",
+              "description": "How far along the task is, as a whole percentage. A completed task reports 100.",
               "maximum": 100,
               "minimum": 0,
               "type": "integer"
@@ -1849,7 +1850,7 @@
             },
             "timeout_seconds": {
               "default": 60,
-              "description": "How long the build may take before it is abandoned, 1 to 300 seconds.",
+              "description": "How long the build may take before it is abandoned, in seconds.",
               "maximum": 300,
               "minimum": 1,
               "type": "integer"
@@ -3333,7 +3334,7 @@
             },
             "navigation_layers": {
               "default": 1,
-              "description": "Navigation layers the path may use, as a 32-bit bit mask, 1 to 4294967295. Defaults to 1.",
+              "description": "Navigation layers the path may use, as a 32-bit bit mask.",
               "maximum": 4294967295,
               "minimum": 1,
               "type": "integer"
@@ -3525,7 +3526,7 @@
           "properties": {
             "collision_mask": {
               "default": 1,
-              "description": "Physics layers to test against, as a 32-bit bit mask, 1 to 4294967295. Defaults to 1, layer one only; 4294967295 tests every layer.",
+              "description": "Physics layers to test against, as a 32-bit bit mask. The default, 1, is layer one only; 4294967295 tests every layer.",
               "maximum": 4294967295,
               "minimum": 1,
               "type": "integer"
@@ -4559,7 +4560,7 @@
             },
             "max_results": {
               "default": 100,
-              "description": "Stop after this many matches and report truncated. 1 to 500, default 100.",
+              "description": "Stop after this many matches and report truncated.",
               "maximum": 500,
               "minimum": 1,
               "type": "integer"
@@ -4718,7 +4719,7 @@
             },
             "max_results": {
               "default": 100,
-              "description": "Stop after this many matches and report truncated. 1 to 500, default 100.",
+              "description": "Stop after this many matches and report truncated.",
               "maximum": 500,
               "minimum": 1,
               "type": "integer"
@@ -4913,7 +4914,7 @@
             },
             "deadzone": {
               "default": 0.2,
-              "description": "Analogue deadzone for the action, 0 to 1.",
+              "description": "Analogue deadzone for the action.",
               "maximum": 1.0,
               "minimum": 0.0,
               "type": "number"
@@ -6418,7 +6419,7 @@
             },
             "limit": {
               "default": 100,
-              "description": "How many records to return, 1 to 500, default 100.",
+              "description": "How many records to return.",
               "maximum": 500,
               "minimum": 1,
               "type": "integer"
@@ -6471,7 +6472,7 @@
             },
             "limit": {
               "default": 100,
-              "description": "How many records to return, 1 to 500, default 100.",
+              "description": "How many records to return.",
               "maximum": 500,
               "minimum": 1,
               "type": "integer"
@@ -8183,7 +8184,7 @@
             },
             "max_symbols": {
               "default": 2000,
-              "description": "Stop after this many declarations, counted across every kind, and report truncated. Defaults to 2000. symbol_count_total says how many the file holds either way, so a clipped answer can be told from a complete one.",
+              "description": "Stop after this many declarations, counted across every kind, and report truncated. symbol_count_total says how many the file holds either way, so a clipped answer can be told from a complete one.",
               "maximum": 100000,
               "minimum": 1,
               "type": "integer"
@@ -8961,7 +8962,7 @@
           "properties": {
             "collision_mask": {
               "default": 1,
-              "description": "Physics layers the shape is tested against, as a 32-bit bit mask, 1 to 4294967295. Defaults to 1.",
+              "description": "Physics layers the shape is tested against, as a 32-bit bit mask.",
               "maximum": 4294967295,
               "minimum": 1,
               "type": "integer"
@@ -9335,7 +9336,7 @@
           "additionalProperties": false,
           "properties": {
             "cells": {
-              "description": "1 to 256 records, each either a write or an erase and nothing else.",
+              "description": "Records, each either a write or an erase and nothing else.",
               "items": {
                 "oneOf": [
                   {
@@ -9544,7 +9545,7 @@
             },
             "max_results": {
               "default": 64,
-              "description": "How many Controls to return, 1 to 256, default 64.",
+              "description": "How many Controls to return.",
               "maximum": 256,
               "minimum": 1,
               "type": "integer"

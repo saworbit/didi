@@ -560,7 +560,8 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
                 {kServerInfoMetaKey, {{"name", kServerName}, {"version", kServerVersion}}},
                 // A client rendering safety affordances needs to know the
                 // confirmation gate is open before it acts, not after.
-                {"didi", {{"confirmationsSkipped", m_skipConfirmations}}}
+                {"didi", {{"confirmationsSkipped", m_skipConfirmations},
+                          {"toolProfile", toolProfileName(m_toolProfile)}}}
             }},
             {"instructions", kServerInstructions},
             // Caching hints are required on a complete result. Everything here
@@ -663,7 +664,8 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
             // A 2024-11-05 client never calls that method, so for every such
             // host the whole published surface was identical in both modes
             // (#684).
-            {"_meta", {{kDidiMetaKey, {{"confirmationsSkipped", m_skipConfirmations}}}}}
+            {"_meta", {{kDidiMetaKey, {{"confirmationsSkipped", m_skipConfirmations},
+                                       {"toolProfile", toolProfileName(m_toolProfile)}}}}}
         };
         return JsonRpcResponse::makeSuccess(req.id, complete(std::move(result)));
     }
@@ -715,7 +717,10 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
                                       ? std::optional<std::string>(active->kind)
                                       : std::optional<std::string>{};
         const bool ui_visible = uiSurfaceVisible(era, req.params);
+        const bool core = m_toolProfile == ToolProfile::Core;
+        json listing_meta = {{"toolProfile", "core"}};
         for (const auto& t : tools) {
+            if (!ToolRegistry::instance().inProfile(t.name, m_toolProfile)) continue;
             json definition = t.toJson();
             if (argumentNormalizationEnabled() && supportsArgumentNormalization(t.name) &&
                 t.annotations.read_only && !t.legacy) {
@@ -747,10 +752,27 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
                     {"visibility", json::array({"model", "app"})}
                 };
             }
+            // Three of those facts are about the server and the route, not the
+            // tool, so they are the same on every entry. The core profile says
+            // each once, on the listing, and the per-tool copies go. The full
+            // profile keeps them where API_SPECIFICATION.md promises them
+            // until a major version moves them (Q4). Taken from the entry
+            // rather than recomputed, so the two can never disagree.
+            if (core) {
+                auto& didi = definition["_meta"]["didi"];
+                for (const char* shared : {"confirmationsSkipped", "editorConnected", "sessionKind"}) {
+                    if (!didi.contains(shared)) continue;
+                    listing_meta[shared] = didi[shared];
+                    didi.erase(shared);
+                }
+            }
             tool_list.push_back(std::move(definition));
         }
-        return JsonRpcResponse::makeSuccess(
-            req.id, cacheable({{"tools", tool_list}}, kSessionDependentTtlMs, "private"));
+        json listing = cacheable({{"tools", tool_list}}, kSessionDependentTtlMs, "private");
+        // Only core has listing-level facts. The full listing stays the shape
+        // it has always been; initialize says which profile a session has.
+        if (core) listing["_meta"] = {{kDidiMetaKey, std::move(listing_meta)}};
+        return JsonRpcResponse::makeSuccess(req.id, std::move(listing));
     }
 
     if (req.method == "tools/call") {
@@ -783,6 +805,21 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
             return JsonRpcResponse::makeError(req.id, JsonRpcErrorCode::InvalidParams,
                                               "Unknown tool: " + name,
                                               json{{"name", name}});
+        }
+        // Unknown to this session, since its tools/list did not show it, but
+        // not unknown to Didi: say which profile left it out and how to get it,
+        // rather than the bare answer a misspelling gets.
+        if (!ToolRegistry::instance().inProfile(name, m_toolProfile)) {
+            return JsonRpcResponse::makeError(
+                req.id, JsonRpcErrorCode::InvalidParams,
+                "Unknown tool in this session: " + name + " is not in the " +
+                    toolProfileName(m_toolProfile) +
+                    " tool profile this server was started with. Restart the server with "
+                    "--tools full to list and call it.",
+                // Not retry_with: that names arguments for the same call, and
+                // no argument to this call can fix it.
+                json{{"name", name}, {"toolProfile", toolProfileName(m_toolProfile)},
+                     {"restart_with", "--tools full"}});
         }
         // Explicit opt-in, before any confirmation or dispatch. The ordinary
         // path never copies or walks arguments through the normalizer.

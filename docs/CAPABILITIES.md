@@ -32,6 +32,7 @@ Every tool and resource definition includes `_meta.didi`:
 - `editorConnected` is true only when the selected route is both connected and an editor; a connected game reports false.
 - `liveAvailable` is true only when a route is connected, the definition implements `live`, and the selected kind is allowed for that exact tool/resource. Logs, tree inspection, evaluation, viewport capture and the two audio reads allow editor or game; pause/step/stop allow only game; other live tools and resources are editor-only by default.
 - A connected wrong-kind route reports `currentMode: "unavailable"` and `liveAvailable: false`. For a tool that also has an offline fallback, this avoids advertising a path its connected-route handler will not take.
+- A server started with `--tools core` lists fewer tools, and states `editorConnected`, `sessionKind` and `confirmationsSkipped` once in the listing's own `_meta.didi` rather than on every entry. See [Tool profiles](API_SPECIFICATION.md#tool-profiles).
 
 Every tool definition carries a specification `title`: a short noun phrase for a person, because a host that displays one otherwise falls back to the identifier and shows someone approving a destructive mutation `gridmap_export_mesh_library`. A legacy alias publishes the title of the tool it resolves to, so the two cannot drift.
 

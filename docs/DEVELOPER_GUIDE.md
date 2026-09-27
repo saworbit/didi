@@ -141,6 +141,8 @@ diff a reviewer reads rather than a surprise a client finds
   `resources/templates/list` and `prompts/list` from a server with no engine.
   Entries are keyed by name, because the wire order is a hash map's and differs
   between standard libraries.
+- `offline-core.json`: what `--tools core` changes about those listings. A tool
+  the profile leaves out is one `<absent>` line.
 - `live-<line>.json`, one for each engine line in CI's matrix: what attaching an
   editor changes in those listings, and the answers to the calls in
   `calls.json`. The calls run against a fresh copy of `tests/contract_fixture/`
@@ -183,6 +185,24 @@ platforms, and each `live-<line>.json` in the Godot job for that line. A failed
 live check uploads what it recorded with the job's logs, so a contributor
 without Godot can read it or adopt it. A change to the fixture changes every
 live snapshot, so regenerate all three lines.
+
+### Tool list budgets and the core profile
+
+`didi --tools full|core` chooses at startup which tools a session lists (Q4).
+`tests/tool_list_budgets.json` holds a byte budget for each profile's
+`tools/list`, measured by `tests/test_tool_profiles.py` from a server with no
+engine attached, and CI fails a listing over its budget. A new tool, or longer
+prose, can exceed one. Raising a budget takes its own pull request that says
+why, merged before the change that needs it, so growing what every session
+pays for is a decision rather than a side effect.
+
+`core` is the union of the tools recorded field trials reached, in
+`tools/field-trial/reached_tools.json`, and every implemented tool the handshake
+guide names. The names are written out as `coreProfileTools()` in
+`src/mcp/tool_registry.cpp`, and the same test fails when that list drifts from
+either source: after a trial, or after the guide starts naming another tool.
+`offline-core.json` in the contract snapshots records what the profile changes
+about the full listing.
 
 ### Opt-in live verification
 
@@ -324,7 +344,9 @@ Route the method from `EditorHook::executeOnMainThread` into a bounded implement
   `tests/test_observed_post_state.py` fails the build until the entry exists,
   and the live harness fails when an answer disagrees with the engine.
 - Regenerate the [contract snapshots](#contract-snapshots), because a new tool
-  changes `tools/list`. If the tool only reads, also give it a call in
+  changes `tools/list`. It also grows the full profile's bytes, so it may need
+  a [budget](#tool-list-budgets-and-the-core-profile) raised first, in a pull
+  request of its own. If the tool only reads, also give it a call in
   `tests/contract_snapshots/calls.json`, or an exclusion with the reason it
   cannot be recorded; `tests/test_contract_snapshots.py` fails the build until
   it has one.

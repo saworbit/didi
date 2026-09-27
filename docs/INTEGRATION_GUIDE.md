@@ -169,6 +169,30 @@ Both recovery flags are required together. Enable the matching addon in the sour
 
 Every invocation needs a fresh workspace. A static client configuration that automatically restarts Didi with the retained same path will fail startup. Use a wrapper that rotates workspace names, or deliberately archive/remove the prior container after inspection before reusing its path. Retained containers are for inspection and salvage, not automatic host resume. See [Managed Recovery](MANAGED_RECOVERY.md) for the restart budget, reconciliation, coverage, and project-code boundary.
 
+### Optional: a smaller tool list
+
+A host that loads every tool definition into every session pays for the whole
+`tools/list` before the agent does anything. `--tools core` lists under half
+the bytes: the tools agents reached in Didi's field trials and the ones its
+handshake guide names.
+
+```json
+{
+  "mcpServers": {
+    "didi": {
+      "command": "D:/didi/build/Release/didi.exe",
+      "args": ["--project", "D:/my_game", "--tools", "core"]
+    }
+  }
+}
+```
+
+`full`, every tool, stays the default until a field trial on `core` shows it
+loses nothing. A tool outside the profile is refused with a message that names
+`--tools full`, so an agent that needs one knows the fix. The profile cannot
+change during a session; restart the server to switch. See
+[Tool profiles](API_SPECIFICATION.md#tool-profiles).
+
 ### Optional: the Control Room dashboard
 
 Didi declares the `io.modelcontextprotocol/ui` extension (MCP Apps, revision

@@ -119,8 +119,11 @@ defaults (#775).
 - Every bounded read says whether it is complete. A short answer must never
   look like a whole one.
 
-**Enforced by.** [Q4](BUILD_QUEUE.md#q4-shrink-the-tool-list) budgets the tool
-list and [Q5](BUILD_QUEUE.md#q5-response-economy) budgets responses.
+**Enforced by.** `tests/tool_list_budgets.json`, from
+[Q4](BUILD_QUEUE.md#q4-shrink-the-tool-list): each tool profile's `tools/list`
+has a byte budget, CI fails a listing over it, and raising one takes its own
+pull request with a reason. [Q5](BUILD_QUEUE.md#q5-response-economy) budgets
+responses.
 
 ## P5. Guidance belongs where the agent is already looking
 

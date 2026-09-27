@@ -9,6 +9,7 @@ committed under ``tests/contract_snapshots``:
 * ``offline.json``: ``initialize``, ``tools/list``, ``resources/list``,
   ``resources/templates/list`` and ``prompts/list`` from a server with no
   engine. Every tool's schema, description, annotations and ``_meta`` is here.
+* ``offline-core.json``: what ``--tools core`` changes about those listings.
 * ``live-<line>.json``, one per Godot line CI drives: the same listings once an
   editor is attached, stored as what differs from the offline ones, and the
   answers to the read-only calls in ``calls.json`` against
@@ -25,7 +26,7 @@ hash map's, which differs between standard libraries.
 
 Usage::
 
-    python tools/contract_snapshots.py                      # regenerate offline.json
+    python tools/contract_snapshots.py                      # regenerate the offline snapshots
     python tools/contract_snapshots.py --godot <exe> ...    # and live-<line>.json per engine
     python tools/contract_snapshots.py --check [--godot <exe> ...]
 
@@ -57,6 +58,10 @@ SNAPSHOT_DIR = REPO_ROOT / "tests" / "contract_snapshots"
 FIXTURE = REPO_ROOT / "tests" / "contract_fixture"
 CALLS = SNAPSHOT_DIR / "calls.json"
 OFFLINE = SNAPSHOT_DIR / "offline.json"
+# The core tool profile (Q4), stored as what it changes about offline.json:
+# a tool it leaves out is one <absent> line, and the facts it moves to the
+# listing show as what they are, so a change to the profile is a small diff.
+OFFLINE_CORE = SNAPSHOT_DIR / "offline-core.json"
 SCHEMA = 1
 
 # A fixed client, so the handshake answer does not depend on who records it.
@@ -165,7 +170,8 @@ def handshake() -> list[dict]:
     ]
 
 
-def exchange(binary: Path, project: Path, env: dict, messages: list[dict]) -> dict[int, dict]:
+def exchange(binary: Path, project: Path, env: dict, messages: list[dict],
+             server_args: tuple[str, ...] = ()) -> dict[int, dict]:
     """Send every message to one server process and return its replies by id.
 
     One process per exchange, the way the live harness drives it. Server
@@ -174,7 +180,7 @@ def exchange(binary: Path, project: Path, env: dict, messages: list[dict]) -> di
     payload = "".join(json.dumps(message) + "\n" for message in messages)
     try:
         completed = subprocess.run(
-            [str(binary), "--project", str(project)],
+            [str(binary), "--project", str(project), *server_args],
             input=payload.encode("utf-8"), capture_output=True, env=env,
             timeout=SERVER_TIMEOUT_SECONDS,
         )
@@ -389,11 +395,12 @@ class Workspace:
             time.sleep(0.5)
 
 
-def record_listings(binary: Path, workspace: Workspace, prefix: list[dict]) -> dict[str, dict]:
+def record_listings(binary: Path, workspace: Workspace, prefix: list[dict],
+                    server_args: tuple[str, ...] = ()) -> dict[str, dict]:
     """`initialize` and the four listings, after `prefix` (an attach, for a live recording)."""
     base = len(prefix) + 10
     messages = handshake() + prefix + [request(base + i, m) for i, m in enumerate(LISTINGS)]
-    replies = exchange(binary, workspace.project, workspace.env, messages)
+    replies = exchange(binary, workspace.project, workspace.env, messages, server_args)
     for message in prefix:
         if "id" in message:
             structured(replies[message["id"]], message["params"].get("name", message["method"]))
@@ -403,17 +410,28 @@ def record_listings(binary: Path, workspace: Workspace, prefix: list[dict]) -> d
     return listings
 
 
-def record_offline(binary: Path, keep: bool = False) -> dict:
+def record_offline(binary: Path, keep: bool = False, server_args: tuple[str, ...] = ()) -> dict:
     """offline.json: what a server with no engine lists, normalised."""
     workspace = Workspace(binary, keep)
     try:
-        listings = record_listings(binary, workspace, [])
+        listings = record_listings(binary, workspace, [], server_args)
         version = listings["initialize"].get("serverInfo", {}).get("version")
         if version:
             workspace.identities.value(version, "<version>")
         return {"schema": SCHEMA, **workspace.identities.normalise(listings)}
     finally:
         workspace.close()
+
+
+def record_offline_core(binary: Path, offline: dict, keep: bool = False) -> dict:
+    """offline-core.json: what --tools core changes about the offline listings."""
+    core = record_offline(binary, keep, ("--tools", "core"))
+    changes = {}
+    for key in ("initialize", *LISTINGS):
+        changed = overlay(offline[key], core[key])
+        if changed is not None:
+            changes[key] = changed
+    return {"schema": SCHEMA, "compared_with": OFFLINE.name, "changes": changes}
 
 
 def wait_for_editor(binary: Path, workspace: Workspace, editor: subprocess.Popen) -> dict:
@@ -661,6 +679,10 @@ def main(argv: list[str] | None = None) -> int:
         recorded[OFFLINE] = offline
         if not args.check:
             stable("offline.json", offline, record_offline(binary, args.keep_work))
+        core = record_offline_core(binary, offline, args.keep_work)
+        recorded[OFFLINE_CORE] = core
+        if not args.check:
+            stable(OFFLINE_CORE.name, core, record_offline_core(binary, offline, args.keep_work))
         for godot in args.godot:
             godot = godot.resolve()
             if not godot.is_file():

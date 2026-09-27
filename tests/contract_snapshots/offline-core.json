@@ -1,0 +1,574 @@
+{
+  "changes": {
+    "initialize": {
+      "_meta": {
+        "didi": {
+          "toolProfile": "core"
+        }
+      }
+    },
+    "tools/list": {
+      "_meta": {
+        "didi": {
+          "confirmationsSkipped": false,
+          "editorConnected": false,
+          "toolProfile": "core"
+        }
+      },
+      "tools": {
+        "analyze_script_diagnostics": "<absent>",
+        "anim_add_library": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "anim_list_tracks": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "anim_play_track": "<absent>",
+        "asset_configure_import": "<absent>",
+        "asset_reimport": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "audio_add_bus": "<absent>",
+        "audio_configure_bus": "<absent>",
+        "audio_list_buses": "<absent>",
+        "blackboard_clear": "<absent>",
+        "blackboard_list_keys": "<absent>",
+        "blackboard_patch": "<absent>",
+        "blackboard_read": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "blackboard_task_claim": "<absent>",
+        "blackboard_task_complete": "<absent>",
+        "blackboard_task_create": "<absent>",
+        "blackboard_task_list": "<absent>",
+        "blackboard_task_update": "<absent>",
+        "blackboard_write": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "capture_viewport": "<absent>",
+        "create_visual_test_lab": "<absent>",
+        "csharp_check_build": "<absent>",
+        "didi_control_room": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "editor_clear_ghost_previews": "<absent>",
+        "editor_redo": "<absent>",
+        "editor_reload_project": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "editor_render_ghost_preview": "<absent>",
+        "editor_save_scene": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "editor_undo": "<absent>",
+        "eval_gdscript": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "execute_test_session": "<absent>",
+        "get_scene_hierarchy": "<absent>",
+        "gridmap_export_mesh_library": "<absent>",
+        "gridmap_set_cells": "<absent>",
+        "inject_input_event": "<absent>",
+        "instantiate_asset": "<absent>",
+        "mutate_scene_tree": "<absent>",
+        "nav_bake_mesh": "<absent>",
+        "nav_query_path": "<absent>",
+        "patch_script_symbols": "<absent>",
+        "physics_raycast_query": "<absent>",
+        "physics_simulate_step": "<absent>",
+        "project_add_export_preset": "<absent>",
+        "project_analyze_impact": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "project_apply_changes": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "project_audit_assets": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "project_export": "<absent>",
+        "project_get_setting": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "project_get_uid_map": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "project_list_autoloads": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "project_list_export_presets": "<absent>",
+        "project_list_input_actions": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "project_list_resources": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "project_remove_autoload": "<absent>",
+        "project_remove_input_action": "<absent>",
+        "project_rename_references": "<absent>",
+        "project_search_symbols": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "project_search_text": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "project_set_autoload": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "project_set_input_action": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "project_set_setting": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "project_verify_changes": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "query_project_resources": "<absent>",
+        "resource_create": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "resource_inspect": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "runtime_attach_session": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "runtime_checkpoint": "<absent>",
+        "runtime_detach_session": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "runtime_explore_scene": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "runtime_get_call_stack": "<absent>",
+        "runtime_get_session": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "runtime_get_tree": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "runtime_inject_input": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "runtime_launch": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "runtime_list_sessions": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "runtime_read_logs": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "runtime_read_output": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "runtime_read_profiler": "<absent>",
+        "runtime_recover_editor": "<absent>",
+        "runtime_recovery_status": "<absent>",
+        "runtime_restore_checkpoint": "<absent>",
+        "runtime_set_paused": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "runtime_step": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "runtime_stop": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "runtime_watch_invariants": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "scene_add_to_group": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "scene_call_method": "<absent>",
+        "scene_close": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "scene_create": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "scene_duplicate_node": "<absent>",
+        "scene_get_group_members": "<absent>",
+        "scene_get_hierarchy": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "scene_get_property": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "scene_get_selection": "<absent>",
+        "scene_instantiate_node": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "scene_list_groups": "<absent>",
+        "scene_open": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "scene_pack_branch": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "scene_remove_from_group": "<absent>",
+        "scene_remove_node": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "scene_reparent_node": "<absent>",
+        "scene_set_property": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "script_attach_to_node": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "script_check_syntax": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "script_create": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "script_detach_from_node": "<absent>",
+        "script_get_symbols": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "script_patch_method": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "script_reflect_class": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "shader_check_compile": "<absent>",
+        "shader_get_visual_graph": "<absent>",
+        "shader_list_uniforms": "<absent>",
+        "shader_set_uniform": "<absent>",
+        "signal_connect": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "signal_disconnect": "<absent>",
+        "signal_emit": "<absent>",
+        "signal_list_connections": "<absent>",
+        "spatial_query_clearance": "<absent>",
+        "spatial_query_frustum": "<absent>",
+        "spatial_query_raycast_batch": "<absent>",
+        "tilemap_get_used_rect": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "tilemap_set_cells": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "ui_hit_test": "<absent>",
+        "ui_list_controls": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "viewport_capture_frame": {
+          "_meta": {
+            "didi": {
+              "confirmationsSkipped": "<absent>",
+              "editorConnected": "<absent>"
+            }
+          }
+        },
+        "viewport_capture_passes": "<absent>",
+        "viewport_create_test_lab": "<absent>",
+        "viewport_diff_capture": "<absent>",
+        "viewport_set_camera_transform": "<absent>",
+        "viewport_toggle_debug_draw": "<absent>"
+      }
+    }
+  },
+  "compared_with": "offline.json",
+  "schema": 1
+}
