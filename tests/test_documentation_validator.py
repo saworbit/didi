@@ -205,6 +205,7 @@ Session lock conflicts return 423. Mutations expose dry_run and protected writes
 """,
         )
         self.write("docs/ROADMAP.md", self.make_future_phase_roadmap())
+        self.write("docs/BUILD_QUEUE.md", self.make_build_queue())
         self.write("docs/FUTURE_PHASES_DESIGN.md", self.make_future_phase_governance())
         self.write(
             "docs/FUTURE_PHASES_IMPLEMENTATION_PLAN.md",
@@ -283,6 +284,8 @@ Second section.
             10: "Animation and UI Authoring",
             11: "Enhanced MCP Protocol Surface",
             12: "Structured Engine Logging",
+            13: "Surface Contracts",
+            14: "Reach and Proof",
         }
         statuses = {phase: "PLANNED" for phase in phase_names}
         statuses[7] = "PARTIAL_DELIVERY"
@@ -354,7 +357,7 @@ Second section.
             "verification evidence": "**Verification evidence:** Focused and repository gates passed.",
         }
         lines = ["# Future Phase Governance", ""]
-        for phase in range(7, 13):
+        for phase in range(7, 15):
             lines.extend([f"## Phase {phase}: Future Work", ""])
             lines.extend(
                 [
@@ -377,6 +380,59 @@ Second section.
                     if field != omitted_completion_field:
                         lines.extend([line, ""])
         return "\n".join(lines) + "\n"
+
+    def make_build_queue(
+        self,
+        rows: list[str] | None = None,
+        sections: str | None = None,
+    ) -> str:
+        if rows is None:
+            rows = [
+                "| [Q1](#q1-first-item) | First item | 8 | none | #12 | COMPLETE (#34) |",
+                "| [Q2](#q2-second-item) | Second item | 9 | Q1 | not yet | PLANNED |",
+            ]
+        if sections is None:
+            sections = "\n".join(
+                [
+                    self.make_build_queue_section("Q1", "First item"),
+                    self.make_build_queue_section("Q2", "Second item"),
+                ]
+            )
+        lines = [
+            "# Build Queue",
+            "",
+            "## Queue",
+            "",
+            "<!-- build-queue:start -->",
+            "| Item | Capability | Phase | Depends on | Issue | Status |",
+            "| --- | --- | --- | --- | --- | --- |",
+            *rows,
+            "<!-- build-queue:end -->",
+            "",
+            "## Items",
+            "",
+            sections,
+            "## Paused",
+            "",
+            "Nothing.",
+            "",
+        ]
+        return "\n".join(lines)
+
+    def make_build_queue_section(
+        self, item: str, title: str, omitted_field: str | None = None
+    ) -> str:
+        fields = {
+            "why": "**Why:** Evidence from a trial.",
+            "what": "**What:** The capability.",
+            "how": "**How:** The design.",
+            "done when": "**Done when:** The finish line.",
+        }
+        lines = [f"### {item}. {title}", ""]
+        for field, line in fields.items():
+            if field != omitted_field:
+                lines.extend([line, ""])
+        return "\n".join(lines)
 
     def phase7_current_status_block(self) -> str:
         return """<!-- phase7-current-status:start -->
@@ -1539,6 +1595,147 @@ Second section.
             errors,
         )
 
+    def test_valid_build_queue_has_no_errors(self):
+        errors = VALIDATOR.validate_build_queue(
+            self.make_build_queue(), self.make_future_phase_roadmap()
+        )
+
+        self.assertEqual([], errors)
+
+    def test_repository_build_queue_is_valid(self):
+        queue = (REPOSITORY_ROOT / "docs/BUILD_QUEUE.md").read_text(encoding="utf-8")
+        roadmap = (REPOSITORY_ROOT / "docs/ROADMAP.md").read_text(encoding="utf-8")
+
+        self.assertEqual([], VALIDATOR.validate_build_queue(queue, roadmap))
+
+    def test_repository_requires_the_build_queue(self):
+        root = self.make_valid_repository()
+        (root / "docs/BUILD_QUEUE.md").unlink()
+
+        errors = validate_repository(root)
+
+        self.assertIn("docs/BUILD_QUEUE.md: required file is missing", errors)
+
+    def test_build_queue_requires_one_marked_table(self):
+        queue = self.make_build_queue().replace("<!-- build-queue:end -->\n", "", 1)
+
+        errors = VALIDATOR.validate_build_queue(queue)
+
+        self.assertEqual(
+            [
+                "docs/BUILD_QUEUE.md must contain one queue table between "
+                "<!-- build-queue:start --> and <!-- build-queue:end -->"
+            ],
+            errors,
+        )
+
+    def test_build_queue_items_must_be_numbered_in_order(self):
+        queue = self.make_build_queue(
+            rows=[
+                "| [Q1](#q1-first-item) | First item | 8 | none | #12 | COMPLETE (#34) |",
+                "| [Q3](#q3-second-item) | Second item | 9 | Q1 | not yet | PLANNED |",
+            ],
+            sections="\n".join(
+                [
+                    self.make_build_queue_section("Q1", "First item"),
+                    self.make_build_queue_section("Q3", "Second item"),
+                ]
+            ),
+        )
+
+        errors = VALIDATOR.validate_build_queue(queue)
+
+        self.assertIn(
+            "docs/BUILD_QUEUE.md queue items must be numbered Q1 to Q2 in order; found Q1, Q3",
+            errors,
+        )
+
+    def test_build_queue_rejects_an_unknown_status(self):
+        for status in ("DONE", "NEXT", "planned"):
+            with self.subTest(status=status):
+                queue = self.make_build_queue().replace("| not yet | PLANNED |", f"| not yet | {status} |")
+
+                errors = VALIDATOR.validate_build_queue(queue)
+
+                self.assertIn(f"docs/BUILD_QUEUE.md Q2 has invalid status '{status}'", errors)
+
+    def test_complete_queue_item_must_name_its_pull_request(self):
+        queue = self.make_build_queue().replace("COMPLETE (#34)", "COMPLETE")
+
+        errors = VALIDATOR.validate_build_queue(queue)
+
+        self.assertIn("docs/BUILD_QUEUE.md Q1 is COMPLETE but names no pull request", errors)
+
+    def test_queue_dependency_must_be_in_the_queue(self):
+        queue = self.make_build_queue().replace("| 9 | Q1 |", "| 9 | Q7 |")
+
+        errors = VALIDATOR.validate_build_queue(queue)
+
+        self.assertIn("docs/BUILD_QUEUE.md Q2 depends on Q7, which is not in the queue", errors)
+
+    def test_complete_queue_item_cannot_depend_on_unfinished_work(self):
+        queue = self.make_build_queue().replace(
+            "| not yet | PLANNED |", "| not yet | COMPLETE (#56) |"
+        ).replace("| 8 | none | #12 | COMPLETE (#34) |", "| 8 | none | #12 | PLANNED |")
+
+        errors = VALIDATOR.validate_build_queue(queue)
+
+        self.assertIn("docs/BUILD_QUEUE.md Q2 is COMPLETE but depends on Q1, which is not", errors)
+
+    def test_queue_item_phase_must_be_declared_by_the_roadmap(self):
+        queue = self.make_build_queue().replace("| 9 | Q1 |", "| 21 | Q1 |")
+
+        errors = VALIDATOR.validate_build_queue(queue, self.make_future_phase_roadmap())
+
+        self.assertIn(
+            "docs/BUILD_QUEUE.md Q2 names Phase 21, which docs/ROADMAP.md does not declare",
+            errors,
+        )
+
+    def test_queue_issue_must_be_a_number_or_not_yet(self):
+        queue = self.make_build_queue().replace("| #12 |", "| soon |")
+
+        errors = VALIDATOR.validate_build_queue(queue)
+
+        self.assertIn(
+            "docs/BUILD_QUEUE.md Q1 issue must be '#<number>' or 'not yet', not 'soon'",
+            errors,
+        )
+
+    def test_queue_item_needs_each_field(self):
+        for field in ("why", "what", "how", "done when"):
+            with self.subTest(field=field):
+                queue = self.make_build_queue(
+                    sections="\n".join(
+                        [
+                            self.make_build_queue_section("Q1", "First item"),
+                            self.make_build_queue_section("Q2", "Second item", omitted_field=field),
+                        ]
+                    )
+                )
+
+                errors = VALIDATOR.validate_build_queue(queue)
+
+                self.assertIn(
+                    f"docs/BUILD_QUEUE.md Q2 section is missing its '{field}' field",
+                    errors,
+                )
+
+    def test_queue_row_needs_a_section_and_a_section_needs_a_row(self):
+        queue = self.make_build_queue(
+            sections="\n".join(
+                [
+                    self.make_build_queue_section("Q1", "First item"),
+                    self.make_build_queue_section("Q9", "Stray item"),
+                ]
+            )
+        )
+
+        errors = VALIDATOR.validate_build_queue(queue)
+
+        self.assertIn("docs/BUILD_QUEUE.md Q2 has no '### Q2.' section", errors)
+        self.assertIn("docs/BUILD_QUEUE.md section Q9 has no row in the queue table", errors)
+
     def test_repository_requires_future_phase_roadmap(self):
         roadmap = (REPOSITORY_ROOT / "docs/ROADMAP.md").read_text(encoding="utf-8")
         design = (REPOSITORY_ROOT / "docs/FUTURE_PHASES_DESIGN.md").read_text(
@@ -1565,7 +1762,7 @@ Second section.
         )
 
     def test_reports_missing_each_required_future_phase(self):
-        for phase in range(7, 13):
+        for phase in range(7, 15):
             with self.subTest(phase=phase):
                 root = self.make_valid_repository()
                 self.write(
@@ -1644,7 +1841,7 @@ Second section.
         )
 
     def test_requires_each_future_phase_governance_field(self):
-        for phase in range(7, 13):
+        for phase in range(7, 15):
             for field in (
                 "scope",
                 "explicit exclusions",

@@ -20,6 +20,22 @@ involves. Add a row there if you vendor anything else.
 
 ---
 
+## 🧭 What to Work On
+
+Bugs are worked by severity, as [ISSUE_SEVERITY.md](ISSUE_SEVERITY.md) describes: open `P0`
+and `P1` issues come first.
+
+New capabilities are built in the order of the [Build Queue](docs/BUILD_QUEUE.md). The next
+item is the first row whose status is `PLANNED` and whose dependencies are all `COMPLETE`.
+Its section says why it is next, what it delivers, how to build it and when it is done, and
+the steps at the top of the queue say how to start it and how to mark it finished. The
+[Design Principles](docs/DESIGN_PRINCIPLES.md) it cites are the rules the change has to keep.
+
+If you want to build something that is not in the queue, add it to the queue first, with the
+evidence for it, in its own pull request.
+
+---
+
 ## 🤖 AI-Assisted Contributions
 
 Yes, you may use an AI assistant on a pull request. So do I, and [AI.md](AI.md) says so at

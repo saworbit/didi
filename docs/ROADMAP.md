@@ -13,6 +13,20 @@ Detailed scope and acceptance gates for all post-Phase-6 work are defined in
 
 ---
 
+## What to Build Next
+
+Work is taken in the order of the [Build Queue](BUILD_QUEUE.md). After any open
+`P0` or `P1` issue, the next item is the first row there whose status is
+`PLANNED` and whose dependencies are all `COMPLETE`. Each item says why it is
+there, what it delivers, how to build it and when it is done.
+
+The phases below group the same work by theme. The queue is the only place
+that says what comes first, and the only place an item's status is kept. The
+reasons the surface is shaped the way it is, and the things Didi will not
+build, are in [Design Principles](DESIGN_PRINCIPLES.md).
+
+---
+
 ## 🎯 Architectural Vision & Implementation Sequence
 
 ```
@@ -201,6 +215,8 @@ API-blocked contracts stay honestly unimplemented.
 
 **Exclusions:** No public tool names are added. No tool claims arbitrary debugger control or engine-output streaming beyond implemented Godot APIs.
 
+**Reopened question:** the gate did not probe the editor's Debug Adapter Protocol server. [Build Queue Q11](BUILD_QUEUE.md#q11-godots-own-debugger-and-language-server) re-runs it for `runtime_get_call_stack`, and the status above stands until that records a result.
+
 **Exit gate (option A):** The fifteen feasible canonical tools have real implementations, and the three API-blocked names remain registered with `implemented: false` and reject calls. Each delivered tool carries cross-platform, native bridge, Godot, security, mutation-policy, and documentation evidence. The superseded atomic gate required that all 79 canonical tools have real implementations and cross-platform, native bridge, Godot, security, mutation-policy, and documentation evidence. Successful placeholders do not satisfy this gate. The 10 legacy registrations remain compatibility-only and do not change the canonical count.
 
 ## Phase 8: Deep Project Intelligence and Asset Pipeline (`IN PROGRESS`)
@@ -247,11 +263,17 @@ board-specific.
 to the pool, and dependency completion releases dependents. All three are
 covered by native tests that fail when the lock is removed.
 
+**Further work is paused.** The board stays as it is until a field trial shows
+coordination as the thing that blocked it. See
+[Paused](BUILD_QUEUE.md#paused).
+
 ---
 
 ## Phase 10: Gogo Parallel Godot Orchestration (`PLANNED`)
 
 **Objective:** Coordinate isolated Godot work across parallel workers with deterministic ownership, conflict prevention, and auditable integration.
+
+**Sequencing:** paused until [Build Queue Q9](BUILD_QUEUE.md#q9-proof-in-one-call) is complete. Running many agents multiplies whatever one agent still gets wrong. See [Paused](BUILD_QUEUE.md#paused).
 
 **Exclusions:** No autonomous planning inside Gogo, Agent-to-Agent transport in the initial phase, attachment to or termination of Godot processes Gogo does not own, or claim that a fixed number of benches is universally supported.
 
@@ -273,9 +295,25 @@ covered by native tests that fail when the lock is removed.
 
 **Exit gate:** Release artifacts are reproducible, signed, installable, and traceable to source. Supported Godot/platform combinations are explicit and continuously verified. Upgrade and rollback paths preserve project configuration and document breaking changes. Extension compatibility and security policy are versioned and enforceable.
 
+## Phase 13: Surface Contracts (`PLANNED`)
+
+**Objective:** Turn the guarantees individual tools make into contracts every tool keeps, and make the surface cheaper to carry: typed arguments, observed post-state, contract snapshots, tool-list and response budgets, a remedy in every refusal, and a journal of every mutation for the person reviewing the work. Build Queue items Q1 to Q6 and Q15.
+
+**Exclusions:** No change to what a tool does beyond what its contract already claims. No tool folded behind a dispatcher or a code executor to save bytes. No budget raised just to let a build through.
+
+**Exit gate:** The argument-type check, the post-state conformance test, the snapshots and both budgets run in required CI jobs. A field trial on the reduced tool list loses no capability its task needed. The live harness undoes a journaled mutation and confirms the engine state.
+
+## Phase 14: Reach and Proof (`PLANNED`)
+
+**Objective:** Let an agent reach any property or method the Inspector can, and prove a behaviour in one call, without arbitrary code execution: a typed, undoable object layer, a scenario runner and test runner, and performance verdicts. Build Queue items Q7, Q9 and Q16.
+
+**Exclusions:** No arbitrary code execution and no interpreter state kept between calls. No fuzzy targeting or argument normalisation outside the elastic ingress profile. No whole-object reads by default.
+
+**Exit gate:** A field trial completes with no scene text edited by hand. The standing double-jump exercise is proved in one call on all three engine lines. A batch write undoes as one step in the live harness on all three engine lines.
+
 ## Adding Future Phases
 
-Phase 13 and later must be documented before implementation begins. Each phase requires scope, explicit exclusions, security and mutation classifications, measurable exit evidence, and a roadmap status. A phase may move to `COMPLETE` only when its completion date and pull request are recorded with its evidence.
+Phase 15 and later must be documented before implementation begins. Each phase requires scope, explicit exclusions, security and mutation classifications, measurable exit evidence, and a roadmap status. A phase may move to `COMPLETE` only when its completion date and pull request are recorded with its evidence.
 
 ---
 
@@ -317,10 +355,14 @@ These are missing capabilities that an AI agent actually requires to complete fu
 - ❌ **Do NOT create a second plugin architecture or network transport** — local named pipes and UNIX domain sockets are optimal.
 - ❌ **Do NOT build a custom GDScript language server** — extend the existing symbol extractor and headless Godot compiler check only where evidence requires it.
 - ❌ **Do NOT expand the limited static ClassDB map** — replace it with live Godot `ClassDB` or generated `extension_api.json` data.
+- ❌ **Do NOT build what [Design Principles](DESIGN_PRINCIPLES.md#refusals) refuses.** That list gives the reason for each refusal: dispatcher tools, arbitrary code execution as an interface, network listeners, schemas generated from engine types, heavy work in the editor process, whole-object reads, self-updaters, hosted services, and features for one game.
 
 ---
 
 ## 📊 Suggested Implementation Sequence
+
+The table records the sequence through Phase 7. From there on, the
+[Build Queue](BUILD_QUEUE.md) is the sequence.
 
 | Phase | Milestone / Capability | Strategic Rationale |
 | :--- | :--- | :--- |

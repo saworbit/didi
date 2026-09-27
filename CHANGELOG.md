@@ -685,6 +685,16 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Changed
 
+- **The roadmap says what to build next, and why.** `docs/BUILD_QUEUE.md`
+  is the ordered list of the next sixteen capabilities. Each item carries the
+  evidence for it, what it delivers, how to build it and when it is done, and
+  the first `PLANNED` item whose dependencies are complete is the next piece of
+  work. `docs/DESIGN_PRINCIPLES.md` records the rules the tool surface
+  follows, the trial evidence behind each, and what Didi will not build.
+  Phases 13 (Surface Contracts) and 14 (Reach and Proof) are defined, Gogo and
+  further coordination work are paused, and `tools/validate_documentation.py`
+  checks the queue's numbering, statuses, dependencies, phases and item fields.
+
 - **The roadmap and the amendment log describe the surface as it stands (#990).**
   The roadmap opened on a 115-tool canonical surface, and the tool count is 120.
   The amendment log's first paragraph said six amendments were implemented,

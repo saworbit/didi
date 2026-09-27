@@ -31,6 +31,7 @@ REQUIRED_DOCUMENTS = (
     "docs/QUICKSTART.md",
     "docs/RESOURCES_AND_PROMPTS.md",
     "docs/ROADMAP.md",
+    "docs/BUILD_QUEUE.md",
     "docs/FUTURE_PHASES_DESIGN.md",
     "docs/FUTURE_PHASES_IMPLEMENTATION_PLAN.md",
     "docs/PHASE_7_API_FEASIBILITY.md",
@@ -74,7 +75,7 @@ ADDON_PARITY_EXEMPT = frozenset({"test_lab_sandbox.tscn"})
 TRACKED_ONLY_ARTIFACT_PATHS = (".superpowers",)
 FILESYSTEM_FORBIDDEN_ARTIFACT_PATHS = ("docs/superpowers",)
 
-FUTURE_PHASE_RANGE = range(7, 13)
+FUTURE_PHASE_RANGE = range(7, 15)
 PHASE7_STATUS = "PARTIAL_DELIVERY"
 VALID_PHASE_STATUSES = {"PLANNED", "IN PROGRESS", "COMPLETE", PHASE7_STATUS}
 FUTURE_PHASE_GOVERNANCE_FIELDS = (
@@ -1219,6 +1220,138 @@ def validate_future_phase_governance(
     return errors
 
 
+BUILD_QUEUE_PATH = "docs/BUILD_QUEUE.md"
+BUILD_QUEUE_START = "<!-- build-queue:start -->"
+BUILD_QUEUE_END = "<!-- build-queue:end -->"
+BUILD_QUEUE_ITEM_FIELDS = ("why", "what", "how", "done when")
+BUILD_QUEUE_ROW_PATTERN = re.compile(
+    r"^\|\s*\[(?P<item>Q\d+)\]\(#[^)\s]+\)\s*"
+    r"\|(?P<capability>[^|]+)"
+    r"\|(?P<phase>[^|]+)"
+    r"\|(?P<depends>[^|]+)"
+    r"\|(?P<issue>[^|]+)"
+    r"\|(?P<status>[^|]+)\|\s*$"
+)
+BUILD_QUEUE_STATUS_PATTERN = re.compile(
+    r"^(?P<status>PLANNED|IN PROGRESS|COMPLETE|PAUSED)"
+    r"(?:\s+\(#(?P<pull_request>\d+)\))?$"
+)
+BUILD_QUEUE_ITEM_HEADING_PATTERN = re.compile(
+    r"^### (?P<item>Q\d+)\.[ \t]+\S[^\n]*$",
+    re.MULTILINE,
+)
+BUILD_QUEUE_SECTION_BOUNDARY_PATTERN = re.compile(r"^#{1,3} ", re.MULTILINE)
+
+
+def _build_queue_rows(queue_text: str, errors: list[str]) -> list[dict[str, str]]:
+    start = queue_text.index(BUILD_QUEUE_START) + len(BUILD_QUEUE_START)
+    end = queue_text.index(BUILD_QUEUE_END)
+    rows: list[dict[str, str]] = []
+    for line in queue_text[start:end].splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("|"):
+            continue
+        cells = [cell.strip() for cell in stripped.strip("|").split("|")]
+        if cells[0] == "Item" or set("".join(cells)) <= set("-: "):
+            continue
+        match = BUILD_QUEUE_ROW_PATTERN.match(stripped)
+        if match is None:
+            errors.append(f"{BUILD_QUEUE_PATH} queue row is malformed: {stripped}")
+            continue
+        rows.append({key: value.strip() for key, value in match.groupdict().items()})
+    return rows
+
+
+def validate_build_queue(queue_text: str, roadmap_text: str | None = None) -> list[str]:
+    """Check the ordered list of what to build next.
+
+    The queue exists so that "what is next" has one answer anyone can read off
+    the page. It stops having one the moment two rows share a number, a status
+    is spelled three ways, a row says COMPLETE with nothing to show for it, or
+    an item's section no longer says why it is there and when it is finished.
+    """
+    path = BUILD_QUEUE_PATH
+    if queue_text.count(BUILD_QUEUE_START) != 1 or queue_text.count(BUILD_QUEUE_END) != 1:
+        return [
+            f"{path} must contain one queue table between "
+            f"{BUILD_QUEUE_START} and {BUILD_QUEUE_END}"
+        ]
+    if queue_text.index(BUILD_QUEUE_END) < queue_text.index(BUILD_QUEUE_START):
+        return [f"{path} queue end marker comes before its start marker"]
+
+    errors: list[str] = []
+    rows = _build_queue_rows(queue_text, errors)
+    if not rows:
+        errors.append(f"{path} queue table has no items")
+        return errors
+
+    items = [row["item"] for row in rows]
+    expected = [f"Q{number}" for number in range(1, len(rows) + 1)]
+    if items != expected:
+        errors.append(
+            f"{path} queue items must be numbered Q1 to Q{len(rows)} in order; "
+            f"found {', '.join(items)}"
+        )
+
+    statuses: dict[str, str] = {}
+    for row in rows:
+        match = BUILD_QUEUE_STATUS_PATTERN.match(row["status"])
+        if match is None:
+            errors.append(f"{path} {row['item']} has invalid status '{row['status']}'")
+            continue
+        statuses[row["item"]] = match.group("status")
+        if match.group("status") == "COMPLETE" and match.group("pull_request") is None:
+            errors.append(f"{path} {row['item']} is COMPLETE but names no pull request")
+
+    declared_phases = (
+        set(_roadmap_phase_declarations(roadmap_text)) if roadmap_text is not None else None
+    )
+    known = set(items)
+    for row in rows:
+        item = row["item"]
+        for phase in (part.strip() for part in row["phase"].split(",")):
+            if not phase.isdigit():
+                errors.append(f"{path} {item} names phase '{phase}', which is not a phase number")
+            elif declared_phases is not None and int(phase) not in declared_phases:
+                errors.append(
+                    f"{path} {item} names Phase {phase}, which docs/ROADMAP.md does not declare"
+                )
+        if row["depends"] != "none":
+            for dependency in (part.strip() for part in row["depends"].split(",")):
+                if dependency == item:
+                    errors.append(f"{path} {item} depends on itself")
+                elif dependency not in known:
+                    errors.append(f"{path} {item} depends on {dependency}, which is not in the queue")
+                elif statuses.get(item) == "COMPLETE" and statuses.get(dependency) != "COMPLETE":
+                    errors.append(
+                        f"{path} {item} is COMPLETE but depends on {dependency}, which is not"
+                    )
+        if row["issue"] != "not yet" and not re.fullmatch(r"#\d+(?:,\s*#\d+)*", row["issue"]):
+            errors.append(
+                f"{path} {item} issue must be '#<number>' or 'not yet', not '{row['issue']}'"
+            )
+
+    boundaries = [match.start() for match in BUILD_QUEUE_SECTION_BOUNDARY_PATTERN.finditer(queue_text)]
+    sections: dict[str, list[str]] = {}
+    for heading in BUILD_QUEUE_ITEM_HEADING_PATTERN.finditer(queue_text):
+        following = [boundary for boundary in boundaries if boundary > heading.start()]
+        stop = following[0] if following else len(queue_text)
+        sections.setdefault(heading.group("item"), []).append(queue_text[heading.end():stop])
+    for item in items:
+        found = sections.get(item, [])
+        if not found:
+            errors.append(f"{path} {item} has no '### {item}.' section")
+            continue
+        if len(found) > 1:
+            errors.append(f"{path} {item} has more than one section")
+        for field in BUILD_QUEUE_ITEM_FIELDS:
+            if not _section_has_field(found[0], field):
+                errors.append(f"{path} {item} section is missing its '{field}' field")
+    for item in sorted(set(sections) - known):
+        errors.append(f"{path} section {item} has no row in the queue table")
+    return errors
+
+
 CANONICAL_COUNT_PATTERNS = {
     "README.md": re.compile(
         r"implementation remains (?P<implemented>\d+)/(?P<canonical>\d+) canonical tools"
@@ -1986,6 +2119,10 @@ def validate_repository(root: Path, tool_manifest: Path | None = None) -> list[s
     design_text = texts.get("docs/FUTURE_PHASES_DESIGN.md")
     if design_text is not None:
         errors.extend(validate_future_phase_governance(design_text, roadmap_text))
+
+    queue_text = texts.get(BUILD_QUEUE_PATH)
+    if queue_text is not None:
+        errors.extend(validate_build_queue(queue_text, roadmap_text))
 
     markdown = sorted(
         path
