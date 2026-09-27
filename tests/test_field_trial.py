@@ -1230,6 +1230,109 @@ class CodexTranscriptTests(unittest.TestCase):
         self.assertEqual(BRIDGE.extract_observations(lines), [])
 
 
+GUIDE_PATH = REPOSITORY_ROOT / "tools" / "field-trial" / "guide_rules.py"
+GUIDE_SPEC = importlib.util.spec_from_file_location("field_trial_guide_rules", GUIDE_PATH)
+if GUIDE_SPEC is None or GUIDE_SPEC.loader is None:
+    raise ImportError(f"Cannot load the guide scorer from {GUIDE_PATH}")
+GUIDE = importlib.util.module_from_spec(GUIDE_SPEC)
+GUIDE_SPEC.loader.exec_module(GUIDE)
+
+
+def claude_call(tool, arguments, payload, identifier, is_error=False):
+    """One Claude call with its arguments, and the answer the client flagged."""
+    result = {"type": "tool_result", "tool_use_id": identifier, "content": json.dumps(payload)}
+    if is_error:
+        result["is_error"] = True
+    return [
+        json.dumps({"message": {"content": [
+            {"type": "tool_use", "id": identifier, "name": f"mcp__didi__{tool}", "input": arguments}
+        ]}}),
+        json.dumps({"message": {"content": [result]}}),
+    ]
+
+
+def refusal(message):
+    return {"error": {"code": 409, "message": message}}
+
+
+class GuideRulesTests(unittest.TestCase):
+    IMPLEMENTED = {"scene_set_property", "scene_get_property", "scene_get_hierarchy",
+                   "script_patch_method"}
+    UNIMPLEMENTED = {"nav_bake_mesh"}
+
+    def report(self, lines):
+        return GUIDE.build_report(
+            TRANSCRIPTS.iter_invocations(lines), self.IMPLEMENTED, self.UNIMPLEMENTED
+        )
+
+    def test_the_reader_keeps_what_a_claude_call_was_sent_and_whether_it_failed(self):
+        lines = claude_call("scene_get_property", {"target_node": "/root/A"},
+                            refusal("Scene node not found: /root/A"), "t1", is_error=True)
+        invocation = TRANSCRIPTS.iter_invocations(lines)[0]
+        self.assertEqual(invocation.arguments, {"target_node": "/root/A"})
+        self.assertTrue(invocation.is_error)
+        self.assertIn("Scene node not found", invocation.result)
+
+    def test_the_reader_keeps_a_codex_call_s_arguments_and_its_failure(self):
+        # Codex has written arguments as an object and as its JSON text; the
+        # reader answers the same for both, and reads isError off the result.
+        line = json.dumps({"type": "item.completed", "item": {
+            "type": "mcp_tool_call", "server": "didi", "tool": "scene_set_property",
+            "arguments": json.dumps({"dry_run": True}),
+            "result": {"content": [{"type": "text", "text": "{}"}], "isError": True},
+            "error": None, "status": "completed",
+        }})
+        invocation = TRANSCRIPTS.iter_invocations([line])[0]
+        self.assertEqual(invocation.arguments, {"dry_run": True})
+        self.assertTrue(invocation.is_error)
+
+    def test_an_answer_that_succeeded_is_not_a_failure(self):
+        lines = claude_call("scene_get_property", {}, {"status": "success", "errors": []}, "t1")
+        self.assertFalse(TRANSCRIPTS.iter_invocations(lines)[0].is_error)
+
+    def test_failures_are_split_by_the_cause_the_guide_speaks_to(self):
+        lines = (
+            claude_call("nav_bake_mesh", {}, refusal("Tool is unimplemented"), "a", True)
+            + claude_call("get_scene_hierarchy", {}, refusal("gone"), "b", True)
+            + claude_call("scene_get_property", {}, refusal("Scene node not found: /root/X"), "c", True)
+            + claude_call("script_patch_method", {},
+                          refusal("This mutation requires a dry-run preview and the confirmation token"), "d", True)
+            + claude_call("scene_set_property", {}, refusal("invalid_arguments"), "e", True)
+            + claude_call("scene_get_property", {}, refusal("Cannot connect to Godot"), "f", True)
+            + claude_call("scene_get_property", {}, refusal("Viewport has no size"), "g", True)
+        )
+        report = self.report(lines)
+        self.assertEqual(report["failures_by_cause"], {
+            "bad_arguments": 1, "missing_target": 1, "mutation_without_preview": 1,
+            "no_live_route": 1, "non_canonical_name": 1, "other": 1, "unimplemented_tool": 1,
+        })
+        # A closed editor and an unmatched answer are not calling mistakes.
+        self.assertEqual(report["guide_addressable_failures"], 5)
+        self.assertEqual(report["non_canonical_calls"], 1)
+
+    def test_only_a_failure_sent_again_unchanged_counts_as_repeated(self):
+        missing = refusal("Scene node not found: /root/X")
+        lines = (
+            claude_call("scene_get_property", {"target_node": "/root/X"}, missing, "a", True)
+            + claude_call("scene_get_property", {"target_node": "/root/X"}, missing, "b", True)
+            + claude_call("scene_get_property", {"target_node": "/root/Y"}, missing, "c", True)
+        )
+        self.assertEqual(self.report(lines)["repeated_identical_failures"], 1)
+
+    def test_a_preview_is_not_a_write_and_a_later_read_is_a_read_back(self):
+        ok = {"status": "success"}
+        lines = (
+            claude_call("scene_set_property", {"dry_run": True}, ok, "a")
+            + claude_call("scene_set_property", {"value": 1}, ok, "b")
+            + claude_call("scene_get_property", {}, ok, "c")
+            + claude_call("scene_set_property", {"value": 2}, ok, "d")
+        )
+        report = self.report(lines)
+        self.assertEqual(report["dry_run_previews"], 1)
+        self.assertEqual(report["writes_with_a_read_pair"], 2)
+        self.assertEqual(report["writes_read_back"], 1)
+
+
 class TomlValueTests(unittest.TestCase):
     def test_a_windows_path_needs_no_escaping_as_a_literal(self):
         self.assertEqual(

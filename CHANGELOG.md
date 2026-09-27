@@ -51,6 +51,15 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Added
 
+- **A field trial is scored on how it called tools, not only which.**
+  `tools/field-trial/guide_rules.py` reads the tester's transcript for every
+  failed call and the cause its answer gives, failing calls sent again
+  unchanged, `dry_run` previews and read-backs, which are the rules the
+  handshake guide gives a host. `transcripts.py` now keeps each call's
+  arguments and whether it failed, for both clients. Trial 06, the first run
+  with the guide, is recorded in
+  [Field Trial Results](docs/FIELD_TRIAL_RESULTS.md#trial-06-2026-09-27): 3.2%
+  of its calls failed, against 22.7% for trial 03.
 - **Operational guidance in the MCP handshake.** `InitializeResult.instructions`
   now carries a compact guide to tool routing, schema inspection, node discovery,
   mutation previews and unsupported workflows with file/headless fallbacks.

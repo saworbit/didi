@@ -4,7 +4,7 @@ Results of field trial runs. Method and apparatus are in [Field Trial Design](FI
 
 One section per run. Keep the numbers, because the point of a repeatable seed is that two runs can be compared.
 
-Every section records which client hosted the tester. Trials 01 through 03 and trial 05 were Claude and trial 04 was Codex, and the comparison that buys the most is between engines rather than between consecutive runs of one.
+Every section records which client hosted the tester. Trials 01 through 03, 05 and 06 were Claude and trial 04 was Codex, and the comparison that buys the most is between engines rather than between consecutive runs of one.
 
 ---
 
@@ -372,6 +372,85 @@ The tester recorded, in the ledger before its first entry, that the session harn
 
 ---
 
+## Trial 06, 2026-09-27
+
+**Seed:** commit `240a6d2`, Didi 2.0.1, build `2.0.1+240a6d238e8a.20260927T010305`, Godot 4.7.2 stable, Windows. Identical task and identical bare seed to trials 01 through 05. The briefing differed in one section, described under the caveat below.
+
+**Tester: Claude, `claude-opus-5`.** Run through `tools/field-trial/trial.py` with no engine flag. This is the first run against a server that returns the handshake guide (#962), and measuring what the guide changes was the point of it. Before launching, a one-question session on the same client and the same kind of MCP config quoted the guide's opening words back from its system prompt, so the tester was handed it.
+
+**Outcome:** all six required features delivered, both endings reached live and captured from the running game, the editor 2D viewport captured, and clean logs on the final build: `runtime_read_output` returned one info record and `runtime_read_logs` at `minimum_level: "warning"` returned nothing. `project_audit_assets` on the finished project reported no broken references, connections, dead signals, orphans or import issues.
+
+**Bridge: matched**, on 21 observations.
+
+**Cost and clock:** $27.43 and 266 turns in 33 minutes, against a $40 ceiling.
+
+### Coverage against every previous run
+
+| Metric | Trial 01 | Trial 02 | Trial 03 | Trial 04 | Trial 05 | Trial 06 |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Tester | claude | claude | claude | codex | claude | claude |
+| Distinct implemented tools called | 36 | 37 | 36 | 36 | 38 | 35 |
+| Coverage | 39.6% | 40.7% | 32.1% | 32.1% | 33.9% | 29.9% |
+| Total invocations | 156 | 313 | 174 | 244 | 160 | 222 |
+| Ledger entries | 18 | 23 | 19 | 23 | 16 | 13 |
+| Entries verdicted `failed` | 6 | 9 | 9 | 7 | 5 | 4 |
+| Issues filed | 9 | 6 | 7 | 4 | 5 | 5 |
+
+The implemented surface is 117 here against 112 for trial 05, so coverage fell on the denominator as much as on the count. Newly reached against trial 05: `anim_add_library`, `runtime_detach_session`, `runtime_read_logs`, `scene_open`, `script_patch_method`, `signal_connect`, `tilemap_get_used_rect`. No longer reached: `editor_reload_project`, `project_list_autoloads`, `resource_inspect`, `runtime_set_paused`, `runtime_step`, `scene_add_to_group`, `scene_pack_branch`, `scene_remove_node`, `script_check_syntax`, `ui_list_controls`.
+
+`signal_connect` is the first `signal_*` call in six runs. The tester wired each enemy's contact area to its handlers with it, after finding that the HUD's connections to an autoload cannot go through it, because an autoload is not part of the edited scene.
+
+### What the handshake guide changed
+
+Coverage cannot answer this, because it counts which tools were reached and not how. `tools/field-trial/guide_rules.py` reads the transcript for how: every failed call and the cause its answer gives, whether a failing call was sent again unchanged, and whether the habits the guide asks for appear. Trial 05 cannot be scored, because its transcript is gone (#1005), so the Claude comparison is with trial 03.
+
+| Measure | Trial 03 | Trial 04 | Trial 06 |
+| :--- | ---: | ---: | ---: |
+| Tester | claude | codex | claude |
+| Handshake guide | no | no | yes |
+| Calls to Didi | 176 | 248 | 222 |
+| Calls that failed | 40 (22.7%) | 20 (8.1%) | 7 (3.2%) |
+| Failures of a kind the guide addresses | 32 | 6 | 1 |
+| A failing call sent again unchanged | 11 | 2 | 0 |
+| Calls by a non-canonical name | 2 | 4 | 0 |
+| `dry_run` previews | 6 | 17 | 16 |
+| Confirmation tokens spent | 3 | 16 | 13 |
+| Writes read back within 15 calls | 8 of 8 | 0 of 33 | 4 of 35 |
+| `editor_undo` or `editor_redo` | 0 | 0 | 0 |
+
+**The failure rate fell by a factor of seven against the last scoreable Claude run.** Trial 03's 32 addressable failures were 16 malformed arguments, 8 missing nodes or properties, 5 operations outside a tool's contract, 2 legacy names and 1 mutation sent without its preview. Trial 06 had one: a `script_patch_method` sent without the confirmation token, which the server refused, and which the tester then previewed. It sent nothing twice after a refusal and used no name outside the canonical set.
+
+**This is not a controlled comparison, and the guide cannot take all of the credit.** Nineteen days of fixes separate trials 03 and 06, and some of trial 03's failures were against contracts that have since changed. "Property type 5 is outside the Phase 1 scalar property contract" cannot happen on this build whatever the caller does. The places where the guide itself shows are narrower and more telling. The tester declined navigation because "`nav_bake_mesh` is one of the three unimplemented tools", which is the guide's own list. It made no legacy-name call, where trials 03 and 04 made two and four. And no failing call was repeated, where the guide says not to repeat unsupported calls. A run on this build with the guide blanked would separate the two effects, and it is the obvious next trial.
+
+**What it did not change.** The tester previewed the first mutation of each kind and then sent the rest directly, and it wrote the deviation down itself, citing the cost of doubling roughly ninety mutations. Read-backs stayed rare, and `editor_undo` has now gone uncalled for six runs on two engines.
+
+**A guide cannot correct a wrong picture of the wire.** The run's most serious finding began with the tester reading `given_type: "String"` on a value it believed it had sent as a number, and concluding that the server stringified values. The client had. See #1000 below.
+
+### Three fixes from trial 05 held
+
+- **#380.** `resource_create` wrote the TileSet with its texture and every collision shape, and an `AnimationLibrary` holding its `Animation` as a sub-resource. Trial 05 could write neither, and nothing in this project was drawn by hand.
+- **#381.** The editor 2D viewport was captured unattended, with `select_main_screen: true` answering `main_screen_restored: true`.
+- **#379.** Scene UIDs are learned now, but not immediately; see #1004.
+
+### Findings
+
+Six issues came out of the run and the review after it.
+
+- **#1000 (P1).** `project_set_setting.value` declares no JSON type, and the Claude client sends every value for such an argument as a string. So no int, bool or array setting can be written. Offline, the documented addon bootstrap writes a quoted string and reports success. The tester lost the bootstrap to it and hand-edited `project.godot`. Declaring the type list fixes what the client sends, checked on a rebuilt server with the same prompt. `blackboard_write.value` and `blackboard_task_complete.artifacts` have the same gap.
+- **#1001 (P2).** Routes to stopped games keep counting against the eight-route cap, so the seventh launch-and-attach of the run was refused with `429` while its own data said the engine was gone. The tester detached after every stop from then on.
+- **#1002 (P3).** The `target_script_not_compiled` note and `LLM_INSTRUCTIONS.md` recommend `editor_reload_project` for a new autoload, which `project_set_autoload`'s own result says does not work.
+- **#1003 (P3).** `resource_create` has no spelling for a whole-valued float, and a JavaScript client cannot send `0.0`. An Animation value track keyed `[0, 0.45, 0]` played without moving anything, and every diagnostic reported healthy. It cost the tester most of an hour.
+- **#1004 (P3).** Nothing waits for a deferred scene UID to be indexed, so a scene instanced straight after `scene_create` logs invalid-UID warnings on its first launch.
+- **#1005 (P3).** `trial.py` scores the Claude transcript where the client filed it and never keeps a copy, which is why trial 05 cannot be rescored. This run's transcript was copied into its trial directory by hand.
+
+One observation was deliberately not filed. Once, just after a `runtime_stop` on the game, the editor process was gone too. There was no Windows crash event, no Didi crash record and no Godot log, because later launches rotated it out of the five Godot keeps. Nothing connects it to `runtime_stop` beyond timing, and the tester drew the same line in its ledger. If it recurs, capture the editor log before relaunching anything.
+
+### Caveat on comparability
+
+The briefing's "Filing issues" section was replaced for this run. The tester wrote drafts to `ISSUE_DRAFTS.md` instead of filing, and a `gh` stub on its `PATH` refused every call; it made none. Filing happened after the run, from a review that reproduced each draft. That review rewrote one draft whose diagnosis was wrong (#1000), kept four and added one of its own (#1005). So the "Issues filed" figure above is not the tester's own count, as it is for every earlier run. The briefing also named the trial worktree at the same commit as the source repository, rather than `D:\didi`.
+
+---
+
 ## When to use Didi, and when not
 
 Drawn from what the run actually did rather than from the tool list. This belongs in agent-facing guidance.
@@ -396,6 +475,17 @@ python tools/field-trial/coverage.py \
   --manifest <trial>/tool-manifest.baseline.json \
   --output <trial>/coverage.json
 ```
+
+How the calls went, rather than which tools they reached, comes from the same transcript. `transcripts.py` keeps each call's arguments and whether its answer failed, and `tools/field-trial/guide_rules.py` scores them against the handshake guide's rules: failures by cause, a failing call sent again unchanged, `dry_run` previews, bounded hierarchy reads and read-backs.
+
+```
+python tools/field-trial/guide_rules.py \
+  --transcript <session>.jsonl \
+  --manifest <trial>/tool-manifest.baseline.json \
+  --output <trial>/guide.json
+```
+
+A failure's cause is read from the answer text, so a reworded refusal can move a call between causes. Compare runs by the totals, then read the calls.
 
 The manifest is captured at seed time from the binary under test, so a run is always scored against exactly what it was handed. A stale manifest reports a wrong uncalled set; this was hit for real while gating trial 01, where the on-disk manifest claimed 83 canonical and 80 implemented against a binary emitting 94 and 91.
 

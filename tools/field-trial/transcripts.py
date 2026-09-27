@@ -36,10 +36,16 @@ class Invocation(NamedTuple):
     not the same as an empty answer: a run cut off mid-call, or a client that
     does not record results, both land here, and a reader that treats None as
     "nothing to see" reports a clean bridge for a run it could not read.
+
+    `arguments` is what the call was sent, as the client recorded it, and
+    `is_error` whether the answer says the call failed. Both exist so a run can
+    be scored on how it called tools, not only on which ones.
     """
 
     tool: str
     result: str | None = None
+    arguments: dict | None = None
+    is_error: bool = False
 
 
 def _claude_blocks(record: object) -> list[dict]:
@@ -73,6 +79,38 @@ def _result_text(content: object) -> str:
             if isinstance(part, dict) and isinstance(part.get("text"), str)
         )
     return ""
+
+
+def _arguments(raw: object) -> dict:
+    """A call's arguments as an object, whether the client wrote one or its text."""
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError:
+            return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _reports_error(result: object, text: str) -> bool:
+    """Whether an answer says the call failed.
+
+    The client's own flag is the first witness, and the callers check it. This
+    reads the answer for the ones that carry no flag: an MCP result with
+    `isError`, a tool's `{"error": ...}` payload, or, in a trial run by hand, the
+    whole JSON-RPC envelope written out as text.
+    """
+    if isinstance(result, dict) and result.get("isError") is True:
+        return True
+    try:
+        value = json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        return False
+    if not isinstance(value, dict):
+        return False
+    if value.get("isError") is True or (value.get("error") and "result" not in value):
+        return True
+    inner = value.get("result")
+    return isinstance(inner, dict) and inner.get("isError") is True
 
 
 def _codex_item(record: object) -> dict | None:
@@ -122,9 +160,11 @@ def iter_invocations(
             tool = item.get("tool")
             if isinstance(tool, str) and tool:
                 result = item.get("result")
-                invocations.append(
-                    Invocation(tool, _result_text(result) if result is not None else None)
-                )
+                text = _result_text(result) if result is not None else None
+                invocations.append(Invocation(
+                    tool, text, _arguments(item.get("arguments")),
+                    bool(item.get("error")) or _reports_error(result, text or ""),
+                ))
             continue
 
         for block in _claude_blocks(record):
@@ -133,13 +173,17 @@ def iter_invocations(
                 name = block.get("name")
                 identifier = block.get("id")
                 if isinstance(name, str) and name.startswith(prefix):
-                    invocations.append(Invocation(name[len(prefix) :]))
+                    invocations.append(
+                        Invocation(name[len(prefix) :], arguments=_arguments(block.get("input")))
+                    )
                     if isinstance(identifier, str):
                         pending[identifier] = len(invocations) - 1
             elif kind == "tool_result":
                 index = pending.pop(block.get("tool_use_id"), None)
                 if index is not None:
-                    invocations[index] = Invocation(
-                        invocations[index].tool, _result_text(block.get("content"))
+                    text = _result_text(block.get("content"))
+                    invocations[index] = invocations[index]._replace(
+                        result=text,
+                        is_error=block.get("is_error") is True or _reports_error(None, text),
                     )
     return invocations
