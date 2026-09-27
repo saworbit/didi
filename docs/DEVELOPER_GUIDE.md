@@ -150,11 +150,15 @@ diff a reviewer reads rather than a surprise a client finds
   `"expect_error": true`; any other error fails the recording.
 
 Session ids, pids, the pipe endpoint, the build id, the server version,
-temporary paths, durations and timestamps become placeholders. Identities are
-replaced by value, taken from the session Didi reports, so they are caught
-wherever they appear. A text block that repeats `structuredContent` is stored
-as a marker, and any other JSON text, which includes every error, is stored
-parsed under `text_json`.
+temporary paths, durations and timestamps become placeholders. The session id,
+endpoint, build id, version and paths are replaced by value, taken from the
+session Didi reports, so they are caught wherever they appear. The pid and the
+start time are short numbers that could match an unrelated value, so they are
+replaced by key, as durations are, and timestamps inside strings by pattern.
+A value none of these rules covers fails the two-recording check below; add
+the rule to `tools/contract_snapshots.py`. A text block that repeats
+`structuredContent` is stored as a marker, and any other JSON text, which
+includes every error, is stored parsed under `text_json`.
 
 When a change to a schema or an answer is intended, regenerate in the same pull
 request and read the diff:
@@ -168,6 +172,11 @@ writes nothing when the two disagree. The error names the JSON path that moved:
 a value the recorder does not yet normalise, which belongs in
 `tools/contract_snapshots.py` rather than in a snapshot. `--check` records once
 and prints a diff, and without `--godot` only `offline.json` is recorded.
+`--binary` names the server to record (the newest build by default, as the
+Python suites pick it), `--out <dir>` writes what a run recorded even when it
+failed, and `--keep-work` keeps each temporary project with its `editor.log`.
+The editor is given its own `DIDI_SESSION_DIR`, `APPDATA` and `GODOT_BIN`, so
+neither another editor on the machine nor your editor settings reach an answer.
 
 CI checks `offline.json` in `tests.test_contract_snapshots` on all three build
 platforms, and each `live-<line>.json` in the Godot job for that line. A failed
