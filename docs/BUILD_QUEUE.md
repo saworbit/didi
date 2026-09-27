@@ -36,7 +36,7 @@ fails when a phase's status differs between the roadmap and the phase design.
 | Item | Capability | Phase | Depends on | Issue | Status |
 | --- | --- | --- | --- | --- | --- |
 | [Q1](#q1-type-every-argument) | Type every argument | 13 | none | #1000 | COMPLETE (#1015) |
-| [Q2](#q2-observed-not-asserted) | Observed, not asserted | 13 | none | #1010 | PLANNED |
+| [Q2](#q2-observed-not-asserted) | Observed, not asserted | 13 | none | #1010 | COMPLETE (#1021) |
 | [Q3](#q3-contract-snapshots) | Contract snapshots | 13 | none | #1011 | PLANNED |
 | [Q4](#q4-shrink-the-tool-list) | Shrink the tool list | 13 | Q3 | #1012 | PLANNED |
 | [Q5](#q5-response-economy) | Response economy | 13 | Q3 | #776 | PLANNED |
