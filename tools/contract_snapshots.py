@@ -14,11 +14,13 @@ committed under ``tests/contract_snapshots``:
   answers to the read-only calls in ``calls.json`` against
   ``tests/contract_fixture``.
 
-Values that change from run to run without the contract changing (the session
-id, the pid, the pipe endpoint, the build id, the temporary project path) are
-replaced by placeholders. They are replaced by value, read from the session
-Didi reports, so an identity is caught wherever it appears, inside a string or
-under a key nobody listed. Tools are keyed by name because the wire order is a
+Values that change from run to run without the contract changing are replaced
+by placeholders. The session id, pipe endpoint, build id, server version and
+temporary paths are replaced by value, read from the session Didi reports, so
+one is caught wherever it appears, inside a string or under a key nobody
+listed. The pid and start time are short numbers that could match anything,
+so they are replaced by key, as are measured durations; wall-clock timestamps
+are replaced by pattern. Tools are keyed by name because the wire order is a
 hash map's, which differs between standard libraries.
 
 Usage::
@@ -138,6 +140,7 @@ def live_path(line: str) -> Path:
 
 
 def load_calls(path: Path = CALLS) -> dict:
+    """The call set: the scene to open, the calls, and the excluded read-only tools."""
     return json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -195,12 +198,14 @@ def exchange(binary: Path, project: Path, env: dict, messages: list[dict]) -> di
 
 
 def result_of(reply: dict, what: str) -> Any:
+    """A reply's result, or a SnapshotError naming `what` for a protocol error."""
     if "error" in reply:
         raise SnapshotError(f"{what} failed at the protocol level: {json.dumps(reply['error'])}")
     return reply["result"]
 
 
 def structured(reply: dict, what: str) -> dict:
+    """A tool's structuredContent, for setup calls that must succeed."""
     result = result_of(reply, what)
     if result.get("isError"):
         raise SnapshotError(f"{what} answered with an error: {result['content'][0]['text']}")
@@ -229,6 +234,7 @@ class Identities:
         self.keyed: dict[str, str] = {key: "<measured>" for key in MEASURED_KEYS}
 
     def path(self, path: Path, placeholder: str) -> None:
+        """A directory, in every spelling an answer can use, resolved or not."""
         for form in spellings(path):
             self.substrings.append((form, placeholder))
         resolved = path.resolve()
@@ -247,6 +253,7 @@ class Identities:
         self.keyed[key] = placeholder
 
     def session(self, descriptor: dict) -> None:
+        """The attached session's identities: its strings by value, its numbers by key."""
         for key in ("session_id", "endpoint", "build_id"):
             if descriptor.get(key):
                 self.value(descriptor[key], f"<{key}>")
@@ -254,6 +261,7 @@ class Identities:
             self.key(key, f"<{key}>")
 
     def normalise(self, node: Any, key: str | None = None) -> Any:
+        """A copy of `node` with every identity, measurement and timestamp replaced."""
         if key in self.keyed and not isinstance(node, (dict, list)):
             return self.keyed[key]
         if isinstance(node, dict):
@@ -334,6 +342,7 @@ def overlay(base: Any, other: Any) -> Any:
 
 
 def render(snapshot: dict) -> str:
+    """The committed form: sorted keys and two-space indents, so a diff is by line."""
     return json.dumps(snapshot, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
 
 
@@ -368,6 +377,7 @@ class Workspace:
         self.identities.path(binary.parent, "<build>")
 
     def close(self) -> None:
+        """Remove the directory, or print where it was kept."""
         if self.keep:
             print(f"Kept the work directory: {self.root}", file=sys.stderr)
             return
@@ -380,6 +390,7 @@ class Workspace:
 
 
 def record_listings(binary: Path, workspace: Workspace, prefix: list[dict]) -> dict[str, dict]:
+    """`initialize` and the four listings, after `prefix` (an attach, for a live recording)."""
     base = len(prefix) + 10
     messages = handshake() + prefix + [request(base + i, m) for i, m in enumerate(LISTINGS)]
     replies = exchange(binary, workspace.project, workspace.env, messages)
@@ -393,6 +404,7 @@ def record_listings(binary: Path, workspace: Workspace, prefix: list[dict]) -> d
 
 
 def record_offline(binary: Path, keep: bool = False) -> dict:
+    """offline.json: what a server with no engine lists, normalised."""
     workspace = Workspace(binary, keep)
     try:
         listings = record_listings(binary, workspace, [])
@@ -588,6 +600,7 @@ def record_live(binary: Path, godot: Path, offline: dict, keep: bool = False) ->
 
 
 def difference(label: str, expected: str, actual: str) -> list[str]:
+    """A unified diff of the committed snapshot against the recorded one."""
     return list(difflib.unified_diff(
         expected.splitlines(), actual.splitlines(),
         fromfile=f"committed/{label}", tofile=f"recorded/{label}", lineterm="", n=3,
@@ -616,6 +629,7 @@ def first_disagreement(a: Any, b: Any, path: str = "$") -> str | None:
 
 
 def stable(label: str, first: dict, second: dict) -> None:
+    """Refuse to write a snapshot two recordings disagree on, naming where."""
     where = first_disagreement(first, second)
     if where:
         raise SnapshotError(
@@ -625,6 +639,7 @@ def stable(label: str, first: dict, second: dict) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """0 when written or matching, 1 on a difference, 2 when recording failed."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--check", action="store_true",
                         help="compare with the committed snapshots instead of writing them")

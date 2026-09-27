@@ -58,8 +58,9 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
   `live-4.7.json` record what attaching an editor on that line changes in those
   listings, and the answers to 42 read-only calls against
   `tests/contract_fixture`, a small project kept for them. Session ids, pids,
-  paths, the build id, durations and timestamps become placeholders, replaced
-  by value so an identity is caught wherever it appears. `python
+  paths, the build id, durations and timestamps become placeholders. Identities
+  are replaced by value, so one is caught wherever it appears; the pid and start
+  time, short numbers that could match anything, are replaced by key. `python
   tools/contract_snapshots.py --godot <exe> ...` regenerates them, recording
   twice from fresh editors and writing nothing if the two disagree. CI checks
   `offline.json` on all three build platforms and each live snapshot in its
