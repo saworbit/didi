@@ -61,9 +61,11 @@ a string, so `project_set_setting` could not write an int, a bool or an array
   [elastic ingress](ELASTIC_INGRESS.md) profile.
 - A refusal names the argument that fixes it, in `retry_with`.
 
-**Enforced by.** Strict schemas, and the refusal checks from #784 and #902.
-[Q1](BUILD_QUEUE.md#q1-type-every-argument) adds a check that no top-level
-argument goes untyped.
+**Enforced by.** Strict schemas, the refusal checks from #784 and #902, and
+`tool_input_schema.every_argument_typed` from
+[Q1](BUILD_QUEUE.md#q1-type-every-argument), which fails the native suite when
+a top-level argument of any tool declares no JSON type, or one that leaves out a
+value the rest of its schema accepts.
 
 ## P3. One write path
 

@@ -295,7 +295,7 @@ coordination as the thing that blocked it. See
 
 **Exit gate:** Release artifacts are reproducible, signed, installable, and traceable to source. Supported Godot/platform combinations are explicit and continuously verified. Upgrade and rollback paths preserve project configuration and document breaking changes. Extension compatibility and security policy are versioned and enforceable.
 
-## Phase 13: Surface Contracts (`PLANNED`)
+## Phase 13: Surface Contracts (`IN PROGRESS`)
 
 **Objective:** Turn the guarantees individual tools make into contracts every tool keeps, and make the surface cheaper to carry: typed arguments, observed post-state, contract snapshots, tool-list and response budgets, a remedy in every refusal, and a journal of every mutation for the person reviewing the work. Build Queue items Q1 to Q6 and Q15.
 

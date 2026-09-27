@@ -196,6 +196,27 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **Every argument declares a JSON type, so a Claude host can send an int, a
+  bool or an array (#1000).** `project_set_setting.value`, `blackboard_write.value`
+  and `blackboard_task_complete.artifacts` published no type at all, and Claude
+  Code sends a top-level argument like that as a string whatever the caller
+  meant. With an editor attached, no int, bool or array setting could be
+  written, and each was refused as a `String`; offline, the documented addon
+  bootstrap wrote `enabled="[\"res://addons/didi/plugin.cfg\"]"` and reported
+  success, so the plugin never loaded. The three now declare every JSON type,
+  and the same Claude Code build sends `1152`, `false`, `["a", "b"]` and
+  `{"slots": 3}` as typed values. Eleven more top-level arguments declared their
+  shape through `oneOf`, `$ref` or `const` with no `type` beside it:
+  `audio_configure_bus.bus`, `nav_query_path`'s two points,
+  `physics_raycast_query.from` and `to`, `resource_create.properties`,
+  `runtime_inject_input.target_context` and its legacy name,
+  `viewport_set_camera_transform`'s position and rotation, and
+  `viewport_toggle_debug_draw.wireframe`. Claude Code already sent those typed,
+  and they now say the type too, because another host need not read the rest
+  of the schema. A native check fails any tool, legacy names included, whose
+  top-level argument has no type or one that leaves out a value the rest of its
+  schema accepts, and the live harness writes an int, a bool and an array
+  setting on all three engine lines and reads each back from the engine.
 - **`asset_reimport` reimports an asset it batches with a new file.** A batch
   that also named a file needing a scan -- a new script, an asset the editor
   had never seen -- started `reimport_files` straight after `scan()`. While a
