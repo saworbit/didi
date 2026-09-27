@@ -33,7 +33,7 @@ exist, phases the roadmap declares, and the four fields in every item.
 <!-- build-queue:start -->
 | Item | Capability | Phase | Depends on | Issue | Status |
 | --- | --- | --- | --- | --- | --- |
-| [Q1](#q1-type-every-argument) | Type every argument | 13 | none | #1000 | IN PROGRESS |
+| [Q1](#q1-type-every-argument) | Type every argument | 13 | none | #1000 | COMPLETE (#1015) |
 | [Q2](#q2-observed-not-asserted) | Observed, not asserted | 13 | none | #1010 | PLANNED |
 | [Q3](#q3-contract-snapshots) | Contract snapshots | 13 | none | #1011 | PLANNED |
 | [Q4](#q4-shrink-the-tool-list) | Shrink the tool list | 13 | Q3 | #1012 | PLANNED |
