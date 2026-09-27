@@ -43,6 +43,8 @@ record is kept for the reasoning, not because it describes today's behaviour.
 | Page | Status |
 | --- | --- |
 | [Roadmap](ROADMAP.md) | Completed phases and the technical build order. |
+| [Build Queue](BUILD_QUEUE.md) | Current. What to build next, in order, with the reason, the design and the finish line for each item. Item status is kept here and nowhere else. |
+| [Design Principles](DESIGN_PRINCIPLES.md) | Current. The rules the tool surface follows, the evidence behind each, and what Didi will not build. |
 | [Surface Amendments](SURFACE_AMENDMENTS.md) | The record of every accepted change to the canonical tool surface. An amendment is accepted here before a name is registered. |
 | [Phase 7 API Feasibility Gate](PHASE_7_API_FEASIBILITY.md) | Reproducible feasibility results on Godot 4.5.1 and 4.7.2, and the three contracts the engine API blocks. |
 | [Phase 7 Canonical Completion Plan](PHASE_7_IMPLEMENTATION_PLAN.md) | The approved plan, stopped at its feasibility gate. |

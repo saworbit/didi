@@ -9,7 +9,7 @@
 [![CI](https://github.com/saworbit/didi/actions/workflows/ci.yml/badge.svg)](https://github.com/saworbit/didi/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/saworbit/didi/actions/workflows/codeql.yml/badge.svg)](https://github.com/saworbit/didi/actions/workflows/codeql.yml)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/saworbit/didi/badge)](https://scorecard.dev/viewer/?uri=github.com/saworbit/didi)
-[![Tests](https://img.shields.io/badge/tests-1367-2ea043?logo=pytest&logoColor=white)](docs/TEST_INVENTORY.md)
+[![Tests](https://img.shields.io/badge/tests-1380-2ea043?logo=pytest&logoColor=white)](docs/TEST_INVENTORY.md)
 [![Release](https://img.shields.io/github/v/release/saworbit/didi?logo=github&color=blue)](https://github.com/saworbit/didi/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Godot Engine](https://img.shields.io/badge/Godot-4.5%2B-478cbf?logo=godotengine&logoColor=white)](https://godotengine.org/)
@@ -68,6 +68,8 @@ a useful report contains.
 | ♻️ [**Managed Recovery**](docs/MANAGED_RECOVERY.md) | **Users / Operators** | Opt-in owned editor, project copies, checkpoints, and recovery limits. |
 | 🎛️ [**Control Room**](docs/CONTROL_ROOM_DESIGN.md) | **Users / Operators** | The MCP Apps dashboard: bridge lights, live tool modes, safety posture, and Didi's own log, rendered inside your assistant. |
 | 🗺️ [**Roadmap & Tool Surface**](docs/ROADMAP.md) | **Developers / Contributors** | Completed phases and technical build order. |
+| 🧭 [**Build Queue**](docs/BUILD_QUEUE.md) | **Developers / Contributors** | What to build next, in order, and why. Start here to pick up work. |
+| 📐 [**Design Principles**](docs/DESIGN_PRINCIPLES.md) | **Developers / Contributors** | The rules the tool surface follows, the evidence for each, and what Didi will not build. |
 | 🧪 [**Phase 7 API Feasibility Evidence**](docs/PHASE_7_API_FEASIBILITY.md) | **Developers / Governance** | Reproducible Godot 4.5.1/4.7.2 feasibility results and the exact three blocked contracts. |
 | 📋 [**Phase 7 Approved Executable Plan**](docs/PHASE_7_IMPLEMENTATION_PLAN.md) | **Developers / Governance** | Approved atomic 83/83 plan, stopped at its feasibility gate. |
 | 🛠️ [**Tool Reference Manual**](docs/TOOL_REFERENCE.md) | **Developers / LLMs** | Current behavior and limits for 120 canonical tools plus 10 legacy names. |
@@ -195,6 +197,8 @@ Phases 1-6 established the implementation baseline. Phase 7 is `PARTIAL_DELIVERY
 Governance selected partial delivery: feasible tools ship only after their own production evidence, while `implemented: false` keeps unavailable names honest. The three API-blocked contracts remain `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`.
 
 Phase 8 is now `IN PROGRESS`. Its read-only slices provide bounded project audit, reverse impact analysis including exact static node paths, and conservative `.import` source/output health evidence. Guarded import configuration is delivered for the loop options of WAV, OGG and MP3 imports by `asset_configure_import`, which previews, writes, reimports and checks what the engine loads, and `resource_inspect` reports an imported asset's options. Configuration for the other importers, UID-cache reconciliation, checksum/importer-version validation, and broader incremental freshness remain planned.
+
+What comes next, in order and with the reason for each item, is the [Build Queue](docs/BUILD_QUEUE.md).
 
 See the [Roadmap](docs/ROADMAP.md), [Phase 7 feasibility evidence](docs/PHASE_7_API_FEASIBILITY.md), [approved executable plan](docs/PHASE_7_IMPLEMENTATION_PLAN.md), and [Future Phases Design](docs/FUTURE_PHASES_DESIGN.md).
 

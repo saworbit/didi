@@ -1,6 +1,6 @@
 # Didi Post-Phase-6 Roadmap Design
 
-> **Status:** Approved roadmap design. This document defines Phases 7–12; [ROADMAP.md](ROADMAP.md) remains the delivery-status index.
+> **Status:** Approved roadmap design. This document defines Phases 7–14; [ROADMAP.md](ROADMAP.md) remains the delivery-status index, and the [Build Queue](BUILD_QUEUE.md) is the order the work is taken in.
 
 ## Goal
 
@@ -16,7 +16,7 @@ Complete the original 79-tool canonical surface, then extend Didi through projec
 - Mutation classification: every new or reclassified mutation must define dry-run behavior, confirmation policy, route/session policy, unknown-outcome handling, and rollback expectations.
 - Explicit exclusions: every phase states exact exclusions so deferred behavior cannot be mistaken for delivered behavior.
 - Completion date and pull request: completion records include the date, pull request, release impact, and verification evidence.
-- New numbered phases after Phase 12 must be documented and approved before implementation begins.
+- New numbered phases after Phase 14 must be documented and approved before implementation begins.
 
 ## Phase 7: Canonical Surface Completion
 
@@ -155,6 +155,8 @@ Requirements:
 - Required Windows, Linux, and macOS checks pass.
 - A security review signs off every newly enabled mutation.
 
+**Reopened question:** the 2026-08-29 gate probed the engine classes GDExtension exposes. It did not probe the editor's Debug Adapter Protocol server, which a headless 4.5.1 editor and a headless 4.7.2 editor both answered on port 6006 on 2026-09-27. [Build Queue Q11](BUILD_QUEUE.md#q11-godots-own-debugger-and-language-server) re-runs the gate for `runtime_get_call_stack` against it. The status above stands until that gate records a result.
+
 ## Phase 8: Deep Project Intelligence and Asset Pipeline
 
 **Status:** `IN PROGRESS`
@@ -173,6 +175,7 @@ Requirements:
 - Import-preset inspection and guarded configuration.
 - Generated `extension_api.json` or live ClassDB reflection replacing the limited static map.
 - Incremental indexing with deterministic invalidation, bounded memory, and explicit freshness.
+- Script diagnostics from the editor's own GDScript language server where an editor is running, with the headless check as the fallback ([Build Queue Q11](BUILD_QUEUE.md#q11-godots-own-debugger-and-language-server)). Consuming that server is not building one, so the exclusion below stands.
 
 **Explicit exclusions:**
 
@@ -204,6 +207,7 @@ Requirements:
 - Animation keyframe creation, update, interpolation, deletion, and duration editing.
 - Multi-frame and richer visual baselines with deterministic comparison metadata.
 - Additional guided character, signal, UI, animation, and visual-verification prompt workflows.
+- Builders for VisualShader graphs, AnimationTree blend trees and state machines, and scene subtrees, each accepting exactly the format its export returns ([Build Queue Q10](BUILD_QUEUE.md#q10-graph-builders-that-round-trip)).
 
 **Explicit exclusions:**
 
@@ -260,6 +264,8 @@ above, two were delivered by later work and one remains open; see the note there
 
 **Goal:** Let one Didi MCP process run isolated Godot experiments in parallel without interfering with the user's editor.
 
+**Sequencing:** paused until [Build Queue Q9](BUILD_QUEUE.md#q9-proof-in-one-call) is complete. See [Paused](BUILD_QUEUE.md#paused).
+
 **Scope:**
 
 - Owned Godot bench pool with acquire, release, status, and bounded experiment execution.
@@ -307,6 +313,7 @@ above, two were delivered by later work and one remains open; see the note there
   `io.modelcontextprotocol/ui` extension bilaterally, and both are covered by tests
   that drive the built binary.
 - Bounded notification queues, coalescing, backpressure, and dropped-event disclosure.
+- Long operations as jobs with stored results, and request ids that stop a retried mutation from running twice ([Build Queue Q8](BUILD_QUEUE.md#q8-long-work-as-jobs)).
 
 **Explicit exclusions:**
 
@@ -338,7 +345,9 @@ above, two were delivered by later work and one remains open; see the note there
 - Generated API, schema, and extension documentation.
 - Upgrade, rollback, migration, compatibility, and deprecation policy.
 - Vulnerability-response automation and recurring security audits.
-- Stable third-party extension points that preserve capability honesty and mutation safety.
+- Stable third-party extension points that preserve capability honesty and mutation safety. The first is project-defined tools ([Build Queue Q13](BUILD_QUEUE.md#q13-project-defined-tools)).
+- `didi setup` and `didi doctor`: one command from a bare project to a working session, and the same diagnostics as the dock from the command line ([Build Queue Q12](BUILD_QUEUE.md#q12-didi-setup-and-didi-doctor)).
+- A skill pack for the common Godot workflows, installed with the addon and measured for routing ([Build Queue Q14](BUILD_QUEUE.md#q14-a-skill-pack-measured)).
 
 **Explicit exclusions:**
 
@@ -355,6 +364,65 @@ above, two were delivered by later work and one remains open; see the note there
 - Supported Godot/platform combinations are explicit and continuously verified.
 - Upgrade and rollback paths preserve project configuration and document breaking changes.
 - Extension compatibility and security policy are versioned and enforceable.
+
+## Phase 13: Surface Contracts
+
+**Status:** `PLANNED`
+
+**Goal:** Turn the guarantees individual tools make into contracts every tool keeps, and make the surface cheaper to carry. See [Design Principles](DESIGN_PRINCIPLES.md) P1 to P5.
+
+**Scope:**
+
+- A declared JSON type on every top-level argument of every tool ([Q1](BUILD_QUEUE.md#q1-type-every-argument)).
+- A conformance test that every mutating tool returns the state it observed after the write ([Q2](BUILD_QUEUE.md#q2-observed-not-asserted)).
+- Committed snapshots of `tools/list` and of a fixed set of read-only answers, per engine line ([Q3](BUILD_QUEUE.md#q3-contract-snapshots)).
+- Byte budgets and a startup profile for the tool list ([Q4](BUILD_QUEUE.md#q4-shrink-the-tool-list)), and for responses ([Q5](BUILD_QUEUE.md#q5-response-economy)).
+- A remedy in every refusal, and a named follow-up on every mutation that leaves work undone ([Q6](BUILD_QUEUE.md#q6-next-step-in-every-answer)).
+- A journal of every mutation, with per-entry undo for the person reviewing the work ([Q15](BUILD_QUEUE.md#q15-change-journal-with-undo)).
+
+**Explicit exclusions:**
+
+- No change to what a tool does beyond what its contract already claims.
+- No tool folded behind a dispatcher or a code executor to save bytes.
+- No budget raised just to let a build through.
+
+**Security classification:** No new trust boundary. The journal holds project data, redacts secrets by key name, and stays inside the project.
+
+**Mutation classification:** Contract and metadata changes to existing tools. Undo from the journal is an editor UndoRedo operation under the existing confirmation policy.
+
+**Exit evidence:**
+
+- The argument-type check, the conformance test, the snapshots and both budgets run in required CI jobs.
+- A field trial on the reduced tool list loses no capability its task needed.
+- The live harness undoes a journaled mutation and confirms the engine state.
+
+## Phase 14: Reach and Proof
+
+**Status:** `PLANNED`
+
+**Goal:** Let an agent reach any property or method the Inspector can, and prove a behaviour in one call, without arbitrary code execution. See [Design Principles](DESIGN_PRINCIPLES.md) P6 and P7.
+
+**Scope:**
+
+- Typed, batched, undoable access to node and sub-resource properties by indexed path, and calls to ClassDB methods ([Q7](BUILD_QUEUE.md#q7-typed-object-layer)).
+- A scenario runner and a GUT or GdUnit4 test runner, both returning evidence ([Q9](BUILD_QUEUE.md#q9-proof-in-one-call)).
+- CPU, GPU and physics verdicts on top of the profiler ([Q16](BUILD_QUEUE.md#q16-performance-verdicts)).
+
+**Explicit exclusions:**
+
+- No arbitrary code execution, and no interpreter state kept between calls.
+- No fuzzy targeting or argument normalisation outside the elastic ingress profile.
+- No whole-object reads by default.
+
+**Security classification:** Local authenticated editor and game access inside the selected project. No new transport or trust boundary.
+
+**Mutation classification:** Property writes and non-const method calls are mutations: dry-runnable, UndoRedo-backed in the editor, read back, and confirmed where the method is not const. A scenario mutates only the game process it launches, and tears it down on every path.
+
+**Exit evidence:**
+
+- A field trial completes with no scene text edited by hand.
+- The standing double-jump exercise is proved in one call on all three engine lines.
+- The live harness proves on all three engine lines that a batch write undoes as one step.
 
 ## Documentation Integration
 
