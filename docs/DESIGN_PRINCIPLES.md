@@ -122,8 +122,10 @@ defaults (#775).
 **Enforced by.** `tests/tool_list_budgets.json`, from
 [Q4](BUILD_QUEUE.md#q4-shrink-the-tool-list): each tool profile's `tools/list`
 has a byte budget, CI fails a listing over it, and raising one takes its own
-pull request with a reason. [Q5](BUILD_QUEUE.md#q5-response-economy) budgets
-responses.
+pull request with a reason. From [Q5](BUILD_QUEUE.md#q5-response-economy),
+the live harness runs #776's seven-call arc for a client that declared
+`didi/responseEconomy` and for one that did not, on every engine line, and
+fails unless the first costs under half the bytes of the second.
 
 ## P5. Guidance belongs where the agent is already looking
 

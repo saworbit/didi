@@ -193,6 +193,30 @@ loses nothing. A tool outside the profile is refused with a message that names
 change during a session; restart the server to switch. See
 [Tool profiles](API_SPECIFICATION.md#tool-profiles).
 
+### Optional: smaller answers, for a client that reads structuredContent
+
+Every successful tool answer carries its payload twice, parsed in
+`structuredContent` and serialised in `content[0].text`, and every live answer
+restates the session descriptor the client got when it attached. That is the
+right default for a client that reads only `content`. A client, or a host
+building one, that reads `structuredContent` can decline both by declaring the
+`didi/responseEconomy` extension:
+
+```json
+"capabilities": {
+  "extensions": {
+    "didi/responseEconomy": { "omit": ["textCopy", "sessionDescriptor"] }
+  }
+}
+```
+
+Declare it in `initialize` for `2024-11-05`, or in each request's
+`_meta["io.modelcontextprotocol/clientCapabilities"]` for `2026-07-28`, the
+same place the UI extension goes. Over a seven-call authoring arc it cuts the
+bytes by more than half. This is a client capability, not a server flag: only
+the client knows which half of a result it reads. See
+[Response economy](API_SPECIFICATION.md#response-economy).
+
 ### Optional: the Control Room dashboard
 
 Didi declares the `io.modelcontextprotocol/ui` extension (MCP Apps, revision

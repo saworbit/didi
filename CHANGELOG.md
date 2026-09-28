@@ -51,6 +51,25 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Added
 
+- **A client that reads `structuredContent` can decline what it already has
+  (Q5 part 1, #776).** Every tool answer carried its payload twice, in
+  `structuredContent` and again as `content[0].text`, and every live answer
+  restated the whole session descriptor. A client that declares the
+  `didi/responseEconomy` extension, with `omit: ["textCopy",
+  "sessionDescriptor"]`, gets the text item left out when it is byte for byte
+  the structured payload, and a live answer's `session` as `{session_id, kind}`
+  once it already holds that descriptor. The descriptor is sent whole again
+  when anything in it changes. A `2024-11-05` client declares it in
+  `initialize` or on a single request; a `2026-07-28` request declares it in its
+  own client capabilities and is answered from those alone.
+  `server/discover` and `initialize` declare what the server honours. Failures
+  and the `runtime_*_session` answers are never reshaped, and a client that
+  declares nothing gets the same bytes as before. The live harness runs #776's
+  seven-call authoring arc both ways on every engine line: 11,835 bytes
+  undeclared and 3,761 declared, 32%, on 4.5.1, 4.6.2 and 4.7.2 alike. It
+  fails unless the declared arc is under half. `fields` on the large reads and
+  `complete` or `truncated` on every bounded read are the second part (#776
+  stays open).
 - **`--tools core` lists under half the bytes, and both tool lists have a budget
   (Q4, #1012).** An agent pays for all of `tools/list`, 203,634 bytes on main,
   before it does anything. `didi --tools core` lists 60 tools in 94,746 bytes:

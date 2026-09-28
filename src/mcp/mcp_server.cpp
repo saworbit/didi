@@ -320,6 +320,25 @@ json uiExtensionDeclaration() {
     return {{kUiExtensionName, {{"mimeTypes", json::array({kUiAppMimeType})}}}};
 }
 
+// Every extension this server declares. Response economy is always on offer,
+// because it changes nothing for a client that does not ask for it.
+json serverExtensions(bool ui_available) {
+    json extensions = ui_available ? uiExtensionDeclaration() : json::object();
+    extensions.update(responseEconomyDeclaration());
+    return extensions;
+}
+
+// What a single request declared in its own client capabilities.
+ResponseEconomy requestDeclaredEconomy(const json& params) {
+    if (!params.is_object() || !params.contains("_meta") || !params["_meta"].is_object()) {
+        return {};
+    }
+    const auto& meta = params["_meta"];
+    const auto capabilities = meta.find(kClientCapabilitiesMetaKey);
+    if (capabilities == meta.end()) return {};
+    return declaredResponseEconomy(*capabilities);
+}
+
 // What a person needs to see is which thing is about to change, not the whole
 // argument object. These are the arguments that name a target across Didi's
 // mutating tools.
@@ -505,6 +524,11 @@ bool McpServer::uiSurfaceVisible(ProtocolEra era, const json& params) const {
     return m_clientDeclaredUiExtension || requestDeclaresUiExtension(params);
 }
 
+ResponseEconomy McpServer::responseEconomyFor(ProtocolEra era, const json& params) const {
+    if (era == ProtocolEra::Modern) return requestDeclaredEconomy(params);
+    return m_clientDeclaredEconomy | requestDeclaredEconomy(params);
+}
+
 JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
     DIDI_LOG_DEBUG("MCP_REQ", "Method: ", req.method);
 
@@ -553,8 +577,7 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
                 // walk the whole sequence -- declare, read it back, look for
                 // the app resource -- to a 400 on the only resource the
                 // extension exists for (#717).
-                {"extensions", m_uiAppMode == UiAppMode::Off ? json::object()
-                                                             : uiExtensionDeclaration()}
+                {"extensions", serverExtensions(m_uiAppMode != UiAppMode::Off)}
             }},
             {"_meta", {
                 {kServerInfoMetaKey, {{"name", kServerName}, {"version", kServerVersion}}},
@@ -633,6 +656,7 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
         // sends it per request instead and is read there.
         if (req.params.is_object() && req.params.contains("capabilities")) {
             m_clientDeclaredUiExtension = clientDeclaresUiExtension(req.params["capabilities"]);
+            m_clientDeclaredEconomy = declaredResponseEconomy(req.params["capabilities"]);
         }
         json result = {
             {"protocolVersion", isSupportedProtocolVersion(asked) ? asked : kProtocolVersion},
@@ -653,8 +677,7 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
                 // works: this is the listing itself moving.
                 {"resources", {{"subscribe", true}, {"listChanged", true}}},
                 {"prompts", {{"listChanged", false}}},
-                {"extensions", m_uiAppMode == UiAppMode::Off ? json::object()
-                                                             : uiExtensionDeclaration()}
+                {"extensions", serverExtensions(m_uiAppMode != UiAppMode::Off)}
             }},
             {"serverInfo", {
                 {"name", kServerName},
@@ -821,6 +844,23 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
                 json{{"name", name}, {"toolProfile", toolProfileName(m_toolProfile)},
                      {"restart_with", "--tools full"}});
         }
+        // Every result this method answers with goes through here, so no path
+        // can answer a client in a shape it did not negotiate, and a client
+        // that negotiated nothing gets exactly what toJson() says.
+        const auto economy = responseEconomyFor(era, req.params);
+        const DescriptorHeld client_holds = [&](const json& descriptor) {
+            // A modern request is served only on the session it named, and it
+            // could only name one it had already been told about. A legacy
+            // client is one conversation, so the process remembers.
+            if (era == ProtocolEra::Modern) {
+                return scope.runtime_session_id.has_value() &&
+                       descriptor.value("session_id", "") == *scope.runtime_session_id;
+            }
+            return m_descriptorLedger.alreadySent(descriptor);
+        };
+        auto encode = [&](const CallToolResult& result) {
+            return complete(economizeToolResult(result.toJson(), economy, client_holds));
+        };
         // Explicit opt-in, before any confirmation or dispatch. The ordinary
         // path never copies or walks arguments through the normalizer.
         const auto meta = req.params.find("_meta");
@@ -841,7 +881,7 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
                 auto error = prepared.error();
                 error.data["tool"] = name;
                 error.data["canonical_tool"] = tool->canonical_name;
-                return JsonRpcResponse::makeSuccess(req.id, complete(CallToolResult::fromError(error).toJson()));
+                return JsonRpcResponse::makeSuccess(req.id, encode(CallToolResult::fromError(error)));
             }
             arguments = std::move(prepared.value());
         } else {
@@ -871,13 +911,13 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
                                            {"data", {{"tool", name}, {"action", action},
                                                      {"retryable", action == "cancel"}}}}}};
                 return JsonRpcResponse::makeSuccess(
-                    req.id, complete(CallToolResult::error(payload.dump()).toJson()));
+                    req.id, encode(CallToolResult::error(payload.dump())));
             }
             json approved = arguments;
             approved["confirmation_token"] = state->at("token");
             auto result = ToolRegistry::instance().callTool(name, approved, scope);
             return JsonRpcResponse::makeSuccess(
-                req.id, withConfirmationProvenance(complete(result.toJson()), "human"));
+                req.id, withConfirmationProvenance(encode(result), "human"));
         }
 
         // A destructive tool with no token yet, and a client that can ask a
@@ -905,7 +945,7 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
                     approved["confirmation_token"] = minted.token;
                     auto result = ToolRegistry::instance().callTool(name, approved, scope);
                     return JsonRpcResponse::makeSuccess(
-                        req.id, withConfirmationProvenance(complete(result.toJson()), "skipped"));
+                        req.id, withConfirmationProvenance(encode(result), "skipped"));
                 }
                 // Skipping confirmation is not skipping validation. A call that
                 // could not run still reports why, and the preview's own refusal
@@ -913,7 +953,7 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
                 // with the generic "this needs a dry run" instead.
                 if (minted.refusal.has_value()) {
                     return JsonRpcResponse::makeSuccess(
-                        req.id, complete(minted.refusal->toJson()));
+                        req.id, encode(*minted.refusal));
                 }
             }
         }
@@ -928,7 +968,7 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
                 auto minted = mintConfirmationToken(name, arguments, scope);
                 if (minted.refusal.has_value()) {
                     return JsonRpcResponse::makeSuccess(
-                        req.id, complete(minted.refusal->toJson()));
+                        req.id, encode(*minted.refusal));
                 }
                 const auto& token = minted.token;
                 const auto& mutation_preview = minted.preview;
@@ -963,7 +1003,7 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
         }
 
         auto result = ToolRegistry::instance().callTool(name, arguments, scope);
-        auto encoded = complete(result.toJson());
+        auto encoded = encode(result);
         if (already_confirmed && !result.isError) {
             encoded = withConfirmationProvenance(std::move(encoded), "agent");
         }

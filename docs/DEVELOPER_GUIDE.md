@@ -204,6 +204,22 @@ either source: after a trial, or after the guide starts naming another tool.
 `offline-core.json` in the contract snapshots records what the profile changes
 about the full listing.
 
+### Response economy
+
+A client that declares the `didi/responseEconomy` extension can decline the
+text copy of `structuredContent` and a session descriptor it already holds
+(Q5, [API specification](API_SPECIFICATION.md#response-economy)). The whole
+of it is `economizeToolResult` in `src/mcp/response_economy.cpp`, applied in
+one place: every `tools/call` answer in `McpServer::handleRequest` is encoded
+through its `encode` lambda, so a new return path there must use it too.
+Handlers never see the declaration and never need to.
+
+A client that declares nothing must get the same bytes. The contract snapshots
+are the check: they record as a client that declared nothing, so any change
+this makes to that client's answers shows as a diff. The live harness runs
+#776's seven-call arc as both kinds of client on every engine line, and fails
+unless the declared arc costs under half the bytes.
+
 ### Opt-in live verification
 
 The opt-in Python recovery suites launch real Godot through MCP stdio and cover owned-child crashes, saved-file persistence, the single restart, no replay, restore, source preservation, previews, and corrupt snapshots. Set `DIDI_TEST_BINARY` to the built host and `DIDI_RECOVERY_GODOT` to an absolute Godot executable:

@@ -14,6 +14,7 @@
 #include "didi/mcp/tool_registry.hpp"
 #include "didi/mcp/resource_registry.hpp"
 #include "didi/mcp/prompt_registry.hpp"
+#include "didi/mcp/response_economy.hpp"
 #include "didi/common/ipc_channel.hpp"
 #include "didi/runtime/session_client.hpp"
 #include "didi/offline/blackboard.hpp"
@@ -120,6 +121,13 @@ private:
     // request on a process serving both eras.
     bool m_clientDeclaredUiExtension{false};
     bool uiSurfaceVisible(ProtocolEra era, const json& params) const;
+    // The same rule for didi/responseEconomy: a legacy request has what the
+    // handshake declared plus what it declares itself, a modern request only
+    // the latter. The ledger is the legacy conversation's, and a modern
+    // request never reads or writes it.
+    ResponseEconomy m_clientDeclaredEconomy;
+    SessionDescriptorLedger m_descriptorLedger;
+    ResponseEconomy responseEconomyFor(ProtocolEra era, const json& params) const;
     std::shared_ptr<ipc::IIpcClient> m_ipcClient;
     std::shared_ptr<runtime::IRuntimeSessionClient> m_runtimeSessionClient;
 
