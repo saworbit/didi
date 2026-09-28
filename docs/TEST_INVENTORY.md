@@ -10,14 +10,14 @@ Every number here is derived from the suites themselves rather than written down
 
 | Measure | Count |
 | --- | ---: |
-| Automated tests | **1432** |
-| Live-harness assertions | 1359 |
+| Automated tests | **1442** |
+| Live-harness assertions | 1363 |
 
 The badge in the [README](../README.md) shows the automated test total. Harness assertions are counted separately because they are assertions inside one live scenario, not independently runnable cases; adding them together would flatter the number.
 
 ## Native C++ suite (`didi_tests`)
 
-**912 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
+**918 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
 
 | Suite | Tests |
 | --- | ---: |
@@ -47,7 +47,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `JsonRpc` | 5 |
 | `ManagedProcess` | 6 |
 | `McpServer` | 42 |
-| `Phase5` | 28 |
+| `Phase5` | 29 |
 | `Phase6` | 25 |
 | `Phase7Contract` | 9 |
 | `Phase7Diagnostics` | 1 |
@@ -61,7 +61,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `Prompts` | 1 |
 | `ResourceIndexer` | 12 |
 | `Resources` | 2 |
-| `ResponseEconomy` | 15 |
+| `ResponseEconomy` | 18 |
 | `RuntimeLaunch` | 11 |
 | `RuntimeLogs` | 12 |
 | `RuntimeOutput` | 5 |
@@ -72,7 +72,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `SceneExploration` | 12 |
 | `Schema` | 2 |
 | `Segmentation` | 5 |
-| `SpeculativeVerify` | 8 |
+| `SpeculativeVerify` | 10 |
 | `TestRunner` | 2 |
 | `ToolManifest` | 1 |
 | `ToolProfile` | 6 |
@@ -98,10 +98,11 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 
 ## Python contract suites (`tests/test_*.py`)
 
-**520 tests.** Derived from `test_*` methods on every `unittest.TestCase` subclass, read with `ast`.
+**524 tests.** Derived from `test_*` methods on every `unittest.TestCase` subclass, read with `ast`.
 
 | File | Tests |
 | --- | ---: |
+| `test_bounded_reads.py` | 4 |
 | `test_check_release_archive.py` | 15 |
 | `test_ci_change_classification.py` | 7 |
 | `test_cli_arguments.py` | 13 |
@@ -136,10 +137,11 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 
 ## Live Godot harness (`tests/*.ps1`)
 
-**1359 assertions.** Derived from `Assert-True` call sites. The harness is one long live scenario rather than a set of named cases, so this counts assertions and says so.
+**1363 assertions.** Derived from `Assert-True` call sites. The harness is one long live scenario rather than a set of named cases, so this counts assertions and says so.
 
 | File | Assertions |
 | --- | ---: |
+| `bounded_reads.ps1` | 4 |
 | `observed_post_state.ps1` | 12 |
 | `run_godot_integration.ps1` | 1347 |
 

@@ -1,10 +1,13 @@
 #pragma once
 
 #include "didi/common/types.hpp"
+#include "didi/mcp/mcp_protocol.hpp"
 
 #include <functional>
 #include <mutex>
 #include <optional>
+#include <string>
+#include <vector>
 
 namespace didi::mcp {
 
@@ -87,6 +90,21 @@ private:
 // Whether the client already holds this session descriptor. Answering false
 // may record it as sent, since the answer is then going to carry it.
 using DescriptorHeld = std::function<bool(const json& descriptor)>;
+
+// Replaces a live payload's top-level session descriptor with a reference when
+// the client already holds it, and says whether it did. A payload that is not
+// a live answer, or whose session is not a descriptor, is left alone; asking
+// may still record the descriptor as sent. Shared by tools/call and
+// resources/read, so both use one ledger (#1033).
+bool referenceHeldSession(json& payload, const DescriptorHeld& client_holds);
+
+// Narrows a successful result to the sections a caller selected with `fields`
+// (Q5). A declared section the answer carries and the caller did not select is
+// removed, and named in omitted_fields in the order the sections are declared.
+// Keys that are not sections are always kept, a text item that was the
+// payload is rewritten to match, and a failure is returned as it came.
+CallToolResult selectSections(CallToolResult result, const std::vector<std::string>& sections,
+                              const json& selected);
 
 // Applies what a client declared to one encoded tools/call result, the output
 // of CallToolResult::toJson(). A result the client did not ask to change comes

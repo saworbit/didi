@@ -1102,6 +1102,8 @@ Result<json> analyzeImpact(const std::string& root_dir, const ProjectImpactOptio
         bool declarations_truncated = false;
         result["declared_in"] =
             impactsToJson(declarationsOf(scan, target), options.max_impacts, declarations_truncated);
+        // Computed and then dropped, so a cut declared_in read as whole (Q5).
+        if (declarations_truncated) result["truncated"] = true;
     }
 
     // In the payload, not only the docs. A caller who reads the impacts and not

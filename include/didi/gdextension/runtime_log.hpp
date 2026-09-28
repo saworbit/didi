@@ -44,6 +44,8 @@ private:
         std::string source;
         std::string message;
         json details;
+        // Whether message or source was cut to its byte bound when recorded.
+        bool clipped{false};
     };
 
     static int levelRank(std::string_view level);

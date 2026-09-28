@@ -169,6 +169,7 @@ if (-not $fixtureRoot.StartsWith($buildRoot + [IO.Path]::DirectorySeparatorChar,
 # extension copy can still be locked; see remove_test_directory.ps1.
 . (Join-Path $PSScriptRoot 'remove_test_directory.ps1')
 . (Join-Path $PSScriptRoot 'observed_post_state.ps1')
+. (Join-Path $PSScriptRoot 'bounded_reads.ps1')
 Remove-TestDirectory -Path $fixtureRoot
 Copy-Item -LiteralPath $sourceFixtureRoot -Destination $fixtureRoot -Recurse
 
@@ -309,6 +310,8 @@ function Invoke-Didi {
     # Every answer from a tool observed_post_state.json checks is kept, so the
     # end of the run can say whether each one carried its observed fields.
     Add-ObservedExchanges -Requests $Requests -Lines $lines
+    # And every bounded read's answer, for whether it says it is complete (Q5).
+    Add-BoundedExchanges -Requests $Requests -Lines $lines
     $lines
 }
 
@@ -329,6 +332,7 @@ function Tool-Payload($Response) {
 # Before any live work: a mutating tool the registry does not account for is a
 # surface change, and it should fail in seconds rather than after the run.
 Assert-ObservedPostStateCoverage ((& $didiExecutable --dump-tool-manifest) -join "`n")
+Assert-BoundedReadsCoverage ((& $didiExecutable --dump-tool-manifest) -join "`n")
 
 function Runtime-InputCounter($TreePayload) {
     $counterNode = @($TreePayload.scene_tree.children | Where-Object { $_.name -match '^InputCounter_(\d+)$' })[0]
@@ -5717,6 +5721,7 @@ text = "Not a key"
     })
     Assert-True ($unexpectedSourceArtifacts.Count -eq 0) "Integration generated artifacts in the checked-in source fixture."
     Assert-ObservedAnswersRecorded
+    Assert-BoundedAnswersSayWhetherComplete
     $integrationSucceeded = $true
     Write-Output "Godot integration passed: Phases 1-6 editor/runtime workflows, deep diagnostics, project isolation, export, MeshLibrary, live UI hit-testing, and live Control listing."
 }

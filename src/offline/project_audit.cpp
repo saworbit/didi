@@ -662,7 +662,20 @@ json auditProject(const std::string& root_dir, const ProjectAuditOptions& option
         {"project_settings_issues", project_settings_issues},
         {"project_settings_issue_count", project_settings_issues.size()}
     };
-    if (scan.truncated) result["truncated"] = true;
+    // Every bound in one flag, on every answer (Q5). max_findings applies to
+    // each list separately and none of them said when it bit, so a list that
+    // reached it counts: it may have had more. The same rule the search tools
+    // use for max_results.
+    const auto reached = [&](const json& list) {
+        return list.is_array() && list.size() >= options.max_findings;
+    };
+    const bool import_issues_cut =
+        import_health.contains("import_issues") && import_health["import_issues"].is_array() &&
+        import_health.value("import_issue_count", std::size_t{0}) > import_health["import_issues"].size();
+    result["truncated"] = scan.truncated || reached(orphans) || reached(broken) ||
+                          reached(dead_signals) || reached(broken_connections) ||
+                          reached(project_settings_issues) || import_issues_cut ||
+                          import_health.contains("import_scan_truncated");
     // Same reason as the scan bounds above: a file this cannot name is a file
     // the answer is missing, and saying so beats omitting it (#650).
     {

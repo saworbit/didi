@@ -217,7 +217,8 @@
             "session_id": "<session_id>",
             "started_at_ms": "<started_at_ms>"
           },
-          "source": "live_scene_tree"
+          "source": "live_scene_tree",
+          "truncated": false
         }
       },
       "tool": "scene_get_hierarchy"
@@ -303,7 +304,8 @@
             "session_id": "<session_id>",
             "started_at_ms": "<started_at_ms>"
           },
-          "source": "live_scene_tree"
+          "source": "live_scene_tree",
+          "truncated": false
         }
       },
       "tool": "scene_get_hierarchy"
@@ -534,7 +536,8 @@
             "session_id": "<session_id>",
             "started_at_ms": "<started_at_ms>"
           },
-          "status": "success"
+          "status": "success",
+          "truncated": false
         }
       },
       "tool": "scene_get_group_members"
@@ -1170,7 +1173,8 @@
             "session_id": "<session_id>",
             "started_at_ms": "<started_at_ms>"
           },
-          "status": "success"
+          "status": "success",
+          "truncated": false
         }
       },
       "tool": "audio_list_buses"
@@ -2160,7 +2164,8 @@
               "uid": ""
             }
           ],
-          "total_found": 11
+          "total_found": 11,
+          "truncated": false
         }
       },
       "tool": "project_list_resources"
@@ -2375,7 +2380,8 @@
           "scanned_import_metadata": 3,
           "scanned_resources": 43,
           "scanned_text_files": 19,
-          "skipped_text_files": 0
+          "skipped_text_files": 0,
+          "truncated": false
         }
       },
       "tool": "project_audit_assets"
@@ -2428,11 +2434,13 @@
           "engine_duration_seconds": "<measured>",
           "engine_executable": "<godot>",
           "engine_exit_code": 0,
+          "engine_timed_out": false,
           "engine_version": "Godot Engine v4.7.2.stable.official",
           "execution_mode": "local",
           "file_path": "res://content/player.gd",
           "has_errors": false,
-          "matches_attached_engine": true
+          "matches_attached_engine": true,
+          "truncated": false
         }
       },
       "tool": "script_check_syntax"
@@ -2681,7 +2689,8 @@
           "output_truncated": false,
           "raw_output": "[<timestamp>] [INFO ] [GDEXTENSION] Didi runtime disabled for isolated offline helper\r\nGodot Engine v4.7.2.stable.official.ed1daf0bf - https://godotengine.org\r\n\r\nDIDI_PHASE5_SHADER_OK\r\n",
           "shader_path": "res://content/tint.gdshader",
-          "success": true
+          "success": true,
+          "truncated": false
         }
       },
       "tool": "shader_check_compile"
@@ -2727,6 +2736,7 @@
           "found": true,
           "path": "",
           "revision": 0,
+          "truncated": false,
           "value": {}
         }
       },

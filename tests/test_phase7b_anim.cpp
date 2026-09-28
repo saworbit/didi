@@ -137,8 +137,12 @@ void test_catalog_applies_count_caps_with_a_cursor() {
     ASSERT_EQ(record["truncated"], true);
     ASSERT_EQ(record["tracks"][0]["key_times"].size(), 256u);
     ASSERT_EQ(record["tracks"][0]["truncated"], true);
-    // Per-record cuts do not set the catalog cursor; the catalog itself is whole.
-    ASSERT_EQ(wide["truncated"], false);
+    // A track or key cut is a cut in the answer, so the top-level flag says so
+    // (Q5); the cursor still names only a catalog-level stop, and there was none.
+    ASSERT_EQ(wide["truncated"], true);
+    ASSERT_TRUE(wide["truncated_at"].is_null());
+    // And a catalog nothing cut says that too.
+    ASSERT_EQ(buildAnimationCatalog({animation("small", 2, 3)})["truncated"], false);
 }
 
 void test_catalog_stops_before_a_record_at_the_byte_budget() {

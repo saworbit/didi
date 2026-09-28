@@ -378,6 +378,12 @@ struct ToolDefinition {
     // Optional. Declared only for tools whose real result shape is known; see
     // outputSchemaForTool. Absent means no promise is made about the payload.
     json outputSchema;
+    // Optional. The top-level answer keys a caller may choose between with a
+    // `fields` argument, which ToolRegistry::registerTool publishes (Q5). Only
+    // for a large read whose answer is sections a caller wants separately, and
+    // never a key its outputSchema requires, or a narrowed answer would break
+    // the schema it was promised.
+    std::vector<std::string> sections;
 
     json toJson() const {
         // Ten of the 126 registrations are legacy names for a tool that is also

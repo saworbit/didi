@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <set>
 #include <stdexcept>
 #include <string>
 
@@ -346,8 +347,47 @@ void test_the_apply_preview_runs_the_check_its_sibling_runs() {
     ASSERT_EQ(verify_payload["error"]["code"], 409);
 }
 
+// The false success the order used to produce. A copy with more uid:// names
+// than the line limit prints that many Unrecognized UID lines before anything
+// the proposal did; capped first and subtracted after, the list came back
+// empty and the proposal passed with a parse error in it.
+void test_baseline_lines_cannot_hide_the_proposals_errors() {
+    std::set<std::string> baseline;
+    std::string output;
+    for (int i = 0; i < 40; ++i) {
+        const auto line = "ERROR: Unrecognized UID: \"uid://b" + std::to_string(i) + "\".";
+        baseline.insert(line);
+        output += line + "\n";
+    }
+    output += "SCRIPT ERROR: Parse Error: Expected end of statement after expression.\n";
+    const auto attributed = didi::offline::attributeEngineErrors(output, baseline, 32);
+    ASSERT_EQ(attributed.lines.size(), static_cast<size_t>(1));
+    ASSERT_TRUE(attributed.lines[0].rfind("SCRIPT ERROR: Parse Error", 0) == 0);
+    ASSERT_TRUE(!attributed.truncated);
+}
+
+// More errors of the proposal's own than the limit: the first ones are kept in
+// order and the answer says the rest were left out.
+void test_attributed_errors_past_the_limit_are_flagged() {
+    std::string output = "WARNING: not an error\nUSER ERROR: from a script\n";
+    for (int i = 0; i < 40; ++i) output += "ERROR: proposal fault " + std::to_string(i) + "\n";
+    const auto attributed = didi::offline::attributeEngineErrors(output, {}, 32);
+    ASSERT_EQ(attributed.lines.size(), static_cast<size_t>(32));
+    ASSERT_TRUE(attributed.lines[0] == "USER ERROR: from a script");
+    ASSERT_TRUE(attributed.lines[1] == "ERROR: proposal fault 0");
+    ASSERT_TRUE(attributed.truncated);
+    // Exactly at the limit is not a cut.
+    std::string exact;
+    for (int i = 0; i < 32; ++i) exact += "ERROR: fault " + std::to_string(i) + "\n";
+    ASSERT_TRUE(!didi::offline::attributeEngineErrors(exact, {}, 32).truncated);
+}
+
 struct RegisterSpeculativeVerify {
     RegisterSpeculativeVerify() {
+        registerTest("SpeculativeVerify.BaselineCannotHideProposalErrors",
+                     test_baseline_lines_cannot_hide_the_proposals_errors);
+        registerTest("SpeculativeVerify.AttributedErrorsPastTheLimitAreFlagged",
+                     test_attributed_errors_past_the_limit_are_flagged);
         registerTest("SpeculativeVerify.RequestDescribesAProposal",
                      test_speculative_request_describes_a_whole_proposal);
         registerTest("SpeculativeVerify.RequestRefusesUncheckable",

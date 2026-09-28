@@ -126,6 +126,9 @@ pull request with a reason. From [Q5](BUILD_QUEUE.md#q5-response-economy),
 the live harness runs #776's seven-call arc for a client that declared
 `didi/responseEconomy` and for one that did not, on every engine line, and
 fails unless the first costs under half the bytes of the second.
+`tests/bounded_reads.json` classifies every read as bounded or unbounded, and
+CI and the live harness fail a bounded read's answer that does not carry
+`truncated`.
 
 ## P5. Guidance belongs where the agent is already looking
 

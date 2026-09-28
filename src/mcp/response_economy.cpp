@@ -1,5 +1,6 @@
 #include "didi/mcp/response_economy.hpp"
 
+#include <algorithm>
 #include <cstddef>
 #include <string>
 #include <vector>
@@ -65,6 +66,44 @@ json sessionReference(const json& descriptor) {
 
 }  // namespace
 
+bool referenceHeldSession(json& payload, const DescriptorHeld& client_holds) {
+    if (!payload.is_object() || !client_holds) return false;
+    const auto session = payload.find("session");
+    if (session == payload.end() || !isDescriptor(*session)) return false;
+    const bool held = client_holds(*session);
+    // Only a live answer's session is the route that answered it.
+    // runtime_attach_session, runtime_get_session and the others answer with a
+    // descriptor because the descriptor is the answer, so theirs is always sent
+    // whole; seeing one still counts as having sent it.
+    if (!held || payload.value("execution_mode", "") != "live") return false;
+    *session = sessionReference(*session);
+    return true;
+}
+
+CallToolResult selectSections(CallToolResult result, const std::vector<std::string>& sections,
+                              const json& selected) {
+    if (result.isError || !result.structuredContent.has_value() ||
+        !result.structuredContent->is_object() || !selected.is_array()) {
+        return result;
+    }
+    json& payload = *result.structuredContent;
+    const std::string original = payload.dump();
+    json omitted = json::array();
+    for (const auto& section : sections) {
+        if (!payload.contains(section)) continue;
+        if (std::find(selected.begin(), selected.end(), json(section)) != selected.end()) continue;
+        payload.erase(section);
+        omitted.push_back(section);
+    }
+    if (omitted.empty()) return result;
+    payload["omitted_fields"] = std::move(omitted);
+    const std::string rewritten = payload.dump();
+    for (auto& item : result.content) {
+        if (item.type == "text" && item.text == original) item.text = rewritten;
+    }
+    return result;
+}
+
 json economizeToolResult(json encoded, const ResponseEconomy& economy,
                          const DescriptorHeld& client_holds) {
     if (!economy.any() || !encoded.is_object()) return encoded;
@@ -91,21 +130,8 @@ json economizeToolResult(json encoded, const ResponseEconomy& economy,
         }
     }
 
-    bool restructured = false;
-    if (economy.reference_session && structured.is_object() && client_holds) {
-        const auto session = structured.find("session");
-        if (session != structured.end() && isDescriptor(*session)) {
-            const bool held = client_holds(*session);
-            // Only a live answer's session is the route that answered it.
-            // runtime_attach_session, runtime_get_session and the others answer
-            // with a descriptor because the descriptor is the answer, so theirs
-            // is always sent whole; seeing one still counts as having sent it.
-            if (held && structured.value("execution_mode", "") == "live") {
-                *session = sessionReference(*session);
-                restructured = true;
-            }
-        }
-    }
+    const bool restructured =
+        economy.reference_session && referenceHeldSession(structured, client_holds);
 
     if (economy.omit_text_copy) {
         for (auto it = copies.rbegin(); it != copies.rend(); ++it) {

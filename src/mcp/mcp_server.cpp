@@ -524,6 +524,19 @@ bool McpServer::uiSurfaceVisible(ProtocolEra era, const json& params) const {
     return m_clientDeclaredUiExtension || requestDeclaresUiExtension(params);
 }
 
+DescriptorHeld McpServer::descriptorHolderFor(const RequestScope& scope) {
+    // A modern request is served only on the session it named, and it could
+    // only name one it had already been told about. A legacy client is one
+    // conversation, so the process remembers, for tool answers and resource
+    // reads alike.
+    if (scope.era == ProtocolEra::Modern) {
+        return [named = scope.runtime_session_id](const json& descriptor) {
+            return named.has_value() && descriptor.value("session_id", "") == *named;
+        };
+    }
+    return [this](const json& descriptor) { return m_descriptorLedger.alreadySent(descriptor); };
+}
+
 ResponseEconomy McpServer::responseEconomyFor(ProtocolEra era, const json& params) const {
     // The operator's switch is not another client's declaration, so it is not
     // what the era split below guards against: it applies to every request on
@@ -857,16 +870,7 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
         // can answer a client in a shape it did not negotiate, and a client
         // that negotiated nothing gets exactly what toJson() says.
         const auto economy = responseEconomyFor(era, req.params);
-        const DescriptorHeld client_holds = [&](const json& descriptor) {
-            // A modern request is served only on the session it named, and it
-            // could only name one it had already been told about. A legacy
-            // client is one conversation, so the process remembers.
-            if (era == ProtocolEra::Modern) {
-                return scope.runtime_session_id.has_value() &&
-                       descriptor.value("session_id", "") == *scope.runtime_session_id;
-            }
-            return m_descriptorLedger.alreadySent(descriptor);
-        };
+        const auto client_holds = descriptorHolderFor(scope);
         auto encode = [&](const CallToolResult& result) {
             return complete(economizeToolResult(result.toJson(), economy, client_holds));
         };
@@ -1149,10 +1153,22 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
         // board was labelled text/plain while carrying the same JSON the default
         // board carries (#513).
         const std::string mime = ResourceRegistry::instance().mimeTypeFor(uri);
+        std::string text = read_res.value();
+        // A live read states its session the way a live tool answer does, so
+        // it is shortened on the same terms and against the same ledger
+        // (#1033). There is no text copy to leave out: the text is the only
+        // form a resource has. Anything that does not parse as a live payload
+        // is sent exactly as read.
+        if (responseEconomyFor(era, req.params).reference_session) {
+            auto payload = json::parse(text, nullptr, false);
+            if (!payload.is_discarded() && referenceHeldSession(payload, descriptorHolderFor(scope))) {
+                text = payload.dump();
+            }
+        }
         json entry = {
             {"uri", uri},
             {"mimeType", mime},
-            {"text", read_res.value()}
+            {"text", std::move(text)}
         };
         // A UI resource carries its own metadata on the content, which is where
         // the host reads the framing preference and any policy from.

@@ -8,6 +8,7 @@
 
 #include "didi/common/project_path.hpp"
 #include "didi/mcp/mcp_server.hpp"
+#include "didi/mcp/resource_registry.hpp"
 #include "didi/mcp/response_economy.hpp"
 #include "didi/mcp/tool_registry.hpp"
 #include "didi/runtime/session_client.hpp"
@@ -335,6 +336,7 @@ struct LiveServer {
         registry.setRuntimeSessionClient(nullptr);
         registry.setIpcClient(nullptr);
         registry.registerAllDefaultTools();
+        didi::mcp::ResourceRegistry::instance().setIpcClient(nullptr);
     }
     LiveServer(const LiveServer&) = delete;
     LiveServer& operator=(const LiveServer&) = delete;
@@ -539,6 +541,134 @@ static void test_every_is_the_default_and_changes_nothing() {
     }
 }
 
+namespace {
+
+json readEditorState(didi::mcp::McpServer& server, const json& meta = json()) {
+    json params = {{"uri", "godot://editor/state"}};
+    if (!meta.is_null()) params["_meta"] = meta;
+    const auto result = send(server, "resources/read", params);
+    return json::parse(result["contents"][0]["text"].get<std::string>());
+}
+
+}  // namespace
+
+// A live resource read states its session the way a live tool answer does, so
+// it is shortened on the same terms and against the same ledger (#1033).
+static void test_a_live_resource_read_references_a_held_descriptor() {
+    {
+        // Undeclared: every read carries the whole descriptor, as before.
+        LiveServer live;
+        initialize(live.server);
+        for (int i = 0; i < 2; ++i) {
+            const auto state = readEditorState(live.server);
+            ASSERT_EQ(state["execution_mode"], "live");
+            ASSERT_TRUE(state["session"].contains("endpoint"));
+        }
+    }
+    {
+        LiveServer live;
+        initialize(live.server, kBothDeclared);
+        ASSERT_TRUE(readEditorState(live.server)["session"].contains("endpoint"));
+        ASSERT_EQ(readEditorState(live.server)["session"],
+                  json({{"session_id", kEditorA}, {"kind", "editor"}}));
+        // One ledger: the tool answer after two reads is already a reference.
+        ASSERT_FALSE(liveCall(live.server)["structuredContent"]["session"].contains("endpoint"));
+        // And a restart is sent whole again, by whichever answers first.
+        live.editor->session = routeDescriptor(kEditorB);
+        ASSERT_TRUE(readEditorState(live.server)["session"].contains("endpoint"));
+        ASSERT_FALSE(liveCall(live.server)["structuredContent"]["session"].contains("endpoint"));
+    }
+    {
+        // The operator's switch reaches resource reads too, and a modern read
+        // that named its session holds it from the first.
+        LiveServer live;
+        live.server.setSessionDescriptorMode(didi::mcp::SessionDescriptorMode::Once);
+        const auto modern = readEditorState(live.server, modernMeta(json::object(), kEditorA));
+        ASSERT_FALSE(modern["session"].contains("endpoint"));
+        ASSERT_EQ(modern["session"]["session_id"], kEditorA);
+    }
+}
+
+namespace {
+
+json callOffline(didi::mcp::McpServer& server, const std::string& tool, const json& arguments) {
+    return send(server, "tools/call", {{"name", tool}, {"arguments", arguments}});
+}
+
+}  // namespace
+
+// A large read made of sections takes `fields` (Q5). The schema publishes the
+// sections, the answer keeps the selected ones and every key that is not a
+// section, and names what it left out.
+static void test_fields_select_the_sections_of_a_large_read() {
+    didi::mcp::McpServer server;
+    initialize(server);
+    const auto whole = callOffline(server, "script_reflect_class", {{"class_name", "Node"}});
+    ASSERT_FALSE(whole.value("isError", false));
+    const auto& all = whole["structuredContent"];
+    ASSERT_TRUE(all.contains("methods") && all.contains("properties") && all.contains("signals"));
+    ASSERT_FALSE(all.contains("omitted_fields"));
+
+    const auto narrowed = callOffline(server, "script_reflect_class",
+                                      {{"class_name", "Node"}, {"fields", {"properties"}}});
+    ASSERT_FALSE(narrowed.value("isError", false));
+    const auto& some = narrowed["structuredContent"];
+    ASSERT_EQ(some["properties"], all["properties"]);
+    ASSERT_FALSE(some.contains("methods") || some.contains("signals") || some.contains("enums"));
+    // Keys that are not sections stay, so the answer still says what it is.
+    ASSERT_EQ(some["class_name"], "Node");
+    ASSERT_EQ(some["execution_mode"], all["execution_mode"]);
+    // Named in declared order, and only sections the whole answer carried.
+    json expected = json::array();
+    for (const auto* section : {"description", "methods", "signals", "enums"}) {
+        if (all.contains(section)) expected.push_back(section);
+    }
+    ASSERT_EQ(some["omitted_fields"], expected);
+    // The text copy is the narrowed payload, not the whole one.
+    ASSERT_TRUE(carriesTextCopy(narrowed));
+    ASSERT_TRUE(narrowed.dump().size() * 2 < whole.dump().size());
+
+    // The control room's lights are required by its schema, so they are never
+    // a section and survive any selection.
+    const auto lights = callOffline(server, "didi_control_room", {{"fields", {"facts"}}});
+    ASSERT_FALSE(lights.value("isError", false));
+    ASSERT_TRUE(lights["structuredContent"].contains("lights"));
+    ASSERT_TRUE(lights["structuredContent"].contains("facts"));
+    ASSERT_FALSE(lights["structuredContent"].contains("tools"));
+}
+
+static void test_fields_are_published_and_checked_like_any_argument() {
+    didi::mcp::McpServer server;
+    initialize(server);
+    const auto listing = send(server, "tools/list", json::object());
+    int with_fields = 0;
+    for (const auto& tool : listing["tools"]) {
+        const auto& properties = tool["inputSchema"]["properties"];
+        if (!properties.contains("fields")) continue;
+        ++with_fields;
+        ASSERT_EQ(properties["fields"]["type"], "array");
+        ASSERT_TRUE(properties["fields"]["items"]["enum"].is_array());
+        ASSERT_TRUE(tool["outputSchema"]["properties"].contains("omitted_fields"));
+        // A section is never a key the output schema requires.
+        for (const auto& section : properties["fields"]["items"]["enum"]) {
+            for (const auto& required : tool["outputSchema"].value("required", json::array())) {
+                ASSERT_TRUE(section != required);
+            }
+        }
+    }
+    ASSERT_EQ(with_fields, 2);
+    // A name that is not a section, an empty selection, and a tool with no
+    // sections are all refused by the schema, before any handler runs.
+    for (const auto& refused :
+         {json{{"class_name", "Node"}, {"fields", {"nope"}}},
+          json{{"class_name", "Node"}, {"fields", json::array()}},
+          json{{"class_name", "Node"}, {"fields", json::array({"methods", "methods"})}}}) {
+        ASSERT_TRUE(callOffline(server, "script_reflect_class", refused).value("isError", false));
+    }
+    ASSERT_TRUE(callOffline(server, "project_list_autoloads", {{"fields", {"autoloads"}}})
+                    .value("isError", false));
+}
+
 struct RegisterResponseEconomyTests {
     RegisterResponseEconomyTests() {
         registerTest("ResponseEconomy.OnlyTheDocumentedDeclarationDeclares",
@@ -570,5 +700,11 @@ struct RegisterResponseEconomyTests {
                      test_once_references_the_descriptor_for_a_client_that_declared_nothing);
         registerTest("ResponseEconomy.EveryIsTheDefault",
                      test_every_is_the_default_and_changes_nothing);
+        registerTest("ResponseEconomy.LiveResourceReadReferencesAHeldDescriptor",
+                     test_a_live_resource_read_references_a_held_descriptor);
+        registerTest("ResponseEconomy.FieldsSelectSections",
+                     test_fields_select_the_sections_of_a_large_read);
+        registerTest("ResponseEconomy.FieldsArePublishedAndChecked",
+                     test_fields_are_published_and_checked_like_any_argument);
     }
 } g_register_response_economy_tests;

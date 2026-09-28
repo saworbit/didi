@@ -74,7 +74,10 @@ struct DomainDiagnostic {
     json toJson() const;
 };
 
-std::vector<DomainDiagnostic> parseMsBuildDiagnostics(const std::string& output);
+// Both parsers keep the first 1000 diagnostics. `truncated`, when given, is
+// set only when a further one was dropped, so exactly 1000 is not a cut (Q5).
+std::vector<DomainDiagnostic> parseMsBuildDiagnostics(const std::string& output,
+                                                      bool* truncated = nullptr);
 
 // How many projects MSBuild says it produced an assembly for.
 //
@@ -86,7 +89,8 @@ std::vector<DomainDiagnostic> parseMsBuildDiagnostics(const std::string& output)
 // localised. Zero of them beside exit code 0 is the state that has no other
 // name.
 int parseMsBuildProjectOutputCount(const std::string& output);
-std::vector<DomainDiagnostic> parseGodotDiagnostics(const std::string& output);
+std::vector<DomainDiagnostic> parseGodotDiagnostics(const std::string& output,
+                                                    bool* truncated = nullptr);
 // What export_presets.cfg holds, with the states a caller has to tell apart
 // kept apart.
 //

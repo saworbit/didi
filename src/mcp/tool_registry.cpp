@@ -14,6 +14,7 @@
 #include "didi/tools/resolved_tool_binding.hpp"
 #include "didi/mcp/phase7_schemas.hpp"
 #include "didi/mcp/schema_validation.hpp"
+#include "didi/mcp/response_economy.hpp"
 #include "didi/offline/deep_domain_support.hpp"
 #include "didi/offline/project_impact.hpp"
 #include "didi/offline/project_settings_file.hpp"
@@ -820,6 +821,8 @@ static json outputSchemaForTool(const std::string& name) {
                               {"engine_exit_code", {{"type", {"integer", "null"}}}},
                               {"engine_duration_seconds", {{"type", "number"}}},
                               {"engine_unavailable_reason", string_type},
+                              {"engine_timed_out", boolean_type},
+                              {"truncated", boolean_type},
                               // Always returned, and the field to branch on.
                               // The four nullable engine fields above read the
                               // same for a check that never asked a compiler
@@ -886,7 +889,8 @@ static json outputSchemaForTool(const std::string& name) {
                                                    {"file_size", integer_type},
                                                    {"dependencies", {{"type", "array"}}}},
                                                   {"path"}))},
-             {"total_found", integer_type}},
+             {"total_found", integer_type},
+             {"truncated", boolean_type}},
             {"execution_mode", "resources"});
     }
     if (name == "runtime_list_sessions") {
@@ -924,6 +928,7 @@ static json outputSchemaForTool(const std::string& name) {
         return object_schema({{"board", string_type},
                               {"path", string_type},
                               {"deep", boolean_type},
+                              {"truncated", boolean_type},
                               // A path with nothing at it is `found: false`
                               // rather than an error, so the flag is the
                               // answer and `value` may be anything or absent.
@@ -999,7 +1004,11 @@ static json outputSchemaForTool(const std::string& name) {
                               {"type", string_type},
                               {"uid", string_type},
                               {"file_size", integer_type},
-                              {"dependencies", {{"type", "array"}}}},
+                              {"dependencies", {{"type", "array"}}},
+                              // The import sidecar's options (#958), or why a
+                              // sidecar that is there could not be read.
+                              {"import", {{"type", "object"}}},
+                              {"import_error", string_type}},
                              {"execution_mode", "path"});
     }
     if (name == "script_get_symbols") {
@@ -1087,7 +1096,8 @@ static json outputSchemaForTool(const std::string& name) {
                               {"log_available", integer_type},
                               {"log_note", string_type},
                               {"log_returned", integer_type},
-                              {"log_truncated", boolean_type}},
+                              {"log_truncated", boolean_type},
+                              {"truncated", boolean_type}},
                              {"execution_mode", "lights"});
     }
     if (name == "scene_get_hierarchy") {
@@ -1378,6 +1388,23 @@ void ToolRegistry::registerTool(ToolDefinition tool) {
                 properties["engine_diagnostics_note"] = json{{"type", "string"}};
                 properties["engine_diagnostics_omitted"] = json{{"type", "integer"}};
             }
+        }
+    }
+    // A large read made of sections takes `fields`, so a caller that wants the
+    // lights does not pay for every tool's mode as well (Q5). The enum is the
+    // sections, so a client validating locally knows the names before it asks,
+    // and an answer that leaves sections out names them in omitted_fields.
+    if (!tool.sections.empty() && tool.inputSchema.is_object()) {
+        tool.inputSchema["properties"]["fields"] = {
+            {"type", "array"},
+            {"items", {{"type", "string"}, {"enum", tool.sections}}},
+            {"minItems", 1},
+            {"uniqueItems", true},
+            {"description", "Sections to return. The others are left out and named in "
+                            "omitted_fields. Omit for every section."}};
+        if (tool.outputSchema.is_object() && tool.outputSchema.contains("properties")) {
+            tool.outputSchema["properties"]["omitted_fields"] = {
+                {"type", "array"}, {"items", {{"type", "string"}}}};
         }
     }
     if (!tool.capability.implemented) {
@@ -2252,6 +2279,16 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
         }
         return invalidArgumentsError(binding, *invalid);
     }
+    // `fields` is the registry's argument, not the handler's: the schema has
+    // just checked it against the sections, the handler answers in full, and
+    // the answer is narrowed on the way out, after attribution, so both halves
+    // of the result agree (Q5).
+    if (!tool->sections.empty() && arguments.is_object() && arguments.contains("fields")) {
+        json rest = arguments;
+        const json selected = rest["fields"];
+        rest.erase("fields");
+        return selectSections(dispatchTool(name, rest, scope), tool->sections, selected);
+    }
     // After the schema, so a wrong name is still reported as unknown. Neither
     // spelling is required there, because a published schema cannot require one
     // of two without a top-level oneOf.
@@ -2984,6 +3021,10 @@ void ToolRegistry::registerAllDefaultTools() {
                            {"default", 120},
                            {"description", "How many of the newest log records to return. The default is a glance; ask for more only when a person is going to read them."}}}
         }}};
+        // A status call for one light used to fetch every tool's mode as well:
+        // the tools array was 77% of the answer (#776). lights is required by
+        // the output schema, so it is always returned and is not a section.
+        t.sections = {"server", "project", "surface", "facts", "tools", "sessions", "log"};
         t.handler = [this](const json& args) {
             // The source client, not the lease-dispatch wrapper: the wrapper is a
             // route lease provider but not a session client, and route
@@ -3427,6 +3468,9 @@ void ToolRegistry::registerAllDefaultTools() {
             }},
             {"required", {"class_name"}}
         };
+        // Node alone answers in about 13 KB, three quarters of it methods, so a
+        // caller after one property list should not pay for the rest (Q5).
+        t.sections = {"description", "methods", "properties", "signals", "enums"};
         // The source client, not the lease dispatch wrapper. This tool never
         // sends a request; it reads the selected session descriptor to say
         // whether the pinned class reference matches the attached engine, and

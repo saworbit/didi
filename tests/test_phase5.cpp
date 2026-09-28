@@ -115,6 +115,40 @@ TEST(Phase5, ParsesGodotShaderDiagnosticsAndBoundsContinuation) {
     ASSERT_EQ(diagnostics[1].line, 3);
 }
 
+// Both parsers keep 1000 diagnostics. Filling the limit exactly is not a cut,
+// one more is, and lines after the limit that are not diagnostics are not
+// either (Q5).
+TEST(Phase5, DiagnosticParsersSayWhenTheyDroppedOne) {
+    const auto godot = [](int count, bool trailing_noise) {
+        std::string output;
+        for (int i = 0; i < count; ++i) {
+            output += "ERROR: res://shaders/water.gdshader:" + std::to_string(i + 1) + " - Expected expression.\n";
+        }
+        if (trailing_noise) output += "Godot Engine v4.6.2.stable.official\n";
+        return output;
+    };
+    // The flag is only ever set, as the handlers use it, so each call starts false.
+    bool cut = false;
+    ASSERT_EQ(parseGodotDiagnostics(godot(1000, true), &cut).size(), 1000u);
+    ASSERT_TRUE(!cut);
+    ASSERT_EQ(parseGodotDiagnostics(godot(1001, false), &cut).size(), 1000u);
+    ASSERT_TRUE(cut);
+
+    const auto msbuild = [](int count, bool trailing_noise) {
+        std::string output;
+        for (int i = 0; i < count; ++i) {
+            output += "Player.cs(" + std::to_string(i + 1) + ",13): error CS1002: ; expected [Game.csproj]\n";
+        }
+        if (trailing_noise) output += "Build FAILED.\n";
+        return output;
+    };
+    cut = false;
+    ASSERT_EQ(parseMsBuildDiagnostics(msbuild(1000, true), &cut).size(), 1000u);
+    ASSERT_TRUE(!cut);
+    ASSERT_EQ(parseMsBuildDiagnostics(msbuild(1001, false), &cut).size(), 1000u);
+    ASSERT_TRUE(cut);
+}
+
 TEST(Phase5, ParsesGodot45DummyRendererShaderDiagnostic) {
     const auto diagnostics = parseGodotDiagnostics(
         "SHADER ERROR: Expected expression, found: 'PARENTHESIS_CLOSE'.\r\n"

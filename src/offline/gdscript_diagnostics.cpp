@@ -607,6 +607,7 @@ std::vector<ScriptDiagnostic> GDScriptDiagnostics::runGodotCompilerCheck(
                 std::chrono::steady_clock::now() - start_time).count();
             if (elapsed > 5000) {
                 TerminateProcess(pi.hProcess, 124);
+                if (engine) engine->timed_out = true;
                 break;
             }
         }
@@ -683,6 +684,7 @@ std::vector<ScriptDiagnostic> GDScriptDiagnostics::runGodotCompilerCheck(
                 if (elapsed > 5000) {
                     kill(pid, SIGKILL);
                     waitpid(pid, &status, 0);
+                    if (engine) engine->timed_out = true;
                     break;
                 }
                 std::this_thread::sleep_for(std::chrono::milliseconds(20));

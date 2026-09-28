@@ -125,8 +125,9 @@ struct Bus {
     bool bypass{false};
 };
 
-// The index a `bus/<n>/...` key names, or nothing for any other key.
-std::optional<int> busIndex(const std::string& key, std::string& rest) {
+// The index a `bus/<n>/...` key names, or nothing for any other key. An index
+// past the cap is also nothing, and `beyond_cap` says that is why.
+std::optional<int> busIndex(const std::string& key, std::string& rest, bool& beyond_cap) {
     if (!strings::startsWith(key, "bus/")) return std::nullopt;
     const auto slash = key.find('/', 4);
     if (slash == std::string::npos || slash == 4) return std::nullopt;
@@ -134,7 +135,10 @@ std::optional<int> busIndex(const std::string& key, std::string& rest) {
     for (size_t at = 4; at < slash; ++at) {
         if (key[at] < '0' || key[at] > '9') return std::nullopt;
         index = index * 10 + (key[at] - '0');
-        if (static_cast<size_t>(index) >= kMaxBuses) return std::nullopt;
+        if (static_cast<size_t>(index) >= kMaxBuses) {
+            beyond_cap = true;
+            return std::nullopt;
+        }
     }
     rest = key.substr(slash + 1);
     return index;
@@ -206,10 +210,11 @@ Result<json> readLayoutAt(const std::filesystem::path& root, const std::string& 
     // Read through the shared scan, which knows what the engine counts as a key,
     // a comment and the end of a value.
     std::map<int, Bus> buses;
+    bool beyond_cap = false;
     for (const auto& entry : scanned.entries) {
         if (entry.section != "resource") continue;
         std::string key;
-        const auto index = busIndex(entry.key, key);
+        const auto index = busIndex(entry.key, key, beyond_cap);
         if (!index) continue;
         // Any key under the index makes the bus, including an effect key.
         auto& bus = buses[*index];
@@ -275,6 +280,8 @@ Result<json> readLayoutAt(const std::filesystem::path& root, const std::string& 
         {"layout_loads", true},
         {"buses", std::move(array)},
         {"bus_count", buses.size()},
+        // A bus past the cap is not read, and said so rather than dropped (Q5).
+        {"truncated", beyond_cap},
         // Effects are stored as sub-resources rather than as bus properties, so
         // the file says how a bus is routed but not what processes it. Saying
         // that is better than reporting an empty effect list as if it were one.

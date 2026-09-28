@@ -351,6 +351,9 @@ void ResourceIndexer::scan(const std::string& root_dir) {
         }
     } catch (const std::exception& e) {
         DIDI_LOG_WARN("RESOURCE_INDEXER", "Error scanning resources: ", e.what());
+        // The walk stopped part way, so what was indexed is not the project:
+        // the same fact as the cap, and reported the same way (Q5).
+        m_truncated = true;
     }
 }
 

@@ -233,7 +233,16 @@ CallToolResult handleScriptCheckSyntax(const json& args, std::shared_ptr<ipc::II
         if (!engine.ran && !engine.failure.empty()) {
             result["engine_unavailable_reason"] = engine.failure;
         }
+        result["engine_timed_out"] = engine.timed_out;
+        if (engine.timed_out) {
+            result["limitation"] =
+                "The Godot compiler was stopped at its 5-second limit, so any diagnostic it had "
+                "not printed yet is missing and has_errors: false is not a verdict.";
+        }
     }
+    // The compiler pass is bounded by time, and a pass cut short can have
+    // stopped before the error that mattered (Q5).
+    result["truncated"] = engine_was_asked && engine.timed_out;
 
     // Which engine answered. The whole question this tool exists for is "will
     // the engine accept this?", and resolveGodotExecutable picks newest-first

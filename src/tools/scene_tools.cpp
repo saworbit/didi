@@ -37,7 +37,10 @@ static std::string findProjectMainScene() {
 // and offline paths answer with the same shape and the same metadata.
 static CallToolResult shapedHierarchyResult(json payload,
                                             const HierarchyViewOptions& options) {
-    if (!payload.contains("scene_tree")) return CallToolResult::successJson(std::move(payload));
+    if (!payload.contains("scene_tree")) {
+        if (!payload.contains("truncated")) payload["truncated"] = false;
+        return CallToolResult::successJson(std::move(payload));
+    }
 
     HierarchyViewStats stats;
     payload["scene_tree"] = shapeHierarchy(payload["scene_tree"], options, stats);
@@ -50,8 +53,11 @@ static CallToolResult shapedHierarchyResult(json payload,
             payload["matched_nodes"] = stats.matched_nodes;
         }
         if (options.max_nodes > 0) payload["max_nodes"] = options.max_nodes;
-        if (stats.truncated) payload["truncated"] = true;
     }
+    // On every answer from both paths, and covering the bridge's own budget
+    // cuts as well as max_depth and max_nodes: it used to appear only when set,
+    // so a whole tree and an unflagged one looked the same (Q5).
+    payload["truncated"] = payload.value("truncated", false) || stats.truncated;
     return CallToolResult::successJson(std::move(payload));
 }
 
@@ -570,7 +576,18 @@ CallToolResult handleSceneRemoveFromGroup(const json& args, std::shared_ptr<ipc:
     return forwardLiveSceneWiring(args, ipc, "scene.removeFromGroup", "remove a node from a group");
 }
 CallToolResult handleSceneGetGroupMembers(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
-    return forwardLiveSceneWiring(args, ipc, "scene.getGroupMembers", "query group members");
+    auto result = forwardLiveSceneWiring(args, ipc, "scene.getGroupMembers", "query group members");
+    // members is whole; the list of other groups offered beside it is capped at
+    // 128, which only known_groups_truncated said (Q5).
+    if (!result.isError && result.structuredContent.has_value() &&
+        result.structuredContent->is_object()) {
+        auto& payload = *result.structuredContent;
+        payload["truncated"] = payload.value("known_groups_truncated", false);
+        for (auto& item : result.content) {
+            if (item.type == "text") item.text = payload.dump();
+        }
+    }
+    return result;
 }
 CallToolResult handleSceneCreate(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     return forwardLiveSceneWiring(args, ipc, "scene.create", "create a scene");
