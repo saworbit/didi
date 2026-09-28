@@ -9,8 +9,9 @@ against every error code the source emits and every code the floor derives
 from a status. The live harness checks the refusals themselves.
 
 A failure answered as plain text rather than an envelope has no data at all,
-so nothing can name its fix. Those are counted, and the count may only fall:
-tests/refusal_remedies.json records it.
+so nothing can name its fix. CallToolResult keeps the constructor that makes
+one private, so a new one does not compile; this holds that in place, and the
+live harness fails a plain-text failure that reaches a caller anyway.
 """
 
 import json
@@ -27,7 +28,7 @@ except ImportError:
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "src"
 ERROR_DATA = SOURCE / "mcp" / "error_data.cpp"
-BASELINE = ROOT / "tests" / "refusal_remedies.json"
+PROTOCOL = ROOT / "include" / "didi" / "mcp" / "mcp_protocol.hpp"
 
 # Every shape a code is set in: an envelope literal, an assignment, and the
 # two helpers the extension builds refusals through.
@@ -45,7 +46,9 @@ CODE_PATTERNS = (
 # every identifier its bridgeError calls use, including through variables.
 SENTENCE_TABLE_KEY = re.compile(r'^\s*\{"([a-z][a-z0-9_]+)",\s*$', re.M)
 BRIDGE = SOURCE / "gdextension" / "godot_bridge.cpp"
-PLAIN_TEXT_ERROR = re.compile(r'CallToolResult::error\("')
+# Any argument, not only a string literal. The census this replaced matched a
+# literal alone and counted 156 of the 199 there were.
+PLAIN_TEXT_ERROR = re.compile(r'CallToolResult::error\(')
 
 
 def emitted_codes():
@@ -70,8 +73,19 @@ def status_codes():
 
 
 def plain_text_error_sites():
-    return sum(len(PLAIN_TEXT_ERROR.findall(path.read_text(encoding="utf-8", errors="replace")))
-               for path in SOURCE.rglob("*.cpp"))
+    sites = []
+    for path in sorted(SOURCE.rglob("*.cpp")):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for match in PLAIN_TEXT_ERROR.finditer(text):
+            line = text.count("\n", 0, match.start()) + 1
+            sites.append(f"{path.relative_to(ROOT).as_posix()}:{line}")
+    return sites
+
+
+def call_tool_result_body():
+    text = PROTOCOL.read_text(encoding="utf-8")
+    start = text.index("struct CallToolResult {")
+    return text[start:text.index("\n};", start)]
 
 
 def manifest_refusals():
@@ -104,18 +118,19 @@ class Census(unittest.TestCase):
 
 
 class PlainTextFailures(unittest.TestCase):
-    def test_the_count_only_falls(self):
-        recorded = json.loads(BASELINE.read_text(encoding="utf-8"))["plain_text_error_sites"]
-        now = plain_text_error_sites()
-        self.assertLessEqual(
-            now, recorded,
-            f"{now} CallToolResult::error(\"...\") sites answer in plain text, up from {recorded}. "
-            "A failure answered as plain text has no error.data, so it cannot name its fix; "
-            "answer with CallToolResult::errorJson or fromError instead.")
+    def test_no_failure_answers_in_plain_text(self):
         self.assertEqual(
-            now, recorded,
-            f"{now} plain-text error sites, down from {recorded}: lower plain_text_error_sites "
-            "in tests/refusal_remedies.json so the gain is kept.")
+            plain_text_error_sites(), [],
+            "A failure answered as plain text has no error.data, so it cannot name its fix; "
+            "answer with CallToolResult::errorJson, fromError or notConnected instead.")
+
+    def test_the_plain_text_constructor_stays_private(self):
+        body = call_tool_result_body()
+        constructor = body.index("static CallToolResult error(std::string")
+        private = body.rfind("private:", 0, constructor)
+        self.assertNotEqual(private, -1, "CallToolResult::error(std::string) is public again")
+        self.assertEqual(body.rfind("public:", private, constructor), -1,
+                         "CallToolResult::error(std::string) is public again")
 
 
 if __name__ == "__main__":

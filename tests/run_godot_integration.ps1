@@ -2846,6 +2846,11 @@ try {
     # Read directly rather than through Tool-Payload: this response is meant to
     # be an error, and the report is the payload of it.
     Assert-True $applyById[642].result.isError "A proposal that was not applied came back as a plain success."
+    # The report is what the documentation promises, and the envelope beside it
+    # is what every failure carries, so it names the fix (Q6).
+    $rejected = $applyById[642].result.content[0].text | ConvertFrom-Json
+    Assert-True ($rejected.applied -eq $false -and $null -ne $rejected.PSObject.Properties["scene_run"]) "The rejected proposal's report is not whole beside its error: $($applyById[642].result.content[0].text)"
+    Assert-True ($rejected.error.code -eq 422 -and $rejected.error.data.code -eq "verification_failed" -and $rejected.error.data.field -eq "changes") "A rejected proposal did not carry the envelope that names its fix: $($rejected.error | ConvertTo-Json -Depth 4 -Compress)"
 
     # scene_call_method. The verb an agent could observe a project having and
     # could not press (#389).

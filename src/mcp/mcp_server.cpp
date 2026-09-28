@@ -926,12 +926,11 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
             if (action != "accept") {
                 // Refusal and dismissal are different answers, and an agent that
                 // cannot tell them apart will retry the one it should not.
-                json payload = {{"error", {{"code", 403},
-                                           {"message", "Mutation was not approved"},
-                                           {"data", {{"tool", name}, {"action", action},
-                                                     {"retryable", action == "cancel"}}}}}};
                 return JsonRpcResponse::makeSuccess(
-                    req.id, encode(CallToolResult::error(payload.dump())));
+                    req.id, encode(CallToolResult::errorJson(
+                                403, "Mutation was not approved",
+                                {{"tool", name}, {"action", action},
+                                 {"retryable", action == "cancel"}})));
             }
             json approved = arguments;
             approved["confirmation_token"] = state->at("token");

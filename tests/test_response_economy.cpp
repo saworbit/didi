@@ -74,7 +74,10 @@ std::vector<CallToolResult> everyResultShape() {
              {"error", {{"code", 404}, {"message", "gone"}}}});
     live_error.isError = true;
     shapes.push_back(live_error);
-    shapes.push_back(CallToolResult::error("{\"error\":{\"code\":400}}"));
+    CallToolResult by_hand;
+    by_hand.content.push_back(didi::mcp::ContentItem::makeText("{\"error\":{\"code\":400}}"));
+    by_hand.isError = true;
+    shapes.push_back(by_hand);
     shapes.push_back(CallToolResult::fromError(didi::Error(409, "conflict")));
     return shapes;
 }
@@ -643,7 +646,10 @@ static void test_fields_are_published_and_checked_like_any_argument() {
     const auto listing = send(server, "tools/list", json::object());
     int with_fields = 0;
     for (const auto& tool : listing["tools"]) {
-        const auto& properties = tool["inputSchema"]["properties"];
+        // A tool that takes no arguments publishes no properties, and a const
+        // operator[] on a missing key reads past the object once NDEBUG removes
+        // its assert: the sanitizer job caught it on runtime_get_session.
+        const auto properties = tool["inputSchema"].value("properties", json::object());
         if (!properties.contains("fields")) continue;
         ++with_fields;
         ASSERT_EQ(properties["fields"]["type"], "array");

@@ -12,9 +12,9 @@ CallToolResult handleEditorUndo(const json& args, std::shared_ptr<ipc::IIpcClien
         if (res.isOk()) {
             return CallToolResult::successJson(res.value());
         }
-        return CallToolResult::error("Editor undo failed: " + res.error().message);
+        return CallToolResult::fromError(res.error(), "Editor undo failed: ");
     }
-    return CallToolResult::error("Godot Editor is offline. Launch Godot to execute Undo transactions.");
+    return CallToolResult::notConnected("Godot Editor is offline. Launch Godot to execute Undo transactions.");
 }
 
 CallToolResult handleEditorRedo(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
@@ -23,9 +23,9 @@ CallToolResult handleEditorRedo(const json& args, std::shared_ptr<ipc::IIpcClien
         if (res.isOk()) {
             return CallToolResult::successJson(res.value());
         }
-        return CallToolResult::error("Editor redo failed: " + res.error().message);
+        return CallToolResult::fromError(res.error(), "Editor redo failed: ");
     }
-    return CallToolResult::error("Godot Editor is offline. Launch Godot to execute Redo transactions.");
+    return CallToolResult::notConnected("Godot Editor is offline. Launch Godot to execute Redo transactions.");
 }
 
 CallToolResult handleEditorSaveScene(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
@@ -34,9 +34,9 @@ CallToolResult handleEditorSaveScene(const json& args, std::shared_ptr<ipc::IIpc
         if (res.isOk()) {
             return CallToolResult::successJson(res.value());
         }
-        return CallToolResult::error("Editor save scene failed: " + res.error().message);
+        return CallToolResult::fromError(res.error(), "Editor save scene failed: ");
     }
-    return CallToolResult::error("Godot Editor is offline. Launch Godot to save active scene.");
+    return CallToolResult::notConnected("Godot Editor is offline. Launch Godot to save active scene.");
 }
 
 CallToolResult handleEditorReloadProject(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
@@ -45,7 +45,7 @@ CallToolResult handleEditorReloadProject(const json& args, std::shared_ptr<ipc::
         if (res.isOk()) {
             return CallToolResult::successJson(res.value());
         }
-        return CallToolResult::error("Editor reload project failed: " + res.error().message);
+        return CallToolResult::fromError(res.error(), "Editor reload project failed: ");
     }
     // Offline this is the whole job. Callers reach for it after changing files
     // outside Didi, and it used to report a re-index while the cached index

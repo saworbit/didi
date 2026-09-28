@@ -64,7 +64,7 @@ static CallToolResult shapedHierarchyResult(json payload,
 CallToolResult handleGetSceneHierarchy(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     auto view = parseHierarchyViewOptions(args);
     if (view.isErr()) {
-        return CallToolResult::error("Invalid scene hierarchy request: " + view.error().message);
+        return CallToolResult::fromError(view.error(), "Invalid scene hierarchy request: ");
     }
 
     // A .tscn root_path is a question about a file, and the file is readable
@@ -80,7 +80,7 @@ CallToolResult handleGetSceneHierarchy(const json& args, std::shared_ptr<ipc::II
         if (res.isOk()) {
             return shapedHierarchyResult(res.value(), view.value());
         }
-        return CallToolResult::error("Failed to query scene hierarchy from Godot: " + res.error().message);
+        return CallToolResult::fromError(res.error(), "Failed to query scene hierarchy from Godot: ");
     }
 
     // Offline mode. With no editor there is no scene tree to walk, so a request
@@ -94,21 +94,29 @@ CallToolResult handleGetSceneHierarchy(const json& args, std::shared_ptr<ipc::II
     if (substituted) {
         root = findProjectMainScene();
     } else if (!strings::endsWith(root, ".tscn")) {
-        return CallToolResult::error(
+        return CallToolResult::notConnected(
             "With no editor attached this reads a .tscn file, and '" + requested +
             "' is not one. Pass a res:// path to a .tscn, or omit root_path for the "
             "project's main scene. A node path can only be scoped to with an editor "
-            "attached.");
+            "attached.",
+            {{"field", "root_path"}});
     }
     if (root.empty()) {
-        return CallToolResult::error(
-            "No offline scene path was provided and project.godot has no run/main_scene.");
+        return CallToolResult::notConnected(
+            "No offline scene path was provided and project.godot has no run/main_scene.",
+            {{"field", "root_path"}});
     }
     auto resolved = paths::resolveProjectFile(root);
-    if (resolved.isErr() || resolved.value().extension() != ".tscn") {
-        return CallToolResult::error(
-            "Invalid offline scene path: " +
-            (resolved.isErr() ? resolved.error().message : std::string("path must identify a .tscn file")));
+    if (resolved.isErr()) {
+        auto error = resolved.error();
+        if (!error.data.is_object()) error.data = json::object();
+        error.data["field"] = "root_path";
+        return CallToolResult::fromError(error, "Invalid offline scene path: ");
+    }
+    if (resolved.value().extension() != ".tscn") {
+        return CallToolResult::errorJson(
+            400, "Invalid offline scene path: path must identify a .tscn file",
+            {{"field", "root_path"}});
     }
     std::ifstream file(resolved.value());
 
@@ -343,11 +351,15 @@ CallToolResult handleGetSceneHierarchy(const json& args, std::shared_ptr<ipc::II
         return shapedHierarchyResult(std::move(tree_res), view.value());
     }
 
-    json offline_msg = {
-        {"status", "offline"},
-        {"message", "Godot Editor is offline. Connect Godot Editor with Didi GDExtension to inspect live in-memory SceneTree, or provide a '.tscn' path in root_path."}
-    };
-    return CallToolResult::error("Godot Editor is offline. " + offline_msg.dump(2));
+    // The path resolved to a file and the file would not open. This used to say
+    // the editor was offline, which is true of every call that reaches here and
+    // is not why it failed. It is the state the script tools answer 403
+    // unreadable for, in the same words.
+    return CallToolResult::errorJson(
+        403,
+        "This scene file is there and cannot be read: " + root +
+            ". Check its permissions, or whether another process is holding it open.",
+        {{"code", "forbidden"}, {"reason", "unreadable"}, {"file_path", root}});
 }
 
 CallToolResult handleSceneInstantiateNode(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
@@ -378,16 +390,16 @@ CallToolResult handleSceneInstantiateNode(const json& args, std::shared_ptr<ipc:
         if (res.isOk()) {
             return CallToolResult::successJson(res.value());
         }
-        return CallToolResult::error("Failed to instantiate node in Godot: " + res.error().message);
+        return CallToolResult::fromError(res.error(), "Failed to instantiate node in Godot: ");
     }
 
-    return CallToolResult::error("Godot Editor is offline. Launch Godot to instantiate nodes interactively.");
+    return CallToolResult::notConnected("Godot Editor is offline. Launch Godot to instantiate nodes interactively.");
 }
 
 CallToolResult handleSceneRemoveNode(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     std::string target_node = args.value("target_node", "");
     if (target_node.empty()) {
-        return CallToolResult::error("Parameter 'target_node' is required.");
+        return CallToolResult::errorJson(400, "Parameter 'target_node' is required.");
     }
 
     if (ipc && ipc->isConnected()) {
@@ -395,10 +407,10 @@ CallToolResult handleSceneRemoveNode(const json& args, std::shared_ptr<ipc::IIpc
         if (res.isOk()) {
             return CallToolResult::successJson(res.value());
         }
-        return CallToolResult::error("Failed to remove node in Godot: " + res.error().message);
+        return CallToolResult::fromError(res.error(), "Failed to remove node in Godot: ");
     }
 
-    return CallToolResult::error("Godot Editor is offline. Launch Godot to delete nodes with UndoRedo.");
+    return CallToolResult::notConnected("Godot Editor is offline. Launch Godot to delete nodes with UndoRedo.");
 }
 
 CallToolResult handleSceneReparentNode(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
@@ -416,10 +428,10 @@ CallToolResult handleSceneReparentNode(const json& args, std::shared_ptr<ipc::II
         if (res.isOk()) {
             return CallToolResult::successJson(res.value());
         }
-        return CallToolResult::error("Failed to reparent node in Godot: " + res.error().message);
+        return CallToolResult::fromError(res.error(), "Failed to reparent node in Godot: ");
     }
 
-    return CallToolResult::error("Godot Editor is offline. Launch Godot to reparent nodes with UndoRedo.");
+    return CallToolResult::notConnected("Godot Editor is offline. Launch Godot to reparent nodes with UndoRedo.");
 }
 
 // Calls a method the target node's own script declares.
@@ -430,50 +442,52 @@ CallToolResult handleSceneReparentNode(const json& args, std::shared_ptr<ipc::II
 // declares, and whether the one named turned out to be a coroutine (#389).
 CallToolResult handleSceneCallMethod(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     if (!args.is_object()) {
-        return CallToolResult::error("Invalid scene_call_method request: arguments must be an object.");
+        return CallToolResult::errorJson(400, "Invalid scene_call_method request: arguments must be an object.");
     }
     const std::string target_node = args.value("target_node", "");
     const std::string method_name = args.value("method_name", "");
     if (target_node.empty() || target_node.size() > 1024) {
-        return CallToolResult::error("Parameter 'target_node' is required.");
+        return CallToolResult::errorJson(400, "Parameter 'target_node' is required.");
     }
     if (method_name.empty() || method_name.size() > 128) {
-        return CallToolResult::error("Parameter 'method_name' is required and must be 1 to 128 characters.");
+        return CallToolResult::errorJson(400, "Parameter 'method_name' is required and must be 1 to 128 characters.");
     }
     if (method_name.front() == '_') {
-        return CallToolResult::error(
+        return CallToolResult::errorJson(
+            400,
             "Refusing to call \"" + method_name +
             "\". A leading underscore is Godot's mark for an engine callback or a script's "
             "private helper, and calling one by hand corrupts node state. Expose the behaviour "
-            "under a name without the underscore.");
+            "under a name without the underscore.",
+            {{"field", "method_name"}});
     }
     if (args.contains("arguments")) {
         if (!args["arguments"].is_array() || args["arguments"].size() > 8) {
-            return CallToolResult::error(
-                "Parameter 'arguments' must be an array of at most 8 values.");
+            return CallToolResult::errorJson(
+                400, "Parameter 'arguments' must be an array of at most 8 values.");
         }
         try {
             if (args["arguments"].dump().size() > 8u * 1024u) {
-                return CallToolResult::error("Parameter 'arguments' exceeds 8 KiB.");
+                return CallToolResult::errorJson(400, "Parameter 'arguments' exceeds 8 KiB.");
             }
         } catch (const json::exception&) {
-            return CallToolResult::error("Parameter 'arguments' is not valid JSON text.");
+            return CallToolResult::errorJson(400, "Parameter 'arguments' is not valid JSON text.");
         }
     }
     if (args.contains("timeout_seconds")) {
         const auto& value = args["timeout_seconds"];
         if ((!value.is_number_integer() && !value.is_number_unsigned()) ||
             value.get<int64_t>() < 1 || value.get<int64_t>() > 120) {
-            return CallToolResult::error("Parameter 'timeout_seconds' must be an integer from 1 to 120.");
+            return CallToolResult::errorJson(400, "Parameter 'timeout_seconds' must be an integer from 1 to 120.");
         }
     }
 
     if (ipc && ipc->isConnected()) {
         auto res = ipc->sendRequest("scene.callMethod", args, ::didi::ipc::kWaitForDefinitiveResponse);
         if (res.isOk()) return CallToolResult::successJson(res.value());
-        return CallToolResult::error("Failed to call the method: " + res.error().message);
+        return CallToolResult::fromError(res.error(), "Failed to call the method: ");
     }
-    return CallToolResult::error(
+    return CallToolResult::notConnected(
         "Godot Editor is offline. scene_call_method runs project code in the editor's own "
         "process, so it has no offline meaning. Launch Godot and attach.");
 }
@@ -491,10 +505,10 @@ CallToolResult handleSceneSetProperty(const json& args, std::shared_ptr<ipc::IIp
         if (res.isOk()) {
             return CallToolResult::successJson(res.value());
         }
-        return CallToolResult::error("Failed to set node property: " + res.error().message);
+        return CallToolResult::fromError(res.error(), "Failed to set node property: ");
     }
 
-    return CallToolResult::error("Godot Editor is offline. Launch Godot to mutate node properties.");
+    return CallToolResult::notConnected("Godot Editor is offline. Launch Godot to mutate node properties.");
 }
 
 CallToolResult handleSceneGetProperty(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
@@ -510,16 +524,16 @@ CallToolResult handleSceneGetProperty(const json& args, std::shared_ptr<ipc::IIp
         if (res.isOk()) {
             return CallToolResult::successJson(res.value());
         }
-        return CallToolResult::error("Failed to query node property: " + res.error().message);
+        return CallToolResult::fromError(res.error(), "Failed to query node property: ");
     }
 
-    return CallToolResult::error("Godot Editor is offline. Launch Godot to inspect live node properties.");
+    return CallToolResult::notConnected("Godot Editor is offline. Launch Godot to inspect live node properties.");
 }
 
 CallToolResult handleSceneDuplicateNode(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     std::string target_node = args.value("target_node", "");
     if (target_node.empty()) {
-        return CallToolResult::error("Parameter 'target_node' is required.");
+        return CallToolResult::errorJson(400, "Parameter 'target_node' is required.");
     }
 
     if (ipc && ipc->isConnected()) {
@@ -527,10 +541,10 @@ CallToolResult handleSceneDuplicateNode(const json& args, std::shared_ptr<ipc::I
         if (res.isOk()) {
             return CallToolResult::successJson(res.value());
         }
-        return CallToolResult::error("Failed to duplicate node: " + res.error().message);
+        return CallToolResult::fromError(res.error(), "Failed to duplicate node: ");
     }
 
-    return CallToolResult::error("Godot Editor is offline. Launch Godot to duplicate nodes with UndoRedo.");
+    return CallToolResult::notConnected("Godot Editor is offline. Launch Godot to duplicate nodes with UndoRedo.");
 }
 
 CallToolResult handleMutateSceneTree(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
@@ -538,7 +552,7 @@ CallToolResult handleMutateSceneTree(const json& args, std::shared_ptr<ipc::IIpc
     std::string target = args.value("target_node", "");
 
     if (action.empty() || target.empty()) {
-        return CallToolResult::error("Missing required parameters: 'action' and 'target_node'.");
+        return CallToolResult::errorJson(400, "Missing required parameters: 'action' and 'target_node'.");
     }
 
     if (ipc && ipc->isConnected()) {
@@ -546,10 +560,10 @@ CallToolResult handleMutateSceneTree(const json& args, std::shared_ptr<ipc::IIpc
         if (res.isOk()) {
             return CallToolResult::successJson(res.value());
         }
-        return CallToolResult::error("Failed to mutate scene tree in Godot: " + res.error().message);
+        return CallToolResult::fromError(res.error(), "Failed to mutate scene tree in Godot: ");
     }
 
-    return CallToolResult::error("Godot Editor is offline. Please launch Godot Editor to execute live SceneTree mutations with EditorUndoRedoManager.");
+    return CallToolResult::notConnected("Godot Editor is offline. Please launch Godot Editor to execute live SceneTree mutations with EditorUndoRedoManager.");
 }
 
 static CallToolResult forwardLiveSceneWiring(const json& args,
@@ -557,11 +571,11 @@ static CallToolResult forwardLiveSceneWiring(const json& args,
                                              const char* method,
                                              const char* operation) {
     if (!ipc || !ipc->isConnected()) {
-        return CallToolResult::error(std::string("Godot Editor is offline. Launch Godot to ") + operation + ".");
+        return CallToolResult::notConnected(std::string("Godot Editor is offline. Launch Godot to ") + operation + ".");
     }
     auto response = ipc->sendRequest(method, args, ipc::kWaitForDefinitiveResponse);
     if (response.isErr()) {
-        return CallToolResult::error(std::string("Failed to ") + operation + ": " + response.error().message);
+        return CallToolResult::fromError(response.error(), std::string("Failed to ") + operation + ": ");
     }
     return CallToolResult::successJson(response.value());
 }

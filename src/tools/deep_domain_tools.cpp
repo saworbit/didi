@@ -322,6 +322,28 @@ Result<offline::ProcessResult> runGodot(const std::filesystem::path& root,
     return offline::runProcess(request);
 }
 
+// A helper Godot that ran out of time. More time can finish it, up to the
+// tool's ceiling, and at the ceiling nothing the caller sends can (Q6). The
+// table's own advice for a timeout is about a live route; this is a process
+// on this machine, so the site says what fixes it.
+CallToolResult helperTimedOut(std::string message, int used_seconds, int maximum_seconds) {
+    json data = {{"code", "timeout"}, {"timeout_seconds", used_seconds}};
+    if (used_seconds < maximum_seconds) {
+        data["retry_with"] = {{"timeout_seconds", maximum_seconds}};
+    } else {
+        data["no_remedy"] = "It ran for the longest time this tool allows.";
+    }
+    return CallToolResult::errorJson(504, std::move(message), std::move(data));
+}
+
+// A directory an output path needs and the filesystem would not create. The
+// caller chose the path, and another one is the fix it can send.
+CallToolResult outputDirectoryRefused(const std::string& what, const std::error_code& error) {
+    return CallToolResult::errorJson(
+        400, "Failed to create " + what + " output directory: " + error.message(),
+        {{"field", "output_path"}});
+}
+
 const char* shaderHelperSource() {
     return R"GD(extends SceneTree
 
@@ -417,14 +439,14 @@ Result<json> parseMarker(const std::string& output, const std::string& marker) {
 
 CallToolResult handleCSharpCheckBuild(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     (void)ipc;
-    if (!args.is_object()) return CallToolResult::error("C# build arguments must be an object");
+    if (!args.is_object()) return CallToolResult::errorJson(400, "C# build arguments must be an object");
     auto root = projectRoot();
     if (root.isErr()) return CallToolResult::fromError(root.error());
     auto project = selectCSharpProject(root.value(), args);
     if (project.isErr()) return CallToolResult::fromError(project.error());
     const std::string configuration = args.value("configuration", "Debug");
     if (configuration != "Debug" && configuration != "Release") {
-        return CallToolResult::error("configuration must be Debug or Release");
+        return CallToolResult::errorJson(400, "configuration must be Debug or Release");
     }
     auto timeout = timeoutSeconds(args, 60, 300);
     if (timeout.isErr()) return CallToolResult::fromError(timeout.error());
@@ -530,7 +552,7 @@ CallToolResult handleShaderGetVisualGraph(const ResolvedToolBinding& binding, co
 
 CallToolResult handleShaderCheckCompile(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     if (!args.is_object() || !args.contains("shader_path") || !args["shader_path"].is_string()) {
-        return CallToolResult::error("shader_path is required and must be a string");
+        return CallToolResult::errorJson(400, "shader_path is required and must be a string");
     }
     auto root = projectRoot();
     if (root.isErr()) return CallToolResult::fromError(root.error());
@@ -547,8 +569,10 @@ CallToolResult handleShaderCheckCompile(const json& args, std::shared_ptr<ipc::I
     auto run = runGodot(root.value(), offline::isolatedGodotArguments(
         {"--path", paths::projectPathToUtf8(root.value()), "--script",
          paths::projectPathToUtf8(helper.value().path()), "--", requested}), timeout.value());
-    if (run.isErr()) return CallToolResult::error("Failed to run Godot shader compiler: " + run.error().message);
-    if (run.value().timed_out) return CallToolResult::error("Shader compilation timed out before completion");
+    if (run.isErr()) return CallToolResult::fromError(run.error(), "Failed to run Godot shader compiler: ");
+    if (run.value().timed_out) {
+        return helperTimedOut("Shader compilation timed out before completion", timeout.value(), 300);
+    }
     bool diagnostics_truncated = false;
     auto diagnostics = offline::parseGodotDiagnostics(run.value().output, &diagnostics_truncated);
     for (auto& diagnostic : diagnostics) {
@@ -622,7 +646,7 @@ CallToolResult malformedPresetsRefusal(const offline::ExportPresetsFile& file) {
 
 CallToolResult handleProjectListExportPresets(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     (void)ipc;
-    if (!args.is_object() || !args.empty()) return CallToolResult::error("Export preset list arguments must be an empty object");
+    if (!args.is_object() || !args.empty()) return CallToolResult::errorJson(400, "Export preset list arguments must be an empty object");
     auto root = projectRoot();
     if (root.isErr()) return CallToolResult::fromError(root.error());
     const auto path = root.value() / "export_presets.cfg";
@@ -778,7 +802,7 @@ CallToolResult handleProjectExport(const json& args, std::shared_ptr<ipc::IIpcCl
     (void)ipc;
     if (!args.is_object() || !args.contains("preset") || !args["preset"].is_string() ||
         !args.contains("output_path") || !args["output_path"].is_string()) {
-        return CallToolResult::error("preset and output_path are required strings");
+        return CallToolResult::errorJson(400, "preset and output_path are required strings");
     }
     auto root = projectRoot();
     if (root.isErr()) return CallToolResult::fromError(root.error());
@@ -797,10 +821,10 @@ CallToolResult handleProjectExport(const json& args, std::shared_ptr<ipc::IIpcCl
     const std::string platform = record.value().value("platform", "");
     const std::string mode = args.value("mode", "release");
     if (mode != "release" && mode != "debug" && mode != "pack") {
-        return CallToolResult::error("mode must be release, debug, or pack");
+        return CallToolResult::errorJson(400, "mode must be release, debug, or pack");
     }
     if (args.contains("overwrite") && !args["overwrite"].is_boolean()) {
-        return CallToolResult::error("overwrite must be a boolean");
+        return CallToolResult::errorJson(400, "overwrite must be a boolean");
     }
     std::error_code error;
     if (std::filesystem::exists(output.value(), error) && !args.value("overwrite", false)) {
@@ -823,7 +847,7 @@ CallToolResult handleProjectExport(const json& args, std::shared_ptr<ipc::IIpcCl
     auto timeout = timeoutSeconds(args, 300, 900);
     if (timeout.isErr()) return CallToolResult::fromError(timeout.error());
     std::filesystem::create_directories(output.value().parent_path(), error);
-    if (error) return CallToolResult::error("Failed to create export output directory");
+    if (error) return outputDirectoryRefused("export", error);
     const std::string flag = mode == "pack" ? "--export-pack" :
                              mode == "debug" ? "--export-debug" : "--export-release";
     // The name is encoded because Godot trims every argument and decodes %20,
@@ -833,8 +857,10 @@ CallToolResult handleProjectExport(const json& args, std::shared_ptr<ipc::IIpcCl
         {"--path", paths::projectPathToUtf8(root.value()), flag,
          offline::presetNameForCommandLine(preset), paths::projectPathToUtf8(output.value())}),
         timeout.value());
-    if (run.isErr()) return CallToolResult::error("Failed to launch Godot export: " + run.error().message);
-    if (run.value().timed_out) return CallToolResult::error("Project export timed out; output status is unknown");
+    if (run.isErr()) return CallToolResult::fromError(run.error(), "Failed to launch Godot export: ");
+    if (run.value().timed_out) {
+        return helperTimedOut("Project export timed out; output status is unknown", timeout.value(), 900);
+    }
     if (run.value().exit_code != 0) {
         const auto engine_output = withoutTerminalEscapes(run.value().output);
         // Godot checked the preset and refused it, and said why in a block of
@@ -953,7 +979,13 @@ CallToolResult handleProjectExport(const json& args, std::shared_ptr<ipc::IIpcCl
     }
     if (!std::filesystem::is_regular_file(output.value(), error) || error ||
         std::filesystem::file_size(output.value(), error) == 0 || error) {
-        return CallToolResult::error("Godot exited successfully but did not create a non-empty export output");
+        return CallToolResult::errorJson(
+            500, "Godot exited successfully but did not create a non-empty export output",
+            json{{"code", "internal_error"},
+                 {"preset", preset},
+                 {"mode", mode},
+                 {"engine_output", withoutTerminalEscapes(run.value().output)},
+                 {"output_truncated", run.value().output_truncated}});
     }
     return CallToolResult::successJson({
         {"success", true}, {"preset", preset}, {"mode", mode},
@@ -968,7 +1000,7 @@ CallToolResult handleGridmapExportMeshLibrary(const json& args, std::shared_ptr<
     (void)ipc;
     if (!args.is_object() || !args.contains("source_scene") || !args["source_scene"].is_string() ||
         !args.contains("output_path") || !args["output_path"].is_string()) {
-        return CallToolResult::error("source_scene and output_path are required strings");
+        return CallToolResult::errorJson(400, "source_scene and output_path are required strings");
     }
     auto root = projectRoot();
     if (root.isErr()) return CallToolResult::fromError(root.error());
@@ -976,7 +1008,7 @@ CallToolResult handleGridmapExportMeshLibrary(const json& args, std::shared_ptr<
     auto source = paths::resolveProjectFile(source_request);
     if (source.isErr()) return CallToolResult::fromError(source.error());
     if (lower(source.value().extension().string()) != ".tscn") {
-        return CallToolResult::error("source_scene must name a .tscn file");
+        return CallToolResult::errorJson(400, "source_scene must name a .tscn file");
     }
     auto output = resolveOutputPath(root.value(), args["output_path"].get<std::string>());
     if (output.isErr()) return CallToolResult::fromError(output.error());
@@ -994,10 +1026,10 @@ CallToolResult handleGridmapExportMeshLibrary(const json& args, std::shared_ptr<
              {"retryable", false}});
     }
     if (args.contains("overwrite") && !args["overwrite"].is_boolean()) {
-        return CallToolResult::error("overwrite must be a boolean");
+        return CallToolResult::errorJson(400, "overwrite must be a boolean");
     }
     if (args.contains("generate_collisions") && !args["generate_collisions"].is_boolean()) {
-        return CallToolResult::error("generate_collisions must be a boolean");
+        return CallToolResult::errorJson(400, "generate_collisions must be a boolean");
     }
     std::error_code error;
     if (std::filesystem::exists(output.value(), error) && !args.value("overwrite", false)) {
@@ -1008,7 +1040,7 @@ CallToolResult handleGridmapExportMeshLibrary(const json& args, std::shared_ptr<
     auto timeout = timeoutSeconds(args, 60, 300);
     if (timeout.isErr()) return CallToolResult::fromError(timeout.error());
     std::filesystem::create_directories(output.value().parent_path(), error);
-    if (error) return CallToolResult::error("Failed to create MeshLibrary output directory");
+    if (error) return outputDirectoryRefused("MeshLibrary", error);
     auto helper = TemporaryScript::create("mesh-library", meshLibraryHelperSource());
     if (helper.isErr()) return CallToolResult::fromError(helper.error());
     const std::string output_res = asResPath(root.value(), output.value());
@@ -1016,8 +1048,11 @@ CallToolResult handleGridmapExportMeshLibrary(const json& args, std::shared_ptr<
         {"--path", paths::projectPathToUtf8(root.value()), "--script",
          paths::projectPathToUtf8(helper.value().path()), "--", source_request,
          output_res, args.value("generate_collisions", true) ? "true" : "false"}), timeout.value());
-    if (run.isErr()) return CallToolResult::error("Failed to launch MeshLibrary conversion: " + run.error().message);
-    if (run.value().timed_out) return CallToolResult::error("MeshLibrary conversion timed out; output status is unknown");
+    if (run.isErr()) return CallToolResult::fromError(run.error(), "Failed to launch MeshLibrary conversion: ");
+    if (run.value().timed_out) {
+        return helperTimedOut("MeshLibrary conversion timed out; output status is unknown",
+                              timeout.value(), 300);
+    }
     if (run.value().exit_code != 0) {
         // The old message ended in a colon with nothing after it: shaped to
         // carry a reason and carrying none, so a caller could not tell "this
@@ -1036,7 +1071,13 @@ CallToolResult handleGridmapExportMeshLibrary(const json& args, std::shared_ptr<
     auto marker = parseMarker(run.value().output, "DIDI_PHASE5_RESULT:");
     if (marker.isErr()) return CallToolResult::fromError(marker.error());
     if (!std::filesystem::is_regular_file(output.value(), error) || error) {
-        return CallToolResult::error("Godot did not create the MeshLibrary output");
+        return CallToolResult::errorJson(
+            500, "Godot did not create the MeshLibrary output",
+            json{{"code", "internal_error"},
+                 {"source_scene", source_request},
+                 {"output_path", output_res},
+                 {"engine_output", withoutTerminalEscapes(run.value().output)},
+                 {"output_truncated", run.value().output_truncated}});
     }
     return CallToolResult::successJson({
         {"success", true}, {"source_scene", source_request}, {"output_path", output_res},
@@ -1048,112 +1089,111 @@ CallToolResult handleGridmapExportMeshLibrary(const json& args, std::shared_ptr<
 
 CallToolResult handleUiHitTest(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     if (!args.is_object() || !args.contains("point") || !args["point"].is_object()) {
-        return CallToolResult::error("point is required and must be an object");
+        return CallToolResult::errorJson(400, "point is required and must be an object");
     }
     const auto& point = args["point"];
     if (!point.contains("x") || !point["x"].is_number() ||
         !point.contains("y") || !point["y"].is_number()) {
-        return CallToolResult::error("point.x and point.y are required finite numbers");
+        return CallToolResult::errorJson(400, "point.x and point.y are required finite numbers");
     }
     const double x = point["x"].get<double>();
     const double y = point["y"].get<double>();
     if (!std::isfinite(x) || !std::isfinite(y)) {
-        return CallToolResult::error("point.x and point.y must be finite");
+        return CallToolResult::errorJson(400, "point.x and point.y must be finite");
     }
     if (args.contains("root_path") && !args["root_path"].is_string()) {
-        return CallToolResult::error("root_path must be a string");
+        return CallToolResult::errorJson(400, "root_path must be a string");
     }
     if (args.contains("include_mouse_filter_ignore") &&
         !args["include_mouse_filter_ignore"].is_boolean()) {
-        return CallToolResult::error("include_mouse_filter_ignore must be a boolean");
+        return CallToolResult::errorJson(400, "include_mouse_filter_ignore must be a boolean");
     }
     if (args.contains("max_results")) {
         if (!args["max_results"].is_number_integer()) {
-            return CallToolResult::error("max_results must be an integer");
+            return CallToolResult::errorJson(400, "max_results must be an integer");
         }
         const int limit = args["max_results"].get<int>();
-        if (limit < 1 || limit > 256) return CallToolResult::error("max_results must be from 1 to 256");
+        if (limit < 1 || limit > 256) return CallToolResult::errorJson(400, "max_results must be from 1 to 256");
     }
     if (!ipc || !ipc->isConnected()) {
-        return CallToolResult::error("UI hit-testing requires a live Godot editor.");
+        return CallToolResult::notConnected("UI hit-testing requires a live Godot editor.");
     }
     auto response = ipc->sendRequest("ui.hitTest", args, ipc::kWaitForDefinitiveResponse);
-    if (response.isErr()) return CallToolResult::error("UI hit-test failed: " + response.error().message);
+    if (response.isErr()) return CallToolResult::fromError(response.error(), "UI hit-test failed: ");
     if (!response.value().is_object() || !response.value().contains("hits") ||
         !response.value()["hits"].is_array()) {
-        return CallToolResult::error("Live UI hit-test returned a malformed response");
+        return CallToolResult::errorJson(502, "Live UI hit-test returned a malformed response");
     }
     return CallToolResult::successJson(response.value());
 }
 
 
 CallToolResult handleUiListControls(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
-    if (!args.is_object()) return CallToolResult::error("arguments must be an object");
+    if (!args.is_object()) return CallToolResult::errorJson(400, "arguments must be an object");
     if (args.contains("root_path") &&
         (!args["root_path"].is_string() || args["root_path"].get<std::string>().size() > 1024)) {
-        return CallToolResult::error("root_path must be a string of at most 1024 bytes");
+        return CallToolResult::errorJson(400, "root_path must be a string of at most 1024 bytes");
     }
     if (args.contains("visible_only") && !args["visible_only"].is_boolean()) {
-        return CallToolResult::error("visible_only must be a boolean");
+        return CallToolResult::errorJson(400, "visible_only must be a boolean");
     }
     if (args.contains("include_text") && !args["include_text"].is_boolean()) {
-        return CallToolResult::error("include_text must be a boolean");
+        return CallToolResult::errorJson(400, "include_text must be a boolean");
     }
     if (args.contains("max_results")) {
         if (!args["max_results"].is_number_integer()) {
-            return CallToolResult::error("max_results must be an integer");
+            return CallToolResult::errorJson(400, "max_results must be an integer");
         }
         const int limit = args["max_results"].get<int>();
         if (limit < 1 || limit > 256) {
-            return CallToolResult::error("max_results must be from 1 to 256");
+            return CallToolResult::errorJson(400, "max_results must be from 1 to 256");
         }
     }
     if (args.contains("class_filter")) {
         const auto& filter = args["class_filter"];
         if (!filter.is_array() || filter.empty() || filter.size() > 16) {
-            return CallToolResult::error("class_filter must be an array of 1 to 16 class names");
+            return CallToolResult::errorJson(400, "class_filter must be an array of 1 to 16 class names");
         }
         for (const auto& entry : filter) {
             if (!entry.is_string() || entry.get<std::string>().empty() ||
                 entry.get<std::string>().size() > 64) {
-                return CallToolResult::error(
-                    "class_filter entries must be 1 to 64 byte class names");
+                return CallToolResult::errorJson(
+                    400, "class_filter entries must be 1 to 64 byte class names");
             }
         }
     }
     if (!ipc || !ipc->isConnected()) {
-        return CallToolResult::error(
+        return CallToolResult::notConnected(
             "Listing live Control nodes requires a connected Godot editor or game.");
     }
     auto response = ipc->sendRequest("ui.listControls", args, ipc::kWaitForDefinitiveResponse);
     if (response.isErr()) {
-        return CallToolResult::error("UI control listing failed: " + response.error().message);
+        return CallToolResult::fromError(response.error(), "UI control listing failed: ");
     }
     if (!response.value().is_object() || !response.value().contains("controls") ||
         !response.value()["controls"].is_array()) {
-        return CallToolResult::error("Live UI control listing returned a malformed response");
+        return CallToolResult::errorJson(502, "Live UI control listing returned a malformed response");
     }
     return CallToolResult::successJson(response.value());
 }
 
 
 CallToolResult handleSceneGetSelection(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
-    if (!args.is_object()) return CallToolResult::error("arguments must be an object");
-    if (!args.empty()) return CallToolResult::error("scene_get_selection takes no arguments");
+    if (!args.is_object()) return CallToolResult::errorJson(400, "arguments must be an object");
+    if (!args.empty()) return CallToolResult::errorJson(400, "scene_get_selection takes no arguments");
     if (!ipc || !ipc->isConnected()) {
-        return CallToolResult::error(
+        return CallToolResult::notConnected(
             "Reading the editor selection requires a live Godot editor. There is no offline "
             "answer: a selection exists only in a running editor.");
     }
     auto response = ipc->sendRequest("editor.getSelection", json::object(),
                                      ipc::kWaitForDefinitiveResponse);
     if (response.isErr()) {
-        return CallToolResult::error("Reading the editor selection failed: " +
-                                     response.error().message);
+        return CallToolResult::fromError(response.error(), "Reading the editor selection failed: ");
     }
     if (!response.value().is_object() || !response.value().contains("selected") ||
         !response.value()["selected"].is_array()) {
-        return CallToolResult::error("Live editor selection returned a malformed response");
+        return CallToolResult::errorJson(502, "Live editor selection returned a malformed response");
     }
     return CallToolResult::successJson(response.value());
 }

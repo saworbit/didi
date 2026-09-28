@@ -243,12 +243,13 @@ run of three identical failures.
 
 **Surface amendment:** Not needed.
 
-**Delivery:** Three pull requests. The first gives every error code a remedy,
-or a reason it has none, and checks it in CI and on every live refusal; the
-156 failures still answered as plain text, with no `error.data`, are counted
-and may only fall. The second is repeat detection, and the third the
-structured next step on a mutation that leaves work undone. Field trial 07
-measures the second half of **Done when**.
+**Delivery:** Four pull requests. The first gives every error code a remedy,
+or a reason it has none, and checks it in CI and on every live refusal. The
+second is repeat detection. The third answers as envelopes the 199 failures
+that were still plain text, with no `error.data` to carry a remedy, and makes a
+new one fail to compile. The fourth is the structured next step on a mutation
+that leaves work undone. Field trial 07 measures the second half of
+**Done when**.
 
 ### Q7. Typed object layer
 

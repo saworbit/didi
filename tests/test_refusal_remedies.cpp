@@ -5,10 +5,16 @@
 // code and tool. What is asserted here is the floor's half: that it fills a
 // remedy where the site gave none, leaves a site's own alone, and gives a fault
 // none. The census of codes is tests/test_refusal_remedies.py.
+//
+// It only works on an envelope. The second half asserts that a failure a caller
+// meets is one, including at the sites that used to answer a bare sentence.
 
 #include "didi/mcp/error_data.hpp"
 #include "didi/mcp/tool_registry.hpp"
 
+#include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <functional>
 #include <stdexcept>
 #include <string>
@@ -29,6 +35,39 @@ json floored(int status, const std::string& message, const json& data, const std
     didi::mcp::applyErrorDataFloor(error, tool, tool);
     return error["data"];
 }
+
+// The error a failed result carries, or a throw naming what it carried instead.
+json envelopeOf(const didi::mcp::CallToolResult& result) {
+    ASSERT_TRUE(result.isError);
+    ASSERT_EQ(result.content.size(), 1u);
+    const auto parsed = json::parse(result.content[0].text, nullptr, false);
+    if (!parsed.is_object() || !parsed.contains("error") || !parsed["error"].is_object()) {
+        throw std::runtime_error("A failure answered without an envelope: " + result.content[0].text);
+    }
+    return parsed["error"];
+}
+
+class ScopedProject final {
+public:
+    explicit ScopedProject(const std::string& suffix)
+        : m_original(std::filesystem::current_path()),
+          m_root(m_original / "build" / "test-projects" /
+                 ("didi-refusal-" + suffix + "-" +
+                  std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()))) {
+        std::filesystem::create_directories(m_root);
+        std::filesystem::current_path(m_root);
+    }
+
+    ~ScopedProject() {
+        std::error_code error;
+        std::filesystem::current_path(m_original, error);
+        std::filesystem::remove_all(m_root, error);
+    }
+
+private:
+    std::filesystem::path m_original;
+    std::filesystem::path m_root;
+};
 
 }  // namespace
 
@@ -117,6 +156,88 @@ static void test_the_manifest_publishes_the_table() {
     }
 }
 
+// The builders a tool answers a failure with. The one that made a bare sentence
+// is private, so these are all there is.
+static void test_every_failure_builder_makes_an_envelope() {
+    using didi::mcp::CallToolResult;
+    const auto offline = envelopeOf(CallToolResult::notConnected("Launch Godot."));
+    ASSERT_EQ(offline["code"], 503);
+    ASSERT_EQ(offline["message"], "Launch Godot.");
+    // The shape the registry's own refusal of a live-only tool carries.
+    ASSERT_EQ(offline["data"]["retryable"], true);
+    ASSERT_EQ(offline["data"]["blocked_on"], "no_live_session");
+    ASSERT_EQ(offline["data"]["needs_live_engine"], true);
+
+    // A site's own fix and its own values stand beside those defaults.
+    const auto scoped = envelopeOf(
+        CallToolResult::notConnected("x", {{"field", "root_path"}, {"retryable", false}}));
+    ASSERT_EQ(scoped["data"]["field"], "root_path");
+    ASSERT_EQ(scoped["data"]["retryable"], false);
+    ASSERT_EQ(scoped["data"]["blocked_on"], "no_live_session");
+
+    // An upstream error keeps its status and its data behind the tool's
+    // sentence. Prefixing its message by hand is how these lost both.
+    const auto upstream = envelopeOf(CallToolResult::fromError(
+        didi::Error(409, "busy", {{"code", "editor_import_busy"}}), "Failed to reimport assets: "));
+    ASSERT_EQ(upstream["code"], 409);
+    ASSERT_EQ(upstream["message"], "Failed to reimport assets: busy");
+    ASSERT_EQ(upstream["data"]["code"], "editor_import_busy");
+}
+
+// Failures that answered a bare sentence, met the way a caller meets them:
+// through the registry, with the floor applied, and no editor attached.
+static void test_former_plain_text_failures_name_their_fix() {
+    ScopedProject project("envelopes");
+    // A project with no run/main_scene.
+    std::ofstream("project.godot") << "config_version=5" << std::endl;
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    registry.setIpcClient(nullptr);
+
+    // Offline this reads a .tscn, and a node path needs an editor.
+    const auto node_path =
+        envelopeOf(registry.callTool("scene_get_hierarchy", {{"root_path", "Player"}}));
+    ASSERT_EQ(node_path["code"], 503);
+    ASSERT_EQ(node_path["data"]["code"], "not_connected");
+    ASSERT_EQ(node_path["data"]["field"], "root_path");
+    ASSERT_EQ(node_path["data"]["tool"], "scene_get_hierarchy");
+
+    // No root_path, and no main scene to stand in for one.
+    const auto no_main = envelopeOf(registry.callTool("scene_get_hierarchy", json::object()));
+    ASSERT_EQ(no_main["data"]["code"], "not_connected");
+    ASSERT_EQ(no_main["data"]["field"], "root_path");
+
+    // A rule the schema cannot state. The sentence names the argument, and the
+    // floor reads it back out.
+    const auto both = envelopeOf(registry.callTool(
+        "project_set_setting",
+        {{"setting", "application/config/name"}, {"value", "x"}, {"remove", true}}));
+    ASSERT_EQ(both["code"], 400);
+    ASSERT_EQ(both["data"]["code"], "invalid_arguments");
+    ASSERT_EQ(both["data"]["field"], "value");
+
+    // A name no registration carries, which only an in-process caller reaches.
+    const auto unknown = envelopeOf(registry.callTool("no_such_tool", json::object()));
+    ASSERT_EQ(unknown["code"], 404);
+    ASSERT_EQ(unknown["data"]["code"], "not_found");
+    ASSERT_TRUE(unknown["data"]["no_remedy"].is_string());
+}
+
+// The arguments as a whole name no argument of their own. The floor names the
+// fix for the two ways they are wrong.
+static void test_the_arguments_as_a_whole_have_a_fix() {
+    ASSERT_EQ(floored(400, "Invalid audio request: this tool takes no arguments", nullptr,
+                      "audio_list_buses")["retry_with"],
+              json::object());
+    ASSERT_EQ(floored(400, "Export preset list arguments must be an empty object", nullptr,
+                      "project_list_export_presets")["retry_with"],
+              json::object());
+    ASSERT_EQ(floored(400, "arguments must be an object", nullptr, "blackboard_write")["field"],
+              "arguments");
+    // A sentence that names a real argument is still about that argument.
+    ASSERT_EQ(floored(400, "path is required", nullptr, "blackboard_write")["field"], "path");
+}
+
 struct RegisterRefusalRemedyTests {
     RegisterRefusalRemedyTests() {
         registerTest("RefusalRemedies.CodeCarriesItsRemedy",
@@ -127,5 +248,11 @@ struct RegisterRefusalRemedyTests {
                      test_a_fault_names_no_fix_and_a_dead_end_says_so);
         registerTest("RefusalRemedies.ManifestPublishesTheTable",
                      test_the_manifest_publishes_the_table);
+        registerTest("RefusalRemedies.EveryBuilderMakesAnEnvelope",
+                     test_every_failure_builder_makes_an_envelope);
+        registerTest("RefusalRemedies.FormerPlainTextNamesItsFix",
+                     test_former_plain_text_failures_name_their_fix);
+        registerTest("RefusalRemedies.ArgumentsAsAWholeHaveAFix",
+                     test_the_arguments_as_a_whole_have_a_fix);
     }
 } g_register_refusal_remedy_tests;

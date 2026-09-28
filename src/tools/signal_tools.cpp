@@ -16,11 +16,10 @@ namespace {
 
 CallToolResult signalRequestError(const ResolvedToolBinding& binding, int code,
                                   std::string_view message) {
-    return CallToolResult::error(json{{"error", {
-        {"code", code}, {"message", message},
-        {"data", {{"tool", binding.invoked_name},
-                  {"canonical_tool", binding.canonical_name},
-                  {"retryable", false}}}}}}.dump());
+    return CallToolResult::errorJson(code, std::string(message),
+                                     {{"tool", binding.invoked_name},
+                                      {"canonical_tool", binding.canonical_name},
+                                      {"retryable", false}});
 }
 
 CallToolResult invalidSignalRequest(const ResolvedToolBinding& binding,

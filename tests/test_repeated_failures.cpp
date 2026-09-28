@@ -24,8 +24,7 @@ using didi::mcp::CallToolResult;
 CallToolResult refusal(const std::string& code, const json& remedy = json::object()) {
     json data = {{"code", code}};
     data.update(remedy);
-    auto result = CallToolResult::error(json{{"error", {{"code", 409}, {"message", "no"}, {"data", data}}}}.dump());
-    return result;
+    return CallToolResult::errorJson(409, "no", data);
 }
 
 json repeatedOf(const CallToolResult& result) {

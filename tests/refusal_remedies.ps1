@@ -72,6 +72,9 @@ function Assert-RefusalsNameTheirFix([string]$ManifestJson) {
     }
     Assert-True ($missing.Count -eq 0) "Refusals that do not say what fixes them:`n$($missing -join "`n")"
     Assert-True ($checked -ge 50) "Only $checked refusals were checked in this run; the harness has stopped reaching them."
+    # A failure without an envelope has no error.data, so it cannot name its
+    # fix. None is left in the source, and one reaching a caller is a regression.
     $plain = @($unstructured.Keys | Sort-Object | ForEach-Object { "$_ x$($unstructured[$_])" })
-    Write-Output "Refusal remedies: $checked refusals named their fix, $repeats of them marked as a repeat. Plain-text failures still without an envelope: $(if ($plain.Count) { $plain -join ', ' } else { 'none' })."
+    Assert-True ($plain.Count -eq 0) "Failures answered as plain text rather than an envelope: $($plain -join ', ')"
+    Write-Output "Refusal remedies: $checked refusals named their fix, $repeats of them marked as a repeat."
 }

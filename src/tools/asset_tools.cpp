@@ -1254,8 +1254,7 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
     auto written = files::writeFileAtomically(target_p, out.str());
     offline::ResourceIndexer::invalidateSharedIndex();
     if (written.isErr()) {
-        return CallToolResult::error("Failed to write resource file to disk: " +
-                                     written.error().message);
+        return CallToolResult::fromError(written.error(), "Failed to write resource file to disk: ");
     }
     // An editor that has this file loaded keeps its own copy, and nothing an
     // unattended editor does re-reads it: not editor_reload_project, not the
@@ -1375,13 +1374,13 @@ CallToolResult handleAudioConfigureBus(const json& args, std::shared_ptr<ipc::II
         // tool's offline sibling in the shared refusal (#615). Kept as the
         // handler's own floor, in the same words, for any path that reaches
         // here without going through that check.
-        return CallToolResult::error(
+        return CallToolResult::notConnected(
             "Godot Editor is offline. Audio bus state lives in the running engine, so launch "
             "Godot to change it. audio_list_buses still reads the project layout offline.");
     }
     auto response = ipc->sendRequest("audio.configureBus", args, ipc::kWaitForDefinitiveResponse);
     if (response.isErr()) {
-        return CallToolResult::error("Failed to configure the audio bus: " + response.error().message);
+        return CallToolResult::fromError(response.error(), "Failed to configure the audio bus: ");
     }
     auto payload = response.value();
     if (payload.is_object() && payload.value("persisted_by_editor", false) &&
@@ -1411,7 +1410,7 @@ CallToolResult handleAudioAddBus(const json& args, std::shared_ptr<ipc::IIpcClie
     if (!ipc || !ipc->isConnected()) {
         // Unreachable in practice, as for audio_configure_bus: the registry's
         // live-route check answers first and names audio_list_buses.
-        return CallToolResult::error(
+        return CallToolResult::notConnected(
             "Godot Editor is offline. A bus is added to the layout the editor holds, which the "
             "editor then writes to the project, so open the project in the editor to add one. "
             "audio_list_buses still reads the project layout offline.");
@@ -1483,7 +1482,7 @@ CallToolResult handleAudioAddBus(const json& args, std::shared_ptr<ipc::IIpcClie
 
 CallToolResult handleAudioListBuses(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     if (!args.is_object() || !args.empty()) {
-        return CallToolResult::error("Invalid audio request: this tool takes no arguments");
+        return CallToolResult::errorJson(400, "Invalid audio request: this tool takes no arguments");
     }
     // Live first, because a bus a script muted at runtime is exactly the case
     // someone is looking for and the layout file cannot show it. The offline
@@ -1523,22 +1522,22 @@ CallToolResult handleAudioListBuses(const json& args, std::shared_ptr<ipc::IIpcC
 CallToolResult handleProjectRenameReferences(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     (void)ipc;
     if (!args.is_object()) {
-        return CallToolResult::error("Invalid rename request: arguments must be an object");
+        return CallToolResult::errorJson(400, "Invalid rename request: arguments must be an object");
     }
     offline::ProjectRenameOptions options;
     if (!args.contains("target") || !args["target"].is_string()) {
-        return CallToolResult::error("Invalid rename request: target must be a string");
+        return CallToolResult::errorJson(400, "Invalid rename request: target must be a string");
     }
     if (!args.contains("new_name") || !args["new_name"].is_string()) {
-        return CallToolResult::error("Invalid rename request: new_name must be a string");
+        return CallToolResult::errorJson(400, "Invalid rename request: new_name must be a string");
     }
     options.target = args["target"].get<std::string>();
     options.new_name = args["new_name"].get<std::string>();
     if (args.contains("max_impacts")) {
         const auto& value = args["max_impacts"];
         if (!value.is_number_integer() || value.get<int64_t>() < 1 || value.get<int64_t>() > 5000) {
-            return CallToolResult::error(
-                "Invalid rename request: max_impacts must be an integer from 1 to 5000");
+            return CallToolResult::errorJson(
+                400, "Invalid rename request: max_impacts must be an integer from 1 to 5000");
         }
         options.max_impacts = static_cast<size_t>(value.get<int64_t>());
     }
@@ -1548,13 +1547,7 @@ CallToolResult handleProjectRenameReferences(const json& args, std::shared_ptr<i
         // The conflict and truncation refusals carry the evidence a caller needs
         // to act, so they travel with the message rather than being flattened
         // into it.
-        const auto& failure = report.error();
-        if (failure.data.is_object() && !failure.data.empty()) {
-            return CallToolResult::error(
-                json{{"error", {{"code", failure.code}, {"message", failure.message},
-                                {"data", failure.data}}}}.dump());
-        }
-        return CallToolResult::error(failure.message);
+        return CallToolResult::fromError(report.error());
     }
     auto payload = report.value();
     payload["execution_mode"] = "offline_fallback";
@@ -1564,7 +1557,7 @@ CallToolResult handleProjectRenameReferences(const json& args, std::shared_ptr<i
 CallToolResult handleProjectVerifyChanges(const json& args) {
     auto parsed = offline::parseSpeculativeVerifyRequest(args);
     if (parsed.isErr()) {
-        return CallToolResult::error("Invalid verification request: " + parsed.error().message);
+        return CallToolResult::fromError(parsed.error(), "Invalid verification request: ");
     }
     auto verified = offline::verifyChangesInSandbox(parsed.value());
     if (verified.isErr()) {
@@ -1576,7 +1569,7 @@ CallToolResult handleProjectVerifyChanges(const json& args) {
 CallToolResult handleProjectApplyChanges(const json& args) {
     auto parsed = offline::parseSpeculativeVerifyRequest(args);
     if (parsed.isErr()) {
-        return CallToolResult::error("Invalid apply request: " + parsed.error().message);
+        return CallToolResult::fromError(parsed.error(), "Invalid apply request: ");
     }
     auto applied = offline::applyVerifiedChanges(parsed.value());
     if (applied.isErr()) {
@@ -1589,29 +1582,38 @@ CallToolResult handleProjectApplyChanges(const json& args) {
     }
     auto payload = applied.value().toJson();
     payload["execution_mode"] = "offline_fallback";
-    // A proposal the check rejected is not an error in this tool. The tool did
-    // what it promises, which is to write nothing when the proposal does not
-    // hold up, and the report says why.
+    if (applied.value().applied) return CallToolResult::successJson(std::move(payload));
+    // A proposal the check rejected writes nothing, which is what the tool
+    // promises, and the report says why. It is still marked as an error so a
+    // caller cannot read it as a success with a footnote, and like every
+    // failure it carries an envelope naming what fixes it (Q6). The report
+    // stays where it was, beside the envelope, the way a live failure keeps its
+    // session beside its own.
+    payload["error"] = {
+        {"code", 422},
+        {"message", "The proposal did not pass verification, so nothing was written. The report "
+                    "beside this error says which check failed."},
+        {"data", {{"code", "verification_failed"}, {"field", "changes"}, {"retryable", false}}}};
     auto result = CallToolResult::successJson(std::move(payload));
-    result.isError = !applied.value().applied;
+    result.isError = true;
     return result;
 }
 
 CallToolResult handleProjectAnalyzeImpact(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     (void)ipc;
     if (!args.is_object()) {
-        return CallToolResult::error("Invalid impact request: arguments must be an object");
+        return CallToolResult::errorJson(400, "Invalid impact request: arguments must be an object");
     }
     offline::ProjectImpactOptions options;
     if (!args.contains("target") || !args["target"].is_string()) {
-        return CallToolResult::error("Invalid impact request: target must be a string");
+        return CallToolResult::errorJson(400, "Invalid impact request: target must be a string");
     }
     options.target = args["target"].get<std::string>();
     if (args.contains("max_impacts")) {
         const auto& value = args["max_impacts"];
         if (!value.is_number_integer() || value.get<int64_t>() < 1 || value.get<int64_t>() > 5000) {
-            return CallToolResult::error(
-                "Invalid impact request: max_impacts must be an integer from 1 to 5000");
+            return CallToolResult::errorJson(
+                400, "Invalid impact request: max_impacts must be an integer from 1 to 5000");
         }
         options.max_impacts = static_cast<size_t>(value.get<int64_t>());
     }
@@ -1625,7 +1627,7 @@ CallToolResult handleProjectAnalyzeImpact(const json& args, std::shared_ptr<ipc:
 
 CallToolResult handleProjectAuditAssets(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     if (!args.is_object()) {
-        return CallToolResult::error("Invalid audit request: arguments must be an object");
+        return CallToolResult::errorJson(400, "Invalid audit request: arguments must be an object");
     }
     offline::ProjectAuditOptions options;
     for (const auto& [key, target] : {std::pair<const char*, bool*>{"include_orphans", &options.include_orphans},
@@ -1636,24 +1638,24 @@ CallToolResult handleProjectAuditAssets(const json& args, std::shared_ptr<ipc::I
                                       {"include_addon_orphans", &options.include_addon_orphans}}) {
         if (!args.contains(key)) continue;
         if (!args[key].is_boolean()) {
-            return CallToolResult::error(std::string("Invalid audit request: ") + key +
-                                         " must be a boolean");
+            return CallToolResult::errorJson(
+                400, std::string("Invalid audit request: ") + key + " must be a boolean");
         }
         *target = args[key].get<bool>();
     }
     if (args.contains("max_findings")) {
         const auto& value = args["max_findings"];
         if (!value.is_number_integer() || value.get<int64_t>() < 1 || value.get<int64_t>() > 5000) {
-            return CallToolResult::error(
-                "Invalid audit request: max_findings must be an integer from 1 to 5000");
+            return CallToolResult::errorJson(
+                400, "Invalid audit request: max_findings must be an integer from 1 to 5000");
         }
         options.max_findings = static_cast<size_t>(value.get<int64_t>());
     }
     if (!options.include_orphans && !options.include_broken_references &&
         !options.include_dead_signals && !options.include_broken_connections &&
         !options.include_import_health) {
-        return CallToolResult::error(
-            "Invalid audit request: at least one of include_orphans, "
+        return CallToolResult::errorJson(
+            400, "Invalid audit request: at least one of include_orphans, "
             "include_broken_references, include_dead_signals, include_broken_connections or "
             "include_import_health must stay enabled");
     }
@@ -1850,24 +1852,24 @@ std::string uidIndexAgreement(const json& uid_map,
 
 CallToolResult handleProjectGetUidMap(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     if (!args.is_object()) {
-        return CallToolResult::error("Invalid uid map request: arguments must be an object");
+        return CallToolResult::errorJson(400, "Invalid uid map request: arguments must be an object");
     }
     for (const auto& entry : args.items()) {
         if (entry.key() != "resolve") {
-            return CallToolResult::error("Invalid uid map request: unknown parameter " + entry.key());
+            return CallToolResult::errorJson(400, "Invalid uid map request: unknown parameter " + entry.key());
         }
     }
     std::vector<std::string> queries;
     if (args.contains("resolve")) {
         const auto& value = args["resolve"];
         if (!value.is_array() || value.empty() || value.size() > 256) {
-            return CallToolResult::error(
-                "Invalid uid map request: resolve must be an array of 1 to 256 strings");
+            return CallToolResult::errorJson(
+                400, "Invalid uid map request: resolve must be an array of 1 to 256 strings");
         }
         for (const auto& item : value) {
             if (!item.is_string() || item.get<std::string>().empty()) {
-                return CallToolResult::error(
-                    "Invalid uid map request: resolve must contain only non-empty strings");
+                return CallToolResult::errorJson(
+                    400, "Invalid uid map request: resolve must contain only non-empty strings");
             }
             queries.push_back(item.get<std::string>());
         }
@@ -1970,7 +1972,7 @@ CallToolResult handleInstantiateAsset(const json& args, std::shared_ptr<ipc::IIp
     std::string parent_path = args.value("parent_path", "/root");
 
     if (asset_path.empty()) {
-        return CallToolResult::error("Parameter 'asset_path' is required.");
+        return CallToolResult::errorJson(400, "Parameter 'asset_path' is required.");
     }
 
     if (ipc && ipc->isConnected()) {
@@ -1978,21 +1980,21 @@ CallToolResult handleInstantiateAsset(const json& args, std::shared_ptr<ipc::IIp
         if (res.isOk()) {
             return CallToolResult::successJson(res.value());
         }
-        return CallToolResult::error("Failed to instantiate asset in Godot: " + res.error().message);
+        return CallToolResult::fromError(res.error(), "Failed to instantiate asset in Godot: ");
     }
 
-    return CallToolResult::error("Godot Editor is offline. Launch Godot Editor to instantiate assets directly into the scene tree.");
+    return CallToolResult::notConnected("Godot Editor is offline. Launch Godot Editor to instantiate assets directly into the scene tree.");
 }
 
 CallToolResult handleAssetReimport(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     if (!args.is_object() || !args.contains("paths") || !args["paths"].is_array() ||
         args["paths"].empty() || args["paths"].size() > 256) {
-        return CallToolResult::error("Invalid asset reimport request: paths must be an array of 1 to 256 strings");
+        return CallToolResult::errorJson(400, "Invalid asset reimport request: paths must be an array of 1 to 256 strings");
     }
     std::set<std::string> unique;
     for (const auto& value : args["paths"]) {
         if (!value.is_string()) {
-            return CallToolResult::error("Invalid asset reimport request: paths must contain only strings");
+            return CallToolResult::errorJson(400, "Invalid asset reimport request: paths must contain only strings");
         }
         const auto path = value.get<std::string>();
         const auto remainder = strings::startsWith(path, "res://") ? path.substr(6) : std::string();
@@ -2003,26 +2005,26 @@ CallToolResult handleAssetReimport(const json& args, std::shared_ptr<ipc::IIpcCl
             remainder.find("//") != std::string::npos || strings::startsWith(remainder, "./") ||
             remainder.find("/./") != std::string::npos || strings::endsWith(remainder, "/.") ||
             remainder.find(':') != std::string::npos) {
-            return CallToolResult::error("Invalid asset reimport request: every path must be a normalized project-owned res:// source asset");
+            return CallToolResult::errorJson(400, "Invalid asset reimport request: every path must be a normalized project-owned res:// source asset");
         }
         if (!unique.insert(path).second) {
-            return CallToolResult::error("Invalid asset reimport request: paths must be unique");
+            return CallToolResult::errorJson(400, "Invalid asset reimport request: paths must be unique");
         }
     }
     if (args.contains("timeout_ms") &&
         (!args["timeout_ms"].is_number_integer() || args["timeout_ms"].get<int64_t>() < 1 ||
          args["timeout_ms"].get<int64_t>() > 10000)) {
-        return CallToolResult::error("Invalid asset reimport request: timeout_ms must be an integer from 1 to 10000");
+        return CallToolResult::errorJson(400, "Invalid asset reimport request: timeout_ms must be an integer from 1 to 10000");
     }
     if (!ipc || !ipc->isConnected()) {
-        return CallToolResult::error("Godot Editor is offline. Launch Godot to reimport assets.");
+        return CallToolResult::notConnected("Godot Editor is offline. Launch Godot to reimport assets.");
     }
     auto response = ipc->sendRequest("asset.reimport", args, ipc::kWaitForDefinitiveResponse);
     // A reimport rewrites .import sidecars and can change uids, so the shared
     // scan is no longer trustworthy whether the call succeeded or not.
     offline::ResourceIndexer::invalidateSharedIndex();
     if (response.isErr()) {
-        return CallToolResult::error("Failed to reimport assets: " + response.error().message);
+        return CallToolResult::fromError(response.error(), "Failed to reimport assets: ");
     }
     return CallToolResult::successJson(response.value());
 }
@@ -2198,7 +2200,7 @@ CallToolResult handleAssetConfigureImport(const json& args, std::shared_ptr<ipc:
     if (!ipc || !ipc->isConnected()) {
         // Unreachable in practice: the registry's live-route check answers
         // first and names resource_inspect.
-        return CallToolResult::error(
+        return CallToolResult::notConnected(
             "Godot Editor is offline. An import option is changed, reimported and checked by the "
             "editor, so open the project in the editor to change one. resource_inspect reads an "
             "asset's import options offline.");
