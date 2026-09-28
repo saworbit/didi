@@ -54,6 +54,19 @@ void applyErrorDataFloor(json& error, const std::string& tool,
     if (!data.contains("canonical_tool")) data["canonical_tool"] = canonical_tool;
     if (!data.contains("retryable")) data["retryable"] = retryableForStatus(status);
 
+    // What fixes it, when the site did not say (Q6). A fault is the server's.
+    const bool fault = status >= 500 && status != 503 && status != 504;
+    if (!fault && !hasRemedy(data)) {
+        const auto code = data["code"].is_string() ? data["code"].get<std::string>() : std::string();
+        const auto message_it = error.find("message");
+        const std::string message = message_it != error.end() && message_it->is_string()
+                                        ? message_it->get<std::string>() : std::string();
+        const auto remedy = remedyForRefusal(code, status, message, canonical_tool, data);
+        for (const auto& [key, value] : remedy.items()) {
+            if (!data.contains(key)) data[key] = value;
+        }
+    }
+
     error["data"] = std::move(data);
 }
 

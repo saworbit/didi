@@ -223,6 +223,7 @@ set(CORE_SOURCES
     src/mcp/argument_normalization.cpp
     src/mcp/response_economy.cpp
     src/mcp/error_data.cpp
+    src/mcp/refusal_remedies.cpp
     src/mcp/control_room.cpp
     src/tools/control_room_tools.cpp
     ${CONTROL_ROOM_GENERATED_SOURCE}
@@ -422,6 +423,7 @@ set(TEST_SOURCES
     tests/test_tool_manifest.cpp
     tests/test_tool_profile.cpp
     tests/test_response_economy.cpp
+    tests/test_refusal_remedies.cpp
     tests/test_control_room.cpp
     tests/test_ui_list_controls.cpp
     tests/test_phase7_contract.cpp

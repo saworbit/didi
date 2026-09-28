@@ -154,7 +154,10 @@ document an agent has to go and find is read by people, not by agents.
   contract.
 
 **Enforced by.** The handshake guide (#962), the test that pins what it claims
-(#998), and the `retry_with` checks. [Q6](BUILD_QUEUE.md#q6-next-step-in-every-answer) and
+(#998), and the `retry_with` checks. From Q6, `src/mcp/refusal_remedies.cpp`
+gives every error code a remedy or a reason it has none, CI fails a code the
+source emits that it does not cover, and the live harness fails any refusal
+that names no fix. [Q6](BUILD_QUEUE.md#q6-next-step-in-every-answer) and
 [Q14](BUILD_QUEUE.md#q14-a-skill-pack-measured).
 
 ## P6. Reach through typed access, not arbitrary code

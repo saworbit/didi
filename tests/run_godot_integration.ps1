@@ -170,6 +170,7 @@ if (-not $fixtureRoot.StartsWith($buildRoot + [IO.Path]::DirectorySeparatorChar,
 . (Join-Path $PSScriptRoot 'remove_test_directory.ps1')
 . (Join-Path $PSScriptRoot 'observed_post_state.ps1')
 . (Join-Path $PSScriptRoot 'bounded_reads.ps1')
+. (Join-Path $PSScriptRoot 'refusal_remedies.ps1')
 Remove-TestDirectory -Path $fixtureRoot
 Copy-Item -LiteralPath $sourceFixtureRoot -Destination $fixtureRoot -Recurse
 
@@ -312,6 +313,8 @@ function Invoke-Didi {
     Add-ObservedExchanges -Requests $Requests -Lines $lines
     # And every bounded read's answer, for whether it says it is complete (Q5).
     Add-BoundedExchanges -Requests $Requests -Lines $lines
+    # And every refusal, for whether it says what fixes it (Q6).
+    Add-RefusalExchanges -Requests $Requests -Lines $lines
     $lines
 }
 
@@ -5722,6 +5725,7 @@ text = "Not a key"
     Assert-True ($unexpectedSourceArtifacts.Count -eq 0) "Integration generated artifacts in the checked-in source fixture."
     Assert-ObservedAnswersRecorded
     Assert-BoundedAnswersSayWhetherComplete
+    Assert-RefusalsNameTheirFix ((& $didiExecutable --dump-tool-manifest) -join "`n")
     $integrationSucceeded = $true
     Write-Output "Godot integration passed: Phases 1-6 editor/runtime workflows, deep diagnostics, project isolation, export, MeshLibrary, live UI hit-testing, and live Control listing."
 }

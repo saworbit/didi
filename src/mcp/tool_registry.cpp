@@ -1475,7 +1475,13 @@ json ToolManifest::toJson() const {
             {"mutating", mutating},
             {"core", core}
         }},
-        {"required", required}
+        {"required", required},
+        // Every error code the remedy table answers (Q6), so a test can hold
+        // it against every code the source emits.
+        {"refusals", {
+            {"remedied", remediedRefusalCodes()},
+            {"without_remedy", refusalsWithoutRemedy()}
+        }}
     };
 }
 

@@ -51,6 +51,23 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Added
 
+- **Every refusal names what fixes it (Q6 part 1, #1040).** A refusal's
+  `error.data` now carries `retry_with` (the arguments to resend), `field` (the
+  argument at fault), `next_call` (`{tool, arguments, reason}`, a call to make
+  first), `restart_with`, `retry_after_ms` (the same call, later), or
+  `no_remedy` saying why nothing the caller sends can fix it. A site that knew
+  already said so and is left alone; for the rest the error floor fills the
+  remedy from `src/mcp/refusal_remedies.cpp`, keyed by the error code and, where
+  one code means different things, by the tool: a `not_found` from a scene tool
+  names `scene_get_hierarchy`, from a blackboard tool `blackboard_list_keys`, and
+  `not_connected` names `runtime_list_sessions`. The manifest publishes the
+  table as `refusals`, CI fails any of the 77 codes the source emits, or the 15
+  the floor derives from a status, that it does not cover, and the live harness
+  fails any refusal it sees without a fix: 262 live refusals on 4.5.1 and 4.6.2 and 260 on
+  4.7.2, each naming one. The 156 failures
+  still answered as plain text have no `error.data` to carry a fix; their count
+  is recorded and may only fall.
+
 - **Every bounded read says whether it is complete, and the two largest take
   `fields` (Q5 part 2, #776).** `tests/bounded_reads.json` classifies all 54
   read-only tools: 31 bounded, naming what can cut their answer short, and 23

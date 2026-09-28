@@ -216,6 +216,20 @@ Handlers never see the declaration and never need to. `--session-descriptor
 once` is the operator's way to the descriptor half for a client that declared
 nothing; it enters in `McpServer::responseEconomyFor`, beside the declarations.
 
+### Refusal remedies
+
+Every refusal names what fixes it: `retry_with`, `field`, `next_call`,
+`restart_with` or `retry_after_ms` in `error.data`, or `no_remedy` saying why
+nothing can (Q6). Say it at the site when the site knows. Otherwise the error
+floor fills it from `src/mcp/refusal_remedies.cpp`, which is keyed by
+`data.code` and may look at the tool. A new code needs an entry there, or one in
+`refusalsWithoutRemedy` with the reason: `tests/test_refusal_remedies.py` scans
+the source for every code and fails on one the table does not cover, and the
+live harness fails a refusal that reaches a caller without a fix. Answer a
+failure with `CallToolResult::errorJson` or `fromError`, never plain text,
+which has no `error.data` to carry a remedy; the number of plain-text sites in
+`tests/refusal_remedies.json` may only fall.
+
 ### Bounded reads
 
 Every read-only tool has an entry in `tests/bounded_reads.json`: `bounded`,
