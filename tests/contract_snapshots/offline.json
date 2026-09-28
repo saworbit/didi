@@ -282,6 +282,9 @@
                 "null"
               ]
             },
+            "engine_timed_out": {
+              "type": "boolean"
+            },
             "engine_unavailable_reason": {
               "type": "string"
             },
@@ -308,6 +311,9 @@
                 "boolean",
                 "null"
               ]
+            },
+            "truncated": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -1107,6 +1113,9 @@
             "revision": {
               "type": "integer"
             },
+            "truncated": {
+              "type": "boolean"
+            },
             "updated_at_ms": {
               "type": "integer"
             },
@@ -1892,6 +1901,24 @@
         "inputSchema": {
           "additionalProperties": false,
           "properties": {
+            "fields": {
+              "description": "Sections to return. The others are left out and named in omitted_fields. Omit for every section.",
+              "items": {
+                "enum": [
+                  "server",
+                  "project",
+                  "surface",
+                  "facts",
+                  "tools",
+                  "sessions",
+                  "log"
+                ],
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array",
+              "uniqueItems": true
+            },
             "log_limit": {
               "default": 120,
               "description": "How many of the newest log records to return. The default is a glance; ask for more only when a person is going to read them.",
@@ -1932,6 +1959,12 @@
             "log_truncated": {
               "type": "boolean"
             },
+            "omitted_fields": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
             "project": {
               "type": "object"
             },
@@ -1952,6 +1985,9 @@
             },
             "tools": {
               "type": "array"
+            },
+            "truncated": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -4329,6 +4365,9 @@
             },
             "total_found": {
               "type": "integer"
+            },
+            "truncated": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -5330,6 +5369,9 @@
             },
             "total_found": {
               "type": "integer"
+            },
+            "truncated": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -5507,6 +5549,12 @@
               "type": "integer"
             },
             "filename": {
+              "type": "string"
+            },
+            "import": {
+              "type": "object"
+            },
+            "import_error": {
               "type": "string"
             },
             "path": {
@@ -8018,6 +8066,9 @@
                 "null"
               ]
             },
+            "engine_timed_out": {
+              "type": "boolean"
+            },
             "engine_unavailable_reason": {
               "type": "string"
             },
@@ -8044,6 +8095,9 @@
                 "boolean",
                 "null"
               ]
+            },
+            "truncated": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -8366,6 +8420,22 @@
               "maxLength": 256,
               "minLength": 1,
               "type": "string"
+            },
+            "fields": {
+              "description": "Sections to return. The others are left out and named in omitted_fields. Omit for every section.",
+              "items": {
+                "enum": [
+                  "description",
+                  "methods",
+                  "properties",
+                  "signals",
+                  "enums"
+                ],
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array",
+              "uniqueItems": true
             }
           },
           "required": [
@@ -8411,6 +8481,12 @@
             },
             "methods": {
               "type": "object"
+            },
+            "omitted_fields": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
             },
             "properties": {
               "type": "object"

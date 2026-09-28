@@ -663,6 +663,9 @@ Result<json> blackboardRead(const BlackboardReadRequest& request, BlackboardCloc
             {"board", request.board},
             {"path", path},
             {"deep", request.deep},
+            // False until a shallow read replaces a container with a marker
+            // below, so every answer says whether it is the whole value (Q5).
+            {"truncated", false},
             // What a writer pins to. `revision` is the board's, for
             // blackboard_patch; `updated_at_ms` is this path's, for
             // blackboard_write's expected_updated_at_ms. 0 means nothing is
@@ -721,6 +724,11 @@ Result<json> blackboardRead(const BlackboardReadRequest& request, BlackboardCloc
         }
         result["found"] = true;
         result["value"] = request.deep ? *value : shallowView(*value);
+        if (!request.deep && value->is_object()) {
+            for (const auto& entry : value->items()) {
+                if (entry.value().is_structured()) result["truncated"] = true;
+            }
+        }
         if (request.include_metadata) {
             json metadata = json::object();
             for (const auto& entry : board.meta.items()) {

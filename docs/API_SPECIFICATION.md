@@ -351,7 +351,7 @@ server honours:
 | `omit` value | Effect on a successful `tools/call` result |
 | :--- | :--- |
 | `textCopy` | A `content` text item that is byte for byte the serialised `structuredContent` is left out. Anything else in `content`, such as an image or its caption, stays. A result with nothing else has `content: []`. |
-| `sessionDescriptor` | A live answer's `session` is `{"session_id", "kind"}` when the client already holds that descriptor, and the whole descriptor when it does not. A legacy client holds it once an answer to a request that declared `sessionDescriptor` carried it whole, until anything in it changes, so an editor restart sends the new one. A modern request holds the session it named in `_meta.didi.runtime_session_id`. |
+| `sessionDescriptor` | A live answer's `session` is `{"session_id", "kind"}` when the client already holds that descriptor, and the whole descriptor when it does not. A legacy client holds it once an answer to a request that declared `sessionDescriptor` carried it whole, until anything in it changes, so an editor restart sends the new one. A modern request holds the session it named in `_meta.didi.runtime_session_id`. The same rule, and the same record of what was sent, applies to the payload of a live `resources/read` (`godot://editor/state`, `godot://runtime/logs`). |
 
 A value the server does not know is ignored, so a client written against a
 later Didi still gets what this one can give, and a declaration of any other
@@ -373,6 +373,38 @@ process, declared or not, with the same holder rules; `every`, the default,
 sends the whole descriptor on every live answer. It never leaves out the text
 copy, which only a client can decline. The mode is fixed at startup, and
 `initialize` and `server/discover` report it as `_meta.didi.sessionDescriptor`.
+
+### Bounded reads and fields
+
+Every read-only tool is either bounded or unbounded, and
+`tests/bounded_reads.json` says which, with what bounds it or why nothing
+does. A bounded read is one whose answer an argument (`max_results`,
+`max_nodes`, `limit`) or an internal limit (an index cap, an output cap, a time
+limit) can cut short. Every successful answer from one carries a boolean
+`truncated`, whatever path answered it: `true` when a bound was reached, which
+can include an answer that filled a bound exactly, and `false` otherwise. A
+short answer never looks like a whole one. The narrower flags a tool already
+had, such as `log_truncated`, `output_truncated`, `children_truncated` and
+`known_groups_truncated`, stay beside it and say which bound it was. A
+`runtime_read_logs` or `runtime_read_output` page is `truncated` when it has
+more to page, when records before its cursor were evicted, or when a record
+was cut when written; such a record carries `message_truncated: true`.
+
+Two large reads are made of sections a caller often wants one of, and take
+`fields`, an array of section names published as an enum in their input
+schema:
+
+| Tool | Sections |
+| :--- | :--- |
+| `didi_control_room` | `server`, `project`, `surface`, `facts`, `tools`, `sessions`, `log` |
+| `script_reflect_class` | `description`, `methods`, `properties`, `signals`, `enums` |
+
+The answer keeps the named sections and every key that is not a section, and
+names the sections it left out in `omitted_fields`, in the order above. A key
+the output schema requires is never a section, so `didi_control_room` always
+returns `lights`. An unknown name, an empty list or a repeated name is refused
+by the schema. A read shaped as one list, such as `project_list_resources` or
+`scene_get_hierarchy`, is narrowed with its bounds and filters instead.
 
 ### Mutation safety extension
 

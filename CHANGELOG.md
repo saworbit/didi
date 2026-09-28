@@ -51,6 +51,23 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Added
 
+- **Every bounded read says whether it is complete, and the two largest take
+  `fields` (Q5 part 2, #776).** `tests/bounded_reads.json` classifies all 54
+  read-only tools: 31 bounded, naming what can cut their answer short, and 23
+  unbounded, saying why nothing can. Every successful answer from a bounded
+  read now carries a boolean `truncated`, on every path, true when a bound was
+  reached. Seventeen did not: some flagged only one of several cuts, some
+  only when set, and some not at all (see Fixed). A new read with neither
+  classification fails CI, and the live harness fails any bounded answer
+  without the flag on every engine line; 144 answers from 26 bounded tools
+  carried it on 4.6.2. `didi_control_room` and `script_reflect_class` take
+  `fields`, an enum of their sections, and name what they left out in
+  `omitted_fields`: the control room's tools array was 77% of its answer,
+  and `Node`'s reference entry is three quarters `methods`. A live
+  `resources/read` now shortens the session descriptor on the same terms as a
+  tool answer, against the same record of what was sent (#1033). The tool list
+  budgets rose in #1038 to carry the new schema fields.
+
 - **`--session-descriptor once` gives the session half of response economy to
   hosts that cannot declare it (#1031).** None of the hosts the integration
   guide documents has a setting for a client capability, so the
@@ -281,6 +298,36 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
   use it on the draft.
 
 ### Fixed
+
+- **`project_verify_changes` could pass a proposal whose errors it never
+  read.** It kept the first 32 engine error lines and only then subtracted the
+  lines the copy prints on its own, one `Unrecognized UID` per `uid://`
+  reference. A project with more than 32 of those filled the list with lines
+  that were all subtracted, and the proposal passed with `all_ok: true`; a
+  project with more than 32 had its later baseline lines counted against the
+  proposal instead. The baseline is subtracted before the limit now, and the
+  answer carries `truncated`.
+- **Seventeen reads that could be cut short said so partly or not at all
+  (Q5).**
+  - Silent caps: `project_get_uid_map`'s 20,000-file index,
+    `csharp_check_build` and `shader_check_compile`'s 1,000 diagnostics,
+    `audio_list_buses`' offline 512-bus cap, and `project_audit_assets`'
+    `max_findings` on each list.
+  - Partial flags: `didi_control_room`'s 50 sessions, `project_analyze_impact`'s
+    `declared_in`, and `anim_list_tracks`' track and key cuts, which the
+    top-level flag missed.
+  - Other names or partial presence: `runtime_read_logs` and
+    `runtime_read_output`, which cut a 16 KiB message silently;
+    `scene_get_hierarchy` and `project_list_resources`, which flagged only when
+    set; `scene_get_group_members` and `viewport_capture_passes`; and
+    `blackboard_read`, whose shallow markers were only nested. With
+    `project_verify_changes` above, that is the seventeen.
+  - Also `project_list_resources` after a directory walk that stopped on an
+    error, and `script_check_syntax` when its compiler pass hit the 5-second
+    limit, which now answers `engine_timed_out` and says `has_errors: false` is
+    not a verdict.
+  - `resource_inspect` names an unreadable import sidecar in `import_error`
+    rather than leaving `import` out.
 
 - **The phase design no longer calls Phase 13 planned while the roadmap says it
   is in progress.** Delivering the first Build Queue item moved Phase 13 in

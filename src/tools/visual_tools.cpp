@@ -137,6 +137,11 @@ CallToolResult handleViewportCapturePasses(const json& args, std::shared_ptr<ipc
     }
     data.erase("passes");
     data["pass_order"] = order;
+    // Whether every node was drawn: the walk has a node limit and the
+    // segmentation palette a colour limit, and each had only its own field (Q5).
+    const auto unpainted = data.find("segmentation_unpainted");
+    data["truncated"] = data.value("scan_limit_reached", false) ||
+                        (unpainted != data.end() && unpainted->is_array() && !unpainted->empty());
     result.content.push_back(ContentItem::makeText(data.dump()));
     result.structuredContent = data;
     result.isError = false;

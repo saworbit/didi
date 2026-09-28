@@ -216,6 +216,24 @@ Handlers never see the declaration and never need to. `--session-descriptor
 once` is the operator's way to the descriptor half for a client that declared
 nothing; it enters in `McpServer::responseEconomyFor`, beside the declarations.
 
+### Bounded reads
+
+Every read-only tool has an entry in `tests/bounded_reads.json`: `bounded`,
+naming what can cut its answer short, or `unbounded`, saying why nothing can
+(Q5). A new read with neither fails `tests/test_bounded_reads.py` on every
+build and the live harness's coverage check. A bounded tool puts a boolean
+`truncated` on every successful answer, on every path, true when a bound was
+reached; a limit that refuses the call instead makes a tool unbounded. The
+harness records every bounded answer it makes through `Invoke-Didi` and fails
+on one without the flag, and the Python test drives the offline paths and
+forces a bound to bite.
+
+`fields` comes from `ToolDefinition::sections`: list the top-level keys a
+caller may choose between, never one the output schema requires, and
+`registerTool` publishes the argument and `omitted_fields`, while
+`dispatchTool` narrows the answer. It is for a large read made of separable
+sections; a read that is one long list takes a bound instead.
+
 A client that declares nothing must get the same bytes. The contract snapshots
 are the check: they record as a client that declared nothing, so any change
 this makes to that client's answers shows as a diff. The live harness runs

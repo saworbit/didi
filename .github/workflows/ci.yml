@@ -486,6 +486,16 @@ jobs:
           # the ones the handshake guide names.
           "$DIDI_PYTHON" -m unittest tests.test_tool_profiles -v
 
+      - name: Verify every bounded read says whether it is complete
+        shell: bash
+        run: |
+          # tests/bounded_reads.json classifies every read-only tool this build
+          # implements as bounded, naming what bounds it, or unbounded, saying
+          # why. A new read with neither fails here, and every offline answer
+          # from a bounded tool must carry a boolean truncated; the live answers
+          # are checked in the Godot job (Q5).
+          "$DIDI_PYTHON" -m unittest tests.test_bounded_reads -v
+
       - name: Run End-to-End MCP Integration Test
         shell: bash
         run: |

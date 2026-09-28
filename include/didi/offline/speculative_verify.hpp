@@ -4,6 +4,7 @@
 #include "didi/common/types.hpp"
 
 #include <optional>
+#include <set>
 #include <string>
 #include <filesystem>
 #include <vector>
@@ -55,6 +56,9 @@ struct SpeculativeScriptVerdict {
     bool ok{false};
     // What the engine said, bounded. Empty when it said nothing.
     std::string detail;
+    // Whether the bound cut anything: error lines past the limit, or detail
+    // past its byte cap.
+    bool truncated{false};
 };
 
 // What happened when the scene was opened in the copy.
@@ -76,6 +80,8 @@ struct SpeculativeSceneRun {
     bool timed_out{false};
     // Error-level lines the engine printed, bounded and in order.
     std::vector<std::string> errors;
+    // Whether lines past the bound were left out.
+    bool errors_truncated{false};
 };
 
 struct SpeculativeVerifyResult {
@@ -99,6 +105,9 @@ struct SpeculativeVerifyResult {
     std::optional<SpeculativeSceneRun> scene_run;
     int written{0};
     bool all_ok{false};
+    // Whether anything in this answer was cut by a bound: a script's or the
+    // run's error lines, a detail, or the untracked list (Q5).
+    bool truncated{false};
 
     json toJson() const;
 };
@@ -117,6 +126,21 @@ struct SpeculativeApplyResult {
 
     json toJson() const;
 };
+
+// The error-level lines an engine run printed that the copy does not print on
+// its own, in order and bounded.
+//
+// The baseline is subtracted before the limit applies. Capped first, a copy
+// that printed more baseline lines than the limit -- one Unrecognized UID per
+// uid:// reference is enough -- filled the list with lines that were then all
+// subtracted, the proposal's own errors were never read, and the check passed.
+struct AttributedEngineErrors {
+    std::vector<std::string> lines;
+    bool truncated{false};
+};
+AttributedEngineErrors attributeEngineErrors(const std::string& output,
+                                             const std::set<std::string>& baseline,
+                                             size_t limit);
 
 // Rejects anything the sandbox could not honestly check: a path outside the
 // project, a traversal, an empty set, or a file this cannot parse.

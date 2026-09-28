@@ -24,6 +24,10 @@ namespace fs = std::filesystem;
 
 constexpr size_t kMaxDetailBytes = 4096;
 constexpr size_t kMaxRunErrors = 32;
+// The baseline is a set to subtract, not an answer, so it is bounded only
+// against a runaway engine. At 32 it dropped the copy's later lines, which
+// were then counted against the proposal.
+constexpr size_t kMaxBaselineErrors = 4096;
 constexpr char kDetailSeparator = '\n';
 
 // Truncates on a character boundary rather than mid-sequence, so a bounded
@@ -185,7 +189,7 @@ std::set<std::string> sandboxBaselineErrors(const std::string& godot,
         // line is attributed, which is the behaviour this had before.
         return {};
     }
-    const auto lines = engineErrorLines(ran.value().output, kMaxRunErrors);
+    const auto lines = engineErrorLines(ran.value().output, kMaxBaselineErrors);
     return {lines.begin(), lines.end()};
 }
 
@@ -229,26 +233,45 @@ Result<SpeculativeSceneRun> runSceneInSandbox(const std::string& godot,
     }
     run.exit_code = ran.value().exit_code;
     run.timed_out = ran.value().timed_out;
-    run.errors = engineErrorLines(ran.value().output, kMaxRunErrors);
     // The same subtraction the script checks make. Opening a scene loads the
     // project first, so every line the copy produces on its own arrives here
     // too, and a proposal is not answerable for them.
-    run.errors.erase(std::remove_if(run.errors.begin(), run.errors.end(),
-                                    [&baseline](const std::string& line) {
-                                        return baseline.count(line) != 0;
-                                    }),
-                     run.errors.end());
+    auto attributed = attributeEngineErrors(ran.value().output, baseline, kMaxRunErrors);
+    run.errors = std::move(attributed.lines);
+    run.errors_truncated = attributed.truncated;
     run.ok = !run.timed_out && run.exit_code == 0 && run.errors.empty();
     return run;
 }
 
 } // namespace
 
+AttributedEngineErrors attributeEngineErrors(const std::string& output,
+                                             const std::set<std::string>& baseline,
+                                             size_t limit) {
+    AttributedEngineErrors attributed;
+    std::istringstream lines(output);
+    std::string line;
+    while (std::getline(lines, line)) {
+        std::string text = trimmed(line);
+        if (text.rfind("USER ", 0) == 0) text = text.substr(5);
+        if (text.rfind("ERROR:", 0) != 0 && text.rfind("SCRIPT ERROR:", 0) != 0) continue;
+        auto bounded = boundedText(trimmed(line), kMaxDetailBytes);
+        if (baseline.count(bounded) != 0) continue;
+        if (attributed.lines.size() == limit) {
+            attributed.truncated = true;
+            break;
+        }
+        attributed.lines.push_back(std::move(bounded));
+    }
+    return attributed;
+}
+
 json SpeculativeVerifyResult::toJson() const {
     json scripts_json = json::array();
     for (const auto& verdict : scripts) {
         json entry = {{"path", verdict.path}, {"ok", verdict.ok}};
         if (!verdict.detail.empty()) entry["detail"] = verdict.detail;
+        if (verdict.truncated) entry["truncated"] = true;
         scripts_json.push_back(std::move(entry));
     }
     json payload = {{"execution_mode", "offline"},
@@ -259,6 +282,7 @@ json SpeculativeVerifyResult::toJson() const {
                     {"written", written},
                     {"scripts", std::move(scripts_json)},
                     {"all_ok", all_ok},
+                    {"truncated", truncated},
                     {"sandbox_removed", true}};
     if (scene_run.has_value()) {
         payload["scene_run"] = {{"path", scene_run->path},
@@ -267,7 +291,8 @@ json SpeculativeVerifyResult::toJson() const {
                                 {"exit_code", scene_run->exit_code},
                                 {"frames", scene_run->frames},
                                 {"timed_out", scene_run->timed_out},
-                                {"errors", scene_run->errors}};
+                                {"errors", scene_run->errors},
+                                {"errors_truncated", scene_run->errors_truncated}};
     }
     return payload;
 }
@@ -513,9 +538,14 @@ Result<SpeculativeVerifyResult> verifyChangesInSandbox(const SpeculativeVerifyRe
     if (untracked.isOk() && untracked.value().exit_code == 0) {
         std::istringstream lines(untracked.value().output);
         std::string line;
-        while (std::getline(lines, line) && result.untracked_excluded.size() < 64) {
+        while (std::getline(lines, line)) {
             const auto name = trimmed(line);
-            if (!name.empty()) result.untracked_excluded.push_back(name);
+            if (name.empty()) continue;
+            if (result.untracked_excluded.size() == 64) {
+                result.truncated = true;
+                break;
+            }
+            result.untracked_excluded.push_back(name);
         }
     }
 
@@ -576,14 +606,12 @@ Result<SpeculativeVerifyResult> verifyChangesInSandbox(const SpeculativeVerifyRe
             // for a script with a plain syntax error while printing the parse
             // error. A proposal full of them read back as all_ok, which is the
             // one answer this tool must never give wrongly.
-            auto errors = engineErrorLines(ran.value().output, kMaxRunErrors);
             // What the copy already said with nothing of the caller's in it is
             // not something the caller's file did.
-            errors.erase(std::remove_if(errors.begin(), errors.end(),
-                                        [&baseline](const std::string& line) {
-                                            return baseline.count(line) != 0;
-                                        }),
-                         errors.end());
+            const auto attributed =
+                attributeEngineErrors(ran.value().output, baseline, kMaxRunErrors);
+            const auto& errors = attributed.lines;
+            verdict.truncated = attributed.truncated;
             verdict.ok = ran.value().exit_code == 0 && errors.empty();
             if (!verdict.ok) {
                 std::string detail;
@@ -592,6 +620,7 @@ Result<SpeculativeVerifyResult> verifyChangesInSandbox(const SpeculativeVerifyRe
                     detail += error;
                 }
                 if (detail.empty()) detail = trimmed(ran.value().output);
+                if (detail.size() > kMaxDetailBytes) verdict.truncated = true;
                 verdict.detail = boundedText(detail, kMaxDetailBytes);
             }
         }
@@ -603,7 +632,11 @@ Result<SpeculativeVerifyResult> verifyChangesInSandbox(const SpeculativeVerifyRe
         auto run = runSceneInSandbox(godot, sandbox_project, request, result.all_ok, baseline);
         if (run.isErr()) return run.error();
         if (!run.value().ok) result.all_ok = false;
+        if (run.value().errors_truncated) result.truncated = true;
         result.scene_run = std::move(run.value());
+    }
+    for (const auto& verdict : result.scripts) {
+        if (verdict.truncated) result.truncated = true;
     }
     return result;
 }

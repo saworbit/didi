@@ -84,6 +84,9 @@ public:
         bool executable_exists{false};
         std::optional<int> exit_code;
         double duration_seconds{0.0};
+        // Whether the check was stopped at its time limit. Diagnostics the
+        // engine had not printed by then are missing (Q5).
+        bool timed_out{false};
     };
 
     static std::vector<ScriptDiagnostic> analyze(const std::string& file_path,

@@ -431,6 +431,8 @@ Like every mutation, all three write operations expose `dry_run` and require a
 
 Runs Didi's string/comment-aware lightweight GDScript diagnostics. When an in-project `file_path` is supplied, it also attempts `godot --headless --check-only`.
 
+The compiler pass has a 5-second limit. A pass stopped there answers `engine_timed_out: true` and `truncated: true` with a `limitation`, because a diagnostic it had not printed yet is missing, and `has_errors: false` is then not a verdict.
+
 - `file_path` (`string`, optional).
 - `source_text` (`string`, optional).
 - At least one is required.
@@ -492,6 +494,8 @@ The demotion needs a `project.godot` Godot can load. A manifest that is `ERR_PAR
 ### `script_reflect_class` — Offline
 
 Reflects a Godot engine class offline from the API dump pinned in the repository, covering every class the engine registers rather than a hand-picked few. Returns `inherits`, `properties` (with `read_only` where there is no setter), `methods` (return type and rendered argument list, with `static`, `const` and `virtual` where they apply), `signals` and `enums`.
+
+`fields` picks sections of the entry: `description`, `methods`, `properties`, `signals` and `enums`. The rest are named in `omitted_fields`. `Node` alone is about 13 KB, three quarters of it `methods`, so a caller after one list asks for that one.
 
 `api_version` names the Godot version the reflection describes, and `source` is `extension_api`. This is not live ClassDB reflection: it describes the pinned API, not the editor you happen to be running, and it does not know about script classes. This tool has no live mode, so attaching an editor does not change the answer; read a script class with `script_get_symbols` instead.
 
@@ -919,6 +923,8 @@ With an editor attached, an overwrite also reloads the editor's copy of the file
 
 Returns indexed file metadata, UID, and parsed dependencies for a matching project resource. It does not expose arbitrary inner Godot Resource properties.
 
+A sidecar that is there and cannot be read, such as one over 1 MiB, gives `import_error` in place of `import`, rather than an answer that reads like an asset with no import options.
+
 `type` is the class the extension implies, which for a `.tres` or `.res` is never more specific than `Resource`. For those, `resource_type` carries the type the file declares in its `[gd_resource]` header, or `null` when the header could not be read. Anything that is not a text resource has no such field. `project_list_resources` reports the same pair per entry. For an asset with a `.import` file beside it, `import` carries what the editor wrote there: `importer`, `type`, `uid`, `valid` when the engine recorded a failed import, `options` with every import option as a boolean, integer, number or string, and `configurable`, the keys `asset_configure_import` sets on that importer. A file Godot's parser cannot read gives `parse_error` and `line` instead.
 
 - `resource_path` (`string`, required).
@@ -948,6 +954,8 @@ Editor sessions only; a game session is refused. Didi does not read `.godot/uid_
 ### `project_verify_changes` — Offline
 
 Checks a set of proposed file contents together in an isolated copy of the project, without writing anything to the working tree.
+
+The error lines the copy prints on its own are subtracted before the 32-line limit applies, not after. Capped first, a project whose copy printed more baseline lines than that, one `Unrecognized UID` per `uid://` reference being enough, hid every error the proposal caused, and the check passed. `truncated` is true when a check's error lines, a detail or the untracked list was cut; a script's entry carries `truncated` and `scene_run` carries `errors_truncated` to say which.
 
 - `changes` (`array`, required): 1 to 64 entries, each with a `path` and the whole proposed `content` of that file. `path` follows the same containment rules `script_create` applies, and each file may appear once.
 - `run_scene` (`string`, optional): a `.tscn` or `.scn` inside the project to open in the copy once the proposal is written.
@@ -1669,7 +1677,7 @@ A live result and a live failure both name the session they ran on, and they nam
 
 A failure names its session once, at the top level, in the same place a success does. `error.data` holds what the engine said about the failure itself -- `outcome`, `route_quarantine`, `transport`, `engine` and the like -- and no longer repeats the session alongside them.
 
-Successful JSON results also carry `structuredContent` alongside the existing text block. It holds the same payload after execution-mode and session attribution, so the two halves of a result can never disagree. The text block is unchanged for clients that do not read `structuredContent`; a client that declared `didi/responseEconomy` with `textCopy` gets it left out when it is byte for byte the structured payload. See [Response economy](API_SPECIFICATION.md#response-economy).
+Successful JSON results also carry `structuredContent` alongside the existing text block. It holds the same payload after execution-mode and session attribution, so the two halves of a result can never disagree. The text block is unchanged for clients that do not read `structuredContent`; a client that declared `didi/responseEconomy` with `textCopy` gets it left out when it is byte for byte the structured payload. See [Response economy](API_SPECIFICATION.md#response-economy). Every bounded read, one whose answer a limit can cut short, carries a boolean `truncated` on every successful answer; see [Bounded reads and fields](API_SPECIFICATION.md#bounded-reads-and-fields).
 
 ## 12. Phase 5 deep domains
 
@@ -1896,6 +1904,8 @@ Reports Didi's own state rather than Godot's. Read-only, and the only tool whose
 subject is the server. With an editor route attached it asks the editor one
 bounded question, which open scenes hold unsaved changes, and nothing else;
 everything else it reports is a stat or a published descriptor.
+
+`fields` picks sections: `server`, `project`, `surface`, `facts`, `tools`, `sessions` and `log`. `lights` is required by the schema and always returned. The `tools` array is most of the answer, so a status check that wants the lights and the facts asks for `fields: ["facts"]`. `truncated` is true when the tool rows, the session rows or the log was cut.
 
 - `log_limit` (`integer`, optional, default `120`, maximum `500`): how many of
   the newest records from this server's log to return.

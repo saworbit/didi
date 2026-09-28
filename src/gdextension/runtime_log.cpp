@@ -107,8 +107,9 @@ Result<uint64_t> RuntimeLogRing::append(std::string_view level, std::string_view
     const uint64_t sequence = m_nextSequence;
     if (sequence == std::numeric_limits<uint64_t>::max()) m_exhausted = true;
     else ++m_nextSequence;
+    const bool clipped = message.size() > kMaxMessageBytes || source.size() > 1024;
     m_records.push_back({sequence, timestamp_ms, truncateUtf8(level, 16), truncateUtf8(source, 1024),
-                         std::move(bounded_message), boundedDetails(details)});
+                         std::move(bounded_message), boundedDetails(details), clipped});
     while (m_records.size() > m_capacity) {
         m_records.pop_front();
     }
@@ -153,6 +154,7 @@ Result<json> RuntimeLogRing::read(uint64_t cursor, size_t limit, std::string_vie
     const int minimum_rank = levelRank(minimum_level);
     bool inspected_any = false;
     uint64_t last_inspected = 0;
+    bool any_clipped = false;
 
     for (const auto& record : m_records) {
         if (record.sequence < start) continue;
@@ -170,6 +172,13 @@ Result<json> RuntimeLogRing::read(uint64_t cursor, size_t limit, std::string_vie
             {"message", record.message},
             {"details", record.details}
         };
+        // Only on a record that was cut, so an ordinary page stays the size it was.
+        const bool details_cut = record.details.is_object() && record.details.size() == 2 &&
+                                 record.details.contains("preview") &&
+                                 record.details.contains("truncated") &&
+                                 record.details["truncated"] == true;
+        if (record.clipped) value["message_truncated"] = true;
+        if (record.clipped || details_cut) any_clipped = true;
         records.push_back(std::move(value));
         if (records.size() >= limit) break;
     }
@@ -190,7 +199,10 @@ Result<json> RuntimeLogRing::read(uint64_t cursor, size_t limit, std::string_vie
         {"oldest_cursor", oldest},
         {"dropped_before_cursor", dropped},
         {"has_more", has_more},
-        {"sequence_overflowed", m_exhausted}
+        {"sequence_overflowed", m_exhausted},
+        // Whether this page is less than was asked for: more past the limit,
+        // records evicted before the cursor, or a record cut when written (Q5).
+        {"truncated", has_more || dropped || any_clipped}
     };
 }
 

@@ -46,7 +46,7 @@ json DomainDiagnostic::toJson() const {
     return value;
 }
 
-std::vector<DomainDiagnostic> parseMsBuildDiagnostics(const std::string& output) {
+std::vector<DomainDiagnostic> parseMsBuildDiagnostics(const std::string& output, bool* truncated) {
     // Roslyn emits both (line,col) and four part (startLine,startCol,endLine,
     // endCol) spans, and diagnostic codes are not always letters then digits:
     // NETSDK1004, MSB3073 and analyzer ids all turn up here.
@@ -71,11 +71,14 @@ std::vector<DomainDiagnostic> parseMsBuildDiagnostics(const std::string& output)
     // "Build FAILED.", which is localised.
     std::set<std::string> seen;
     for (const auto& raw : strings::split(output, '\n')) {
-        if (diagnostics.size() >= kMaxDiagnostics) break;
         std::smatch match;
         const std::string line = strings::trim(raw);
         if (!std::regex_match(line, match, pattern)) continue;
         if (!seen.insert(line).second) continue;
+        if (diagnostics.size() >= kMaxDiagnostics) {
+            if (truncated) *truncated = true;
+            break;
+        }
         std::string severity = match[4].str();
         std::transform(severity.begin(), severity.end(), severity.begin(),
                        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
@@ -104,7 +107,7 @@ int parseMsBuildProjectOutputCount(const std::string& output) {
     return static_cast<int>(projects.size());
 }
 
-std::vector<DomainDiagnostic> parseGodotDiagnostics(const std::string& output) {
+std::vector<DomainDiagnostic> parseGodotDiagnostics(const std::string& output, bool* truncated) {
     static const std::regex resource_pattern(
         R"(^\s*(?:ERROR|SCRIPT ERROR):\s*(?:Parse Error:\s*)?(res://[^:]+):([0-9]+)\s*(?:-|:)\s*(.+?)\s*$)",
         std::regex::icase);
@@ -127,17 +130,25 @@ std::vector<DomainDiagnostic> parseGodotDiagnostics(const std::string& output) {
         return std::regex_search(path, engine_source);
     };
     std::vector<DomainDiagnostic> diagnostics;
+    bool full = false;
+    const auto add = [&](DomainDiagnostic diagnostic) {
+        if (diagnostics.size() >= kMaxDiagnostics) {
+            full = true;
+            return;
+        }
+        diagnostics.push_back(std::move(diagnostic));
+    };
     for (const auto& raw : strings::split(output, '\n')) {
-        if (diagnostics.size() >= kMaxDiagnostics) break;
+        if (full) break;
         std::smatch match;
         if (std::regex_match(raw, match, resource_pattern)) {
-            diagnostics.push_back({"error", "", strings::trim(match[3].str()), match[1].str(),
-                                   std::stoi(match[2].str()), 0});
+            add({"error", "", strings::trim(match[3].str()), match[1].str(),
+                 std::stoi(match[2].str()), 0});
         } else if (std::regex_match(raw, match, trailing_resource_pattern)) {
-            diagnostics.push_back({"error", "", strings::trim(match[1].str()), match[2].str(),
-                                   std::stoi(match[3].str()), 0});
+            add({"error", "", strings::trim(match[1].str()), match[2].str(),
+                 std::stoi(match[3].str()), 0});
         } else if (std::regex_match(raw, match, shader_pattern)) {
-            diagnostics.push_back({"error", "GODOT_SHADER", strings::trim(match[1].str()), "", 0, 0});
+            add({"error", "GODOT_SHADER", strings::trim(match[1].str()), "", 0, 0});
         } else if (!diagnostics.empty() && diagnostics.back().code == "GODOT_SHADER" &&
                    diagnostics.back().line == 0 &&
                    std::regex_match(raw, match, shader_location_pattern)) {
@@ -149,6 +160,7 @@ std::vector<DomainDiagnostic> parseGodotDiagnostics(const std::string& output) {
             }
         }
     }
+    if (full && truncated) *truncated = true;
     return diagnostics;
 }
 

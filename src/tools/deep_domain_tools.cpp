@@ -475,7 +475,8 @@ CallToolResult handleCSharpCheckBuild(const json& args, std::shared_ptr<ipc::IIp
             {{"code", "timeout"}, {"tool", "csharp_check_build"},
              {"timeout_seconds", timeout.value()}, {"retryable", true}});
     }
-    auto diagnostics = offline::parseMsBuildDiagnostics(run.value().output);
+    bool diagnostics_truncated = false;
+    auto diagnostics = offline::parseMsBuildDiagnostics(run.value().output, &diagnostics_truncated);
     const bool has_errors = run.value().exit_code != 0 || std::any_of(
         diagnostics.begin(), diagnostics.end(), [](const auto& value) { return value.severity == "error"; });
     // How many projects the compiler actually produced an assembly for. A
@@ -494,6 +495,8 @@ CallToolResult handleCSharpCheckBuild(const json& args, std::shared_ptr<ipc::IIp
         {"diagnostics_count", diagnostics.size()},
         {"dotnet_executable", dotnet.executable}, {"dotnet_version", probe.version},
         {"duration_seconds", run.value().duration_seconds}, {"output_truncated", run.value().output_truncated},
+        // Either bound: the raw output, or the diagnostics parsed from it (Q5).
+        {"truncated", run.value().output_truncated || diagnostics_truncated},
         {"raw_output", run.value().output}, {"execution_mode", "offline_fallback"}
     };
     if (built_nothing) {
@@ -546,7 +549,8 @@ CallToolResult handleShaderCheckCompile(const json& args, std::shared_ptr<ipc::I
          paths::projectPathToUtf8(helper.value().path()), "--", requested}), timeout.value());
     if (run.isErr()) return CallToolResult::error("Failed to run Godot shader compiler: " + run.error().message);
     if (run.value().timed_out) return CallToolResult::error("Shader compilation timed out before completion");
-    auto diagnostics = offline::parseGodotDiagnostics(run.value().output);
+    bool diagnostics_truncated = false;
+    auto diagnostics = offline::parseGodotDiagnostics(run.value().output, &diagnostics_truncated);
     for (auto& diagnostic : diagnostics) {
         if (diagnostic.path.empty()) diagnostic.path = requested;
     }
@@ -560,8 +564,9 @@ CallToolResult handleShaderCheckCompile(const json& args, std::shared_ptr<ipc::I
         {"success", !has_errors}, {"has_errors", has_errors}, {"exit_code", run.value().exit_code},
         {"shader_path", requested}, {"diagnostics", diagnosticsJson(diagnostics)},
         {"diagnostics_count", diagnostics.size()}, {"duration_seconds", run.value().duration_seconds},
-        {"output_truncated", run.value().output_truncated}, {"raw_output", run.value().output},
-        {"execution_mode", "offline_fallback"}
+        {"output_truncated", run.value().output_truncated},
+        {"truncated", run.value().output_truncated || diagnostics_truncated},
+        {"raw_output", run.value().output}, {"execution_mode", "offline_fallback"}
     };
     // Which engine answered, as a field rather than only inside raw_output.
     // Reading the selected session takes no route and changes no selection,

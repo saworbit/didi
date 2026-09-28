@@ -135,6 +135,8 @@ private:
     ResponseEconomy m_clientDeclaredEconomy;
     SessionDescriptorLedger m_descriptorLedger;
     ResponseEconomy responseEconomyFor(ProtocolEra era, const json& params) const;
+    // Whether the client behind a request already holds a session descriptor.
+    DescriptorHeld descriptorHolderFor(const RequestScope& scope);
     std::shared_ptr<ipc::IIpcClient> m_ipcClient;
     std::shared_ptr<runtime::IRuntimeSessionClient> m_runtimeSessionClient;
 

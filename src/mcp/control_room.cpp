@@ -490,6 +490,11 @@ json buildControlRoomModel(const ControlRoomInputs& in,
     model["log_returned"] = model["log"].size();
     model["log_available"] = in.log.size();
     model["log_truncated"] = begin > 0;
+    // One answer to "is this the whole dashboard?", covering every bound on
+    // it: the tool rows, the session rows and the log (Q5). The session list
+    // had no flag of its own.
+    model["truncated"] = model["surface"].value("truncated", false) || begin > 0 ||
+                         in.sessions.size() > kControlRoomMaxSessions;
 
     std::ostringstream note;
     note << "Didi's own diagnostics, which otherwise go only to this process's standard error. "

@@ -54,7 +54,8 @@ CallToolResult handleQueryProjectResources(const json& args, std::shared_ptr<ipc
         {"total_found", results.size()},
         {"resources", res_arr}
     };
-    if (indexer->truncated()) out["truncated"] = true;
+    // On every answer, so a whole index reads as whole rather than as silent (Q5).
+    out["truncated"] = indexer->truncated();
     // A file whose name is not valid UTF-8 is not in the list and cannot be,
     // because no JSON response can carry it. Said rather than silently omitted:
     // before this the serialisation threw and the call answered that an
@@ -1313,6 +1314,11 @@ CallToolResult handleResourceInspect(const json& args, std::shared_ptr<ipc::IIpc
             if (std::filesystem::is_regular_file(sidecar, error) && !error) {
                 if (auto text = offline::readImportSidecarFile(sidecar); text.isOk()) {
                     described["import"] = offline::describeImportSidecar(text.value());
+                } else {
+                    // A sidecar that is there and could not be read left no
+                    // trace, which read exactly like an asset with no import
+                    // options at all.
+                    described["import_error"] = text.error().message;
                 }
             }
         }
@@ -1486,7 +1492,12 @@ CallToolResult handleAudioListBuses(const json& args, std::shared_ptr<ipc::IIpcC
     std::optional<Error> live_failure;
     if (ipc && ipc->isConnected()) {
         auto response = ipc->sendRequest("audio.listBuses", args, ipc::kWaitForDefinitiveResponse);
-        if (response.isOk()) return CallToolResult::successJson(response.value());
+        if (response.isOk()) {
+            // The engine's bus list has no cap, so a live answer is whole (Q5).
+            auto live = response.value();
+            if (live.is_object() && !live.contains("truncated")) live["truncated"] = false;
+            return CallToolResult::successJson(std::move(live));
+        }
         live_failure = response.error();
     }
 
@@ -1495,6 +1506,7 @@ CallToolResult handleAudioListBuses(const json& args, std::shared_ptr<ipc::IIpcC
     auto payload = layout.value();
     payload["execution_mode"] = "offline_fallback";
     payload["is_live_engine"] = false;
+    if (!payload.contains("truncated")) payload["truncated"] = false;
     // An attached engine that failed the read is not the same answer as no
     // engine. Every game session failed it until vibe session nineteen, and the
     // file came back looking like the choice of a caller with nothing attached.
@@ -1876,6 +1888,9 @@ CallToolResult handleProjectGetUidMap(const json& args, std::shared_ptr<ipc::IIp
     json payload{
         {"total_uids", uid_map.size()},
         {"uid_map", uid_map},
+        // The same capped index project_list_resources reads, which said so
+        // while this did not (Q5).
+        {"truncated", indexer->truncated()},
         // The map is always the file scan. ResourceUID resolves an id or a path
         // it is given but exposes no way to enumerate its table through
         // GDExtension, so a live enumeration would be an invented claim.

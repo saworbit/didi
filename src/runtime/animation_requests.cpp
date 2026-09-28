@@ -202,7 +202,20 @@ json buildAnimationCatalog(std::vector<AnimationInfo> animations) {
         bytes += record_bytes;
         output.push_back(std::move(record));
     }
-    return {{"animations", std::move(output)}, {"truncated", truncated}, {"truncated_at", cursor}};
+    // The top-level flag covered only the animation count and the byte budget,
+    // so a track or key cut read as a whole catalog to a caller that did not
+    // walk every nested flag (Q5). truncated_at still names the first
+    // catalog-level cause.
+    bool any_nested = false;
+    for (const auto& record : output) {
+        if (record.value("truncated", false)) any_nested = true;
+        for (const auto& track : record["tracks"]) {
+            if (track.value("truncated", false)) any_nested = true;
+        }
+    }
+    return {{"animations", std::move(output)},
+            {"truncated", truncated || any_nested},
+            {"truncated_at", cursor}};
 }
 
 } // namespace runtime

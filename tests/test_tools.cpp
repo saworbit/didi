@@ -5474,11 +5474,11 @@ static void test_depth_cut_reports_what_it_stopped_on() {
     ASSERT_EQ(root_payload["scene_tree"]["children_summary"]["Node2D"], 1u);
     ASSERT_EQ(root_payload["scene_tree"]["children_summary"]["Sprite2D"], 2u);
 
-    // Nothing cut, nothing claimed.
+    // Nothing cut, and the answer says so rather than saying nothing (Q5).
     const auto whole = registry.callTool("scene_get_hierarchy",
         {{"root_path", "res://levels/deep.tscn"}});
     const auto whole_payload = didi::json::parse(whole.content[0].text);
-    ASSERT_TRUE(!whole_payload.contains("truncated"));
+    ASSERT_EQ(whole_payload["truncated"], false);
     ASSERT_TRUE(!whole_payload["scene_tree"]["children"][0].contains("children_omitted"));
 }
 
