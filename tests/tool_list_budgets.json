@@ -6,7 +6,21 @@
     "note": "main before Q4 (15c8458), 2026-09-28"
   },
   "budgets": {
-    "full": 203600,
-    "core": 95000
-  }
+    "full": 204600,
+    "core": 95900
+  },
+  "raises": [
+    {
+      "date": "2026-09-28",
+      "full": [
+        203600,
+        204600
+      ],
+      "core": [
+        95000,
+        95900
+      ],
+      "why": "Q5 part 2 (#776): a fields argument on didi_control_room and script_reflect_class, so a caller can ask for one section of the two largest reads instead of all of them, and truncated, omitted_fields and import_error declared in the output schemas of the reads that return them. Measured 204,333 full and 95,617 core with that change; core stays under half of the 203,634 Q4 measured."
+    }
+  ]
 }
