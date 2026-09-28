@@ -3,6 +3,7 @@
 
 #include "didi/offline/gdscript_diagnostics.hpp"
 #include "didi/mcp/error_data.hpp"
+#include "didi/mcp/follow_ups.hpp"
 #include "didi/mcp/parameter_descriptions.hpp"
 #include "didi/mcp/control_room.hpp"
 #include "didi/mcp/project_tools.hpp"
@@ -975,6 +976,8 @@ static json outputSchemaForTool(const std::string& name) {
                               {"section_written", string_type},
                               {"preset_count", integer_type},
                               {"next_step", string_type},
+                              // The restart an unattached editor needs (Q6).
+                              {"follow_up", {{"type", "array"}}},
                               // Whether the folder export_path names is there,
                               // since Godot will not create it (#932).
                               {"export_path_folder_exists", boolean_type},
@@ -2109,6 +2112,24 @@ static CallToolResult withErrorDataFloor(CallToolResult result,
     return result;
 }
 
+// A successful answer that left work undone names it as steps (Q6): the save a
+// live scene edit still needs, or the restart a change the running editor
+// cannot take. Every step comes from a fact the answer already carries, so this
+// runs after dispatch, when execution_mode and any recovery receipt are there
+// to read. See follow_ups.hpp.
+static CallToolResult withFollowUps(CallToolResult result) {
+    if (result.isError) return result;
+    for (auto& item : result.content) {
+        if (item.type != "text") continue;
+        auto payload = json::parse(item.text, nullptr, false);
+        if (payload.is_discarded() || !payload.is_object()) continue;
+        if (applyFollowUps(payload)) item.text = payload.dump();
+        break;
+    }
+    if (result.structuredContent.has_value()) applyFollowUps(*result.structuredContent);
+    return result;
+}
+
 // The shape the rest of the surface already uses for a caller mistake: a
 // sentence a person or an agent can act on, plus a stable machine code beside
 // it rather than instead of it (#406).
@@ -2216,7 +2237,7 @@ static bool takesEmitterAsTargetNode(std::string_view canonical_name) {
 CallToolResult ToolRegistry::callTool(const std::string& name, const json& arguments,
                                       const RequestScope& scope) {
     const auto binding = resolveAliasBinding(name, arguments);
-    return withErrorDataFloor(dispatchTool(name, arguments, scope), binding);
+    return withFollowUps(withErrorDataFloor(dispatchTool(name, arguments, scope), binding));
 }
 
 CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& arguments,

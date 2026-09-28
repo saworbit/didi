@@ -51,6 +51,23 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Added
 
+- **A mutation that leaves work undone names it as a step (Q6 part 3, #1040).**
+  The answer carries `follow_up`, a list of `{work, tool, reason}`: a live edit
+  of the open scene names `editor_save_scene`, and a change the attached editor
+  cannot take until it restarts names a restart, which no tool can do for it.
+  Each step comes from a fact the answer already published and a person could
+  read but an agent could not act on: `scene_saved: false` on the 16 scene
+  edits, `requires_editor_restart: true` on a new or removed autoload and a
+  moved bus layout, `project.godot` written with no editor attached, and
+  `export_presets.cfg` written with `editor_reloaded: false`. A scene managed
+  recovery already saved names no save. `tests/follow_ups.json` accounts for all
+  63 mutating tools: 20 can leave work, 33 leave none and say why, and 10 are
+  exempt against the issue that tracks them. Six of those write files an
+  attached editor keeps an old copy of, which no rescan refreshes (#1047). CI
+  fails a mutating tool with no entry, and the live harness fails a step a tool
+  did not declare and a fact that arrived without its step. On 4.7 the save step
+  is checked against the scene the editor itself lists as unsaved.
+
 - **No failure answers as a bare sentence (Q6 part 1, finished, #1040).** 199
   failures answered as a bare sentence, with no `error.data`, so none could carry a code
   to branch on or name its fix. The census that counted them matched only a

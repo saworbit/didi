@@ -234,6 +234,15 @@ fails a plain-text failure it sees. `RepeatedFailures`, in
 its way out of `McpServer::handleRequest`; it keys on the arguments as sent, so
 nothing a handler does changes what counts as the same call.
 
+A mutation that leaves work undone names it under `follow_up` (Q6).
+`src/mcp/follow_ups.cpp` derives each step from a fact the answer already
+carries, such as `scene_saved: false` or `requires_editor_restart: true`, so
+publish the fact and the step follows. `tests/follow_ups.json` needs an entry
+for every mutating tool: the work it can leave and the fact behind it, why it
+leaves none, or an exemption with its issue. `tests/test_follow_ups.py` fails a
+mutating tool with no entry and a declared kind of work no rule produces, and
+the live harness fails a step a tool did not declare.
+
 ### Bounded reads
 
 Every read-only tool has an entry in `tests/bounded_reads.json`: `bounded`,

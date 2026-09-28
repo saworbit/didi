@@ -115,6 +115,36 @@ repeated call is never refused, because polling is legitimate. A `2024-11-05`
 client is counted across the process; a modern request within the runtime
 session it named.
 
+### Follow-ups
+
+A successful mutation that leaves work undone names it under `follow_up`, a
+list of steps:
+
+| Field | Meaning |
+| :--- | :--- |
+| `work` | `save` or `restart`. |
+| `tool` | The call that does it, when one can: `editor_save_scene` for a save. Nothing Didi sends restarts an editor, so a restart names none. |
+| `reason` | What is undone, in a sentence. |
+
+Every step comes from a fact the answer already carries, and the prose beside
+it stays:
+
+- `scene_saved: false`, on every live edit of the open scene, is a save. None
+  is named when managed recovery's receipt says it saved the scene.
+- `requires_editor_restart: true`, on a new or removed autoload and on a bus
+  layout moved under an attached editor, is a restart.
+- `project.godot` written with no editor attached (`written_to`, offline) is a
+  restart, and so is `export_presets.cfg` written with `editor_reloaded: false`.
+
+An answer that names its own `follow_up` is left as it is. There is no rescan
+step: a file written behind an attached editor leaves the editor's cached copy
+stale, and a rescan does not refresh it (#1047).
+
+`tests/follow_ups.json` says, for every mutating tool, the work it can leave,
+why it leaves none, or the issue that tracks what it does not say yet. CI fails
+a mutating tool with no entry, and the live harness fails a step a tool does
+not declare and a fact that arrives without its step.
+
 ---
 
 ## 2. MCP Methods

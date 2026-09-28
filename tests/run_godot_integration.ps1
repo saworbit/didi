@@ -171,6 +171,7 @@ if (-not $fixtureRoot.StartsWith($buildRoot + [IO.Path]::DirectorySeparatorChar,
 . (Join-Path $PSScriptRoot 'observed_post_state.ps1')
 . (Join-Path $PSScriptRoot 'bounded_reads.ps1')
 . (Join-Path $PSScriptRoot 'refusal_remedies.ps1')
+. (Join-Path $PSScriptRoot 'follow_ups.ps1')
 Remove-TestDirectory -Path $fixtureRoot
 Copy-Item -LiteralPath $sourceFixtureRoot -Destination $fixtureRoot -Recurse
 
@@ -315,6 +316,8 @@ function Invoke-Didi {
     Add-BoundedExchanges -Requests $Requests -Lines $lines
     # And every refusal, for whether it says what fixes it (Q6).
     Add-RefusalExchanges -Requests $Requests -Lines $lines
+    # And every success that names work left undone, or a fact that should (Q6).
+    Add-FollowUpExchanges -Requests $Requests -Lines $lines
     $lines
 }
 
@@ -4272,6 +4275,11 @@ try {
     $dirtyProbe = Tool-Payload $byId[116]
     Assert-True ($dirtyProbe.scene_saved -eq $false) "A live scene mutation did not say the change is unsaved: $($dirtyProbe | ConvertTo-Json -Compress)"
     Assert-True ($dirtyProbe.limitation -match "editor_save_scene") "A live scene mutation did not say how to persist the change: $($dirtyProbe.limitation)"
+    # The same fact as a step to act on (Q6). On 4.7 the control room below
+    # names the scene the editor holds unsaved, so the step is checked against
+    # the engine and not only against the flag it came from.
+    $dirtySave = @($dirtyProbe.follow_up | Where-Object { $_.work -eq "save" })
+    Assert-True ($dirtySave.Count -eq 1 -and $dirtySave[0].tool -eq "editor_save_scene") "A live scene mutation did not name editor_save_scene as its follow-up: $($dirtyProbe | ConvertTo-Json -Compress -Depth 5)"
     $engineErrorsAfterRoom = @((Tool-Payload $byId[5571]).records | Where-Object { $_.message -match 'Parameter "mb" is null' })
     Assert-True ($engineErrorsAfterRoom.Count -eq 0) "The dashboard read left $($engineErrorsAfterRoom.Count) engine error(s) about a missing method bind in the log."
     $roomAfterMutation = Tool-Payload $byId[5570]
@@ -5731,6 +5739,7 @@ text = "Not a key"
     Assert-ObservedAnswersRecorded
     Assert-BoundedAnswersSayWhetherComplete
     Assert-RefusalsNameTheirFix ((& $didiExecutable --dump-tool-manifest) -join "`n")
+    Assert-MutationsNameTheirFollowUps ((& $didiExecutable --dump-tool-manifest) -join "`n")
     $integrationSucceeded = $true
     Write-Output "Godot integration passed: Phases 1-6 editor/runtime workflows, deep diagnostics, project isolation, export, MeshLibrary, live UI hit-testing, and live Control listing."
 }

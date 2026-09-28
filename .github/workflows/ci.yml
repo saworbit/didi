@@ -507,6 +507,16 @@ jobs:
           # (Q6).
           "$DIDI_PYTHON" -m unittest tests.test_refusal_remedies -v
 
+      - name: Verify every mutation says what work it leaves
+        shell: bash
+        run: |
+          # tests/follow_ups.json says, for each tool this build classifies as
+          # a mutation, the work a successful call can leave and the answer
+          # fact behind its follow_up step, why it leaves none, or the issue
+          # that tracks what it does not say yet. A new mutating tool with no
+          # entry fails here; the live steps are checked in the Godot job (Q6).
+          "$DIDI_PYTHON" -m unittest tests.test_follow_ups -v
+
       - name: Run End-to-End MCP Integration Test
         shell: bash
         run: |
