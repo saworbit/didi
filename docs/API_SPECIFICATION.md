@@ -107,6 +107,15 @@ it sees without one of the fields above. A failure answered as plain text
 rather than an envelope has no `error.data` at all; their number is recorded in
 `tests/refusal_remedies.json` and may only fall.
 
+When the same call fails the same way twice in a row, the second refusal says
+so in `error.data.repeated`: `count`, how many times in a row, `follow`, the
+remedy field above to act on, and a `note`. The same call is the tool and the
+arguments as sent, less `confirmation_token`; the same way is `data.code`. A
+success of that call, or a different failure, starts the count again. A
+repeated call is never refused, because polling is legitimate. A `2024-11-05`
+client is counted across the process; a modern request within the runtime
+session it named.
+
 ---
 
 ## 2. MCP Methods

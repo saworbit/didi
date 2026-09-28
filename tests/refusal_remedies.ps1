@@ -38,6 +38,7 @@ function Assert-RefusalsNameTheirFix([string]$ManifestJson) {
     $withoutRemedy = @(($ManifestJson | ConvertFrom-Json).refusals.without_remedy.PSObject.Properties.Name)
     $missing = @()
     $checked = 0
+    $repeats = 0
     $unstructured = @{}
     foreach ($exchange in $refusalExchanges) {
         $text = @($exchange.Response.result.content | Where-Object { $_.type -eq "text" })[0].text
@@ -52,6 +53,16 @@ function Assert-RefusalsNameTheirFix([string]$ManifestJson) {
         $data = $envelope.error.data
         if ($null -ne $data -and $withoutRemedy -contains [string]$data.code) { continue }
         $checked++
+        # The same call failing the same way again says so, and what it points
+        # at is a fix the refusal really carries (Q6).
+        if ($null -ne $data -and $null -ne $data.PSObject.Properties["repeated"]) {
+            $repeats++
+            $repeat = $data.repeated
+            if ([int]$repeat.count -lt 2) { $missing += "$($exchange.Tool) request $($exchange.Response.id): repeated with a count under 2" }
+            if ($null -ne $repeat.PSObject.Properties["follow"] -and $null -eq $data.PSObject.Properties[[string]$repeat.follow]) {
+                $missing += "$($exchange.Tool) request $($exchange.Response.id): repeated points at $($repeat.follow), which it does not carry"
+            }
+        }
         $named = @($refusalRemedyFields | Where-Object { $null -ne $data -and $null -ne $data.PSObject.Properties[$_] })
         if ($named.Count -eq 0) {
             $said = [string]$envelope.error.message
@@ -62,5 +73,5 @@ function Assert-RefusalsNameTheirFix([string]$ManifestJson) {
     Assert-True ($missing.Count -eq 0) "Refusals that do not say what fixes them:`n$($missing -join "`n")"
     Assert-True ($checked -ge 50) "Only $checked refusals were checked in this run; the harness has stopped reaching them."
     $plain = @($unstructured.Keys | Sort-Object | ForEach-Object { "$_ x$($unstructured[$_])" })
-    Write-Output "Refusal remedies: $checked refusals named their fix. Plain-text failures still without an envelope: $(if ($plain.Count) { $plain -join ', ' } else { 'none' })."
+    Write-Output "Refusal remedies: $checked refusals named their fix, $repeats of them marked as a repeat. Plain-text failures still without an envelope: $(if ($plain.Count) { $plain -join ', ' } else { 'none' })."
 }

@@ -51,6 +51,16 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Added
 
+- **The same call failing the same way twice says so (Q6 part 2, #1040).** The
+  second identical failure in a row carries `error.data.repeated`: `count`,
+  `follow`, naming the remedy field to act on, and a `note` saying the call
+  will fail again unchanged. The same call is the tool and the arguments as
+  sent, less `confirmation_token`, which is new on every attempt; the same way
+  is the refusal's `data.code`. A success, or a different failure, starts the
+  count again, and nothing is refused for being repeated, because polling is
+  legitimate. A `2024-11-05` client is counted across the process, a modern
+  request within the session it named, and what is remembered is bounded.
+
 - **Every refusal names what fixes it (Q6 part 1, #1040).** A refusal's
   `error.data` now carries `retry_with` (the arguments to resend), `field` (the
   argument at fault), `next_call` (`{tool, arguments, reason}`, a call to make

@@ -36,7 +36,7 @@ Before planning work, call `tools/list` and inspect `_meta.didi` on every candid
 - Never infer implementation from the fact that a schema is registered.
 - Re-check discovery after the editor starts, stops, or reconnects.
 - Argument names differ between tool families: the node a call is about is `target_node` on most tools and `tilemap_path`, `animation_player_path` or `emitter_node` on others. A refusal for one argument sent under the wrong name carries `argument` (what you sent), `did_you_mean` and `retry_with`: resend without `argument` and with `retry_with` added.
-- Every refusal says what fixes it in `error.data`: `retry_with` (arguments to resend), `field` (the argument at fault), `next_call` (a call to make first, with its `reason`), `restart_with`, or `retry_after_ms` (the same call, later). Do that before sending the call again. `no_remedy` means nothing you send will fix it, so do not retry.
+- Every refusal says what fixes it in `error.data`: `retry_with` (arguments to resend), `field` (the argument at fault), `next_call` (a call to make first, with its `reason`), `restart_with`, or `retry_after_ms` (the same call, later). Do that before sending the call again. `no_remedy` means nothing you send will fix it, so do not retry. A refusal carrying `repeated` is the same call failing the same way again: stop resending it and do what its `follow` field says.
 
 The four possible `currentMode` values are:
 

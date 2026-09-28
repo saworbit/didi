@@ -15,6 +15,7 @@
 #include "didi/mcp/resource_registry.hpp"
 #include "didi/mcp/prompt_registry.hpp"
 #include "didi/mcp/response_economy.hpp"
+#include "didi/mcp/repeated_failures.hpp"
 #include "didi/common/ipc_channel.hpp"
 #include "didi/runtime/session_client.hpp"
 #include "didi/offline/blackboard.hpp"
@@ -134,6 +135,8 @@ private:
     // request never reads or writes it.
     ResponseEconomy m_clientDeclaredEconomy;
     SessionDescriptorLedger m_descriptorLedger;
+    // The same call failing the same way again, per conversation (Q6).
+    RepeatedFailures m_repeatedFailures;
     ResponseEconomy responseEconomyFor(ProtocolEra era, const json& params) const;
     // Whether the client behind a request already holds a session descriptor.
     DescriptorHeld descriptorHolderFor(const RequestScope& scope);
