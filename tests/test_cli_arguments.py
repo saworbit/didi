@@ -74,6 +74,8 @@ ACCEPTED = [
     ("log level WARN", ["--project", FIXTURE_PROJECT, "--log-level", "WARN"]),
     ("log level ERROR", ["--project", FIXTURE_PROJECT, "--log-level", "ERROR"]),
     ("log level NONE", ["--project", FIXTURE_PROJECT, "--log-level", "NONE"]),
+    ("session descriptor every", ["--project", FIXTURE_PROJECT, "--session-descriptor", "every"]),
+    ("session descriptor once", ["--project", FIXTURE_PROJECT, "--session-descriptor", "once"]),
     ("every option at once",
      ["--project", FIXTURE_PROJECT, "--yolo", "--log-level", "WARN",
       "--pipe-name", "didi-cli-test"]),
@@ -108,6 +110,11 @@ REFUSED = [
      "--pipe-name expects a value and was given an empty one"),
     ("empty log level", ["--log-level", ""],
      "--log-level expects a value and was given an empty one"),
+    ("session descriptor outside the enum",
+     ["--project", FIXTURE_PROJECT, "--session-descriptor", "always"],
+     "--session-descriptor expects every or once, not always"),
+    ("session descriptor swallows the next flag", ["--session-descriptor", "--yolo"],
+     "--session-descriptor expects a value, but the next argument is the option --yolo"),
     ("empty argument", [""], "an empty argument is neither an option nor a value"),
     ("stray argument", ["oops"], "unexpected argument oops"),
     ("stray argument after valid options", ["--project", FIXTURE_PROJECT, "oops"],
@@ -189,7 +196,9 @@ class CommandLineTests(unittest.TestCase):
     def test_help_lists_every_option_the_parser_accepts(self):
         help_text = _run(["--help"]).stdout
         for option in ("--version", "--help", "--project", "--pipe-name",
-                       "--log-level", "--dump-tool-manifest", "--yolo"):
+                       "--log-level", "--dump-tool-manifest", "--yolo", "--ui-app",
+                       "--tools", "--session-descriptor", "--managed-editor",
+                       "--recovery-workspace"):
             self.assertIn(option, help_text)
 
     def test_version_prints_the_build_it_came_from_as_well_as_the_release(self):

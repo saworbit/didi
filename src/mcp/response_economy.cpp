@@ -24,6 +24,16 @@ ResponseEconomy declaredResponseEconomy(const json& capabilities) {
     return economy;
 }
 
+std::optional<SessionDescriptorMode> parseSessionDescriptorMode(const std::string& value) {
+    if (value == "every") return SessionDescriptorMode::Every;
+    if (value == "once") return SessionDescriptorMode::Once;
+    return std::nullopt;
+}
+
+const char* sessionDescriptorModeName(SessionDescriptorMode mode) {
+    return mode == SessionDescriptorMode::Once ? "once" : "every";
+}
+
 json responseEconomyDeclaration() {
     return {{kResponseEconomyExtension,
              {{"omit", json::array({kOmitTextCopy, kOmitSessionDescriptor})}}}};

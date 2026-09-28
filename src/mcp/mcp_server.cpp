@@ -525,8 +525,14 @@ bool McpServer::uiSurfaceVisible(ProtocolEra era, const json& params) const {
 }
 
 ResponseEconomy McpServer::responseEconomyFor(ProtocolEra era, const json& params) const {
-    if (era == ProtocolEra::Modern) return requestDeclaredEconomy(params);
-    return m_clientDeclaredEconomy | requestDeclaredEconomy(params);
+    // The operator's switch is not another client's declaration, so it is not
+    // what the era split below guards against: it applies to every request on
+    // the process, the way --tools does. It can only ever turn on the
+    // descriptor half; the text copy stays the client's to decline.
+    const ResponseEconomy operator_chose{
+        false, m_sessionDescriptorMode == SessionDescriptorMode::Once};
+    if (era == ProtocolEra::Modern) return operator_chose | requestDeclaredEconomy(params);
+    return operator_chose | m_clientDeclaredEconomy | requestDeclaredEconomy(params);
 }
 
 JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
@@ -584,7 +590,8 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
                 // A client rendering safety affordances needs to know the
                 // confirmation gate is open before it acts, not after.
                 {"didi", {{"confirmationsSkipped", m_skipConfirmations},
-                          {"toolProfile", toolProfileName(m_toolProfile)}}}
+                          {"toolProfile", toolProfileName(m_toolProfile)},
+                          {"sessionDescriptor", sessionDescriptorModeName(m_sessionDescriptorMode)}}}
             }},
             {"instructions", kServerInstructions},
             // Caching hints are required on a complete result. Everything here
@@ -688,7 +695,9 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
             // host the whole published surface was identical in both modes
             // (#684).
             {"_meta", {{kDidiMetaKey, {{"confirmationsSkipped", m_skipConfirmations},
-                                       {"toolProfile", toolProfileName(m_toolProfile)}}}}}
+                                       {"toolProfile", toolProfileName(m_toolProfile)},
+                                       {"sessionDescriptor",
+                                        sessionDescriptorModeName(m_sessionDescriptorMode)}}}}}
         };
         return JsonRpcResponse::makeSuccess(req.id, complete(std::move(result)));
     }

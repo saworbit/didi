@@ -3,6 +3,7 @@
     "_meta": {
       "didi": {
         "confirmationsSkipped": false,
+        "sessionDescriptor": "every",
         "toolProfile": "full"
       }
     },

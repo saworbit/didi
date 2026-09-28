@@ -473,6 +473,72 @@ static void test_the_eras_do_not_share_a_declaration_or_a_ledger() {
     ASSERT_FALSE(liveCall(live.server)["structuredContent"]["session"].contains("endpoint"));
 }
 
+static void test_only_every_and_once_are_session_descriptor_modes() {
+    using didi::mcp::SessionDescriptorMode;
+    ASSERT_TRUE(didi::mcp::parseSessionDescriptorMode("every") == SessionDescriptorMode::Every);
+    ASSERT_TRUE(didi::mcp::parseSessionDescriptorMode("once") == SessionDescriptorMode::Once);
+    for (const auto* refused : {"", "Once", "EVERY", "never", "once "}) {
+        ASSERT_FALSE(didi::mcp::parseSessionDescriptorMode(refused).has_value());
+    }
+    for (const auto mode : {SessionDescriptorMode::Every, SessionDescriptorMode::Once}) {
+        ASSERT_TRUE(didi::mcp::parseSessionDescriptorMode(
+                        didi::mcp::sessionDescriptorModeName(mode)) == mode);
+    }
+}
+
+// A client learns the mode before its first call, the way it learns the tool
+// profile, rather than from the shape of an answer.
+static void test_both_handshakes_report_the_session_descriptor_mode() {
+    for (const auto mode : {didi::mcp::SessionDescriptorMode::Every,
+                            didi::mcp::SessionDescriptorMode::Once}) {
+        didi::mcp::McpServer server;
+        server.setSessionDescriptorMode(mode);
+        const auto discovered = send(server, "server/discover", json::object());
+        const auto initialized = initialize(server);
+        for (const auto& answer : {discovered, initialized}) {
+            ASSERT_EQ(answer["_meta"]["didi"]["sessionDescriptor"],
+                      didi::mcp::sessionDescriptorModeName(mode));
+        }
+    }
+}
+
+// The operator's switch, for a host that cannot declare anything (#1031). It
+// references the descriptor for every client and never touches the text copy,
+// which only the client can decide it does not read.
+static void test_once_references_the_descriptor_for_a_client_that_declared_nothing() {
+    LiveServer live;
+    live.server.setSessionDescriptorMode(didi::mcp::SessionDescriptorMode::Once);
+    initialize(live.server);
+    const auto first = liveCall(live.server);
+    ASSERT_TRUE(carriesTextCopy(first));
+    ASSERT_TRUE(first["structuredContent"]["session"].contains("endpoint"));
+    for (int i = 0; i < 2; ++i) {
+        const auto later = liveCall(live.server);
+        // The copy is kept, and it says what the structured half says.
+        ASSERT_TRUE(carriesTextCopy(later));
+        ASSERT_EQ(later["structuredContent"]["session"],
+                  json({{"session_id", kEditorA}, {"kind", "editor"}}));
+    }
+    // A restart is a new descriptor, sent whole.
+    live.editor->session = routeDescriptor(kEditorB);
+    ASSERT_TRUE(liveCall(live.server)["structuredContent"]["session"].contains("endpoint"));
+    // A modern request named its session, so it holds it from the first call.
+    const auto modern = liveCall(live.server, modernMeta(json::object(), kEditorB));
+    ASSERT_TRUE(carriesTextCopy(modern));
+    ASSERT_FALSE(modern["structuredContent"]["session"].contains("endpoint"));
+}
+
+// The default is the promise API_SPECIFICATION.md makes: every live answer
+// carries the whole descriptor.
+static void test_every_is_the_default_and_changes_nothing() {
+    LiveServer live;
+    ASSERT_TRUE(live.server.sessionDescriptorMode() == didi::mcp::SessionDescriptorMode::Every);
+    initialize(live.server);
+    for (int i = 0; i < 3; ++i) {
+        ASSERT_TRUE(liveCall(live.server)["structuredContent"]["session"].contains("endpoint"));
+    }
+}
+
 struct RegisterResponseEconomyTests {
     RegisterResponseEconomyTests() {
         registerTest("ResponseEconomy.OnlyTheDocumentedDeclarationDeclares",
@@ -496,5 +562,13 @@ struct RegisterResponseEconomyTests {
                      test_a_legacy_request_can_declare_for_itself);
         registerTest("ResponseEconomy.ErasShareNoDeclarationOrLedger",
                      test_the_eras_do_not_share_a_declaration_or_a_ledger);
+        registerTest("ResponseEconomy.OnlyEveryAndOnceAreModes",
+                     test_only_every_and_once_are_session_descriptor_modes);
+        registerTest("ResponseEconomy.HandshakesReportTheSessionDescriptorMode",
+                     test_both_handshakes_report_the_session_descriptor_mode);
+        registerTest("ResponseEconomy.OnceReferencesForAnUndeclaredClient",
+                     test_once_references_the_descriptor_for_a_client_that_declared_nothing);
+        registerTest("ResponseEconomy.EveryIsTheDefault",
+                     test_every_is_the_default_and_changes_nothing);
     }
 } g_register_response_economy_tests;
