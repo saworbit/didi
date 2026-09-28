@@ -3356,14 +3356,6 @@ json liveResult(const json& fields) {
     return result;
 }
 
-// A committed edited-scene mutation lands in the editor's open scene and its
-// undo history, and nowhere else. Every reply reported plain success, so an
-// agent that mutated, read its change back and handed off left a scene one
-// "don't save" away from never having happened, and nothing said so;
-// undo_redo_registered: true read as reassurance that the change was real
-// rather than as the warning that it was unsaved (#557). The offline setting
-// writer set the precedent with its limitation paragraph for the mode where
-// this matters less.
 // Parses "min,max[,step][,flags...]". Anything that does not start with two
 // numbers is not a range this can act on, and is passed over rather than
 // guessed at.
@@ -3533,6 +3525,16 @@ std::string describeResourceTypeRefusal(const std::string& property_name,
 
 namespace {
 
+// A committed edited-scene mutation lands in the editor's open scene and its
+// undo history, and nowhere else. Every reply reported plain success, so an
+// agent that mutated, read its change back and handed off left a scene one
+// "don't save" away from never having happened, and nothing said so;
+// undo_redo_registered: true read as reassurance that the change was real
+// rather than as the warning that it was unsaved (#557). The offline setting
+// writer set the precedent with its limitation paragraph for the mode where
+// this matters less.
+// The server turns scene_saved: false into a follow_up step naming
+// editor_save_scene (src/mcp/follow_ups.cpp, Q6).
 json liveSceneMutation(json fields) {
     fields["scene_saved"] = false;
     fields["limitation"] =
