@@ -40,7 +40,7 @@ fails when a phase's status differs between the roadmap and the phase design.
 | [Q3](#q3-contract-snapshots) | Contract snapshots | 13 | none | #1011 | COMPLETE (#1024) |
 | [Q4](#q4-shrink-the-tool-list) | Shrink the tool list | 13 | Q3 | #1012 | IN PROGRESS |
 | [Q5](#q5-response-economy) | Response economy | 13 | Q3 | #776 | COMPLETE (#1039) |
-| [Q6](#q6-next-step-in-every-answer) | Next step in every answer | 13 | none | not yet | PLANNED |
+| [Q6](#q6-next-step-in-every-answer) | Next step in every answer | 13 | none | #1040 | IN PROGRESS |
 | [Q7](#q7-typed-object-layer) | Typed object layer | 14 | Q2 | not yet | PLANNED |
 | [Q8](#q8-long-work-as-jobs) | Long work as jobs | 11 | none | not yet | PLANNED |
 | [Q9](#q9-proof-in-one-call) | Proof in one call | 14 | Q8 | not yet | PLANNED |
@@ -242,6 +242,13 @@ It never refuses a call, because polling is legitimate.
 run of three identical failures.
 
 **Surface amendment:** Not needed.
+
+**Delivery:** Three pull requests. The first gives every error code a remedy,
+or a reason it has none, and checks it in CI and on every live refusal; the
+156 failures still answered as plain text, with no `error.data`, are counted
+and may only fall. The second is repeat detection, and the third the
+structured next step on a mutation that leaves work undone. Field trial 07
+measures the second half of **Done when**.
 
 ### Q7. Typed object layer
 

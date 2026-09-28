@@ -1,0 +1,5 @@
+{
+  "schema": 1,
+  "plain_text_error_sites": 156,
+  "note": "CallToolResult::error(\"...\") sites in src/, which answer in plain text with no error.data and so cannot name their fix. The count may only fall (Q6)."
+}

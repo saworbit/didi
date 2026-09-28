@@ -1865,6 +1865,7 @@
                   "canonical_tool": "viewport_capture_frame",
                   "code": "headless_engine",
                   "display_driver": "headless",
+                  "no_remedy": "The attached editor runs headless and has no render device; start it with a display and attach again.",
                   "relaunch_argument": null,
                   "retryable": false,
                   "session_kind": "editor",

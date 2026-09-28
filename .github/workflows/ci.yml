@@ -496,6 +496,16 @@ jobs:
           # are checked in the Godot job (Q5).
           "$DIDI_PYTHON" -m unittest tests.test_bounded_reads -v
 
+      - name: Verify every refusal names what fixes it
+        shell: bash
+        run: |
+          # src/mcp/refusal_remedies.cpp gives every error code a remedy, or a
+          # reason it has none, and the manifest publishes it. This fails on a
+          # code the source emits that the table does not cover, and on any
+          # growth in the failures still answered as plain text; the live
+          # refusals themselves are checked in the Godot job (Q6).
+          "$DIDI_PYTHON" -m unittest tests.test_refusal_remedies -v
+
       - name: Run End-to-End MCP Integration Test
         shell: bash
         run: |
