@@ -1437,6 +1437,7 @@ json ToolManifest::toJson() const {
             {"implemented", implemented.size()},
             {"unimplemented", unimplemented.size()},
             {"mutating", mutating.size()},
+            {"core", core.size()},
             {"total", canonical.size() + legacy.size()}
         }},
         {"names", {
@@ -1444,10 +1445,53 @@ json ToolManifest::toJson() const {
             {"legacy", legacy},
             {"implemented", implemented},
             {"unimplemented", unimplemented},
-            {"mutating", mutating}
+            {"mutating", mutating},
+            {"core", core}
         }},
         {"required", required}
     };
+}
+
+std::optional<ToolProfile> parseToolProfile(const std::string& value) {
+    if (value == "full") return ToolProfile::Full;
+    if (value == "core") return ToolProfile::Core;
+    return std::nullopt;
+}
+
+const char* toolProfileName(ToolProfile profile) {
+    return profile == ToolProfile::Core ? "core" : "full";
+}
+
+// Every tool an agent reached in the six field trials, from the called sets in
+// tools/field-trial/reached_tools.json, and every implemented tool the handshake
+// guide sends an agent to, so a core session can follow its own guide. Written
+// out rather than computed at startup because the trial data is not part of
+// the build; tests/test_tool_profiles.py fails when this drifts from either
+// source. Legacy names are never here: each has a canonical tool.
+const std::set<std::string>& coreProfileTools() {
+    static const std::set<std::string> names = {
+        "anim_add_library", "anim_list_tracks", "asset_reimport", "blackboard_read",
+        "blackboard_write", "didi_control_room", "editor_reload_project", "editor_save_scene",
+        "eval_gdscript", "project_analyze_impact", "project_apply_changes", "project_audit_assets",
+        "project_get_setting", "project_get_uid_map", "project_list_autoloads",
+        "project_list_input_actions", "project_list_resources", "project_search_symbols",
+        "project_search_text", "project_set_autoload", "project_set_input_action",
+        "project_set_setting", "project_verify_changes", "resource_create", "resource_inspect",
+        "runtime_attach_session", "runtime_detach_session", "runtime_explore_scene",
+        "runtime_get_session", "runtime_get_tree", "runtime_inject_input", "runtime_launch",
+        "runtime_list_sessions", "runtime_read_logs", "runtime_read_output", "runtime_set_paused",
+        "runtime_step", "runtime_stop", "runtime_watch_invariants", "scene_add_to_group",
+        "scene_close", "scene_create", "scene_get_hierarchy", "scene_get_property",
+        "scene_instantiate_node", "scene_open", "scene_pack_branch", "scene_remove_node",
+        "scene_set_property", "script_attach_to_node", "script_check_syntax", "script_create",
+        "script_get_symbols", "script_patch_method", "script_reflect_class", "signal_connect",
+        "tilemap_get_used_rect", "tilemap_set_cells", "ui_list_controls", "viewport_capture_frame"};
+    return names;
+}
+
+bool ToolRegistry::inProfile(const std::string& name, ToolProfile profile) const {
+    if (!getTool(name)) return false;
+    return profile == ToolProfile::Full || coreProfileTools().count(name) > 0;
 }
 
 ToolManifest ToolRegistry::buildManifest() const {
@@ -1461,6 +1505,7 @@ ToolManifest ToolRegistry::buildManifest() const {
         manifest.canonical.push_back(tool.name);
         if (tool.capability.implemented) {
             manifest.implemented.push_back(tool.name);
+            if (coreProfileTools().count(tool.name)) manifest.core.push_back(tool.name);
             if (MutationSafety::isMutation(resolveAliasBinding(tool.name, json::object()))) {
                 manifest.mutating.push_back(tool.name);
             }
@@ -1486,6 +1531,7 @@ ToolManifest ToolRegistry::buildManifest() const {
     std::sort(manifest.implemented.begin(), manifest.implemented.end());
     std::sort(manifest.unimplemented.begin(), manifest.unimplemented.end());
     std::sort(manifest.mutating.begin(), manifest.mutating.end());
+    std::sort(manifest.core.begin(), manifest.core.end());
     return manifest;
 }
 

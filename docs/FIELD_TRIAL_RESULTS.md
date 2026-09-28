@@ -478,6 +478,11 @@ python tools/field-trial/coverage.py \
   --output <trial>/coverage.json
 ```
 
+Then add the run's `called` names to `tools/field-trial/reached_tools.json` under
+its trial number. The `core` tool profile is derived from that file, and
+`tests/test_tool_profiles.py` fails until `coreProfileTools()` in
+`src/mcp/tool_registry.cpp` lists every tool a recorded run reached.
+
 How the calls went, rather than which tools they reached, comes from the same transcript. `transcripts.py` keeps each call's arguments and whether its answer failed, and `tools/field-trial/guide_rules.py` scores them against the handshake guide's rules: failures by cause, a failing call sent again unchanged, `dry_run` previews, bounded hierarchy reads and read-backs.
 
 ```

@@ -51,6 +51,22 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Added
 
+- **`--tools core` lists under half the bytes, and both tool lists have a budget
+  (Q4, #1012).** An agent pays for all of `tools/list`, 203,634 bytes on main,
+  before it does anything. `didi --tools core` lists 60 tools in 94,746 bytes:
+  every tool the six field trials reached, recorded in
+  `tools/field-trial/reached_tools.json`, and every implemented tool the
+  handshake guide names, so a core session can follow its own guide. Its
+  listing states `confirmationsSkipped`, `editorConnected` and `sessionKind`
+  once, in the listing's own `_meta.didi`, instead of on each entry. A tool
+  outside the profile is refused with `-32602` and `restart_with: "--tools
+  full"`. `initialize` and `server/discover` report `_meta.didi.toolProfile`.
+  `full` stays the default and keeps its shape; fifteen parameter descriptions
+  lose sentences that repeated the `default` or bounds their schema declares,
+  so it is 272 bytes smaller. `tests/tool_list_budgets.json` budgets both, and
+  CI fails a listing over its budget; raising one takes its own pull request.
+  Turning legacy names off and moving the shared fields in `full` break hosts
+  that read them, so they wait for a major version (#1012 stays open).
 - **What a client is shown is committed, and CI fails when it moves (Q3, #1011).**
   `tests/contract_snapshots/offline.json` records the handshake, every tool's
   schema, description, annotations and `_meta`, and the resources and prompts,

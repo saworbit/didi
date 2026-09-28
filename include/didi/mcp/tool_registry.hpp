@@ -1,6 +1,8 @@
 #pragma once
 
 #include <map>
+#include <optional>
+#include <set>
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -13,6 +15,18 @@
 
 namespace didi {
 namespace mcp {
+
+// Which tools a session lists (Q4 in docs/BUILD_QUEUE.md). Chosen with --tools
+// at startup and fixed for the life of the process, because a tool list that
+// changes mid-session throws away the client's prompt cache.
+//
+// `full` is every registration and the default. `core` is the tools field
+// trials reached plus the ones the handshake guide sends an agent to, with the
+// _meta.didi fields that are the same on every tool moved to the listing.
+enum class ToolProfile { Full, Core };
+std::optional<ToolProfile> parseToolProfile(const std::string& value);
+const char* toolProfileName(ToolProfile profile);
+const std::set<std::string>& coreProfileTools();
 
 // A machine-readable description of the registered tool surface.
 //
@@ -31,6 +45,10 @@ struct ToolManifest {
     // classification the dry-run and confirmation contracts use rather than
     // from annotations a second derivation could move.
     std::vector<std::string> mutating;
+    // The names the core profile lists. The published counts stay the full
+    // surface; this is here so tests can check the profile against the trial
+    // data and the handshake guide it is derived from.
+    std::vector<std::string> core;
     // Required request fields per implemented canonical tool, so documentation
     // can be checked against the schema a caller actually has to satisfy
     // rather than against prose about it. dry_run is excluded: it is on every
@@ -47,6 +65,8 @@ public:
     void registerTool(ToolDefinition tool);
     const ToolDefinition* getTool(const std::string& name) const;
     std::vector<ToolDefinition> listTools() const;
+    // Whether a registered tool is listed, and callable, under the profile.
+    bool inProfile(const std::string& name, ToolProfile profile) const;
     ToolManifest buildManifest() const;
     // The scope says which era asked and which runtime session it named. It
     // defaults to a legacy request, so a caller that does not care about

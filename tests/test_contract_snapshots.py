@@ -149,7 +149,7 @@ class LiveSnapshots(unittest.TestCase):
         # A pid, a session id or a path that escaped the normaliser would fail
         # every later recording, so it is refused before it is committed.
         leaks = re.compile(r"[A-Za-z]:[\\/]+Users|/home/|/tmp/|didi-contract-|godot_didi_[0-9a-f]")
-        for name in ["offline.json"] + [p.name for p in self.live_files().values()]:
+        for name in ["offline.json", "offline-core.json"] + [p.name for p in self.live_files().values()]:
             with self.subTest(snapshot=name):
                 text = (SNAPSHOTS / name).read_text(encoding="utf-8")
                 self.assertIsNone(leaks.search(text), f"{name} holds a machine-specific value")
@@ -242,21 +242,26 @@ class Normalising(unittest.TestCase):
 
 
 class OfflineSurface(unittest.TestCase):
-    def test_offline_snapshot_matches_this_build(self):
-        # The schema half of the gate, with no engine: every tool's schema,
-        # description, annotations and _meta, and the handshake, resources and
-        # prompts. The engine jobs check the live answers the same way.
-        binary = didi_binary.resolve()
-        expected = (SNAPSHOTS / "offline.json").read_text(encoding="utf-8")
-        actual = contract.render(contract.record_offline(binary))
+    def assert_matches(self, name, actual):
+        expected = (SNAPSHOTS / name).read_text(encoding="utf-8")
         if actual != expected:
-            diff = contract.difference("tests/contract_snapshots/offline.json", expected, actual)
+            diff = contract.difference(f"tests/contract_snapshots/{name}", expected, actual)
             shown = "\n".join(diff[:200]) + ("\n..." if len(diff) > 200 else "")
             self.fail(
-                "This build shows clients something offline.json does not record. If the change is "
+                f"This build shows clients something {name} does not record. If the change is "
                 "intended, regenerate with python tools/contract_snapshots.py --godot <exe> for each "
                 "engine line and review the diff in this pull request.\n" + shown
             )
+
+    def test_offline_snapshot_matches_this_build(self):
+        # The schema half of the gate, with no engine: every tool's schema,
+        # description, annotations and _meta, and the handshake, resources and
+        # prompts. The engine jobs check the live answers the same way. Both
+        # tool profiles (Q4), core as what it changes about full.
+        binary = didi_binary.resolve()
+        offline = contract.record_offline(binary)
+        self.assert_matches("offline.json", contract.render(offline))
+        self.assert_matches("offline-core.json", contract.render(contract.record_offline_core(binary, offline)))
 
 
 if __name__ == "__main__":

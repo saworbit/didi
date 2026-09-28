@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "measured": "Bytes of the tools/list response line from a server with no engine attached, for a client that declared no capabilities.",
+  "baseline": {
+    "full": 203634,
+    "note": "main before Q4 (15c8458), 2026-09-28"
+  },
+  "budgets": {
+    "full": 203600,
+    "core": 95000
+  }
+}

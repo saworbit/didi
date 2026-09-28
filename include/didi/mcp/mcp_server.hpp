@@ -73,6 +73,11 @@ public:
     UiAppMode uiAppMode() const { return m_uiAppMode; }
     static std::optional<UiAppMode> parseUiAppMode(const std::string& value);
 
+    // Which tools tools/list shows and tools/call accepts. Set from --tools at
+    // startup and never changed afterwards; see ToolProfile.
+    void setToolProfile(ToolProfile profile) { m_toolProfile = profile; }
+    ToolProfile toolProfile() const { return m_toolProfile; }
+
 private:
     std::optional<JsonRpcResponse> dispatchPayload(const json& payload);
     void sendResponse(const JsonRpcResponse& resp);
@@ -108,6 +113,7 @@ private:
     bool m_initialized{false};
     bool m_skipConfirmations{false};
     UiAppMode m_uiAppMode{UiAppMode::Auto};
+    ToolProfile m_toolProfile{ToolProfile::Full};
     // Sticky from a 2024-11-05 handshake, and read only for legacy requests.
     // A modern request declares its own capabilities and is answered from
     // those alone, so one client's extension choice cannot reach another's

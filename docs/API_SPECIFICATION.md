@@ -238,7 +238,9 @@ one that is closed:
   published surface used to be identical in either mode.
 - Every tool entry in `tools/list` carries `_meta.didi.confirmationsSkipped`
   beside `currentMode`, which is where a host looks when it is deciding whether
-  to put its own guard in front of a destructive call.
+  to put its own guard in front of a destructive call. Under `--tools core` the
+  listing states it once, in its own `_meta.didi` (see
+  [Tool profiles](#tool-profiles)).
 - Every affected result records `_meta.didi.confirmation` as `skipped` --
   distinct from `human` and `agent`, because nobody confirmed anything.
 
@@ -295,6 +297,37 @@ Each tool and resource definition includes a namespaced `_meta.didi` object:
 ```
 
 `executionModes` and `implemented` describe the registration. `currentMode`, `liveAvailable`, `editorConnected`, and optional `sessionKind` are evaluated when the list request is handled. `sessionKind` identifies the selected `editor`/`game` route. `editorConnected` is true only for a connected editor route. `liveAvailable` additionally requires that the exact tool/resource allow the selected kind: runtime logs/tree/evaluation allow both kinds, pause/step/stop are game-only, and other live definitions are editor-only by default. A connected wrong-kind definition reports `currentMode: "unavailable"`; otherwise `currentMode` is `live`, `offline_fallback`, `local`, `local_status`, `local_session_management`, `unavailable`, or `unimplemented`. `currentMode` and `executionModes` use the definition's own answer vocabulary, so a tool or resource with no live path advertises `local` (or `local_status`, or `local_session_management`) rather than `offline_fallback`; only one that can go live advertises the fallback. The same word appears in the answer, because both come from the registration. A `resources/list` entry additionally carries `subscribable`, which says whether `resources/subscribe` accepts that URI. A non-empty `reason` is included for unimplemented definitions.
+
+### Tool profiles
+
+`--tools full|core` chooses, at startup, which tools a session lists. It is
+fixed for the life of the process, because a tool list that changed mid-session
+would throw away the client's prompt cache. `initialize` and `server/discover`
+report the choice as `_meta.didi.toolProfile`.
+
+- `full` is the default and the published surface: every canonical tool and
+  every legacy name, each with the `_meta.didi` object above. Its listing
+  carries no listing-level `_meta`.
+- `core` lists the tools the field trials reached, recorded in
+  `tools/field-trial/reached_tools.json`, plus every implemented tool this
+  server's handshake guide names, so a core session can follow its own guide.
+  It lists no legacy name. `confirmationsSkipped`, `editorConnected` and
+  `sessionKind` are the same on every entry, so a core listing states them once
+  in the listing's own `_meta.didi`, beside `toolProfile: "core"`, and its
+  entries omit them. Every other `_meta.didi` field stays on the entry.
+
+A `tools/call` naming a registered tool the session's profile does not list is
+refused with `-32602`, like any name the client was not shown, but its message
+and `error.data` say why: `name`, `toolProfile`, and `restart_with:
+"--tools full"`. It is `restart_with` and not `retry_with`, because no argument
+to the call can fix it. The published counts and `didi --dump-tool-manifest`
+describe the full surface whatever a session lists; the manifest carries the
+core names as `names.core`.
+
+Each profile's `tools/list` has a byte budget in `tests/tool_list_budgets.json`,
+checked in CI. The full profile's per-entry `confirmationsSkipped`,
+`editorConnected` and `sessionKind`, and its legacy names, stay until a major
+version, because hosts read them where this document promises them.
 
 Tool execution failures use MCP `result.isError: true` with explanatory text. JSON-RPC top-level errors remain reserved for malformed requests, unknown JSON-RPC methods, and other protocol-level failures.
 

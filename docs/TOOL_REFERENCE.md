@@ -1656,7 +1656,10 @@ sends `notifications/tools/list_changed` and
 `notifications/resources/list_changed` when that state moves -- an editor
 attaching or detaching, or a route obstruction appearing or clearing -- so a
 host that caches a listing is told when to take it again. Nothing else changes
-the listings; a quiet session produces no notifications.
+the listings; a quiet session produces no notifications. Under `--tools core`
+the tool listing states `editorConnected` and `sessionKind` once, in its own
+`_meta.didi`, rather than on each entry; see
+[Tool profiles](API_SPECIFICATION.md#tool-profiles).
 
 Tools whose result shape has been observed also publish an `outputSchema`, and CI validates each of those tools' real `structuredContent` against the schema the server published for it, so the promise cannot drift from the implementation. A schema is declared only where the shape is known: a tool that cannot be exercised, and every unimplemented name, publishes none rather than asserting a shape nobody has seen. `required` lists only fields present in every execution mode, and additional properties are permitted, so the extra members a live result carries never invalidate it.
 

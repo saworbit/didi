@@ -38,7 +38,7 @@ fails when a phase's status differs between the roadmap and the phase design.
 | [Q1](#q1-type-every-argument) | Type every argument | 13 | none | #1000 | COMPLETE (#1015) |
 | [Q2](#q2-observed-not-asserted) | Observed, not asserted | 13 | none | #1010 | COMPLETE (#1021) |
 | [Q3](#q3-contract-snapshots) | Contract snapshots | 13 | none | #1011 | COMPLETE (#1024) |
-| [Q4](#q4-shrink-the-tool-list) | Shrink the tool list | 13 | Q3 | #1012 | PLANNED |
+| [Q4](#q4-shrink-the-tool-list) | Shrink the tool list | 13 | Q3 | #1012 | IN PROGRESS |
 | [Q5](#q5-response-economy) | Response economy | 13 | Q3 | #776 | PLANNED |
 | [Q6](#q6-next-step-in-every-answer) | Next step in every answer | 13 | none | not yet | PLANNED |
 | [Q7](#q7-typed-object-layer) | Typed object layer | 14 | Q2 | not yet | PLANNED |
@@ -156,7 +156,9 @@ every definition into every session.
   `confirmationsSkipped` and `editorConnected`, move to server-level metadata.
 - Descriptions and schema prose that repeat the schema are trimmed.
 - A startup profile, `--tools core|full`. `core` is the union of the tools any
-  trial reached. `full` stays the default until a trial on `core` shows no loss.
+  trial reached, and the implemented tools the handshake guide names, so a
+  core session can follow its own guide. `full` stays the default until a
+  trial on `core` shows no loss.
 - A byte budget for each profile, checked in CI.
 
 **How:** Measure the same way the figures above were taken: `initialize`, then
@@ -173,6 +175,14 @@ takes its own pull request with a reason.
 
 **Surface amendment:** Not needed. Turning legacy names off by default breaks a
 client that calls them, so it goes in the changelog under Breaking.
+
+**Delivery:** Two pull requests. The first ships everything that breaks
+nothing: the profiles, the budgets, the trimmed prose, and the shared `_meta`
+fields moved to the listing inside `core`, which no client used before. The
+second moves those fields in `full` too and turns legacy names off by default.
+Both break a host that reads what
+[API_SPECIFICATION.md](API_SPECIFICATION.md#didi-capability-extension) promises,
+so it lands with a major version, and #1012 stays open until it does.
 
 ### Q5. Response economy
 

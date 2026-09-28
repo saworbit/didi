@@ -475,6 +475,17 @@ jobs:
           # every read-only tool; the live answers are checked in the Godot job.
           "$DIDI_PYTHON" -m unittest tests.test_contract_snapshots -v
 
+      - name: Verify each tool profile stays within its byte budget
+        shell: bash
+        run: |
+          # An agent pays for every byte of tools/list before it does anything.
+          # tests/tool_list_budgets.json holds a budget for --tools full and
+          # --tools core, and a listing over its budget fails here; raising one
+          # takes its own pull request with a reason (Q4). The same module
+          # checks that core is still the tools the field trials reached plus
+          # the ones the handshake guide names.
+          "$DIDI_PYTHON" -m unittest tests.test_tool_profiles -v
+
       - name: Run End-to-End MCP Integration Test
         shell: bash
         run: |

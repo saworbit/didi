@@ -57,15 +57,15 @@ const std::unordered_map<std::string, std::string>& sharedDescriptions() {
          "screen is showing, so without this an unattended agent cannot capture one at all. "
          "Editor sessions only."},
         {"collision_mask",
-         "Physics layers to test against, as a 32-bit bit mask, 1 to 4294967295. Defaults to 1, "
-         "layer one only; 4294967295 tests every layer."},
+         "Physics layers to test against, as a 32-bit bit mask. The default, 1, is layer one "
+         "only; 4294967295 tests every layer."},
         {"board",
          "Which blackboard to read or write. Defaults to the default board, so a single-agent "
          "session never needs to pass it."},
         {"timeout_ms",
          "How long to wait before giving up, in milliseconds."},
         {"paths",
-         "The res:// source assets to act on, 1 to 256 of them, each a normalized "
+         "The res:// source assets to act on, each a normalized "
          "project-owned path. Duplicates are refused rather than silently collapsed."},
     };
     return table;
@@ -195,7 +195,7 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
         {"project_set_input_action.action",
          "The InputMap action name, such as ui_accept or player_jump."},
         {"project_set_input_action.deadzone",
-         "Analogue deadzone for the action, 0 to 1."},
+         "Analogue deadzone for the action."},
         {"project_set_input_action.events",
          "The input events bound to the action, each an object in Godot's InputEvent shape."},
         {"project_set_input_action.replace",
@@ -225,7 +225,7 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
          "opening the files."},
         {"script_get_symbols.max_symbols",
          "Stop after this many declarations, counted across every kind, and report truncated. "
-         "Defaults to 2000. symbol_count_total says how many the file holds either way, so a "
+         "symbol_count_total says how many the file holds either way, so a "
          "clipped answer can be told from a complete one."},
         {"project_search_text.query",
          "The text to look for. At most 256 characters, which is the maxLength this parameter publishes."},
@@ -238,7 +238,7 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
          "Narrow to these file extensions. Defaults to every project text format; anything "
          "excluded is counted in unsearchable_files rather than passed over silently."},
         {"project_search_text.max_results",
-         "Stop after this many matches and report truncated. 1 to 500, default 100."},
+         "Stop after this many matches and report truncated."},
         {"project_search_symbols.query",
          "The declaration name to look for. At most 256 characters, which is the maxLength this parameter publishes."},
         {"project_search_symbols.case_sensitive",
@@ -252,7 +252,7 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
          "Narrow the files that are read. Declarations are extracted from .gd and .cs only; "
          "anything else reached is counted in unsearchable_files."},
         {"project_search_symbols.max_results",
-         "Stop after this many matches and report truncated. 1 to 500, default 100."},
+         "Stop after this many matches and report truncated."},
         {"project_analyze_impact.max_impacts",
          "Stop after this many impacts and report the result as truncated."},
         {"project_rename_references.max_impacts",
@@ -302,7 +302,7 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
          "with res://player.gd.uid."},
         {"asset_reimport.timeout_ms",
          "How long to wait for the editor to finish reimporting, and to apply any scan the batch "
-         "needed, 1 to 10000 milliseconds. A timeout's error.data says whether the editor was "
+         "needed, in milliseconds. A timeout's error.data says whether the editor was "
          "still scanning (editor_scanning) or applying the scan (scan_applied)."},
         {"instantiate_asset.asset_path",
          "The res:// asset to put in the scene."},
@@ -337,7 +337,7 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
          "Sequence number to read from. 0 starts at the oldest retained record; pass the "
          "next_cursor from the previous answer to continue, until has_more is false."},
         {"runtime_read_logs.limit",
-         "How many records to return, 1 to 500, default 100."},
+         "How many records to return."},
         {"runtime_read_logs.minimum_level",
          "Drop records below this level: debug, info, warning or error. The cursor still "
          "advances over what the filter excludes, so a quiet level cannot starve paging."},
@@ -345,7 +345,7 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
          "Sequence number to read from. 0 starts at the oldest retained record; pass the "
          "next_cursor from the previous answer to continue, until has_more is false."},
         {"runtime_read_output.limit",
-         "How many records to return, 1 to 500, default 100."},
+         "How many records to return."},
         {"runtime_read_output.minimum_level",
          "Drop records below this level: debug, info, warning or error. The cursor still "
          "advances over what the filter excludes."},
@@ -471,7 +471,7 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
         {"ui_hit_test.max_results",
          "How many hits to return, ordered topmost first."},
         {"ui_list_controls.max_results",
-         "How many Controls to return, 1 to 256, default 64."},
+         "How many Controls to return."},
 
         // -- Shaders --------------------------------------------------------
         {"shader_check_compile.shader_path",
@@ -491,7 +491,7 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
         {"tilemap_set_cells.tilemap_path",
          "The TileMapLayer to edit."},
         {"tilemap_set_cells.cells",
-         "1 to 256 records, each either a write or an erase and nothing else."},
+         "Records, each either a write or an erase and nothing else."},
         {"gridmap_set_cells.gridmap_path",
          "The GridMap to edit."},
         {"gridmap_set_cells.cells",
@@ -525,13 +525,13 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
         {"nav_query_path.end_point",
          "Where the path ends, in the same shape as start_point. Equal points are allowed."},
         {"nav_query_path.navigation_layers",
-         "Navigation layers the path may use, as a 32-bit bit mask, 1 to 4294967295. Defaults to 1."},
+         "Navigation layers the path may use, as a 32-bit bit mask."},
         {"nav_query_path.optimize",
          "Simplify the returned path. On by default."},
         {"nav_bake_mesh.nav_node_path",
          "The navigation region whose mesh to bake."},
         {"spatial_query_clearance.collision_mask",
-         "Physics layers the shape is tested against, as a 32-bit bit mask, 1 to 4294967295. Defaults to 1."},
+         "Physics layers the shape is tested against, as a 32-bit bit mask."},
         {"spatial_query_frustum.max_results",
          "How many nodes to return."},
 
@@ -603,7 +603,7 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
         {"csharp_check_build.configuration",
          "Which MSBuild configuration to build: Debug or Release."},
         {"csharp_check_build.timeout_seconds",
-         "How long the build may take before it is abandoned, 1 to 300 seconds."},
+         "How long the build may take before it is abandoned, in seconds."},
 
         // -- Blackboard ---------------------------------------------------------
         {"blackboard_list_keys.max_keys",
@@ -629,7 +629,7 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
          "The task to update. Requires the live lease, except when reopening a needs_review "
          "or failed task, which is by definition somebody else's call."},
         {"blackboard_task_update.progress",
-         "How far along the task is, as a whole percentage from 0 to 100. A completed task "
+         "How far along the task is, as a whole percentage. A completed task "
          "reports 100."},
         {"blackboard_task_complete.task_id",
          "The task to complete. Only the lease holder may, because completing someone else's "
