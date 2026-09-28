@@ -226,9 +226,10 @@ floor fills it from `src/mcp/refusal_remedies.cpp`, which is keyed by
 `refusalsWithoutRemedy` with the reason: `tests/test_refusal_remedies.py` scans
 the source for every code and fails on one the table does not cover, and the
 live harness fails a refusal that reaches a caller without a fix. Answer a
-failure with `CallToolResult::errorJson` or `fromError`, never plain text,
-which has no `error.data` to carry a remedy; the number of plain-text sites in
-`tests/refusal_remedies.json` may only fall. `RepeatedFailures`, in
+failure with `CallToolResult::errorJson`, `fromError` or `notConnected`, never
+plain text, which has no `error.data` to carry a remedy. The constructor that
+makes plain text is private, so a new one does not compile, and the harness
+fails a plain-text failure it sees. `RepeatedFailures`, in
 `src/mcp/repeated_failures.cpp`, marks the second identical failure of a call on
 its way out of `McpServer::handleRequest`; it keys on the arguments as sent, so
 nothing a handler does changes what counts as the same call.

@@ -185,8 +185,8 @@ CallToolResult handleControlRoom(const json& args, const std::shared_ptr<ipc::II
         const auto requested = boundedJsonInteger(
             args["log_limit"], 0, static_cast<int64_t>(kControlRoomMaxLogRecords));
         if (!requested.has_value()) {
-            return CallToolResult::error(
-                "log_limit must be an integer between 0 and " +
+            return CallToolResult::errorJson(
+                400, "log_limit must be an integer between 0 and " +
                 std::to_string(kControlRoomMaxLogRecords));
         }
         inputs.log_limit = static_cast<std::size_t>(*requested);

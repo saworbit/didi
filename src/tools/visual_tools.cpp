@@ -37,12 +37,11 @@ bool isCaptureId(const json& value) {
 // "code": "invalid_arguments" the way the structured argument errors do (#424).
 CallToolResult viewportRequestError(const ResolvedToolBinding& binding,
                                     std::string_view message) {
-    return CallToolResult::error(json{{"error", {
-        {"code", 400}, {"message", message},
-        {"data", {{"tool", binding.invoked_name},
-                  {"canonical_tool", binding.canonical_name},
-                  {"code", "invalid_arguments"},
-                  {"retryable", false}}}}}}.dump());
+    return CallToolResult::errorJson(400, std::string(message),
+                                     {{"tool", binding.invoked_name},
+                                      {"canonical_tool", binding.canonical_name},
+                                      {"code", "invalid_arguments"},
+                                      {"retryable", false}});
 }
 
 bool hasOnlyViewportKeys(const json& value,
@@ -108,13 +107,12 @@ CallToolResult handleViewportCapturePasses(const json& args, std::shared_ptr<ipc
     }
     auto res = ipc->sendRequest("vision.capturePasses", args, ::didi::ipc::kWaitForDefinitiveResponse);
     if (res.isErr()) {
-        return CallToolResult::error("Failed to capture viewport passes via Godot GDExtension: " +
-                                     res.error().message);
+        return CallToolResult::fromError(res.error(), "Failed to capture viewport passes via Godot GDExtension: ");
     }
     json data = res.value();
     if (!data.is_object() || !data.contains("passes") || !data["passes"].is_array() ||
         data["passes"].empty()) {
-        return CallToolResult::error("Live pass capture returned a malformed response.");
+        return CallToolResult::errorJson(502, "Live pass capture returned a malformed response.");
     }
 
     // One image block per pass, in the order they were asked for, rather than
@@ -126,11 +124,11 @@ CallToolResult handleViewportCapturePasses(const json& args, std::shared_ptr<ipc
     for (auto& pass : data["passes"]) {
         if (!pass.is_object() || !pass.contains("kind") || !pass["kind"].is_string() ||
             !pass.contains("image_base64") || !pass["image_base64"].is_string()) {
-            return CallToolResult::error("Live pass capture returned a malformed pass entry.");
+            return CallToolResult::errorJson(502, "Live pass capture returned a malformed pass entry.");
         }
         auto image = pass["image_base64"].get<std::string>();
         if (image.empty()) {
-            return CallToolResult::error("Live pass capture returned a pass with no PNG image.");
+            return CallToolResult::errorJson(502, "Live pass capture returned a pass with no PNG image.");
         }
         order.push_back(pass["kind"].get<std::string>());
         result.content.push_back(ContentItem::makeImagePng(std::move(image)));
@@ -154,28 +152,28 @@ CallToolResult handleCaptureViewport(const json& args, std::shared_ptr<ipc::IIpc
         if (res.isOk()) {
             json result_data = res.value();
             if (!result_data.is_object()) {
-                return CallToolResult::error("Live viewport capture returned a malformed response.");
+                return CallToolResult::errorJson(502, "Live viewport capture returned a malformed response.");
             }
             if (!result_data.contains("image_base64") || !result_data["image_base64"].is_string()) {
-                return CallToolResult::error("Live viewport capture returned a missing or malformed PNG image.");
+                return CallToolResult::errorJson(502, "Live viewport capture returned a missing or malformed PNG image.");
             }
             std::string b64 = result_data["image_base64"].get<std::string>();
-            if (b64.empty()) return CallToolResult::error("Live viewport capture returned no PNG image.");
+            if (b64.empty()) return CallToolResult::errorJson(502, "Live viewport capture returned no PNG image.");
             if (!result_data.contains("capture_id") || !isCaptureId(result_data["capture_id"])) {
-                return CallToolResult::error("Live viewport capture returned a missing or malformed capture_id.");
+                return CallToolResult::errorJson(502, "Live viewport capture returned a missing or malformed capture_id.");
             }
             result_data.erase("image_base64");
             return CallToolResult::successImage(std::move(b64), result_data.dump());
         }
-        return CallToolResult::error("Failed to capture viewport via Godot GDExtension: " + res.error().message);
+        return CallToolResult::fromError(res.error(), "Failed to capture viewport via Godot GDExtension: ");
     }
 
     if (args.contains("node_isolation_path")) {
         if (!args["node_isolation_path"].is_string()) {
-            return CallToolResult::error("Invalid viewport capture request: node_isolation_path must be a string.");
+            return CallToolResult::errorJson(400, "Invalid viewport capture request: node_isolation_path must be a string.");
         }
         if (!args["node_isolation_path"].get<std::string>().empty()) {
-            return CallToolResult::error("Viewport node isolation requires a live Godot editor.");
+            return CallToolResult::notConnected("Viewport node isolation requires a live Godot editor.");
         }
     }
 
@@ -197,7 +195,7 @@ CallToolResult handleCaptureViewport(const json& args, std::shared_ptr<ipc::IIpc
         }
     }
     std::string encoded = png::encodeRgbaBase64(pixels.data(), width, height);
-    if (encoded.empty()) return CallToolResult::error("Failed to encode offline viewport preview.");
+    if (encoded.empty()) return CallToolResult::errorJson(500, "Failed to encode offline viewport preview.");
     json metadata = {
         {"status", "offline_preview"},
         {"execution_mode", "offline_fallback"},
@@ -231,26 +229,26 @@ CallToolResult handleViewportDiffCapture(const ResolvedToolBinding& binding, con
             "baseline_capture_id must be exactly 32 lowercase hexadecimal characters.");
     }
     if (!ipc || !ipc->isConnected()) {
-        return CallToolResult::error("Viewport diff capture requires a live Godot editor.");
+        return CallToolResult::notConnected("Viewport diff capture requires a live Godot editor.");
     }
     auto res = ipc->sendRequest("vision.diffViewport", args, ::didi::ipc::kWaitForDefinitiveResponse);
     if (res.isErr()) {
-        return CallToolResult::error("Failed to diff viewport via Godot GDExtension: " + res.error().message);
+        return CallToolResult::fromError(res.error(), "Failed to diff viewport via Godot GDExtension: ");
     }
     json result_data = res.value();
     if (!result_data.is_object()) {
-        return CallToolResult::error("Live viewport diff returned a malformed response.");
+        return CallToolResult::errorJson(502, "Live viewport diff returned a malformed response.");
     }
     if (!result_data.contains("image_base64") || !result_data["image_base64"].is_string()) {
-        return CallToolResult::error("Live viewport diff returned a missing or malformed PNG image.");
+        return CallToolResult::errorJson(502, "Live viewport diff returned a missing or malformed PNG image.");
     }
     const std::string b64 = result_data["image_base64"].get<std::string>();
     if (b64.empty()) {
-        return CallToolResult::error("Live viewport diff returned no PNG image.");
+        return CallToolResult::errorJson(502, "Live viewport diff returned no PNG image.");
     }
     if (!result_data.contains("comparison_capture_id") ||
         !isCaptureId(result_data["comparison_capture_id"])) {
-        return CallToolResult::error("Live viewport diff returned a missing or malformed comparison_capture_id.");
+        return CallToolResult::errorJson(502, "Live viewport diff returned a missing or malformed comparison_capture_id.");
     }
     // Applied here rather than in the engine: the metrics are a property of the
     // two frames, the tolerance is a property of the caller's pipeline.
@@ -313,7 +311,7 @@ CallToolResult handleCreateVisualTestLab(const json& args, std::shared_ptr<ipc::
     bool ortho = args.value("orthographic", false);
     json rig = args.value("camera_rig", json::array({"front", "top", "isometric"}));
     if (args.contains("overwrite") && !args["overwrite"].is_boolean()) {
-        return CallToolResult::error("Parameter 'overwrite' must be a boolean.");
+        return CallToolResult::errorJson(400, "Parameter 'overwrite' must be a boolean.");
     }
     const bool overwrite = args.value("overwrite", false);
 
@@ -392,8 +390,7 @@ CallToolResult handleCreateVisualTestLab(const json& args, std::shared_ptr<ipc::
     auto written = files::writeFileAtomically(paths::projectPathFromUtf8(disk_path),
                                               scene_file.str());
     if (written.isErr()) {
-        return CallToolResult::error("Failed to generate visual test lab sandbox scene file: " +
-                                     written.error().message);
+        return CallToolResult::fromError(written.error(), "Failed to generate visual test lab sandbox scene file: ");
     }
     offline::ResourceIndexer::invalidateSharedIndex();
 

@@ -17,11 +17,10 @@ namespace {
 
 CallToolResult requestError(const ResolvedToolBinding& binding,
                             std::string_view message, int code = 400) {
-    return CallToolResult::error(json{{"error", {
-        {"code", code}, {"message", message},
-        {"data", {{"tool", binding.invoked_name},
-                  {"canonical_tool", binding.canonical_name},
-                  {"retryable", false}}}}}}.dump());
+    return CallToolResult::errorJson(code, std::string(message),
+                                     {{"tool", binding.invoked_name},
+                                      {"canonical_tool", binding.canonical_name},
+                                      {"retryable", false}});
 }
 
 bool hasOnlyKeys(const json& value, std::initializer_list<std::string_view> allowed) {

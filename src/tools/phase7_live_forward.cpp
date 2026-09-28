@@ -13,9 +13,7 @@ CallToolResult phase7Error(const ResolvedToolBinding& binding, int code,
                            std::string_view message, json data = json::object()) {
     data["tool"] = binding.invoked_name;
     data["canonical_tool"] = binding.canonical_name;
-    if (!data.contains("retryable")) data["retryable"] = false;
-    return CallToolResult::error(
-        json{{"error", {{"code", code}, {"message", message}, {"data", std::move(data)}}}}.dump());
+    return CallToolResult::errorJson(code, std::string(message), std::move(data));
 }
 
 bool isTask1Blocker(std::string_view canonical_name) {
@@ -204,9 +202,8 @@ CallToolResult sendPhase7LiveRequest(const ResolvedToolBinding& binding,
         data["tool"] = binding.invoked_name;
         data["canonical_tool"] = binding.canonical_name;
         data["retryable"] = false;
-        return CallToolResult::error(
-            json{{"error", {{"code", error["code"]}, {"message", error["message"]},
-                            {"data", std::move(data)}}}}.dump());
+        return CallToolResult::errorJson(error["code"].get<int>(),
+                                         error["message"].get<std::string>(), std::move(data));
     }
 
     payload["tool"] = binding.invoked_name;

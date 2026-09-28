@@ -63,17 +63,14 @@ std::optional<CallToolResult> unreadableScriptRefusal(const std::filesystem::pat
                                                       const std::string& file_path) {
     std::ifstream probe(resolved, std::ios::binary);
     if (probe.is_open()) return std::nullopt;
-    return CallToolResult::error(
-        json{{"error",
-              {{"code", 403},
-               {"message", "This file is there and cannot be read: " + file_path +
-                               ". Check its permissions, or whether another process is holding "
-                               "it open."},
-               {"data", {{"code", "forbidden"},
-                         {"reason", "unreadable"},
-                         {"file_path", file_path},
-                         {"retryable", false}}}}}}
-            .dump());
+    return CallToolResult::errorJson(
+        403,
+        "This file is there and cannot be read: " + file_path +
+            ". Check its permissions, or whether another process is holding it open.",
+        {{"code", "forbidden"},
+         {"reason", "unreadable"},
+         {"file_path", file_path},
+         {"retryable", false}});
 }
 
 CallToolResult handleScriptCheckSyntax(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
@@ -154,17 +151,15 @@ CallToolResult handleScriptCheckSyntax(const json& args, std::shared_ptr<ipc::II
                                                                        : json(nullptr)},
                      {"retryable", false}};
         const auto configured_engine = offline::resolveGodotExecutableDetailed();
-        json error_body = {{"code", 503},
-                           {"message", "Godot did not compile this script, so whether it has "
-                                       "errors is unknown: " + engine.failure +
-                                       ". Engine tried: " +
-                                       (engine.executable.empty() ? std::string("none found")
-                                                                  : engine.executable) +
-                                       ". Set GODOT_BIN to a Godot executable."},
-                           {"data", data}};
-        versions::annotateConfiguredEngine(error_body["data"], configured_engine.configured,
+        versions::annotateConfiguredEngine(data, configured_engine.configured,
                                            configured_engine.configured_rejected);
-        return CallToolResult::error(json{{"error", error_body}}.dump());
+        return CallToolResult::errorJson(
+            503,
+            "Godot did not compile this script, so whether it has errors is unknown: " +
+                engine.failure + ". Engine tried: " +
+                (engine.executable.empty() ? std::string("none found") : engine.executable) +
+                ". Set GODOT_BIN to a Godot executable.",
+            std::move(data));
     }
 
     json result = {
@@ -418,12 +413,10 @@ CallToolResult handleScriptGetSymbols(const json& args, std::shared_ptr<ipc::IIp
             return *unreadable;
         }
         if (auto refused = scriptEncodingRefusal(resolved.value())) {
-            return CallToolResult::error(json{{"error", {
-                {"code", 415},
-                {"message", *refused},
-                {"data", {{"code", "binary_or_invalid_utf8"},
-                          {"file_path", file_path},
-                          {"retryable", false}}}}}}.dump());
+            return CallToolResult::errorJson(415, *refused,
+                                             {{"code", "binary_or_invalid_utf8"},
+                                              {"file_path", file_path},
+                                              {"retryable", false}});
         }
         std::ifstream file(resolved.value());
         if (file.is_open()) {
@@ -589,11 +582,11 @@ static CallToolResult forwardLiveScriptWiring(const json& args,
                                               const char* method,
                                               const char* operation) {
     if (!ipc || !ipc->isConnected()) {
-        return CallToolResult::error(std::string("Godot Editor is offline. Launch Godot to ") + operation + ".");
+        return CallToolResult::notConnected(std::string("Godot Editor is offline. Launch Godot to ") + operation + ".");
     }
     auto response = ipc->sendRequest(method, args, ipc::kWaitForDefinitiveResponse);
     if (response.isErr()) {
-        return CallToolResult::error(std::string("Failed to ") + operation + ": " + response.error().message);
+        return CallToolResult::fromError(response.error(), std::string("Failed to ") + operation + ": ");
     }
     return CallToolResult::successJson(response.value());
 }

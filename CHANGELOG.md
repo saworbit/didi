@@ -51,6 +51,24 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Added
 
+- **Every failure is an envelope (Q6 part 1, finished, #1040).** 199 failures
+  answered as a bare sentence, with no `error.data`, so none could carry a code
+  to branch on or name its fix. The census that counted them matched only a
+  string literal as the argument and found 156. Each now answers with the
+  status its cause warrants: 400 for an argument, 503 for a missing editor, 504
+  for a helper Godot that ran out of time, and 500 or 502 for a fault in the
+  server or in what the engine sent back. A missing editor answers in the shape
+  the registry's own refusal of a live-only tool has, `retryable: true` and
+  `blocked_on: "no_live_session"`. A timeout names a longer `timeout_seconds`
+  until the tool's ceiling, and says at the ceiling that nothing more can be
+  sent. Thirty-five answered with another error's message and dropped its
+  status and data, so a 404 or a 409 from the engine reached the caller as
+  prose; they keep both now. The sentences are the ones they were.
+  `CallToolResult` keeps the constructor that made a bare failure private, so a
+  new one does not compile, and the live harness fails a plain-text failure it
+  sees. Offline, `scene_get_hierarchy` on a scene file it could not open said
+  the editor was offline; it answers 403 `unreadable`, as the script tools do.
+
 - **The same call failing the same way twice says so (Q6 part 2, #1040).** The
   second identical failure in a row carries `error.data.repeated`: `count`,
   `follow`, naming the remedy field to act on, and a `note` saying the call
@@ -74,9 +92,9 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
   table as `refusals`, CI fails any of the 77 codes the source emits, or the 15
   the floor derives from a status, that it does not cover, and the live harness
   fails any refusal it sees without a fix: 262 live refusals on 4.5.1 and 4.6.2 and 260 on
-  4.7.2, each naming one. The 156 failures
-  still answered as plain text have no `error.data` to carry a fix; their count
-  is recorded and may only fall.
+  4.7.2, each naming one. Failures still answered as plain text had no
+  `error.data` to carry a fix; the first entry above makes every one an
+  envelope.
 
 - **Every bounded read says whether it is complete, and the two largest take
   `fields` (Q5 part 2, #776).** `tests/bounded_reads.json` classifies all 54

@@ -17,11 +17,11 @@ CallToolResult forwardLiveProject(const json& args,
                                   const char* method,
                                   const char* operation) {
     if (!ipc || !ipc->isConnected()) {
-        return CallToolResult::error(std::string("Godot Editor is offline. Launch Godot to ") + operation + ".");
+        return CallToolResult::notConnected(std::string("Godot Editor is offline. Launch Godot to ") + operation + ".");
     }
     auto response = ipc->sendRequest(method, args, ipc::kWaitForDefinitiveResponse);
     if (response.isErr()) {
-        return CallToolResult::error(std::string("Failed to ") + operation + ": " + response.error().message);
+        return CallToolResult::fromError(response.error(), std::string("Failed to ") + operation + ": ");
     }
     return CallToolResult::successJson(response.value());
 }
@@ -88,12 +88,12 @@ CallToolResult handleProjectListAutoloads(const json& args, std::shared_ptr<ipc:
         return forwardLiveProject(args, ipc, "project.listAutoloads", "list project autoloads");
     }
     if (!args.is_object() || !args.empty()) {
-        return CallToolResult::error("Invalid autoload list request: this tool takes no arguments");
+        return CallToolResult::errorJson(400, "Invalid autoload list request: this tool takes no arguments");
     }
     std::error_code root_error;
     const auto root = std::filesystem::current_path(root_error);
     if (root_error) {
-        return CallToolResult::error("The project root cannot be resolved for an offline autoload read");
+        return CallToolResult::errorJson(500, "The project root cannot be resolved for an offline autoload read");
     }
     auto read = offline::readProjectAutoloads(root);
     if (read.isErr()) {
@@ -149,13 +149,13 @@ CallToolResult handleProjectGetSetting(const json& args, std::shared_ptr<ipc::II
         return forwardLiveProject(args, ipc, "project.getSetting", "read a project setting");
     }
     if (!args.is_object()) {
-        return CallToolResult::error("Invalid project setting request: arguments must be an object");
+        return CallToolResult::errorJson(400, "Invalid project setting request: arguments must be an object");
     }
     const std::string setting = args.value("setting", "");
     std::error_code root_error;
     const auto root = std::filesystem::current_path(root_error);
     if (root_error) {
-        return CallToolResult::error("The project root cannot be resolved for an offline setting read");
+        return CallToolResult::errorJson(500, "The project root cannot be resolved for an offline setting read");
     }
     auto read = offline::readProjectSetting(root, setting);
     if (read.isErr()) {
@@ -374,12 +374,12 @@ CallToolResult handleProjectSetSetting(const json& args, std::shared_ptr<ipc::II
         return forwardLiveProject(args, ipc, "project.setSetting", "persist a project setting");
     }
     if (!args.is_object()) {
-        return CallToolResult::error("Invalid project setting request: arguments must be an object");
+        return CallToolResult::errorJson(400, "Invalid project setting request: arguments must be an object");
     }
     const std::string setting = args.value("setting", "");
     const bool remove = args.value("remove", false);
     if (remove && args.contains("value")) {
-        return CallToolResult::error("Specify either value or remove: true, not both");
+        return CallToolResult::errorJson(400, "Specify either value or remove: true, not both");
     }
     if (!remove && !args.contains("value")) {
         return CallToolResult::errorJson(400, "value is required unless remove is true");
@@ -408,7 +408,7 @@ CallToolResult handleProjectSetSetting(const json& args, std::shared_ptr<ipc::II
     std::error_code root_error;
     const auto root = std::filesystem::current_path(root_error);
     if (root_error) {
-        return CallToolResult::error("The project root cannot be resolved for an offline setting write");
+        return CallToolResult::errorJson(500, "The project root cannot be resolved for an offline setting write");
     }
     auto written = offline::writeProjectSetting(
         root, setting, remove ? json() : args["value"], remove);

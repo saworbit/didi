@@ -213,7 +213,18 @@ const std::map<std::string, Rule>& rules() {
             if (r.tool == "runtime_inject_input") return field("events");
             if (r.tool == "runtime_watch_invariants") return field("invariants");
             const auto name = argumentNamedIn(r.message, r.tool);
-            return name.empty() ? json::object() : field(name);
+            if (!name.empty()) return field(name);
+            // The arguments as a whole: sent to a tool that takes none, or not
+            // an object at all. "arguments" is the tools/call field, the word
+            // response_too_large uses for the same thing.
+            if (r.message.find("takes no arguments") != std::string::npos ||
+                r.message.find("must be an empty object") != std::string::npos) {
+                return retryWith(json::object());
+            }
+            if (r.message.find("arguments must be an object") != std::string::npos) {
+                return field("arguments");
+            }
+            return json::object();
         }},
         {"binary_or_invalid_utf8", [](const Refusal&) { return field("file_path"); }},
         {"camera_path_does_not_resolve_to_camera3d", [](const Refusal& r) {

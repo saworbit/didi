@@ -414,14 +414,14 @@ CallToolResult handleEvalGdscript(const json& args, std::shared_ptr<ipc::IIpcCli
 
 CallToolResult handleExecuteTestSession(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     if (!args.is_object()) {
-        return CallToolResult::error("runtime_launch arguments must be an object");
+        return CallToolResult::errorJson(400, "runtime_launch arguments must be an object");
     }
     if (args.contains("timeout_seconds") &&
         !integerInRange(args["timeout_seconds"], 1, 120)) {
-        return CallToolResult::error("timeout_seconds must be an integer from 1 to 120");
+        return CallToolResult::errorJson(400, "timeout_seconds must be an integer from 1 to 120");
     }
     if (args.contains("detach") && !args["detach"].is_boolean()) {
-        return CallToolResult::error("detach must be a boolean");
+        return CallToolResult::errorJson(400, "detach must be a boolean");
     }
     std::string scene_path = args.value("scene_path", "");
     int timeout_sec = args.value("timeout_seconds", 10);

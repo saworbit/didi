@@ -2075,9 +2075,9 @@ std::optional<Error> probeNodeTarget(const std::string& tool, const std::string&
 // (#486). Filling it here rather than at each site is what makes it a floor: a
 // site that knows more still says more, and anything already set is left alone.
 //
-// A result whose text is not an error envelope is passed through untouched.
-// Wrapping a bare sentence would be a different change, and the five bare ones
-// that remain are not semantic failures.
+// A result whose text is not an error envelope is passed through untouched. No
+// failure answers as a bare sentence any more, because CallToolResult no longer
+// makes one (Q6), so what passes through is a success.
 static CallToolResult withErrorDataFloor(CallToolResult result,
                                          const ResolvedToolBinding& binding) {
     // The envelope is the envelope whether or not isError is set on the result
@@ -2115,14 +2115,14 @@ static CallToolResult withErrorDataFloor(CallToolResult result,
 // Off is a state the server knows at startup, not a missing implementation,
 // and a caller branches on the code (#599).
 static CallToolResult managedRecoveryDisabled(const ResolvedToolBinding& binding) {
-    return CallToolResult::error(json{{"error", {
-        {"code", 409},
-        {"message", "Managed recovery is disabled. Start Didi with --managed-editor and "
-                    "--recovery-workspace to use an isolated project copy."},
-        {"data", {{"tool", binding.invoked_name},
-                  {"canonical_tool", binding.canonical_name},
-                  {"code", "managed_mode_disabled"},
-                  {"retryable", false}}}}}}.dump());
+    return CallToolResult::errorJson(
+        409,
+        "Managed recovery is disabled. Start Didi with --managed-editor and "
+        "--recovery-workspace to use an isolated project copy.",
+        {{"tool", binding.invoked_name},
+         {"canonical_tool", binding.canonical_name},
+         {"code", "managed_mode_disabled"},
+         {"retryable", false}});
 }
 
 // The first string in a live call's arguments that holds a NUL, by where it
@@ -2157,10 +2157,7 @@ static CallToolResult invalidArgumentsError(const ResolvedToolBinding& binding,
                  {"code", "invalid_arguments"},
                  {"retryable", false}};
     data.update(extra);
-    return CallToolResult::error(json{{"error", {
-        {"code", 400},
-        {"message", message},
-        {"data", std::move(data)}}}}.dump());
+    return CallToolResult::errorJson(400, message, std::move(data));
 }
 
 // One argument sent under a name this tool does not use, and the one required
@@ -2227,10 +2224,15 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
     const auto binding = resolveAliasBinding(name, arguments);
     const auto* tool = getTool(name);
     if (!tool) {
-        return CallToolResult::error("Tool not found: " + name);
+        // Only an in-process caller gets here: the server answers a name no
+        // registration carries as a protocol error before calling in.
+        return CallToolResult::errorJson(
+            404, "Tool not found: " + name,
+            {{"name", name},
+             {"no_remedy", "No tool has this name; tools/list names the ones this server has."}});
     }
     if (!tool->handler && !tool->boundHandler) {
-        return CallToolResult::error("Tool handler not set for: " + name);
+        return CallToolResult::errorJson(500, "Tool handler not set for: " + name);
     }
     if (!tool->capability.implemented) {
         // Registered for protocol compatibility and refused before any handler
@@ -2238,9 +2240,8 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
         // envelope could not reach these five. The bare sentence buried the one
         // thing a caller needs: this failure is permanent (#492). The data
         // floor below fills code, tool and retryable.
-        return CallToolResult::error(json{{"error", {
-            {"code", 501},
-            {"message", "Tool '" + name + "' is unimplemented: " + tool->capability.reason}}}}.dump());
+        return CallToolResult::errorJson(
+            501, "Tool '" + name + "' is unimplemented: " + tool->capability.reason);
     }
     // Rewritten before anything reads the call, so the schema, the gate, the
     // preview and a confirmation token all see one spelling.
@@ -2309,7 +2310,12 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
     if (recovery_tool && !m_recovery) return managedRecoveryDisabled(binding);
     if (m_recovery) {
         if (name == "runtime_attach_session" || name == "runtime_detach_session")
-            return m_recovery->annotate(CallToolResult::error("Managed mode owns its editor route; use a separate ordinary Didi session to attach elsewhere."));
+            return m_recovery->annotate(CallToolResult::errorJson(
+                409,
+                "Managed mode owns its editor route; use a separate ordinary Didi session to "
+                "attach elsewhere.",
+                {{"no_remedy", "This server owns its editor; another Didi server without "
+                               "--managed-editor can attach elsewhere."}}));
     }
     const bool supports_live =
         std::find(tool->capability.modes.begin(), tool->capability.modes.end(), "live") !=
@@ -2708,7 +2714,15 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
         const auto current_session = m_runtimeSessionClient->activeSession();
         if (ready.isOk() && MutationSafety::isMutation(binding) &&
             (!prior_session || !current_session || prior_session->session_id != current_session->session_id))
-            return m_recovery->annotate(CallToolResult::error("Editor recovered. This mutation was not started. Inspect the scene and submit a fresh request; any confirmation must be renewed."));
+            return m_recovery->annotate(CallToolResult::errorJson(
+                409,
+                "Editor recovered. This mutation was not started. Inspect the scene and submit "
+                "a fresh request; any confirmation must be renewed.",
+                {{"outcome", "not_started"},
+                 {"next_call", {{"tool", "scene_get_hierarchy"},
+                                {"arguments", {{"summary", true}}},
+                                {"reason", "The editor restarted; read the scene before "
+                                           "sending the mutation again."}}}}));
         if (ready.isOk() && supports_live) lease = runtime::acquireRuntimeRouteLease(m_sourceIpcClient);
     }
     const bool protected_mutation = m_recovery && !recovery_tool && MutationSafety::isMutation(binding);
@@ -2847,18 +2861,15 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
         if (e.id == 316) {
             DIDI_LOG_ERROR("TOOL_EXEC", "Response from tool '", name,
                            "' could not be encoded: ", e.what());
-            auto result = CallToolResult::error(
-                json{{"error",
-                      {{"code", 500},
-                       {"message", "The answer from '" + name +
-                                       "' holds bytes that are not valid UTF-8, so it cannot be "
-                                       "sent as JSON. This is a fault in the server or in what it "
-                                       "read, not in the call."},
-                       {"data", {{"tool", binding.invoked_name},
-                                 {"canonical_tool", binding.canonical_name},
-                                 {"code", "response_not_encodable"},
-                                 {"retryable", false}}}}}}
-                    .dump());
+            auto result = CallToolResult::errorJson(
+                500,
+                "The answer from '" + name +
+                    "' holds bytes that are not valid UTF-8, so it cannot be sent as JSON. This "
+                    "is a fault in the server or in what it read, not in the call.",
+                {{"tool", binding.invoked_name},
+                 {"canonical_tool", binding.canonical_name},
+                 {"code", "response_not_encodable"},
+                 {"retryable", false}});
             return protected_mutation ? finish(std::move(result)) : std::move(result);
         }
         // A handler read an argument at a type the value does not have. The
@@ -2874,7 +2885,8 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
         return protected_mutation ? finish(std::move(result)) : std::move(result);
     } catch (const std::exception& e) {
         DIDI_LOG_ERROR("TOOL_EXEC", "Exception calling tool '", name, "': ", e.what());
-        auto result = CallToolResult::error("Internal error executing tool: " + std::string(e.what()));
+        auto result =
+            CallToolResult::errorJson(500, "Internal error executing tool: " + std::string(e.what()));
         return protected_mutation ? finish(std::move(result)) : std::move(result);
     }
 }

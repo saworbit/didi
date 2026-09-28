@@ -103,9 +103,8 @@ and 504 is a fault in the server or what it read, and carries none.
 `didi --dump-tool-manifest` publishes the table as `refusals.remedied`, and
 `refusals.without_remedy` with the reason for each code that has none. CI holds
 it against every code the source emits, and the live harness fails any refusal
-it sees without one of the fields above. A failure answered as plain text
-rather than an envelope has no `error.data` at all; their number is recorded in
-`tests/refusal_remedies.json` and may only fall.
+it sees without one of the fields above. Every failure is an envelope: a tool
+cannot answer one as plain text, which would have no `error.data` at all.
 
 When the same call fails the same way twice in a row, the second refusal says
 so in `error.data.repeated`: `count`, how many times in a row, `follow`, the

@@ -188,13 +188,6 @@ struct CallToolResult {
         return res;
     }
 
-    static CallToolResult error(std::string err_msg) {
-        CallToolResult res;
-        res.content.push_back(ContentItem::makeText(std::move(err_msg)));
-        res.isError = true;
-        return res;
-    }
-
     // The envelope the rest of the surface answers a failure with. Most tools
     // built one of these by hand; eighteen returned the message as a bare JSON
     // string with no code, so a client that switches on error.code -- the
@@ -229,6 +222,33 @@ struct CallToolResult {
         auto res = error(json{{"error", {{"code", code},
                                          {"message", std::move(message)},
                                          {"data", std::move(data)}}}}.dump());
+        return res;
+    }
+
+    // A call that needs a live engine and has none attached. The same data the
+    // registry's own refusal of a live-only tool carries (liveOnlySessionMissing),
+    // so a caller branches on one shape whichever of the two answered. retryable
+    // stays true: opening an editor is not a change to the request. The error
+    // floor adds the call that finds a session, unless `data` already names a
+    // fix of its own.
+    static CallToolResult notConnected(std::string message, json data = json::object()) {
+        if (!data.is_object()) data = json::object();
+        data.emplace("retryable", true);
+        data.emplace("blocked_on", "no_live_session");
+        data.emplace("needs_live_engine", true);
+        return errorJson(503, std::move(message), std::move(data));
+    }
+
+private:
+    // A failure as a bare sentence has no error.data, so it cannot carry a
+    // code to branch on or name what fixes it (Q6). 199 did, and a census that
+    // matched only a string literal as the argument counted 156 of them. Kept
+    // private, so every failure leaves through errorJson or fromError and a
+    // new bare one does not compile.
+    static CallToolResult error(std::string err_msg) {
+        CallToolResult res;
+        res.content.push_back(ContentItem::makeText(std::move(err_msg)));
+        res.isError = true;
         return res;
     }
 };

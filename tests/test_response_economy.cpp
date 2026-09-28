@@ -74,7 +74,10 @@ std::vector<CallToolResult> everyResultShape() {
              {"error", {{"code", 404}, {"message", "gone"}}}});
     live_error.isError = true;
     shapes.push_back(live_error);
-    shapes.push_back(CallToolResult::error("{\"error\":{\"code\":400}}"));
+    CallToolResult by_hand;
+    by_hand.content.push_back(didi::mcp::ContentItem::makeText("{\"error\":{\"code\":400}}"));
+    by_hand.isError = true;
+    shapes.push_back(by_hand);
     shapes.push_back(CallToolResult::fromError(didi::Error(409, "conflict")));
     return shapes;
 }
