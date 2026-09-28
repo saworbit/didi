@@ -646,7 +646,10 @@ static void test_fields_are_published_and_checked_like_any_argument() {
     const auto listing = send(server, "tools/list", json::object());
     int with_fields = 0;
     for (const auto& tool : listing["tools"]) {
-        const auto& properties = tool["inputSchema"]["properties"];
+        // A tool that takes no arguments publishes no properties, and a const
+        // operator[] on a missing key reads past the object once NDEBUG removes
+        // its assert: the sanitizer job caught it on runtime_get_session.
+        const auto properties = tool["inputSchema"].value("properties", json::object());
         if (!properties.contains("fields")) continue;
         ++with_fields;
         ASSERT_EQ(properties["fields"]["type"], "array");
