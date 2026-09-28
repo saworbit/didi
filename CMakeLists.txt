@@ -223,6 +223,7 @@ set(CORE_SOURCES
     src/mcp/argument_normalization.cpp
     src/mcp/response_economy.cpp
     src/mcp/error_data.cpp
+    src/mcp/follow_ups.cpp
     src/mcp/refusal_remedies.cpp
     src/mcp/repeated_failures.cpp
     src/mcp/control_room.cpp
@@ -424,6 +425,7 @@ set(TEST_SOURCES
     tests/test_tool_manifest.cpp
     tests/test_tool_profile.cpp
     tests/test_response_economy.cpp
+    tests/test_follow_ups.cpp
     tests/test_refusal_remedies.cpp
     tests/test_repeated_failures.cpp
     tests/test_control_room.cpp

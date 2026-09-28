@@ -3753,6 +3753,9 @@
             "file_created": {
               "type": "boolean"
             },
+            "follow_up": {
+              "type": "array"
+            },
             "is_live_engine": {
               "type": "boolean"
             },
