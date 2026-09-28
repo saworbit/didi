@@ -39,7 +39,7 @@ fails when a phase's status differs between the roadmap and the phase design.
 | [Q2](#q2-observed-not-asserted) | Observed, not asserted | 13 | none | #1010 | COMPLETE (#1021) |
 | [Q3](#q3-contract-snapshots) | Contract snapshots | 13 | none | #1011 | COMPLETE (#1024) |
 | [Q4](#q4-shrink-the-tool-list) | Shrink the tool list | 13 | Q3 | #1012 | IN PROGRESS |
-| [Q5](#q5-response-economy) | Response economy | 13 | Q3 | #776 | PLANNED |
+| [Q5](#q5-response-economy) | Response economy | 13 | Q3 | #776 | IN PROGRESS |
 | [Q6](#q6-next-step-in-every-answer) | Next step in every answer | 13 | none | not yet | PLANNED |
 | [Q7](#q7-typed-object-layer) | Typed object layer | 14 | Q2 | not yet | PLANNED |
 | [Q8](#q8-long-work-as-jobs) | Long work as jobs | 11 | none | not yet | PLANNED |
@@ -205,6 +205,15 @@ so a client that reads only `content` sees no change.
 that opts out, and is unchanged for one that does not.
 
 **Surface amendment:** Not needed.
+
+**Delivery:** Two pull requests. The first is the negotiated opt-out: a client
+that declares the `didi/responseEconomy` extension can decline the text copy
+and the session descriptor it already holds. It meets **Done when**, measured
+on every engine line by the live harness. The second adds `fields` to the large
+reads and `complete` or `truncated` to every bounded read. That needs an audit
+of its own: 11 of the 18 tools that take a bound publish no `outputSchema`, so
+what they return has to be read from their answers. #776 stays open until the
+second lands.
 
 ### Q6. Next step in every answer
 

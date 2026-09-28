@@ -4782,6 +4782,78 @@ try {
     Assert-True $rootById[5635].result.isError "A class the engine does not know was accepted as a scene root."
     Assert-True ($rootById[5635].result.content[0].text -match "NotARealClass") "The unknown-class refusal does not name the class."
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $fixtureRoot "root_type_bad.tscn"))) "A refused scene root left a file behind."
+
+    # Response economy (Q5, #776). #776 measured 73% of a seven-call authoring
+    # arc as things the caller already had: the text copy of structuredContent
+    # and the session descriptor on every live answer. The same arc runs twice
+    # here, in a scene of its own, once from a client that declared nothing and
+    # once declaring didi/responseEconomy on each call, the way a 2024-11-05
+    # client may. The declared arc has to cost under half the bytes, and the
+    # undeclared one has to look the way every answer did before.
+    function Economy-Request([int]$Id, [string]$Tool, [hashtable]$Arguments, $Meta) {
+        $params = @{ name = $Tool; arguments = $Arguments }
+        if ($null -ne $Meta) { $params["_meta"] = $Meta }
+        return @{ jsonrpc = "2.0"; id = $Id; method = "tools/call"; params = $params } | ConvertTo-Json -Compress -Depth 100
+    }
+    function Economy-Arc([int]$BaseId, [string]$Name, $Meta) {
+        $node = "/root/EconomyArc/$Name"
+        return @(
+            (Economy-Request $BaseId "scene_instantiate_node" @{ node_type = "Label"; parent_path = "/root/EconomyArc"; name = $Name } $Meta),
+            (Economy-Request ($BaseId + 1) "scene_set_property" @{ target_node = $node; property_name = "text"; value = "a" } $Meta),
+            (Economy-Request ($BaseId + 2) "scene_set_property" @{ target_node = $node; property_name = "visible"; value = $true } $Meta),
+            (Economy-Request ($BaseId + 3) "scene_get_property" @{ target_node = $node; property_name = "text" } $Meta),
+            (Economy-Request ($BaseId + 4) "scene_add_to_group" @{ target_node = $node; group = "economy_arc" } $Meta),
+            (Economy-Request ($BaseId + 5) "scene_get_group_members" @{ group = "economy_arc" } $Meta),
+            (Economy-Request ($BaseId + 6) "editor_save_scene" @{} $Meta)
+        )
+    }
+    $economyDeclared = @{ "io.modelcontextprotocol/clientCapabilities" = @{ extensions = @{ "didi/responseEconomy" = @{ omit = @("textCopy", "sessionDescriptor") } } } }
+    $economyRequests = @(
+        (@{ jsonrpc = "2.0"; id = 5700; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
+        (Tool-Request 5701 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
+        (Tool-Request 5702 "scene_create" @{ scene_path = "res://economy_arc.tscn"; root_type = "Control"; root_name = "EconomyArc"; overwrite = $true })
+    ) + (Economy-Arc 5710 "Undeclared" $null) + (Economy-Arc 5720 "Declared" $economyDeclared) + @(
+        (Tool-Request 5730 "scene_open" @{ scene_path = "res://main.tscn" })
+    )
+    $rawEconomyResponses = Invoke-Didi -Requests $economyRequests -Arguments @("--project", $fixtureRoot)
+    Assert-True ($LASTEXITCODE -eq 0) "Response economy MCP process exited with $LASTEXITCODE."
+    $economyById = @{}
+    $economyBytes = @{}
+    foreach ($line in $rawEconomyResponses) {
+        # The server writes object keys in sorted order, so "id" leads.
+        $match = [regex]::Match([string]$line, '^\{"id":(\d+),')
+        if (-not $match.Success) { continue }
+        $economyBytes[[int]$match.Groups[1].Value] = [Text.Encoding]::UTF8.GetByteCount([string]$line)
+        $economyById[[int]$match.Groups[1].Value] = [string]$line | ConvertFrom-Json
+    }
+    Assert-True (-not $economyById[5702].result.isError) "The response economy scene was not created: $($economyById[5702].result.content[0].text)"
+    $undeclaredBytes = 0
+    $declaredBytes = 0
+    foreach ($step in 0..6) {
+        $undeclared = $economyById[5710 + $step]
+        $declared = $economyById[5720 + $step]
+        Assert-True ($null -ne $undeclared -and -not $undeclared.result.isError) "Undeclared arc step $step failed: $($undeclared.result.content[0].text)"
+        Assert-True ($null -ne $declared -and -not $declared.result.isError) "Declared arc step $step failed: $($declared | ConvertTo-Json -Compress -Depth 20)"
+        $undeclaredBytes += $economyBytes[5710 + $step]
+        $declaredBytes += $economyBytes[5720 + $step]
+
+        $copy = @($undeclared.result.content | Where-Object { $_.type -eq "text" })
+        Assert-True ($copy.Count -eq 1 -and $null -ne $undeclared.result.structuredContent) "Undeclared arc step $step did not carry the text copy beside structuredContent."
+        Assert-True ((($copy[0].text | ConvertFrom-Json) | ConvertTo-Json -Compress -Depth 100) -eq ($undeclared.result.structuredContent | ConvertTo-Json -Compress -Depth 100)) "Undeclared arc step ${step}: the text copy and structuredContent disagree."
+        Assert-True ($null -ne $undeclared.result.structuredContent.session.endpoint) "Undeclared arc step $step did not carry the whole session descriptor."
+
+        Assert-True (@($declared.result.content).Count -eq 0) "Declared arc step $step still carried the text copy: $($declared.result.content | ConvertTo-Json -Compress -Depth 5)"
+        Assert-True ($declared.result.structuredContent.execution_mode -eq "live") "Declared arc step $step lost execution_mode."
+        Assert-True ($declared.result.structuredContent.session.session_id -eq $editorSession.session_id) "Declared arc step $step does not say which session answered."
+        # Whole on the first live answer the declaring client got, a reference
+        # after that, because nothing about the route changed in between.
+        Assert-True (($null -ne $declared.result.structuredContent.session.endpoint) -eq ($step -eq 0)) "Declared arc step $step sent the session descriptor when it should not, or withheld it when it should not."
+    }
+    # Leaving bytes out left no fact out: the reads answer the same.
+    Assert-True ($economyById[5723].result.structuredContent.value -eq "a") "The declared arc's read did not see the value it wrote."
+    Assert-True (@($economyById[5725].result.structuredContent.members) -contains "/root/EconomyArc/Declared") "The declared arc's group read missed its node."
+    Write-Host "Response economy: #776 arc $undeclaredBytes bytes undeclared, $declaredBytes declared."
+    Assert-True (2 * $declaredBytes -lt $undeclaredBytes) "The declared arc cost $declaredBytes bytes against $undeclaredBytes undeclared, which is not under half (Q5)."
     # An asset the editor has never seen. Adding art is step one of building a
     # game and there was no way to do it through the surface: update_file
     # announces a file, it does not import one, so no .import was written and

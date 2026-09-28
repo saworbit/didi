@@ -144,7 +144,8 @@ struct CallToolResult {
     bool isError{false};
     // Server-produced result data. Emitted alongside the text block, never
     // instead of it, so clients that do not read structuredContent are
-    // unaffected.
+    // unaffected. A client that reads only this half can decline the text at
+    // the protocol boundary; see response_economy.hpp.
     std::optional<json> structuredContent;
 
     json toJson() const {

@@ -1,0 +1,84 @@
+#pragma once
+
+#include "didi/common/types.hpp"
+
+#include <functional>
+#include <mutex>
+#include <optional>
+
+namespace didi::mcp {
+
+// Response economy (Q5 in docs/BUILD_QUEUE.md, #776).
+//
+// Every tools/call answer carries its payload twice, once parsed in
+// structuredContent and once serialised into content[0].text, and every live
+// answer restates the session descriptor the caller already obtained when it
+// attached. Over #776's seven-call authoring arc that was 68% of the wire. Both
+// are the right default, because a client that reads only `content` needs the
+// text and a client that never attached needs the descriptor, so neither
+// changes unless the client asks. A client asks by declaring this extension in
+// its capabilities, which is also where it declares the MCP Apps extension:
+// once in `initialize` for a 2024-11-05 client, on each request for a modern
+// one.
+//
+//   "extensions": {"didi/responseEconomy": {"omit": ["textCopy", "sessionDescriptor"]}}
+//
+// The server declares the same extension, listing what it honours, so a client
+// can check before relying on it. A value the server does not know is ignored
+// rather than refused: a capability is a statement of what the client can
+// handle, and a client written against a later Didi should still get what this
+// one can give.
+inline constexpr char kResponseEconomyExtension[] = "didi/responseEconomy";
+inline constexpr char kOmitTextCopy[] = "textCopy";
+inline constexpr char kOmitSessionDescriptor[] = "sessionDescriptor";
+
+struct ResponseEconomy {
+    // Leave out a text item that is byte for byte the structuredContent.
+    bool omit_text_copy{false};
+    // Send the session descriptor only when the client does not already hold
+    // it, and a reference to it otherwise.
+    bool reference_session{false};
+
+    bool any() const { return omit_text_copy || reference_session; }
+    ResponseEconomy operator|(const ResponseEconomy& other) const {
+        return {omit_text_copy || other.omit_text_copy,
+                reference_session || other.reference_session};
+    }
+};
+
+// What a client's capabilities object declared. Anything that is not the
+// documented shape declares nothing.
+ResponseEconomy declaredResponseEconomy(const json& capabilities);
+
+// This server's half of the negotiation, for initialize and server/discover.
+json responseEconomyDeclaration();
+
+// The last session descriptor one conversation was sent in full.
+//
+// A 2024-11-05 client is one conversation per process, so the process can know
+// what it has already told it. The descriptor is compared whole rather than by
+// session_id, so any change at all sends it again.
+class SessionDescriptorLedger {
+public:
+    // True when this is the descriptor last sent in full. Otherwise it is
+    // recorded as sent, because the caller is about to send it.
+    bool alreadySent(const json& descriptor);
+
+private:
+    std::mutex m_mutex;
+    std::optional<json> m_lastSent;
+};
+
+// Whether the client already holds this session descriptor. Answering false
+// may record it as sent, since the answer is then going to carry it.
+using DescriptorHeld = std::function<bool(const json& descriptor)>;
+
+// Applies what a client declared to one encoded tools/call result, the output
+// of CallToolResult::toJson(). A result the client did not ask to change comes
+// back untouched, and so does every failure: an error keeps its text and its
+// session provenance whatever was declared, because it is the answer a caller
+// most needs whole.
+json economizeToolResult(json encoded, const ResponseEconomy& economy,
+                         const DescriptorHeld& client_holds);
+
+}  // namespace didi::mcp

@@ -331,6 +331,42 @@ version, because hosts read them where this document promises them.
 
 Tool execution failures use MCP `result.isError: true` with explanatory text. JSON-RPC top-level errors remain reserved for malformed requests, unknown JSON-RPC methods, and other protocol-level failures.
 
+### Response economy
+
+A client that reads `structuredContent` can decline what it already has by
+declaring the `didi/responseEconomy` extension in its capabilities. A
+`2024-11-05` client declares it in `initialize`, and it then applies to every
+legacy request on the process; any request may also declare it in its own
+`_meta["io.modelcontextprotocol/clientCapabilities"]`, for that request. A
+modern request is answered from its own declaration alone, so a legacy
+handshake on the same process never changes a modern request's answer. This is
+where the `io.modelcontextprotocol/ui` extension is negotiated too.
+`server/discover` and `initialize` declare the extension with every value this
+server honours:
+
+```json
+"extensions": {"didi/responseEconomy": {"omit": ["textCopy", "sessionDescriptor"]}}
+```
+
+| `omit` value | Effect on a successful `tools/call` result |
+| :--- | :--- |
+| `textCopy` | A `content` text item that is byte for byte the serialised `structuredContent` is left out. Anything else in `content`, such as an image or its caption, stays. A result with nothing else has `content: []`. |
+| `sessionDescriptor` | A live answer's `session` is `{"session_id", "kind"}` when the client already holds that descriptor, and the whole descriptor when it does not. A legacy client holds it once an answer to a request that declared `sessionDescriptor` carried it whole, until anything in it changes, so an editor restart sends the new one. A modern request holds the session it named in `_meta.didi.runtime_session_id`. |
+
+A value the server does not know is ignored, so a client written against a
+later Didi still gets what this one can give, and a declaration of any other
+shape declares nothing. `runtime_list_sessions`, `runtime_attach_session`,
+`runtime_detach_session` and `runtime_get_session` always answer with whole
+descriptors, since the descriptor is their answer; `runtime_get_session` is how
+a client that dropped one gets it back. A failed call (`isError: true`) is
+never reshaped: its text and its session provenance are what a caller most
+needs whole.
+
+A client that declares nothing gets the bytes it got before the extension
+existed. The live harness runs the seven-call authoring arc #776 measured both
+ways on every engine line, and fails when the declared arc is not under half the
+undeclared one's bytes.
+
 ### Mutation safety extension
 
 Every required string parameter carries a declared length: `minLength: 1` unless an empty value is a real answer, and a `maxLength` sized by what the value is. An identifier is 256, a path is 1024, and a body (`source_text`, `new_definition`) is 1,048,576 — the one place a large number is right, and the point is that it is declared. A schema that states its own narrower bound keeps it. Both are stamped where `additionalProperties` is stamped, so an argument the schema cannot describe cannot exist. `maxLength` is a count of characters, which is what the JSON Schema keyword means, so a client that validates against the published schema before sending reaches the same verdict the server does. A handler that has its own reason to bound bytes rather than characters says so in that parameter's description: `eval_gdscript.expression` and the node-path parameters do, and their schema bound stays the character count it publishes.
@@ -406,7 +442,7 @@ Which kind of session may run a method is one table, `livePolicyForMethod` in `i
 
 `editor.getRecoveryState` is an internal main-thread readiness observation, not a public MCP tool. Its `filesystem_scanning` field reports ongoing editor filesystem scanning/import activity. Managed startup and reattachment share a 30-second deadline across discovery, exact-child attachment, four quiet readiness polls, and a stable saved-file checkpoint; connection alone is insufficient readiness.
 
-Each `tools/list` definition carries specification `annotations` with `readOnlyHint`, `destructiveHint`, `idempotentHint`, and `openWorldHint`. They are derived and never set by hand, but from four classifications rather than one: whether the tool mutates the project, whether it changes the server's own session state, whether it can only add, and whether it lands in the same state when called twice. Deriving all four from a single read/write bit made `destructiveHint` and `idempotentHint` restatements of `readOnlyHint`, which is no information for a client to act on. Every `inputSchema` carries `additionalProperties: false`, stamped from the same predicate the argument check uses, so a client that validates locally before sending reaches the same verdict the server does. Every required string parameter carries `minLength: 1` unless its schema states another bound, because a required string on this surface names something and the empty string is never the value a caller meant; `script_create`'s `source_text` is the one exception, since an empty file is a file. Successful `tools/call` results whose payload is JSON carry `structuredContent` with that payload, emitted alongside the existing text content item rather than replacing it, so clients that read only `content` are unaffected. Where a tool publishes an `outputSchema`, it declares every field the handler can return across both execution paths plus the `execution_mode`, `is_live_engine`, `session` and `session_kind` the server stamps; only the fields present on every answer are `required`, because several are specific to one path.
+Each `tools/list` definition carries specification `annotations` with `readOnlyHint`, `destructiveHint`, `idempotentHint`, and `openWorldHint`. They are derived and never set by hand, but from four classifications rather than one: whether the tool mutates the project, whether it changes the server's own session state, whether it can only add, and whether it lands in the same state when called twice. Deriving all four from a single read/write bit made `destructiveHint` and `idempotentHint` restatements of `readOnlyHint`, which is no information for a client to act on. Every `inputSchema` carries `additionalProperties: false`, stamped from the same predicate the argument check uses, so a client that validates locally before sending reaches the same verdict the server does. Every required string parameter carries `minLength: 1` unless its schema states another bound, because a required string on this surface names something and the empty string is never the value a caller meant; `script_create`'s `source_text` is the one exception, since an empty file is a file. Successful `tools/call` results whose payload is JSON carry `structuredContent` with that payload, emitted alongside the existing text content item rather than replacing it, so clients that read only `content` are unaffected. A client that reads `structuredContent` can decline the text item; see [Response economy](#response-economy). Where a tool publishes an `outputSchema`, it declares every field the handler can return across both execution paths plus the `execution_mode`, `is_live_engine`, `session` and `session_kind` the server stamps; only the fields present on every answer are `required`, because several are specific to one path.
 
 A tool publishes an `outputSchema` when something checks it against a real answer: a contract test calls every publishing tool that is reachable without an engine and fails on any returned key the schema does not declare, and the live Godot harness runs the same comparison against an attached editor for the shapes only it can produce. A tool with no schema is unspecified, and that absence is deliberate rather than an oversight. The rule is enforced in both directions: a publishing tool that the contract test does not call fails the suite, and so does a live-only tool that acquires a schema, because nothing offline could check it. Writing schemas for the live-only tools is not more of the same work; each would be a claim nothing verifies, which is the defect that made `scene_get_hierarchy`'s schema wrong for as long as it was.
 
