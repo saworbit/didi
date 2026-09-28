@@ -51,8 +51,8 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Added
 
-- **Every failure is an envelope (Q6 part 1, finished, #1040).** 199 failures
-  answered as a bare sentence, with no `error.data`, so none could carry a code
+- **No failure answers as a bare sentence (Q6 part 1, finished, #1040).** 199
+  failures answered as a bare sentence, with no `error.data`, so none could carry a code
   to branch on or name its fix. The census that counted them matched only a
   string literal as the argument and found 156. Each now answers with the
   status its cause warrants: 400 for an argument, 503 for a missing editor, 504
@@ -66,8 +66,12 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
   prose; they keep both now. The sentences are the ones they were.
   `CallToolResult` keeps the constructor that made a bare failure private, so a
   new one does not compile, and the live harness fails a plain-text failure it
-  sees. Offline, `scene_get_hierarchy` on a scene file it could not open said
-  the editor was offline; it answers 403 `unreadable`, as the script tools do.
+  sees. That check found one more: a `project_apply_changes` proposal that
+  failed verification answered with its report and `isError`, and no `error`
+  in it. The report stays, and beside it is a 422 `verification_failed`
+  naming `changes`. Offline, `scene_get_hierarchy` on a scene file it could
+  not open said the editor was offline; it answers 403 `unreadable`, as the
+  script tools do.
 
 - **The same call failing the same way twice says so (Q6 part 2, #1040).** The
   second identical failure in a row carries `error.data.repeated`: `count`,

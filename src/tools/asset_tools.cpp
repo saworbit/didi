@@ -1582,11 +1582,20 @@ CallToolResult handleProjectApplyChanges(const json& args) {
     }
     auto payload = applied.value().toJson();
     payload["execution_mode"] = "offline_fallback";
-    // A proposal the check rejected is not an error in this tool. The tool did
-    // what it promises, which is to write nothing when the proposal does not
-    // hold up, and the report says why.
+    if (applied.value().applied) return CallToolResult::successJson(std::move(payload));
+    // A proposal the check rejected writes nothing, which is what the tool
+    // promises, and the report says why. It is still marked as an error so a
+    // caller cannot read it as a success with a footnote, and like every
+    // failure it carries an envelope naming what fixes it (Q6). The report
+    // stays where it was, beside the envelope, the way a live failure keeps its
+    // session beside its own.
+    payload["error"] = {
+        {"code", 422},
+        {"message", "The proposal did not pass verification, so nothing was written. The report "
+                    "beside this error says which check failed."},
+        {"data", {{"code", "verification_failed"}, {"field", "changes"}, {"retryable", false}}}};
     auto result = CallToolResult::successJson(std::move(payload));
-    result.isError = !applied.value().applied;
+    result.isError = true;
     return result;
 }
 

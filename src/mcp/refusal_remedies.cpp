@@ -231,6 +231,7 @@ const std::map<std::string, Rule>& rules() {
             return field(r.tool == "spatial_query_frustum" ? "camera_node" : "camera_path");
         }},
         {"not_a_packed_scene", [](const Refusal&) { return field("scene_path"); }},
+        {"verification_failed", [](const Refusal&) { return field("changes"); }},
         {"not_a_shader_material", [](const Refusal&) { return field("property_name"); }},
         {"not_a_translation", [](const Refusal&) { return field("value"); }},
         {"no_script_attached", [](const Refusal&) { return field("target_node"); }},

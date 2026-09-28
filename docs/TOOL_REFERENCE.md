@@ -985,7 +985,7 @@ Checks a proposal in an isolated copy and, only if it passes, writes it into the
 
 The verification runs here rather than being taken on trust from an earlier call. A caller that verified a minute ago is describing a project that may have moved since, and the point of this tool is that what reaches the working tree is the thing that was just proved.
 
-A proposal that does not pass writes nothing. The response is the verification report with `applied: false`, and the result is marked as an error so a caller cannot read it as a success with a footnote.
+A proposal that does not pass writes nothing. The response is the verification report with `applied: false`, and the result is marked as an error so a caller cannot read it as a success with a footnote. Beside the report, `error` is the envelope every failure carries: status 422, `data.code: "verification_failed"`, and `field: "changes"`, since the proposal is what to change.
 
 A failure of the check itself, as opposed to a proposal that did not hold up, answers with the same error envelope `project_verify_changes` uses, including behind the confirmation gate.
 
