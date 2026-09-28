@@ -871,8 +871,15 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
         // that negotiated nothing gets exactly what toJson() says.
         const auto economy = responseEconomyFor(era, req.params);
         const auto client_holds = descriptorHolderFor(scope);
+        // A legacy client is one conversation; a modern request is counted
+        // within the session it named, so two tasks never see each other's.
+        const std::string conversation =
+            era == ProtocolEra::Modern ? "modern/" + scope.runtime_session_id.value_or("")
+                                       : std::string("legacy");
         auto encode = [&](const CallToolResult& result) {
-            return complete(economizeToolResult(result.toJson(), economy, client_holds));
+            CallToolResult observed = result;
+            m_repeatedFailures.observe(conversation, name, supplied_arguments, observed);
+            return complete(economizeToolResult(observed.toJson(), economy, client_holds));
         };
         // Explicit opt-in, before any confirmation or dispatch. The ordinary
         // path never copies or walks arguments through the normalizer.
