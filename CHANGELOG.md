@@ -63,7 +63,9 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
   recovery already saved names no save. `tests/follow_ups.json` accounts for all
   63 mutating tools: 20 can leave work, 33 leave none and say why, and 10 are
   exempt against the issue that tracks them. Six of those write files an
-  attached editor keeps an old copy of, which no rescan refreshes (#1047). CI
+  attached editor keeps an old copy of, which no rescan refreshes (#1047); the
+  other four are undo, redo and the two tools that run project code, whose
+  answers cannot yet say whether the scene is left unsaved (#1049). CI
   fails a mutating tool with no entry, and the live harness fails a step a tool
   did not declare and a fact that arrived without its step. On 4.7 the save step
   is checked against the scene the editor itself lists as unsaved.

@@ -145,8 +145,9 @@ document an agent has to go and find is read by people, not by agents.
 **In practice.**
 
 - Every refusal carries the argument or the call that fixes it.
-- Every mutation names the follow-up it still needs: a save, a rescan, a
-  restart.
+- Every mutation names the follow-up it still needs, as a `follow_up` step: a
+  save or a restart. A rescan is not one, because it does not refresh an
+  editor's copy of a file it already holds (#1047).
 - When the same call fails the same way twice, the answer says so and names the
   alternative. A repeated call is never refused outright, because polling is
   legitimate.
