@@ -213,9 +213,27 @@ building one, that reads `structuredContent` can decline both by declaring the
 Declare it in `initialize` for `2024-11-05`, or in each request's
 `_meta["io.modelcontextprotocol/clientCapabilities"]` for `2026-07-28`, the
 same place the UI extension goes. Over a seven-call authoring arc it cuts the
-bytes by more than half. This is a client capability, not a server flag: only
-the client knows which half of a result it reads. See
+bytes by more than half. Leaving out the text copy is a client capability,
+not a server flag: only the client knows which half of a result it reads. See
 [Response economy](API_SPECIFICATION.md#response-economy).
+
+None of the hosts above has a setting to declare an extension. The session half
+is safe for any client, so the server can apply it on its own:
+
+```json
+{
+  "mcpServers": {
+    "didi": {
+      "command": "D:/didi/build/Release/didi.exe",
+      "args": ["--project", "D:/my_game", "--session-descriptor", "once"]
+    }
+  }
+}
+```
+
+Each live answer then carries the whole session descriptor the first time a
+route answers, and `{session_id, kind}` after that until anything in it changes.
+`runtime_get_session` returns the whole descriptor whenever an agent needs it.
 
 ### Optional: the Control Room dashboard
 

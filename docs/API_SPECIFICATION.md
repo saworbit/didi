@@ -367,6 +367,13 @@ existed. The live harness runs the seven-call authoring arc #776 measured both
 ways on every engine line, and fails when the declared arc is not under half the
 undeclared one's bytes.
 
+A host that cannot declare an extension can still have the descriptor half.
+`--session-descriptor once` applies `sessionDescriptor` to every request on the
+process, declared or not, with the same holder rules; `every`, the default,
+sends the whole descriptor on every live answer. It never leaves out the text
+copy, which only a client can decline. The mode is fixed at startup, and
+`initialize` and `server/discover` report it as `_meta.didi.sessionDescriptor`.
+
 ### Mutation safety extension
 
 Every required string parameter carries a declared length: `minLength: 1` unless an empty value is a real answer, and a `maxLength` sized by what the value is. An identifier is 256, a path is 1024, and a body (`source_text`, `new_definition`) is 1,048,576 — the one place a large number is right, and the point is that it is declared. A schema that states its own narrower bound keeps it. Both are stamped where `additionalProperties` is stamped, so an argument the schema cannot describe cannot exist. `maxLength` is a count of characters, which is what the JSON Schema keyword means, so a client that validates against the published schema before sending reaches the same verdict the server does. A handler that has its own reason to bound bytes rather than characters says so in that parameter's description: `eval_gdscript.expression` and the node-path parameters do, and their schema bound stays the character count it publishes.
@@ -483,7 +490,7 @@ The token must never be placed in MCP requests, responses, logs, diagnostics, or
 
 ### Failure provenance
 
-An error returned from a live route carries `session` provenance identifying which route failed: `schema_version`, `session_id`, `pid`, `kind`, `project_path`, `started_at_ms` and `protocol_version`. It omits `endpoint`, which successful results and `runtime_list_sessions` do carry; a successful live result carries only `session_id` and `kind` for a client that declared `sessionDescriptor` and already holds the rest (see [Response economy](#response-economy)). The distinction is deliberate rather than incidental: identifying a session and publishing the address to connect to it are different acts, and only the first belongs in a failure. `token` has never appeared in any public form.
+An error returned from a live route carries `session` provenance identifying which route failed: `schema_version`, `session_id`, `pid`, `kind`, `project_path`, `started_at_ms` and `protocol_version`. It omits `endpoint`, which successful results and `runtime_list_sessions` do carry; a successful live result carries only `session_id` and `kind` for a client that declared `sessionDescriptor`, or on a server started with `--session-descriptor once`, once it holds the rest (see [Response economy](#response-economy)). The distinction is deliberate rather than incidental: identifying a session and publishing the address to connect to it are different acts, and only the first belongs in a failure. `token` has never appeared in any public form.
 
 It is stated once, at the top level, where a successful result states it too. The extension also names the route on its way out, so a bridged error arrived carrying the same session in `error.data` as well; that inner copy is dropped when the envelope has one to keep. `error.data` retains everything else the engine said, including `outcome`, `route_quarantine`, `transport`, `engine` and `engine_diagnostics`. Over the internal IPC protocol, before the standalone wraps it, the extension's error still carries its own `execution_mode` and `session`: that is the layer at which it is the only attribution there is. Resource errors follow the same rule as tool errors.
 

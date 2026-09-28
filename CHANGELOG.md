@@ -51,6 +51,22 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Added
 
+- **`--session-descriptor once` gives the session half of response economy to
+  hosts that cannot declare it (#1031).** None of the hosts the integration
+  guide documents has a setting for a client capability, so the
+  `didi/responseEconomy` saving reached none of them. The session descriptor is
+  safe to shorten for any client: the reference is valid in both halves of a
+  result, and `runtime_get_session` returns the rest. With the switch, every
+  request is answered as though it had declared `sessionDescriptor`: the whole
+  descriptor the first time a route answers, `{session_id, kind}` after that
+  until anything in it changes. The text copy is never left out by it, since
+  only a client knows which half it reads. `every` stays the default because
+  the API specification promises the endpoint on every successful result.
+  `initialize` and `server/discover` report the mode as
+  `_meta.didi.sessionDescriptor`. On #776's arc it cuts an undeclared client's
+  bytes to 54%, 11,933 to 6,453 in the local harness on 4.5.1, 4.6.2 and 4.7.2
+  alike, and the harness fails unless it is under three quarters. `--tools` joins the ADMIN_GUIDE options
+  table, where Q4 left it out.
 - **A client that reads `structuredContent` can decline what it already has
   (Q5 part 1, #776).** Every tool answer carried its payload twice, in
   `structuredContent` and again as `content[0].text`, and every live answer

@@ -4854,6 +4854,42 @@ try {
     Assert-True (@($economyById[5725].result.structuredContent.members) -contains "/root/EconomyArc/Declared") "The declared arc's group read missed its node."
     Write-Host "Response economy: #776 arc $undeclaredBytes bytes undeclared, $declaredBytes declared."
     Assert-True (2 * $declaredBytes -lt $undeclaredBytes) "The declared arc cost $declaredBytes bytes against $undeclaredBytes undeclared, which is not under half (Q5)."
+
+    # The operator's switch for a host that cannot declare anything (#1031):
+    # the same arc from a client that declared nothing, on a server started
+    # with --session-descriptor once. The attach answer carries the descriptor
+    # whole, every live answer after it a reference, and the text copy stays,
+    # because only a client can say it does not read it.
+    $onceRequests = @(
+        (@{ jsonrpc = "2.0"; id = 5740; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
+        (Tool-Request 5741 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
+        (Tool-Request 5742 "scene_open" @{ scene_path = "res://economy_arc.tscn" })
+    ) + (Economy-Arc 5750 "Once" $null) + @(
+        (Tool-Request 5760 "scene_open" @{ scene_path = "res://main.tscn" })
+    )
+    $rawOnceResponses = Invoke-Didi -Requests $onceRequests -Arguments @("--project", $fixtureRoot, "--session-descriptor", "once")
+    Assert-True ($LASTEXITCODE -eq 0) "Session-descriptor-once MCP process exited with $LASTEXITCODE."
+    $onceById = @{}
+    $onceBytes = 0
+    foreach ($line in $rawOnceResponses) {
+        $match = [regex]::Match([string]$line, '^\{"id":(\d+),')
+        if (-not $match.Success) { continue }
+        $id = [int]$match.Groups[1].Value
+        $onceById[$id] = [string]$line | ConvertFrom-Json
+        if ($id -ge 5750 -and $id -le 5756) { $onceBytes += [Text.Encoding]::UTF8.GetByteCount([string]$line) }
+    }
+    Assert-True ($onceById[5740].result._meta.didi.sessionDescriptor -eq "once") "initialize did not report --session-descriptor once."
+    Assert-True ($null -ne (Tool-Payload $onceById[5741]).session.endpoint) "The attach answer did not carry the whole descriptor under --session-descriptor once."
+    Assert-True (-not $onceById[5742].result.isError) "The economy scene did not reopen: $($onceById[5742].result.content[0].text)"
+    foreach ($step in 0..6) {
+        $once = $onceById[5750 + $step]
+        Assert-True ($null -ne $once -and -not $once.result.isError) "Once arc step $step failed: $($once.result.content[0].text)"
+        $copy = @($once.result.content | Where-Object { $_.type -eq "text" })
+        Assert-True ($copy.Count -eq 1 -and ((($copy[0].text | ConvertFrom-Json) | ConvertTo-Json -Compress -Depth 100) -eq ($once.result.structuredContent | ConvertTo-Json -Compress -Depth 100))) "Once arc step ${step} lost its text copy, or the copy disagrees with structuredContent."
+        Assert-True ($once.result.structuredContent.session.session_id -eq $editorSession.session_id -and $null -eq $once.result.structuredContent.session.endpoint) "Once arc step $step did not carry a session reference."
+    }
+    Write-Host "Session descriptor once: #776 arc $onceBytes bytes, against $undeclaredBytes with every."
+    Assert-True (4 * $onceBytes -lt 3 * $undeclaredBytes) "--session-descriptor once cost $onceBytes bytes against $undeclaredBytes, which is not under three quarters (#1031)."
     # An asset the editor has never seen. Adding art is step one of building a
     # game and there was no way to do it through the surface: update_file
     # announces a file, it does not import one, so no .import was written and

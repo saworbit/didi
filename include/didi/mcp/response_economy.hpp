@@ -50,6 +50,21 @@ struct ResponseEconomy {
 // documented shape declares nothing.
 ResponseEconomy declaredResponseEconomy(const json& capabilities);
 
+// How often a live answer carries the whole session descriptor, chosen by the
+// operator at startup with --session-descriptor (#1031).
+//
+// No host Didi documents can declare an extension, so the declaration above
+// reaches only a client written for it. The descriptor half is safe to apply
+// for every client, because the reference is valid in both halves of a result
+// and runtime_get_session returns the rest. The text copy is not: only the
+// client knows which half it reads, so no switch turns that one on. `every` is
+// the default because API_SPECIFICATION.md promises the endpoint on every
+// successful result; `once` is the operator deciding their host does not need
+// it.
+enum class SessionDescriptorMode { Every, Once };
+std::optional<SessionDescriptorMode> parseSessionDescriptorMode(const std::string& value);
+const char* sessionDescriptorModeName(SessionDescriptorMode mode);
+
 // This server's half of the negotiation, for initialize and server/discover.
 json responseEconomyDeclaration();
 

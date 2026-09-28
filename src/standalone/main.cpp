@@ -60,6 +60,8 @@ static const char* kUiAppHelpLine =
     "  --ui-app <mode>       MCP Apps dashboard: auto (default), always, or off";
 static const char* kToolsHelpLine =
     "  --tools <profile>     Tools to list: full (default) or core, the tools agents reach";
+static const char* kSessionDescriptorHelpLine =
+    "  --session-descriptor <mode>  Live answers carry the session: every (default) or once";
 static const char* kHelpHint = "Run didi --help for the supported options.";
 
 #if defined(_WIN32)
@@ -160,6 +162,7 @@ static int runDidi(const std::vector<std::string>& arguments) {
     bool skip_confirmations = false;
     auto ui_app_mode = didi::mcp::McpServer::UiAppMode::Auto;
     auto tool_profile = didi::mcp::ToolProfile::Full;
+    auto session_descriptor = didi::mcp::SessionDescriptorMode::Every;
     std::string managed_editor, recovery_workspace;
     if (const auto env_yolo = environmentValue("DIDI_YOLO")) {
         const std::string& value = *env_yolo;
@@ -203,6 +206,7 @@ static int runDidi(const std::vector<std::string>& arguments) {
                       << kLogLevelHelpLine << "\n"
                       << kUiAppHelpLine << "\n"
                       << kToolsHelpLine << "\n"
+                      << kSessionDescriptorHelpLine << "\n"
                       << "  --dump-tool-manifest  Print the registered tool surface as JSON and exit\n"
                       << "  --managed-editor <exe>  Own a headless Godot editor with saved-file recovery\n"
                       << "  --recovery-workspace <new-dir>  Copy the project here; required with --managed-editor\n"
@@ -248,6 +252,18 @@ static int runDidi(const std::vector<std::string>& arguments) {
                 return 2;
             }
             tool_profile = *parsed;
+        } else if (arg == "--session-descriptor") {
+            // For a host that cannot declare didi/responseEconomy: the whole
+            // descriptor once per route, and {session_id, kind} after (#1031).
+            std::string mode;
+            if (!takeValue(arguments, i, arg, kSessionDescriptorHelpLine, mode)) return 2;
+            const auto parsed = didi::mcp::parseSessionDescriptorMode(mode);
+            if (!parsed.has_value()) {
+                refuse("--session-descriptor expects every or once, not " + mode,
+                       kSessionDescriptorHelpLine);
+                return 2;
+            }
+            session_descriptor = *parsed;
         } else if (arg == "--yolo") {
             skip_confirmations = true;
         } else if (arg == "--log-level") {
@@ -344,6 +360,7 @@ static int runDidi(const std::vector<std::string>& arguments) {
     }
     server.setUiAppMode(ui_app_mode);
     server.setToolProfile(tool_profile);
+    server.setSessionDescriptorMode(session_descriptor);
     // The dashboard's log page is the only place this process's own
     // diagnostics are readable: they otherwise go to standard error, which a
     // client that launched this server over stdio usually discards.
