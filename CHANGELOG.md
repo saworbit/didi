@@ -367,6 +367,15 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **Two failures that skipped the error floor now name their fix (#1043).** A
+  confirmation the person declined or dismissed answered `403` with no code
+  and no remedy, so it read as any other 403. It now carries `data.code:
+  "not_approved"`, with `no_remedy` for a decline and `retry_after_ms: 0` for a
+  dismissal. And a managed-mode change that applied and then failed to save,
+  checkpoint or journal set `isError` with no `error` object. It now carries
+  one beside the tool's answer and the receipt, with the recovery outcome,
+  `retryable: false` and a `next_call` to `runtime_recovery_status`, because
+  sending it again would apply it twice.
 - **A harness run that fails reports the failure, not the teardown guard
   (#1044).** The live harness stops its engines in a `finally` behind a guard
   that refuses a reused process id, and that refusal threw over the failure the

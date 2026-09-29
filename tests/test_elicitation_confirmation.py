@@ -161,6 +161,13 @@ class ElicitationConfirmationTests(unittest.TestCase):
         # Dismissal and refusal are different answers, and an agent that cannot
         # tell them apart will retry the one it should not.
         self.assertEqual(payload["error"]["data"]["action"], "decline")
+        # This answer never passes through the registry, and it read as any
+        # other 403 with no code and no remedy (#1043).
+        data = payload["error"]["data"]
+        self.assertEqual(data["code"], "not_approved")
+        self.assertEqual(data["tool"], "resource_create")
+        self.assertIs(data["retryable"], False)
+        self.assertIn("declined", data["no_remedy"])
 
     def test_cancelling_is_distinguishable_from_declining(self):
         offered = self._call(self._gated_arguments(), ELICITATION_CAPABLE)["result"]
@@ -176,6 +183,12 @@ class ElicitationConfirmationTests(unittest.TestCase):
         result = self._request("tools/call", params)["result"]
         payload = json.loads(result["content"][0]["text"])
         self.assertEqual(payload["error"]["data"]["action"], "cancel")
+        # A dismissed prompt was never answered, so asking again is the remedy.
+        data = payload["error"]["data"]
+        self.assertEqual(data["code"], "not_approved")
+        self.assertIs(data["retryable"], True)
+        self.assertEqual(data["retry_after_ms"], 0)
+        self.assertNotIn("no_remedy", data)
 
     def test_a_client_without_elicitation_is_not_silently_downgraded(self):
         # The specification forbids sending a mode the client did not declare,

@@ -270,7 +270,10 @@ called without a token returns an `input_required` result instead of `428`:
 
 The client reissues the call with `inputResponses`. `accept` executes; `decline`
 and `cancel` both refuse and stay distinguishable, because an agent that cannot
-tell refusal from dismissal will retry the one it should not.
+tell refusal from dismissal will retry the one it should not. Both answer `403`
+with `data.code: "not_approved"` and `data.action`. A decline carries
+`no_remedy` and `retryable: false`; a dismissal was never answered, so it
+carries `retry_after_ms: 0` and `retryable: true`.
 
 **A client that cannot elicit is not silently downgraded.** The specification
 forbids sending a mode the client did not declare, so the token flow remains and
