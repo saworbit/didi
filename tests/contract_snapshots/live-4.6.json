@@ -2673,7 +2673,7 @@
           "has_errors": false,
           "matches_attached_engine": true,
           "output_truncated": false,
-          "raw_output": "[<timestamp>] [INFO ] [GDEXTENSION] Didi runtime disabled for isolated offline helper\r\nGodot Engine v4.6.2.stable.official.71f334935 - https://godotengine.org\r\n\r\nDIDI_PHASE5_SHADER_OK\r\n",
+          "raw_output": "Godot Engine v4.6.2.stable.official.71f334935 - https://godotengine.org\r\n\r\nDIDI_PHASE5_SHADER_OK\r\n",
           "shader_path": "res://content/tint.gdshader",
           "success": true,
           "truncated": false

@@ -1174,6 +1174,9 @@ try {
     Assert-True ($canaryWarning.Count -ge 1) "Engine push_warning() was not captured by runtime_read_output."
     Assert-True ($canaryWarning[0].level -eq "warning") "Captured engine warning was not recorded at warning level."
     Assert-True ($canaryWarning[0].details.file -like "*runtime_probe.gd*" -or $canaryWarning[0].details.function -eq "push_warning") "Captured engine warning carried no origin details."
+    # Text for a reader, not a terminal's colouring (#1028).
+    $coloured = @($outputMessages | Where-Object { ([string]$_).Contains([string][char]27) })
+    Assert-True ($coloured.Count -eq 0) "runtime_read_output relayed terminal escape codes: $($coloured | Select-Object -First 1)"
 
     # A headless game is not an editor, and the remedy is not an editor's.
     #

@@ -176,7 +176,10 @@ GDE_EXPORT GDExtensionBool didi_library_init(GDExtensionInterfaceGetProcAddress 
         r_initialization->deinitialize = didi::godot::deinitialize_offline_helper;
         r_initialization->userdata = nullptr;
         r_initialization->minimum_initialization_level = GDEXTENSION_INITIALIZATION_CORE;
-        DIDI_LOG_INFO("GDEXTENSION", "Didi runtime disabled for isolated offline helper");
+        // DEBUG, because the helper's output is what shader_check_compile and
+        // its siblings hand back as raw_output, and at INFO every answer began
+        // with this line (#1028). The WARN default below is never reached here.
+        DIDI_LOG_DEBUG("GDEXTENSION", "Didi runtime disabled for isolated offline helper");
         return 1;
     }
     // The extension's console lines go wherever the engine's stderr goes: the
