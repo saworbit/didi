@@ -1,6 +1,7 @@
 #include "didi/mcp/mcp_protocol.hpp"
 #include "didi/tools/phase7_live_forward.hpp"
 #include "didi/tools/editor_copy_refresh.hpp"
+#include "didi/common/terminal_text.hpp"
 #include "didi/common/ipc_channel.hpp"
 #include "didi/common/project_path.hpp"
 #include "didi/common/atomic_write.hpp"
@@ -628,32 +629,6 @@ CallToolResult handleShaderCheckCompile(const json& args, std::shared_ptr<ipc::I
         result, offline::engineVersionFromOutput(run.value().output), configured.executable,
         attached.has_value() ? attached->engine_version : std::string());
     return CallToolResult::successJson(result);
-}
-
-// Godot's console output with the terminal control sequences taken out.
-//
-// The export failure used to hand four kilobytes of this over concatenated into
-// a message, carriage returns and colour escapes and progress bars included,
-// with the one actionable line sixty lines down. A client that renders an error
-// message into a terminal would execute the escapes (#651).
-std::string withoutTerminalEscapes(const std::string& text) {
-    std::string out;
-    out.reserve(text.size());
-    for (size_t index = 0; index < text.size(); ++index) {
-        if (text[index] == '\r') continue;
-        if (text[index] != '\x1b') {
-            out += text[index];
-            continue;
-        }
-        // CSI and the two-character sequences alike: skip to the byte that ends
-        // the sequence rather than trying to understand it.
-        ++index;
-        if (index < text.size() && text[index] == '[') {
-            ++index;
-            while (index < text.size() && !(text[index] >= '@' && text[index] <= '~')) ++index;
-        }
-    }
-    return out;
 }
 
 // The refusal both export tools give for a presets file that is there and

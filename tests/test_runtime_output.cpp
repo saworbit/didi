@@ -66,6 +66,31 @@ static void test_didi_records_do_not_carry_engine_output() {
 
 // Cursor paging is what makes the tool usable in a loop rather than a
 // one-shot dump, so it must behave like the log ring's.
+// Break caught: Godot colours its console output, and runtime_read_output
+// handed the colouring to the agent. 40 of a fresh headless editor's first 41
+// records carried it, and a match against the visible text failed (#1028).
+static void test_engine_output_records_carry_text_not_terminal_codes() {
+    auto& hook = didi::godot::EditorHook::instance();
+    didi::godot::EditorHookTestAccess::setSessionKind(hook, didi::runtime::SessionKind::editor);
+    const auto first = hook.engineOutput().nextSequence();
+    ASSERT_TRUE(hook.engineOutput()
+                    .append("info", "godot",
+                            "[  50% ] \x1b[90m\x1b[1mfirst_scan_filesystem\x1b[22m | Creating autoload "
+                            "scripts...\x1b[39m\x1b[0m")
+                    .isOk());
+
+    const auto output = didi::godot::EditorHookTestAccess::executeOnMainThread(
+        hook, "runtime.getOutput", {{"cursor", first}, {"limit", 10}});
+    ASSERT_FALSE(output.contains("error"));
+    bool saw_line = false;
+    for (const auto& record : output.at("records")) {
+        const auto message = record.at("message").get<std::string>();
+        ASSERT_TRUE(message.find('\x1b') == std::string::npos);
+        if (message == "[  50% ] first_scan_filesystem | Creating autoload scripts...") saw_line = true;
+    }
+    ASSERT_TRUE(saw_line);
+}
+
 static void test_engine_output_pages_by_cursor() {
     auto& hook = didi::godot::EditorHook::instance();
     didi::godot::EditorHookTestAccess::setSessionKind(hook, didi::runtime::SessionKind::editor);
@@ -196,6 +221,8 @@ struct RegisterRuntimeOutputTests {
         registerTest("RuntimeOutput.SeparateFromDidiRecords", test_engine_output_is_a_separate_stream_from_didi_records);
         registerTest("RuntimeOutput.DidiRecordsStayClean", test_didi_records_do_not_carry_engine_output);
         registerTest("RuntimeOutput.CursorPaging", test_engine_output_pages_by_cursor);
+        registerTest("RuntimeOutput.RecordsCarryTextNotTerminalCodes",
+                     test_engine_output_records_carry_text_not_terminal_codes);
         registerTest("RuntimeOutput.RejectsMalformedQueries", test_engine_output_rejects_malformed_queries);
         registerTest("RuntimeOutput.ToolIsReadOnly", test_runtime_read_output_is_registered_as_a_read_only_tool);
         registerTest("EditorHook.NestedPumpStartsNoWork",

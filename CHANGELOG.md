@@ -367,6 +367,13 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **Engine output and helper answers carry text, not terminal noise (#1028).**
+  `runtime_read_output` relayed Godot's colour escape codes in its records, 40
+  of a fresh headless editor's first 41, so a match against the visible text
+  failed. A record's message now has them taken out when it is captured. And
+  the offline helper Godot logged Didi's own INFO line before anything else,
+  so `shader_check_compile`'s `raw_output` began with it; that line is DEBUG
+  now, and the answer starts with the engine's own output on 4.5, 4.6 and 4.7.
 - **The advice for a new autoload no longer offers a rescan that does not work
   (#1002).** `signal_connect`'s `target_script_not_compiled` note and
   `LLM_INSTRUCTIONS` said to restart the editor or call

@@ -1,4 +1,5 @@
 #include "didi/gdextension/runtime_log.hpp"
+#include "didi/common/terminal_text.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -100,14 +101,17 @@ Result<uint64_t> RuntimeLogRing::append(std::string_view level, std::string_view
     if (!isValidLevel(level)) return Error::invalidArgument("Runtime log level must be debug, info, warning, or error");
     const auto now = std::chrono::system_clock::now();
     const auto timestamp_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
-    std::string bounded_message = truncateUtf8(message, kMaxMessageBytes);
+    // A record is text for a reader, not a terminal, and Godot colours its own
+    // output (#1028). Stripped before the bound, so the limit measures text.
+    const std::string text = withoutTerminalEscapes(std::string(message));
+    std::string bounded_message = truncateUtf8(text, kMaxMessageBytes);
 
     std::lock_guard<std::mutex> lock(m_mutex);
     if (m_exhausted) return Error(507, "Runtime log sequence is exhausted");
     const uint64_t sequence = m_nextSequence;
     if (sequence == std::numeric_limits<uint64_t>::max()) m_exhausted = true;
     else ++m_nextSequence;
-    const bool clipped = message.size() > kMaxMessageBytes || source.size() > 1024;
+    const bool clipped = text.size() > kMaxMessageBytes || source.size() > 1024;
     m_records.push_back({sequence, timestamp_ms, truncateUtf8(level, 16), truncateUtf8(source, 1024),
                          std::move(bounded_message), boundedDetails(details), clipped});
     while (m_records.size() > m_capacity) {
