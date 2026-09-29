@@ -1,5 +1,6 @@
 #include "didi/mcp/mcp_protocol.hpp"
 #include "didi/tools/phase7_live_forward.hpp"
+#include "didi/tools/editor_copy_refresh.hpp"
 #include "didi/common/ipc_channel.hpp"
 #include "didi/common/project_path.hpp"
 #include "didi/common/atomic_write.hpp"
@@ -997,7 +998,6 @@ CallToolResult handleProjectExport(const json& args, std::shared_ptr<ipc::IIpcCl
 }
 
 CallToolResult handleGridmapExportMeshLibrary(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
-    (void)ipc;
     if (!args.is_object() || !args.contains("source_scene") || !args["source_scene"].is_string() ||
         !args.contains("output_path") || !args["output_path"].is_string()) {
         return CallToolResult::errorJson(400, "source_scene and output_path are required strings");
@@ -1079,12 +1079,14 @@ CallToolResult handleGridmapExportMeshLibrary(const json& args, std::shared_ptr<
                  {"engine_output", withoutTerminalEscapes(run.value().output)},
                  {"output_truncated", run.value().output_truncated}});
     }
-    return CallToolResult::successJson({
+    json exported = {
         {"success", true}, {"source_scene", source_request}, {"output_path", output_res},
         {"item_count", marker.value().value("item_count", 0)},
         {"generated_collisions", args.value("generate_collisions", true)},
         {"duration_seconds", run.value().duration_seconds}, {"execution_mode", "offline_fallback"}
-    });
+    };
+    reportEditorCopy(exported, refreshEditorCopies(ipc, {output_res}));
+    return CallToolResult::successJson(std::move(exported));
 }
 
 CallToolResult handleUiHitTest(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {

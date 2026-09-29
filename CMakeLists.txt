@@ -211,6 +211,7 @@ set(CORE_SOURCES
     src/tools/script_tools.cpp
     src/tools/runtime_tools.cpp
     src/tools/asset_tools.cpp
+    src/tools/editor_copy_refresh.cpp
     src/tools/blackboard_tools.cpp
     src/tools/project_tools.cpp
     src/tools/signal_tools.cpp

@@ -3244,6 +3244,110 @@ try {
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $fixtureRoot "refresh_anim.res"))) "A refused .res write left a file behind."
     Assert-True (-not $refreshById[2656].result.isError) "main.tscn did not reopen after the anim_add_library batches: $($refreshById[2656].result.content[0].text)"
 
+    # Six more writers put files on disk behind an attached editor, which keeps
+    # its own copy of anything it has loaded and does not re-read a file that
+    # changed underneath it. Each now asks the editor to reload its copy
+    # (#1047). The witness holds each file first, the way an open scene would,
+    # and afterwards reads the copy it holds rather than the disk, which is the
+    # only place a stale copy shows. A script is the case a CACHE_MODE_REPLACE
+    # load gets wrong, which is why three of the writers rewrite one.
+    $copyWitness = "/root/ObservedRoot/Witness"
+    $copyScript = "res://editor_copy_probe.gd"
+    $copyScene = "res://editor_copy_probe.tscn"
+    $copyLibrary = "res://editor_copy_probe_lib.tres"
+    $copyLab = "res://didi_test_lab.tscn"
+    $copyHold = { param($id, $path) Tool-Request $id "scene_call_method" @{ target_node = $copyWitness; method_name = "hold"; arguments = @($path) } }
+    $copyRead = { param($id, $path) Tool-Request $id "scene_call_method" @{ target_node = $copyWitness; method_name = "held_copy"; arguments = @($path) } }
+    $copySceneText = "[gd_scene load_steps=2 format=3]`n`n[ext_resource type=`"Script`" path=`"$copyScript`" id=`"1`"]`n`n[node name=`"CopyProbe`" type=`"Node`"]`nscript = ExtResource(`"1`")`n`n[connection signal=`"ready`" from=`".`" to=`".`" method=`"probe_copy_handler`"]`n"
+    $copyRequests = @(
+        (@{ jsonrpc = "2.0"; id = 2710; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
+        (Tool-Request 2711 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
+        (Tool-Request 2712 "scene_open" @{ scene_path = "res://observed_post_state.tscn" }),
+        (Tool-Request 2713 "script_create" @{ script_path = $copyScript; overwrite = $true; source_text = "extends Node`n`nfunc alpha():`n`treturn 1`n" }),
+        (& $copyHold 2714 $copyScript),
+        (Tool-Request 2715 "script_create" @{ script_path = $copyScript; overwrite = $true; source_text = "extends Node`n`nfunc alpha():`n`treturn 1`n`nfunc beta():`n`treturn 2`n" }),
+        (& $copyRead 2716 $copyScript),
+        (Tool-Request 2717 "script_patch_method" @{ file_path = $copyScript; method_name = "gamma"; new_definition = "func gamma():`n`treturn 3"; create_if_missing = $true }),
+        (& $copyRead 2718 $copyScript),
+        (Tool-Request 2719 "project_apply_changes" @{ changes = @(
+            @{ path = $copyScript; content = "extends Node`n`nfunc delta():`n`treturn 4`n`nfunc probe_copy_handler():`n`tpass`n" },
+            @{ path = $copyScene; content = $copySceneText }) }),
+        (& $copyRead 2720 $copyScript),
+        (& $copyHold 2721 $copyScene),
+        (Tool-Request 2722 "project_rename_references" @{ target = "probe_copy_handler"; new_name = "probe_copy_renamed" }),
+        (& $copyRead 2723 $copyScene),
+        (Tool-Request 2724 "viewport_create_test_lab" @{ target_resource_path = "res://probe_visual.tres"; overwrite = $true }),
+        (& $copyHold 2725 $copyLab),
+        (& $copyRead 2726 $copyLab),
+        (Tool-Request 2727 "viewport_create_test_lab" @{ target_resource_path = "res://probe_visual.tres"; orthographic = $true; overwrite = $true }),
+        (& $copyRead 2728 $copyLab),
+        (Tool-Request 2729 "gridmap_export_mesh_library" @{ source_scene = "res://phase5_mesh_source.tscn"; output_path = $copyLibrary; generate_collisions = $false; overwrite = $true; timeout_seconds = 60 }),
+        (& $copyHold 2730 $copyLibrary),
+        (& $copyRead 2731 $copyLibrary),
+        (Tool-Request 2732 "gridmap_export_mesh_library" @{ source_scene = "res://phase5_mesh_source.tscn"; output_path = $copyLibrary; generate_collisions = $true; overwrite = $true; timeout_seconds = 60 }),
+        (& $copyRead 2733 $copyLibrary),
+        (Tool-Request 2734 "scene_close" @{ discard_unsaved = $true }),
+        (Tool-Request 2735 "scene_open" @{ scene_path = "res://main.tscn" })
+    )
+    # The MeshLibrary export and the apply's check start their own Godot, and
+    # the apply's check works in a git worktree of the fixture.
+    $previousCopyGodotBin = $env:GODOT_BIN
+    try {
+        $env:GODOT_BIN = $GodotExecutable
+        Push-Location $fixtureRoot
+        try {
+            $rawCopy = Invoke-Didi -Requests $copyRequests -Arguments @("--project", $fixtureRoot, "--yolo")
+        }
+        finally {
+            Pop-Location
+        }
+    }
+    finally {
+        if ($null -eq $previousCopyGodotBin) { Remove-Item Env:GODOT_BIN -ErrorAction SilentlyContinue }
+        else { $env:GODOT_BIN = $previousCopyGodotBin }
+    }
+    $copyById = @{}
+    foreach ($response in @($rawCopy | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.PSObject.Properties.Name -contains "id" })) { $copyById[[int]$response.id] = $response }
+    foreach ($id in @(2714, 2721, 2725, 2730)) {
+        Assert-True ((Tool-Payload $copyById[$id]).returned -eq $true) "The witness could not hold a file for request ${id}: $($copyById[$id] | ConvertTo-Json -Depth 8 -Compress)"
+    }
+    $copyHeld = { param($id) (Tool-Payload $copyById[$id]).returned }
+
+    $scriptCreated = Tool-Payload $copyById[2715]
+    Assert-True ($scriptCreated.editor_copy_reloaded -eq $true) "script_create replaced a script the editor holds and did not reload the editor's copy: $($scriptCreated | ConvertTo-Json -Depth 6 -Compress)"
+    $heldAfterCreate = & $copyHeld 2716
+    Assert-True (@($heldAfterCreate.methods) -contains "beta") "After script_create, the editor's copy of the script still had the old code: $($heldAfterCreate | ConvertTo-Json -Depth 6 -Compress)"
+
+    $scriptPatched = Tool-Payload $copyById[2717]
+    Assert-True ($scriptPatched.editor_copy_reloaded -eq $true) "script_patch_method changed a script the editor holds and did not reload the editor's copy: $($scriptPatched | ConvertTo-Json -Depth 6 -Compress)"
+    $heldAfterPatch = & $copyHeld 2718
+    Assert-True (@($heldAfterPatch.methods) -contains "gamma") "After script_patch_method, the editor's copy of the script still had the old code: $($heldAfterPatch | ConvertTo-Json -Depth 6 -Compress)"
+
+    $copiesApplied = Tool-Payload $copyById[2719]
+    Assert-True ($copiesApplied.applied -eq $true -and @($copiesApplied.editor_copies_reloaded) -contains $copyScript -and @($copiesApplied.editor_copies_reloaded) -notcontains $copyScene) "project_apply_changes did not reload exactly the one file the editor held: $($copiesApplied | ConvertTo-Json -Depth 6 -Compress)"
+    $heldAfterApply = & $copyHeld 2720
+    Assert-True (@($heldAfterApply.methods) -contains "delta" -and @($heldAfterApply.methods) -notcontains "beta") "After project_apply_changes, the editor's copy of the script still had the old code: $($heldAfterApply | ConvertTo-Json -Depth 6 -Compress)"
+
+    $copiesRenamed = Tool-Payload $copyById[2722]
+    Assert-True (@($copiesRenamed.editor_copies_reloaded) -contains $copyScene) "project_rename_references rewrote a scene the editor holds and did not reload the editor's copy: $($copiesRenamed | ConvertTo-Json -Depth 6 -Compress)"
+    $heldAfterRename = & $copyHeld 2723
+    Assert-True ((@($heldAfterRename.connection_methods) -join ",") -eq "probe_copy_renamed") "After project_rename_references, the editor's copy of the scene still named the old method: $($heldAfterRename | ConvertTo-Json -Depth 6 -Compress)"
+
+    $labBefore = & $copyHeld 2726
+    $labRewritten = Tool-Payload $copyById[2727]
+    Assert-True ($labRewritten.editor_copy_reloaded -eq $true) "viewport_create_test_lab rewrote a scene the editor holds and did not reload the editor's copy: $($labRewritten | ConvertTo-Json -Depth 6 -Compress)"
+    $labAfter = & $copyHeld 2728
+    # An orthographic front camera is two more properties: projection and size.
+    Assert-True ($labAfter.property_count -eq $labBefore.property_count + 2) "After viewport_create_test_lab, the editor's copy of the lab was not the orthographic one: before $($labBefore | ConvertTo-Json -Compress), after $($labAfter | ConvertTo-Json -Compress)"
+
+    $libraryBefore = & $copyHeld 2731
+    Assert-True ($libraryBefore.item_count -gt 0 -and $libraryBefore.shape_entries -eq 0) "The MeshLibrary exported without collisions is not the one the editor holds: $($libraryBefore | ConvertTo-Json -Compress)"
+    $libraryRewritten = Tool-Payload $copyById[2732]
+    Assert-True ($libraryRewritten.editor_copy_reloaded -eq $true) "gridmap_export_mesh_library replaced a library the editor holds and did not reload the editor's copy: $($libraryRewritten | ConvertTo-Json -Depth 6 -Compress)"
+    $libraryAfter = & $copyHeld 2733
+    Assert-True ($libraryAfter.shape_entries -gt 0) "After gridmap_export_mesh_library, the editor's copy of the library still had no collision shapes: $($libraryAfter | ConvertTo-Json -Compress)"
+    Assert-True (-not $copyById[2735].result.isError) "main.tscn did not reopen after the editor copy block: $($copyById[2735].result.content[0].text)"
+
     $previousGodotBin = $env:GODOT_BIN
     try {
         $env:GODOT_BIN = $GodotExecutable

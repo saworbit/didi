@@ -367,6 +367,17 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **Six file writers no longer leave an attached editor holding the old copy
+  (#1047).** `script_create`, `script_patch_method`, `project_apply_changes`,
+  `project_rename_references`, `gridmap_export_mesh_library` and
+  `viewport_create_test_lab` wrote files and never told the editor, so every
+  live reader kept the old version until a restart. Each now reloads the
+  editor's copy of what it wrote and says so in `editor_copy_reloaded`, or
+  `editor_copies_reloaded` for the two that write several files. A script is
+  reloaded the way the Script editor reloads one, because a `CACHE_MODE_REPLACE`
+  load leaves a script's code unchanged on 4.5.1, 4.6.2 and 4.7.2. Other files
+  now reload with `CACHE_MODE_REPLACE` rather than `REPLACE_DEEP`, so a reload
+  no longer re-reads the files the written one depends on.
 - **A stopped game no longer counts against the eight held sessions (#1001).**
   A route was released only when its connection said it was closed, and a
   connection to a game that `runtime_stop` ended never says so. After enough

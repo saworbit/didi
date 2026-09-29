@@ -8,6 +8,7 @@
 #include "didi/offline/project_search.hpp"
 #include "didi/offline/test_runner.hpp"
 #include "didi/offline/project_settings_file.hpp"
+#include "didi/tools/editor_copy_refresh.hpp"
 #include "didi/offline/project_file_lock.hpp"
 #include "didi/offline/resource_indexer.hpp"
 #include "didi/runtime/session_client.hpp"
@@ -258,7 +259,6 @@ CallToolResult handleScriptCheckSyntax(const json& args, std::shared_ptr<ipc::II
 }
 
 CallToolResult handleScriptCreate(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
-    (void)ipc;
     const std::string script_path = args.value("script_path", args.value("file_path", ""));
     if (script_path.empty()) {
         return CallToolResult::errorJson(
@@ -343,14 +343,16 @@ CallToolResult handleScriptCreate(const json& args, std::shared_ptr<ipc::IIpcCli
         diag_arr.push_back(d.toJson());
     }
 
-    return CallToolResult::successJson({
+    json created = {
         {"status", already_there ? "replaced_offline" : "created_offline"},
         {"script_path", reported_path},
         {"bytes_written", source_text.size()},
         {"diagnostics_count", diags.size()},
         {"has_errors", has_error},
         {"diagnostics", diag_arr}
-    });
+    };
+    reportEditorCopy(created, refreshEditorCopies(ipc, {reported_path}));
+    return CallToolResult::successJson(std::move(created));
 }
 
 CallToolResult handleScriptReflectClass(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
@@ -440,7 +442,6 @@ CallToolResult handleScriptGetSymbols(const json& args, std::shared_ptr<ipc::IIp
 }
 
 CallToolResult handleScriptPatchMethod(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
-    (void)ipc;
     std::string file_path = args.value("file_path", "");
     std::string symbol_name = args.value("method_name", args.value("symbol_name", ""));
     std::string new_definition = args.value("new_definition", "");
@@ -573,7 +574,7 @@ CallToolResult handleScriptPatchMethod(const json& args, std::shared_ptr<ipc::II
         {"has_errors", has_error},
         {"diagnostics", diag_arr}
     };
-
+    reportEditorCopy(result, refreshEditorCopies(ipc, {reported_path}));
     return CallToolResult::successJson(result);
 }
 

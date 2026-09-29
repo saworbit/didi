@@ -8,7 +8,8 @@
 //
 // There is no rescan rule. Writing a file behind an attached editor leaves its
 // cached copy stale, and a rescan does not refresh it: measured on all three
-// engine lines, only a CACHE_MODE_REPLACE load does (#1047).
+// engine lines, only a CACHE_MODE_REPLACE load does, and for a script not even
+// that. The writers reload the copy themselves (#1047).
 
 #include "didi/mcp/follow_ups.hpp"
 

@@ -18,6 +18,10 @@ extends Node
 ## loads this file does not fail to compile it.
 
 
+# What hold() has loaded, kept so the editor keeps its copy.
+var _held := []
+
+
 func edited_scene_path() -> String:
 	var root := _root()
 	return root.scene_file_path if root != null else ""
@@ -161,6 +165,53 @@ func load_fresh(path: String, properties: Array) -> Dictionary:
 		values[property_name] = _plain(resource.get(property_name))
 	answer["properties"] = values
 	return answer
+
+
+## Loads a file and keeps it, so the editor holds a copy of it the way it does
+## of anything an open scene uses (#1047). The copy goes when this node does.
+func hold(path: String) -> bool:
+	var resource := load(path)
+	if resource == null:
+		return false
+	_held.append(resource)
+	return true
+
+
+## The copy of a file the editor holds, read from that copy and never from disk,
+## which is the opposite of load_fresh on purpose: a writer that leaves the
+## editor's copy stale is caught only by asking the copy. A script answers with
+## the methods it compiled, not its source text, because a CACHE_MODE_IGNORE
+## read of a held GDScript updates the text and leaves the code.
+func held_copy(path: String) -> Dictionary:
+	if not ResourceLoader.has_cached(path):
+		return {"cached": false}
+	var resource := ResourceLoader.load(path, "", ResourceLoader.CACHE_MODE_REUSE)
+	var answer := {"cached": true, "class": resource.get_class()}
+	if resource is Script:
+		var methods := []
+		for method in resource.get_script_method_list():
+			methods.append(String(method["name"]))
+		methods.sort()
+		answer["methods"] = methods
+	elif resource is PackedScene:
+		var state: SceneState = resource.get_state()
+		var properties := 0
+		for index in state.get_node_count():
+			properties += state.get_node_property_count(index)
+		var connected := []
+		for index in state.get_connection_count():
+			connected.append(String(state.get_connection_method(index)))
+		answer["node_count"] = state.get_node_count()
+		answer["property_count"] = properties
+		answer["connection_methods"] = connected
+	elif resource is MeshLibrary:
+		var shapes := 0
+		for item in resource.get_item_list():
+			shapes += resource.get_item_shapes(item).size()
+		answer["item_count"] = resource.get_item_list().size()
+		answer["shape_entries"] = shapes
+	return answer
+
 
 
 func _didi_path(node: Node) -> String:

@@ -14,6 +14,7 @@
 #include "didi/common/engine_version.hpp"
 #include "didi/runtime/session_client.hpp"
 #include "didi/runtime/audio_requests.hpp"
+#include "didi/tools/editor_copy_refresh.hpp"
 #include <chrono>
 #include <optional>
 #include <thread>
@@ -1264,14 +1265,7 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
     // seventeen). The caller overwrote the file on purpose, with a token, so the
     // editor's copy is reloaded from it in place, which is what the editor does
     // itself when it notices a change on disk. Absent when no editor answered.
-    std::optional<json> editor_copy_reloaded;
-    if (ipc && ipc->isConnected()) {
-        auto refreshed = ipc->sendRequest("resource.refreshCached", json{{"path", reported_path}}, 5000);
-        if (refreshed.isOk() && refreshed.value().is_object() &&
-            refreshed.value().contains("reloaded") && refreshed.value()["reloaded"].is_boolean()) {
-            editor_copy_reloaded = refreshed.value()["reloaded"];
-        }
-    }
+    const auto editor_copy = refreshEditorCopies(ipc, {reported_path});
     json created = {
         {"status", "created_offline"},
         {"save_path", reported_path},
@@ -1287,7 +1281,7 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
         {"property_check", property_check.value()},
         {"sub_resource_property_checks", std::move(sub_property_checks)}
     };
-    if (editor_copy_reloaded.has_value()) created["editor_copy_reloaded"] = *editor_copy_reloaded;
+    reportEditorCopy(created, editor_copy);
     return CallToolResult::successJson(std::move(created));
 }
 
@@ -1520,7 +1514,6 @@ CallToolResult handleAudioListBuses(const json& args, std::shared_ptr<ipc::IIpcC
 }
 
 CallToolResult handleProjectRenameReferences(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
-    (void)ipc;
     if (!args.is_object()) {
         return CallToolResult::errorJson(400, "Invalid rename request: arguments must be an object");
     }
@@ -1551,6 +1544,13 @@ CallToolResult handleProjectRenameReferences(const json& args, std::shared_ptr<i
     }
     auto payload = report.value();
     payload["execution_mode"] = "offline_fallback";
+    std::vector<std::string> rewritten;
+    for (const auto& file : payload.value("updated_files", json::array())) {
+        if (file.is_object() && file.contains("path") && file["path"].is_string()) {
+            rewritten.push_back(file["path"].get<std::string>());
+        }
+    }
+    reportEditorCopies(payload, refreshEditorCopies(ipc, rewritten));
     return CallToolResult::successJson(std::move(payload));
 }
 
@@ -1566,7 +1566,7 @@ CallToolResult handleProjectVerifyChanges(const json& args) {
     return CallToolResult::successJson(verified.value().toJson());
 }
 
-CallToolResult handleProjectApplyChanges(const json& args) {
+CallToolResult handleProjectApplyChanges(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     auto parsed = offline::parseSpeculativeVerifyRequest(args);
     if (parsed.isErr()) {
         return CallToolResult::fromError(parsed.error(), "Invalid apply request: ");
@@ -1582,7 +1582,17 @@ CallToolResult handleProjectApplyChanges(const json& args) {
     }
     auto payload = applied.value().toJson();
     payload["execution_mode"] = "offline_fallback";
-    if (applied.value().applied) return CallToolResult::successJson(std::move(payload));
+    if (applied.value().applied) {
+        // The caller's spelling reaches the file, and the editor keys its copy
+        // by the file's own, so each is asked for as the readers spell it.
+        std::vector<std::string> written;
+        for (const auto& path : applied.value().written) {
+            auto resolved = paths::resolveProjectFile(path);
+            if (resolved.isOk()) written.push_back(paths::resourcePathOf(resolved.value()));
+        }
+        reportEditorCopies(payload, refreshEditorCopies(ipc, written));
+        return CallToolResult::successJson(std::move(payload));
+    }
     // A proposal the check rejected writes nothing, which is what the tool
     // promises, and the report says why. It is still marked as an error so a
     // caller cannot read it as a success with a footnote, and like every
