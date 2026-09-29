@@ -3898,6 +3898,10 @@
               "pattern": "^[0-9a-f]{64}$",
               "type": "string"
             },
+            "discard_unsaved": {
+              "description": "Allow reloading an open tab that may hold unsaved edits.",
+              "type": "boolean"
+            },
             "dry_run": {
               "default": false,
               "description": "Return a non-mutating change preview instead of executing.",
@@ -4499,6 +4503,10 @@
               "minLength": 64,
               "pattern": "^[0-9a-f]{64}$",
               "type": "string"
+            },
+            "discard_unsaved": {
+              "description": "Allow reloading an open tab that may hold unsaved edits.",
+              "type": "boolean"
             },
             "dry_run": {
               "default": false,

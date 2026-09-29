@@ -3879,8 +3879,8 @@ void ToolRegistry::registerAllDefaultTools() {
                 {"run_frames", {{"type", "integer"}, {"minimum", 1}, {"maximum", 6000}, {"default", 120},
                                 {"description", "Iterations to let the scene run before Godot quits by itself. Only meaningful with run_scene."}}},
                 {"timeout_seconds", {{"type", "integer"}, {"minimum", 1}, {"maximum", 600}, {"default", 120}}},
-                {"discard_unsaved", {{"type", "boolean"}, {"default", false},
-                                     {"description", "A scene this rewrites that is open in the editor is reloaded from the new file. Pass true to allow that when its tab has unsaved changes, which are lost, or before Godot 4.7, which cannot report them; without it such a call writes nothing."}}}
+                {"discard_unsaved", {{"type", "boolean"},
+                                     {"description", "Allow reloading an open tab that may hold unsaved edits."}}}
             }},
             {"required", json::array({"changes"})},
             {"additionalProperties", false}
@@ -4651,8 +4651,8 @@ void ToolRegistry::registerAllDefaultTools() {
                 {"new_name", {{"type", "string"}, {"minLength", 1}, {"maxLength", 256},
                               {"description", "The identifier to rename it to. Refused if a scene connection or animation track already uses it, because that would merge two different symbols."}}},
                 {"max_impacts", {{"type", "integer"}, {"minimum", 1}, {"maximum", 5000}, {"default", 500}}},
-                {"discard_unsaved", {{"type", "boolean"}, {"default", false},
-                                     {"description", "A scene this rewrites that is open in the editor is reloaded from the new file. Pass true to allow that when its tab has unsaved changes, which are lost, or before Godot 4.7, which cannot report them; without it such a call writes nothing."}}}
+                {"discard_unsaved", {{"type", "boolean"},
+                                     {"description", "Allow reloading an open tab that may hold unsaved edits."}}}
             }},
             {"required", json::array({"target", "new_name"})},
             {"additionalProperties", false}
