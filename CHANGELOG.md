@@ -367,6 +367,12 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **A stopped game no longer counts against the eight held sessions (#1001).**
+  A route was released only when its connection said it was closed, and a
+  connection to a game that `runtime_stop` ended never says so. After enough
+  launch and stop cycles `runtime_attach_session` answered 429. A route is now
+  released when the process its session names has exited. An attach that fails
+  also no longer carries the selected session's incident as its own.
 - **`project_verify_changes` could pass a proposal whose errors it never
   read.** It kept the first 32 engine error lines and only then subtracted the
   lines the copy prints on its own, one `Unrecognized UID` per `uid://`

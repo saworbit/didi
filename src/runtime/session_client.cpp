@@ -1821,12 +1821,20 @@ private:
         return attached;
     }
 
+    // A connection cannot tell this on its own. Its handle stays open after the
+    // process at the other end exits, and nothing is sent on a route to a game
+    // that runtime_stop ended, so every such route kept answering isConnected()
+    // and they filled the cap (#1001). The process the descriptor names is the
+    // fact, the same one discovery reads to call a session stale.
     void releaseDeadRoutes() {
         std::vector<Route> released;
         {
             std::lock_guard<std::mutex> lock(m_mutex);
             for (auto it = m_routes.begin(); it != m_routes.end();) {
-                if (it->second.client && it->second.client->isConnected()) {
+                const auto& descriptor = it->second.descriptor;
+                if (it->second.client && it->second.client->isConnected() &&
+                    processInstanceState(descriptor.pid, descriptor.started_at_ms) !=
+                        ProcessInstanceState::proven_stale) {
                     ++it;
                     continue;
                 }

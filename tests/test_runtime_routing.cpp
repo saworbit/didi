@@ -50,6 +50,7 @@ CallToolResult handleRuntimeReadLogs(const json&, std::shared_ptr<ipc::IIpcClien
 CallToolResult handleRuntimeGetSession(const json&, std::shared_ptr<runtime::IRuntimeSessionClient>,
                                        std::vector<std::string> available_without_engine = {});
 CallToolResult handleRuntimeDetachSession(const json&, std::shared_ptr<runtime::IRuntimeSessionClient>);
+CallToolResult handleRuntimeAttachSession(const json&, std::shared_ptr<runtime::IRuntimeSessionClient>);
 CallToolResult handleRuntimeSetPaused(const json&, std::shared_ptr<ipc::IIpcClient>);
 CallToolResult handleRuntimeStep(const json&, std::shared_ptr<ipc::IIpcClient>);
 CallToolResult handleRuntimeStop(const json&, std::shared_ptr<ipc::IIpcClient>);
@@ -403,12 +404,12 @@ uint64_t currentPid() {
 #endif
 }
 
-std::string endpointForSession(const std::string& session_id) {
+std::string endpointForSession(const std::string& session_id, uint64_t pid = currentPid()) {
 #if defined(_WIN32)
-    return "\\\\.\\pipe\\godot_didi_" + std::to_string(currentPid()) + "_" + session_id;
+    return "\\\\.\\pipe\\godot_didi_" + std::to_string(pid) + "_" + session_id;
 #else
     return (std::filesystem::temp_directory_path() /
-            ("godot_didi_" + std::to_string(currentPid()) + "_" + session_id + ".sock")).string();
+            ("godot_didi_" + std::to_string(pid) + "_" + session_id + ".sock")).string();
 #endif
 }
 
@@ -919,10 +920,17 @@ public:
 
     didi::runtime::SessionDescriptor add(const std::string& session_id, const std::string& kind,
                                          const std::string& project = {}) {
+        return addForProcess(session_id, kind, currentPid(), started_at_ms, project);
+    }
+
+    didi::runtime::SessionDescriptor addForProcess(const std::string& session_id,
+                                                   const std::string& kind, uint64_t pid,
+                                                   int64_t process_started_at_ms,
+                                                   const std::string& project = {}) {
         didi::runtime::SessionDescriptor descriptor{
-            1, session_id, std::string(64, session_id.front()), currentPid(), kind,
-            project.empty() ? project_path : project, endpointForSession(session_id),
-            started_at_ms, "1.3"};
+            1, session_id, std::string(64, session_id.front()), pid, kind,
+            project.empty() ? project_path : project, endpointForSession(session_id, pid),
+            process_started_at_ms, "1.3"};
         const auto descriptor_path = directory / (session_id + ".json");
         std::ofstream output(descriptor_path, std::ios::binary);
         output << descriptor.toJson(true).dump();
@@ -3015,6 +3023,169 @@ void test_a_dead_route_does_not_count_against_the_held_route_limit() {
     client->disconnect();
 }
 
+// A real process standing in for an engine, so a test can end it and see what
+// the route table makes of a descriptor whose process has gone. Windows starts
+// it suspended, which keeps it alive for as long as the test holds it and
+// leaves no children of its own behind; POSIX blocks it on a pipe.
+class StandInEngine {
+public:
+    StandInEngine() {
+#if defined(_WIN32)
+        STARTUPINFOW startup{};
+        startup.cb = sizeof(startup);
+        std::wstring command = L"cmd.exe /d /c exit 0";
+        if (!CreateProcessW(nullptr, command.data(), nullptr, nullptr, FALSE,
+                            CREATE_NO_WINDOW | CREATE_SUSPENDED, nullptr, nullptr, &startup,
+                            &info_)) {
+            throw std::runtime_error("Failed to start the stand-in engine process");
+        }
+        CloseHandle(info_.hThread);
+        info_.hThread = nullptr;
+        pid = info_.dwProcessId;
+#else
+        int gate[2] = {-1, -1};
+        if (pipe(gate) != 0) throw std::runtime_error("Failed to open the stand-in engine gate");
+        child_ = fork();
+        if (child_ < 0) {
+            close(gate[0]);
+            close(gate[1]);
+            throw std::runtime_error("Failed to fork the stand-in engine process");
+        }
+        if (child_ == 0) {
+            close(gate[1]);
+            char ignored = 0;
+            while (read(gate[0], &ignored, 1) < 0 && errno == EINTR) {
+            }
+            _exit(0);
+        }
+        close(gate[0]);
+        gate_ = gate[1];
+        pid = static_cast<uint64_t>(child_);
+#endif
+        const auto identity = didi::runtime::queryProcessIdentity(pid);
+        if (identity.isErr()) {
+            end();
+            throw std::runtime_error("The stand-in engine had no identity while it was running");
+        }
+        started_at_ms = identity.value().started_at_ms;
+    }
+    ~StandInEngine() { end(); }
+    StandInEngine(const StandInEngine&) = delete;
+    StandInEngine& operator=(const StandInEngine&) = delete;
+
+    // Ends the process and returns once it has gone, reaped on POSIX.
+    void end() {
+#if defined(_WIN32)
+        if (info_.hProcess) {
+            TerminateProcess(info_.hProcess, 0);
+            WaitForSingleObject(info_.hProcess, 30000);
+            CloseHandle(info_.hProcess);
+            info_.hProcess = nullptr;
+        }
+#else
+        if (gate_ >= 0) {
+            close(gate_);
+            gate_ = -1;
+        }
+        if (child_ > 0) {
+            int status = 0;
+            while (waitpid(child_, &status, 0) < 0 && errno == EINTR) {
+            }
+            child_ = -1;
+        }
+#endif
+    }
+
+    uint64_t pid{0};
+    int64_t started_at_ms{0};
+
+private:
+#if defined(_WIN32)
+    PROCESS_INFORMATION info_{};
+#else
+    pid_t child_{-1};
+    int gate_{-1};
+#endif
+};
+
+// The shape field trial 06 met (#1001). runtime_stop ends the game, and the
+// connection to it stays open because nothing is sent on it again, so the
+// route has to be judged by its process. The fake connection here is never
+// told the engine went, which is all the real one is ever told.
+void test_a_route_whose_engine_exited_does_not_fill_the_limit() {
+    SessionDirectoryFixture fixture;
+    StandInEngine game;
+    const auto stopped = fixture.addForProcess("6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e", "game",
+                                               game.pid, game.started_at_ms);
+    auto client = fixture.client();
+    ASSERT_TRUE(client->attachSession(stopped.session_id).isOk());
+
+    game.end();
+    {
+        // The premise: the connection still says it is up.
+        const auto lease = client->acquireRouteLeaseFor(stopped.session_id);
+        ASSERT_TRUE(lease.has_value());
+        ASSERT_TRUE(lease->client->isConnected());
+    }
+
+    // The whole cap's worth of live sessions. The last one was refused with
+    // 429 while the stopped game still counted.
+    for (const char digit : std::string("01234578")) {
+        const auto live = fixture.add(std::string(32, digit), "game");
+        ASSERT_TRUE(client->openSessionRoute(live.session_id).isOk());
+    }
+    const auto held = client->heldSessions();
+    ASSERT_EQ(held.size(), static_cast<size_t>(8));
+    ASSERT_TRUE(std::none_of(held.begin(), held.end(), [&](const auto& session) {
+        return session.session_id == stopped.session_id;
+    }));
+    // It was the selection, and a selection naming a corpse is no selection.
+    ASSERT_FALSE(client->activeSession().has_value());
+    // Its connection was closed, not abandoned.
+    ASSERT_EQ(fixture.state->disconnects[stopped.endpoint], 1);
+
+    client->disconnect();
+}
+
+// An attach names its session, so its error is about that session. It used to
+// carry whatever the selection's engine was doing: attaching an editor that had
+// closed answered 404 with the incident of a game this caller had stopped
+// (#1001).
+void test_an_attach_error_carries_only_the_named_sessions_facts() {
+    didi::runtime::clearRouteObstruction();
+    SessionDirectoryFixture fixture;
+    const auto game = fixture.add("7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f", "game");
+    auto client = fixture.client();
+    ASSERT_TRUE(client->attachSession(game.session_id).isOk());
+    // A stop this caller asked for, on the game that is still the selection.
+    didi::runtime::recordRequestedStop({game.pid, game.session_id, 0, 0});
+    didi::runtime::recordRouteObstruction(
+        {"game_stopped", "runtime_stop asked the game to exit with code 0, and it did.", "",
+         game.pid, game.session_id, 0});
+
+    const std::string closed_editor = "8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a";
+    const auto missing = payload(
+        didi::mcp::handleRuntimeAttachSession({{"session_id", closed_editor}}, client));
+    ASSERT_EQ(missing["error"]["code"].get<int>(), 404);
+    const auto& data = missing["error"]["data"];
+    ASSERT_FALSE(data.contains("incident"));
+    ASSERT_FALSE(data.contains("requested_by"));
+    ASSERT_FALSE(data.contains("engine"));
+    ASSERT_FALSE(data.contains("route_obstruction"));
+
+    // What is about the named session is still told.
+    didi::runtime::recordRouteObstruction(
+        {"engine_crashed", "The engine process is gone and left no crash report.", "", 4242,
+         closed_editor, 0});
+    const auto crashed = payload(
+        didi::mcp::handleRuntimeAttachSession({{"session_id", closed_editor}}, client));
+    ASSERT_EQ(crashed["error"]["data"]["route_obstruction"]["session_id"].get<std::string>(),
+              closed_editor);
+
+    client->disconnect();
+    didi::runtime::clearRouteObstruction();
+}
+
 struct RegisterRuntimeRoutingTests {
     RegisterRuntimeRoutingTests() {
         registerTest("RuntimeRouting.EngineLivenessTriState",
@@ -3148,6 +3319,10 @@ struct RegisterRuntimeRoutingTests {
                      test_reattaching_the_same_session_still_handshakes);
         registerTest("RuntimeRouting.DeadRouteDoesNotFillTheLimit",
                      test_a_dead_route_does_not_count_against_the_held_route_limit);
+        registerTest("RuntimeRouting.ExitedEngineDoesNotFillTheLimit",
+                     test_a_route_whose_engine_exited_does_not_fill_the_limit);
+        registerTest("RuntimeRouting.AttachErrorCarriesOnlyTheNamedSession",
+                     test_an_attach_error_carries_only_the_named_sessions_facts);
     }
 } g_registerRuntimeRoutingTests;
 
