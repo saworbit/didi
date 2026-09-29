@@ -4773,11 +4773,15 @@ try {
         (Tool-Request 384 "script_get_symbols" @{ file_path = "res://signal_uses_autoload.gd" }),
         (Tool-Request 385 "signal_connect" @{ emitter_node = "/root/SignalCompile/Plain"; signal_name = "tree_entered"; target_node = "/root/SignalCompile/Plain"; target_method = "_on_probe" }),
         (Tool-Request 386 "signal_connect" @{ emitter_node = "/root/SignalCompile/Uses"; signal_name = "tree_entered"; target_node = "/root/SignalCompile/Uses"; target_method = "_on_probe" }),
+        # The rescan the refusal's note used to offer as the fix (#1002). It
+        # is always confirmed, which is why this batch runs with --yolo.
+        (Tool-Request 3860 "editor_reload_project" @{}),
+        (Tool-Request 3861 "signal_connect" @{ emitter_node = "/root/SignalCompile/Uses"; signal_name = "tree_entered"; target_node = "/root/SignalCompile/Uses"; target_method = "_on_probe" }),
         (Tool-Request 387 "signal_connect" @{ emitter_node = "/root/SignalCompile/Plain"; signal_name = "tree_entered"; target_node = "/root/SignalCompile/Plain"; target_method = "_not_in_the_file" }),
         (Tool-Request 388 "project_remove_autoload" @{ name = "SignalProbeState" }),
         (Tool-Request 389 "scene_open" @{ scene_path = "res://main.tscn" })
     )
-    $rawCompileResponses = Invoke-Didi -Requests $compileRequests -Arguments @("--project", $fixtureRoot)
+    $rawCompileResponses = Invoke-Didi -Requests $compileRequests -Arguments @("--project", $fixtureRoot, "--yolo")
     $compileResponses = @($rawCompileResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.PSObject.Properties.Name -contains "id" })
     Assert-True ($LASTEXITCODE -eq 0) "Uncompiled-script signal MCP process exited with $LASTEXITCODE."
     $compileById = @{}
@@ -4796,6 +4800,13 @@ try {
     Assert-True ($refusal.error.data.script_path -eq "res://signal_uses_autoload.gd") "The refusal did not name the script."
     Assert-True (@($refusal.error.data.unresolved_autoloads) -contains "SignalProbeState") "The refusal did not name the autoload the script cannot resolve."
     Assert-True ($refusal.error.data.note -match "restart") "The refusal carries no note about the editor restart."
+    # A rescan does not register the singleton, which is what
+    # project_set_autoload says; the note used to say it did (#1002).
+    Assert-True (-not $compileById[3860].result.isError) "editor_reload_project failed: $($compileById[3860].result.content[0].text)"
+    Assert-True $compileById[3861].result.isError "After editor_reload_project, a script naming the new autoload compiled, which contradicts project_set_autoload."
+    $afterRescan = ($compileById[3861].result.content[0].text | ConvertFrom-Json)
+    Assert-True ($afterRescan.error.data.code -eq "target_script_not_compiled") "After editor_reload_project the refusal is $($afterRescan.error.data.code), not the compile answer."
+    Assert-True ($refusal.error.data.note -notmatch "or call editor_reload_project" -and $refusal.error.data.note -match "does not register") "The refusal still offers editor_reload_project as the fix: $($refusal.error.data.note)"
 
     # The other half has to keep working: a method that is genuinely not in the
     # file is still a plain not-found, not a compile story.

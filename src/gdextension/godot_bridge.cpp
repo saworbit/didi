@@ -2080,7 +2080,8 @@ const char* const kAutoloadRestartNote =
     "A newly registered autoload does not exist in the editor that registered it until that "
     "editor restarts, and a script naming one cannot compile until then, so its methods are not "
     "on the node yet. The engine resolves the identifier at run time. Do not rewrite the script "
-    "for this: restart the editor, or call editor_reload_project.";
+    "for this: restart the editor. editor_reload_project is a file rescan and does not register "
+    "it.";
 
 Result<std::string> logicalPathFromEditedRoot(GDExtensionObjectPtr root,
                                                GDExtensionObjectPtr target) {
