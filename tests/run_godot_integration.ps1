@@ -5815,6 +5815,11 @@ text = "Not a key"
         @{ Pattern = 'Identifier "SignalProbeState" not declared|Failed to load script "res://signal_uses_autoload\.gd"'; Cause = "signal_uses_autoload.gd does not compile, on purpose, for target_script_not_compiled" },
         @{ Pattern = "corrupt_asset\.png|IHDR: CRC error|ERR_FILE_CORRUPT"; Cause = "request 2700 imports a PNG with a wrong CRC on every chunk" },
         @{ Pattern = "didi_output_canary_warning"; Cause = "the runtime fixture prints a warning canary for runtime_read_output" },
+        # Request 3860's rescan is the first scan_sources after earlier blocks
+        # wrote these two scripts behind the editor, and 4.5 and 4.6 print this
+        # for their sidecars; 4.7 does not. Godot derives both UIDs from the
+        # path and the contents, so they are the same on every run.
+        @{ Pattern = 'Unrecognized UID: "uid://(cvcftt3vwfqoa|dwyc37mesi4be)"'; Where = "core/io/resource_uid\.cpp"; Cause = "request 3860 rescans after editor_copy_probe.gd and sandbox_run.gd were written behind the editor" },
         # The host, not a request. A CI runner has no GPU and no audio device,
         # and the engine says so while its drivers start, before any request is
         # sent. Matched on where in the engine the line comes from as well as
