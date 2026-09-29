@@ -48,6 +48,15 @@ cd "$WORK"
 # CI configures fresh every time and should; it starts from an empty runner.
 # Here the build volume persists, so reuse it. DIDI_LOCALCI_RECONFIGURE=1
 # forces the fresh path when a CMake input actually changed.
+# A cache naming a compiler this image no longer has cannot be reused, and
+# CMake does not read CC and CXX again over an existing one, so the build
+# would go on asking for the old compiler. That is what a compiler change in
+# the Dockerfile leaves in the volume (#1026).
+cached_compiler=$(sed -n 's/^CMAKE_CXX_COMPILER:[A-Z]*=//p' "$BUILD/CMakeCache.txt" 2>/dev/null || true)
+if [ -n "$cached_compiler" ] && ! command -v "$cached_compiler" >/dev/null 2>&1; then
+    say "the cached compiler $cached_compiler is gone; configuring from scratch"
+    rm -rf "$BUILD/CMakeCache.txt" "$BUILD/CMakeFiles"
+fi
 if [ -f "$BUILD/CMakeCache.txt" ] && [ "${DIDI_LOCALCI_RECONFIGURE:-0}" != "1" ]; then
     say "reusing the existing configuration in $BUILD"
     echo "  (DIDI_LOCALCI_RECONFIGURE=1 to configure from scratch)"
@@ -69,7 +78,7 @@ clang)
     # library implementation (libc++), which is what catches the great
     # majority of MSVC-to-Clang breaks. It is not macOS. See README.md.
     say "configure (clang + libc++, Release)"
-    CC=clang CXX=clang++ cmake -S "$WORK" -B "$BUILD" -G Ninja \
+    CC=clang-20 CXX=clang++-20 cmake -S "$WORK" -B "$BUILD" -G Ninja \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_CXX_FLAGS="-stdlib=libc++" \
         -DCMAKE_EXE_LINKER_FLAGS="-stdlib=libc++"

@@ -45,7 +45,7 @@ addon check verbatim, with the Linux library name.
 | :--- | :--- | :--- |
 | `gcc` | `ubuntu-latest (gcc)` | Release build, staged-addon check, `didi_tests`, `ctest` |
 | `asan` | `Sanitizers (ubuntu, asan+ubsan)` | RelWithDebInfo + `DIDI_ENABLE_SANITIZERS`, `didi_tests` under the same ASAN/UBSAN options |
-| `clang` | **nothing** — see below | Same as `gcc`, with clang and libc++ |
+| `clang` | **nothing** — see below | Same as `gcc`, with clang 20 and libc++ 20 |
 
 `gcc` and `asan` are mirrors: same OS image, same apt packages, same CMake
 invocations, same test commands. A failure in them is a failure CI will
@@ -153,6 +153,13 @@ job catches in practice: the same compiler family and the same standard library
 (libc++), so it finds missing transitive includes that MSVC supplies, two-phase
 name lookup in templates, narrowing conversions, and the stricter
 `std::filesystem` overload set.
+
+It builds with clang 20 and libc++ 20 from Ubuntu 24.04's own archive, not the
+image's default 18. libc++ 18 has no floating-point `std::from_chars`, which
+`src/mcp/argument_normalization.cpp` uses and Apple's libc++ provides, so with
+18 the lane could not build main at all (#1026). A build volume configured with
+an older compiler is reconfigured on its own the first time the lane finds that
+compiler gone.
 
 It cannot stand in for Apple Clang's own version, Darwin `dyld` behaviour, the
 `.dylib` name, or a case-insensitive filesystem. When the Mac is available, run
