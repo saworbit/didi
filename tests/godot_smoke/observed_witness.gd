@@ -167,6 +167,12 @@ func load_fresh(path: String, properties: Array) -> Dictionary:
 	return answer
 
 
+## Whether a node is in a group, asked of the node itself.
+func in_group(path: String, group: String) -> Variant:
+	var node := _node(path)
+	return node.is_in_group(group) if node != null else null
+
+
 ## A blackboard as its file holds it, parsed here with Godot's own JSON reader
 ## and not by Didi, which is the point of a witness (#1019). Numbers come back
 ## as floats, which the harness compares to float precision.

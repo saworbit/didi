@@ -196,8 +196,10 @@
       "issue": 1020
     },
     "scene_add_to_group": {
-      "exempt": "added is a constant, group and target_node are the request, and membership is read before the write, never after.",
-      "issue": 1019
+      "observed": [
+        "in_group"
+      ],
+      "witness": "Node.is_in_group through observed_witness.gd"
     },
     "scene_call_method": {
       "exempt": "Runs a project method whose effects only the project knows. returned is the method's own value, and there may be no state to read back; the issue decides whether this stays exempt.",
@@ -240,8 +242,10 @@
       "witness": "The packed scene loaded with CACHE_MODE_IGNORE, and ResourceUID, through observed_witness.gd"
     },
     "scene_remove_from_group": {
-      "exempt": "removed is a constant, group and target_node are the request, and membership is read before the write, never after.",
-      "issue": 1019
+      "observed": [
+        "in_group"
+      ],
+      "witness": "Node.is_in_group through observed_witness.gd"
     },
     "scene_remove_node": {
       "exempt": "Answers action remove_node and reads nothing after the commit, so nothing in the answer says the node left the tree.",

@@ -1504,6 +1504,7 @@ Copy the built `addons/didi` folder into the project first; that copy is a files
 - `scene_list_groups`: requires `target_node` and returns sorted group names.
 - `scene_add_to_group`: requires `target_node` and `group`; `persistent` defaults to `true`. Duplicate membership is an error.
 - `scene_remove_from_group`: requires existing membership.
+- Both answer `in_group`, the node's membership read again after the change is committed. A change the node does not reflect is refused rather than reported (#1019).
 - `scene_get_group_members`: requires `group` and returns canonical node paths confined to the active edited scene. It also returns `known_groups`, the group names any node in the edited scene is currently in, and `group_exists` for the name that was asked about. Nothing else enumerates a scene's groups: `scene_list_groups` requires a `target_node` and answers for that one node. In Godot a group is only its members, so removing the last one is the same state as a name never used, and an empty `members` alone cannot tell a caller they mistyped `enemies`. `known_groups` is capped at 128 names, with `known_groups_truncated` when it fills, and omits Godot's own underscore-prefixed internal groups.
 
 Group mutations use UndoRedo.
