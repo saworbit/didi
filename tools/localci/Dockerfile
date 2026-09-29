@@ -27,11 +27,15 @@ RUN apt-get update -qq \
  && apt-get install -y --no-install-recommends \
       build-essential \
       ca-certificates \
-      clang \
+      # clang and libc++ 20, not the image's default 18. libc++ 18 has no
+      # floating-point std::from_chars and cannot build main, which the
+      # macOS runner's Apple libc++ can (#1026). Ubuntu 24.04 ships 20 in its
+      # own archive.
+      clang-20 \
       cmake \
       git \
-      libc++-dev \
-      libc++abi-dev \
+      libc++-20-dev \
+      libc++abi-20-dev \
       ninja-build \
       python3 \
       python3-pip \

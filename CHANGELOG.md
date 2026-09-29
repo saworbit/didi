@@ -367,6 +367,13 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **The local clang lane builds main again (#1026).** It used Ubuntu 24.04's
+  default clang and libc++ 18, which has no floating-point `std::from_chars`,
+  so `argument_normalization.cpp` did not compile there while the macOS
+  runner's libc++ built it. The lane now uses clang and libc++ 20 from the same
+  archive, and a build volume configured with a compiler the image no longer
+  has is reconfigured on its own. `DIDI_LOCALCI_RECONFIGURE` was documented and
+  never passed into the container; `run.sh` passes it now.
 - **The live harness copies only the fixture it tracks (#1036).** It copied
   `tests/godot_smoke` whole, including the `.didi/` runtime state the Python
   suites leave there, so a local run started from that state, and a suite
