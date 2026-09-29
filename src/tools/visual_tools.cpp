@@ -409,7 +409,11 @@ CallToolResult handleCreateVisualTestLab(const json& args, std::shared_ptr<ipc::
         // is being steered onto the deprecated surface (#408).
         {"message", "Created sandbox scene at " + lab_scene_path + ". Open Godot Editor to view live or run `runtime_launch`."}
     };
-    reportEditorCopy(res, refreshEditorCopies(ipc, {lab_scene_path}));
+    // Replacing an existing lab took overwrite: true, which is the caller
+    // accepting its loss, so a tab that has the lab open is reloaded from the
+    // new file whatever it holds, the way scene_create reloads the scene it
+    // overwrites. Left alone, the next save put the old lab back (#1068).
+    reportEditorCopy(res, refreshEditorCopies(ipc, {lab_scene_path}, true));
     return CallToolResult::successJson(res);
 }
 

@@ -74,6 +74,7 @@ CallToolResult handleCreateVisualTestLab(const json& args, std::shared_ptr<ipc::
 CallToolResult handleScriptCreate(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleScriptPatchMethod(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleProjectRenameReferences(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleProjectApplyChanges(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 } // namespace mcp
 } // namespace didi
 
@@ -2549,6 +2550,9 @@ static void test_a_rename_preview_shows_the_files_it_will_change() {
     ASSERT_TRUE(collision_error);
     ASSERT_EQ(collision["error"]["code"], 409);
     ASSERT_TRUE(collision.dump().find("confirmation_token") == std::string::npos);
+    // It names what fixes it, the way every refusal does (Q6). The live
+    // harness first reached it in #1068's block, and it named nothing.
+    ASSERT_EQ(collision["error"]["data"]["field"], "new_name");
 }
 
 static void test_a_name_in_a_scene_is_not_a_code_reference() {
@@ -4484,6 +4488,11 @@ static void test_resource_create_refreshes_the_editor_copy_it_overwrote() {
 
 // An editor that holds some files and answers resource.refreshCached for them,
 // in either form: one `path`, or `paths` for a writer that changed several.
+//
+// It can also have scenes open in tabs. Like the bridge it answers
+// editor.openScenes, rebuilds one tab a request and answers the rest pending,
+// and rebuilds a tab that has unsaved changes, or on an engine that cannot
+// say, only when told to discard them (#1068).
 class EditorCopyClient final : public didi::ipc::IIpcClient {
 public:
     bool connect(const std::string&, int) override { return true; }
@@ -4491,17 +4500,45 @@ public:
     bool isConnected() const override { return true; }
     didi::Result<didi::json> sendRequest(const std::string& method, const didi::json& params,
                                          int) override {
+        if (method == "editor.openScenes" && knows_open_scenes) {
+            ++open_scene_requests;
+            return didi::json{{"open_scenes", std::vector<std::string>(open.begin(), open.end())},
+                              {"unsaved_scenes_readable", unsaved_readable},
+                              {"unsaved_scenes", unsaved_readable
+                                                     ? didi::json(std::vector<std::string>(
+                                                           unsaved.begin(), unsaved.end()))
+                                                     : didi::json(nullptr)}};
+        }
         if (method != "resource.refreshCached") return didi::Error(404, "Unknown method: " + method);
         ++requests;
         if (requests > answer_requests) return didi::Error(504, "no answer");
+        refresh_params.push_back(params);
+        const bool discard = params.value("discard_unsaved", false);
+        bool rebuilt_one = false;
         const auto answer = [&](const std::string& path) {
             asked.push_back(path);
-            if (!held.count(path)) return didi::json{{"path", path}, {"cached", false}, {"reloaded", false}};
-            if (broken.count(path)) {
-                return didi::json{{"path", path}, {"cached", true}, {"reloaded", false},
-                                  {"reload_error", "The editor's copy did not compile after the write (Godot error 43)."}};
+            didi::json result;
+            if (!held.count(path)) {
+                result = {{"path", path}, {"cached", false}, {"reloaded", false}};
+            } else if (broken.count(path)) {
+                result = {{"path", path}, {"cached", true}, {"reloaded", false},
+                          {"reload_error", "The editor's copy did not compile after the write (Godot error 43)."}};
+            } else {
+                result = {{"path", path}, {"cached", true}, {"reloaded", true}};
             }
-            return didi::json{{"path", path}, {"cached", true}, {"reloaded", true}};
+            if (!open.count(path)) return result;
+            result["scene_open"] = true;
+            result["scene_reloaded"] = false;
+            if (!discard && (!unsaved_readable || unsaved.count(path))) {
+                result["scene_reload_error"] = "The scene is open in the editor with unsaved changes.";
+            } else if (rebuilt_one) {
+                result["scene_reload_pending"] = true;
+            } else {
+                rebuilt_one = true;
+                result["scene_reloaded"] = true;
+                rebuilt.push_back(path);
+            }
+            return result;
         };
         if (!params.contains("paths")) return answer(params.value("path", std::string()));
         didi::json results = didi::json::array();
@@ -4514,6 +4551,13 @@ public:
     std::vector<std::string> asked;
     int requests{0};
     int answer_requests{1000};
+    std::set<std::string> open;
+    std::set<std::string> unsaved;
+    bool unsaved_readable{true};
+    bool knows_open_scenes{true};
+    int open_scene_requests{0};
+    std::vector<std::string> rebuilt;
+    std::vector<didi::json> refresh_params;
 };
 
 static void test_script_writers_reload_the_editor_copy_they_replaced() {
@@ -4604,6 +4648,155 @@ static void test_a_rename_reloads_the_editor_copies_it_rewrote() {
     // None was held here, so none was reloaded, and the answer says that much.
     ASSERT_TRUE(report["editor_copies_reloaded"].empty());
     ASSERT_TRUE(!report.contains("editor_copy_errors"));
+}
+
+static void test_a_rename_reloads_the_scenes_open_in_clean_tabs() {
+    // An open tab is a node tree, not a cached copy, so the rename left it as
+    // it was and the next save wrote the old connection back over the file
+    // (#1068). Each rewritten scene open in a tab the engine reports clean is
+    // rebuilt from the new file and named. The bridge rebuilds one a request,
+    // so the second is asked about again.
+    ScopedToolProject project("rename-open-tabs");
+    writeImpactFixture();
+    auto editor = std::make_shared<EditorCopyClient>();
+    editor->open = {"res://scenes/hud.tscn", "res://scenes/player.tscn"};
+    const auto renamed = didi::mcp::handleProjectRenameReferences(
+        {{"target", "character_health"}, {"new_name", "vitality"}}, editor);
+    ASSERT_TRUE(!renamed.isError);
+    const auto report = didi::json::parse(renamed.content[0].text);
+    ASSERT_EQ(editor->open_scene_requests, 1);
+    ASSERT_EQ(report["editor_scenes_reloaded"],
+              didi::json::array({"res://scenes/hud.tscn", "res://scenes/player.tscn"}));
+    ASSERT_EQ(editor->requests, 2);
+    ASSERT_TRUE(!report.contains("editor_copy_errors"));
+    // Without discard_unsaved, which the bridge then applies itself.
+    ASSERT_TRUE(!editor->refresh_params[0].contains("discard_unsaved"));
+    ASSERT_TRUE(readToolTestFile("scenes/hud.tscn").find("signal=\"vitality\"") != std::string::npos);
+}
+
+static void test_a_rename_refuses_a_scene_open_with_unsaved_changes() {
+    // Rebuilding a tab drops its unsaved changes, and leaving it lets the next
+    // save undo the rename. The call stops before anything is written and
+    // names the way through.
+    ScopedToolProject project("rename-unsaved-tab");
+    writeImpactFixture();
+    const auto before = readToolTestFile("scenes/hud.tscn");
+    auto editor = std::make_shared<EditorCopyClient>();
+    editor->open = {"res://scenes/hud.tscn"};
+    editor->unsaved = {"res://scenes/hud.tscn"};
+    const didi::json args = {{"target", "character_health"}, {"new_name", "vitality"}};
+    const auto refused = didi::mcp::handleProjectRenameReferences(args, editor);
+    ASSERT_TRUE(refused.isError);
+    const auto envelope = didi::json::parse(refused.content[0].text);
+    ASSERT_EQ(envelope["error"]["code"], 409);
+    ASSERT_EQ(envelope["error"]["data"]["code"], "unsaved_changes");
+    ASSERT_EQ(envelope["error"]["data"]["retry_with"]["discard_unsaved"], true);
+    ASSERT_EQ(envelope["error"]["data"]["open_scenes"], didi::json::array({"res://scenes/hud.tscn"}));
+    ASSERT_TRUE(envelope["error"]["message"].get<std::string>().find("Nothing was written") !=
+                std::string::npos);
+    ASSERT_EQ(readToolTestFile("scenes/hud.tscn"), before);
+    ASSERT_EQ(editor->requests, 0);
+
+    // On 4.5 and 4.6 the engine cannot say, which is not the same as clean.
+    editor->unsaved.clear();
+    editor->unsaved_readable = false;
+    const auto unknown = didi::mcp::handleProjectRenameReferences(args, editor);
+    ASSERT_TRUE(unknown.isError);
+    const auto unknown_envelope = didi::json::parse(unknown.content[0].text);
+    ASSERT_EQ(unknown_envelope["error"]["data"]["code"], "dirty_state_unavailable");
+    ASSERT_EQ(unknown_envelope["error"]["data"]["retry_with"]["discard_unsaved"], true);
+    ASSERT_EQ(readToolTestFile("scenes/hud.tscn"), before);
+
+    // discard_unsaved is the caller accepting the loss: the file is written
+    // and the tab rebuilt from it whatever it held.
+    auto discarding = args;
+    discarding["discard_unsaved"] = true;
+    const auto written = didi::mcp::handleProjectRenameReferences(discarding, editor);
+    ASSERT_TRUE(!written.isError);
+    const auto report = didi::json::parse(written.content[0].text);
+    ASSERT_EQ(report["editor_scenes_reloaded"], didi::json::array({"res://scenes/hud.tscn"}));
+    ASSERT_EQ(editor->refresh_params[0]["discard_unsaved"], true);
+    ASSERT_TRUE(readToolTestFile("scenes/hud.tscn") != before);
+
+    // A bad value is refused, not read as false.
+    auto bad = args;
+    bad["discard_unsaved"] = "yes";
+    ASSERT_TRUE(didi::mcp::handleProjectRenameReferences(bad, editor).isError);
+}
+
+static void test_a_tab_that_cannot_be_rebuilt_after_a_write_is_named() {
+    // Between the check and the write a tab can gain unsaved changes, or a
+    // bridge can stop answering. Whatever is left stale is named with the
+    // reason, never reported as reloaded.
+    auto editor = std::make_shared<EditorCopyClient>();
+    editor->open = {"res://a.tscn"};
+    editor->unsaved = {"res://a.tscn"};
+    const auto refresh = didi::mcp::refreshEditorCopies(editor, {"res://a.tscn", "res://b.gd"});
+    ASSERT_TRUE(refresh.answered);
+    ASSERT_TRUE(refresh.scenes_reloaded.empty());
+    ASSERT_EQ(refresh.failed.size(), 1u);
+    ASSERT_EQ(refresh.failed[0]["path"], "res://a.tscn");
+    ASSERT_TRUE(refresh.failed[0]["reason"].get<std::string>().find("unsaved") != std::string::npos);
+
+    // A pending tab the editor then does not answer about is named too.
+    auto quiet = std::make_shared<EditorCopyClient>();
+    quiet->open = {"res://a.tscn", "res://b.tscn"};
+    quiet->answer_requests = 1;
+    const auto cut_off = didi::mcp::refreshEditorCopies(quiet, {"res://a.tscn", "res://b.tscn"});
+    ASSERT_EQ(cut_off.scenes_reloaded, std::vector<std::string>{"res://a.tscn"});
+    ASSERT_EQ(cut_off.failed.size(), 1u);
+    ASSERT_EQ(cut_off.failed[0]["path"], "res://b.tscn");
+    ASSERT_TRUE(cut_off.failed[0]["reason"].get<std::string>().find("scene_close") != std::string::npos);
+
+    // A single-file writer says the same in its own two fields.
+    didi::json payload = didi::json::object();
+    didi::mcp::reportEditorCopy(payload, cut_off);
+    ASSERT_EQ(payload["editor_scene_reloaded"], true);
+    ASSERT_TRUE(payload.contains("editor_copy_error"));
+}
+
+static void test_the_open_tab_check_asks_only_when_it_can_matter() {
+    auto editor = std::make_shared<EditorCopyClient>();
+    editor->open = {"res://open.tscn"};
+    editor->unsaved = {"res://open.tscn"};
+    // Nothing rewritten is open: nothing to refuse.
+    ASSERT_TRUE(!didi::mcp::refuseUnsavedOpenScenes(editor, {"res://closed.tscn"}, false).has_value());
+    // discard_unsaved: nothing to ask.
+    ASSERT_TRUE(!didi::mcp::refuseUnsavedOpenScenes(editor, {"res://open.tscn"}, true).has_value());
+    ASSERT_EQ(editor->open_scene_requests, 1);
+    // A bridge older than the request, or a game session, knows nothing, and
+    // the refresh after the write names what it could not reload.
+    editor->knows_open_scenes = false;
+    ASSERT_TRUE(!didi::mcp::refuseUnsavedOpenScenes(editor, {"res://open.tscn"}, false).has_value());
+    // No editor at all.
+    ASSERT_TRUE(!didi::mcp::refuseUnsavedOpenScenes(nullptr, {"res://open.tscn"}, false).has_value());
+}
+
+static void test_an_apply_refuses_a_scene_open_with_unsaved_changes() {
+    // The same stop for project_apply_changes, before its verification run and
+    // so before anything is written.
+    ScopedToolProject project("apply-unsaved-tab");
+    writeAuditFile("project.godot", "config_version=5\n");
+    writeAuditFile("level.tscn", "[gd_scene format=3]\n\n[node name=\"Level\" type=\"Node2D\"]\n");
+    const auto before = readToolTestFile("level.tscn");
+    auto editor = std::make_shared<EditorCopyClient>();
+    editor->open = {"res://level.tscn"};
+    editor->unsaved = {"res://level.tscn"};
+    const auto refused = didi::mcp::handleProjectApplyChanges(
+        {{"changes", {{{"path", "res://level.tscn"},
+                       {"content", "[gd_scene format=3]\n\n[node name=\"Level\" type=\"Node3D\"]\n"}}}}},
+        editor);
+    ASSERT_TRUE(refused.isError);
+    const auto envelope = didi::json::parse(refused.content[0].text);
+    ASSERT_EQ(envelope["error"]["data"]["code"], "unsaved_changes");
+    ASSERT_EQ(envelope["error"]["data"]["retry_with"]["discard_unsaved"], true);
+    ASSERT_EQ(readToolTestFile("level.tscn"), before);
+    // discard_unsaved belongs to this tool, not to the proposal it passes on.
+    const auto bad = didi::mcp::handleProjectApplyChanges(
+        {{"changes", {{{"path", "res://level.tscn"}, {"content", "x"}}}}, {"discard_unsaved", 1}},
+        editor);
+    ASSERT_TRUE(bad.isError);
+    ASSERT_TRUE(bad.content[0].text.find("discard_unsaved must be a boolean") != std::string::npos);
 }
 
 // An editor whose scene save can be made to fail, for the recovery receipts.
@@ -9341,6 +9534,16 @@ struct RegisterToolTests {
                      test_every_file_a_batch_writer_names_is_accounted_for);
         registerTest("Tools.RenameReloadsTheEditorCopiesItRewrote",
                      test_a_rename_reloads_the_editor_copies_it_rewrote);
+        registerTest("Tools.RenameReloadsScenesOpenInCleanTabs",
+                     test_a_rename_reloads_the_scenes_open_in_clean_tabs);
+        registerTest("Tools.RenameRefusesASceneOpenWithUnsavedChanges",
+                     test_a_rename_refuses_a_scene_open_with_unsaved_changes);
+        registerTest("Tools.TabNotRebuiltAfterAWriteIsNamed",
+                     test_a_tab_that_cannot_be_rebuilt_after_a_write_is_named);
+        registerTest("Tools.OpenTabCheckAsksOnlyWhenItCanMatter",
+                     test_the_open_tab_check_asks_only_when_it_can_matter);
+        registerTest("Tools.ApplyRefusesASceneOpenWithUnsavedChanges",
+                     test_an_apply_refuses_a_scene_open_with_unsaved_changes);
         registerTest("Tools.ResourceCreateOverwriteGuard",
                      test_resource_create_preserves_existing_file_without_overwrite);
     registerTest("resource_create type guard asks the attached engine",

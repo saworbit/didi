@@ -20,6 +20,7 @@
 #include "didi/offline/project_impact.hpp"
 #include "didi/offline/project_settings_file.hpp"
 #include "didi/offline/speculative_verify.hpp"
+#include "didi/tools/editor_copy_refresh.hpp"
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
@@ -2612,8 +2613,13 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
         // (#716). Carrying it here also puts it in the fingerprint, so a token
         // is spent against the sites the caller was shown rather than against a
         // list that moved underneath them.
-        target_probe = [](const json& call_arguments, json& before,
-                          json& subject) -> std::optional<Error> {
+        //
+        // And the same refusal the call makes for a rewritten scene open in the
+        // editor that may hold unsaved changes, so a preview does not mint a
+        // token for a call that will write nothing (#1068).
+        target_probe = [client = lease.has_value() ? m_sourceIpcClient : nullptr](
+                           const json& call_arguments, json& before,
+                           json& subject) -> std::optional<Error> {
             if (!call_arguments.is_object() || !call_arguments.contains("target") ||
                 !call_arguments.contains("new_name") || !call_arguments["target"].is_string() ||
                 !call_arguments["new_name"].is_string()) {
@@ -2633,6 +2639,18 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
             // call would rather than handing out a token for it.
             auto plan = offline::planRenameReferences(paths::projectPathToUtf8(root), options);
             if (plan.isErr()) return plan.error();
+            std::vector<std::string> rewritten;
+            for (const auto& file : plan.value()["updated_files"]) {
+                if (file.is_object() && file.contains("path") && file["path"].is_string()) {
+                    rewritten.push_back(file["path"].get<std::string>());
+                }
+            }
+            const auto discard = call_arguments.find("discard_unsaved");
+            if (auto refused = refuseUnsavedOpenScenes(
+                    client, rewritten,
+                    discard != call_arguments.end() && discard->is_boolean() && discard->get<bool>())) {
+                return refused;
+            }
             subject = {{"target", options.target}, {"new_name", options.new_name}};
             before = {{"updated_files", plan.value()["updated_files"]},
                       {"updated_file_count", plan.value()["updated_file_count"]},
@@ -2655,14 +2673,32 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
         // It reports the refusal and nothing else. Filling `before` with the
         // repository would flip target_read to true, and the target here is the
         // files this call will overwrite, which the preview still has not read.
-        target_probe = [](const json& call_arguments, json& before,
-                          json& subject) -> std::optional<Error> {
-            (void)call_arguments;
+        //
+        // The same holds for a scene the proposal rewrites that is open in the
+        // editor and may hold unsaved changes: the call refuses it before
+        // anything runs, so the preview does too (#1068).
+        target_probe = [client = lease.has_value() ? m_sourceIpcClient : nullptr](
+                           const json& call_arguments, json& before,
+                           json& subject) -> std::optional<Error> {
             (void)before;
             (void)subject;
             auto resolved = offline::resolveSandboxRepository();
             if (resolved.isErr()) return resolved.error();
-            return std::nullopt;
+            if (!call_arguments.is_object()) return std::nullopt;
+            json proposal = call_arguments;
+            const bool discard = proposal.contains("discard_unsaved") &&
+                                 proposal["discard_unsaved"].is_boolean() &&
+                                 proposal["discard_unsaved"].get<bool>();
+            proposal.erase("discard_unsaved");
+            // A proposal the parser refuses is the call's own refusal to make.
+            auto parsed = offline::parseSpeculativeVerifyRequest(proposal);
+            if (parsed.isErr()) return std::nullopt;
+            std::vector<std::string> rewritten;
+            for (const auto& change : parsed.value().changes) {
+                auto file = paths::resolveProjectFile(change.path);
+                if (file.isOk()) rewritten.push_back(paths::resourcePathOf(file.value()));
+            }
+            return refuseUnsavedOpenScenes(client, rewritten, discard);
         };
     } else if (binding.policy_source == "project_set_setting") {
         target_probe = [](const json& call_arguments, json& before,
@@ -3842,7 +3878,9 @@ void ToolRegistry::registerAllDefaultTools() {
                                {"description", "Optional. A .tscn or .scn to open in the copy before deciding, so a scene that fails to load stops the write."}}},
                 {"run_frames", {{"type", "integer"}, {"minimum", 1}, {"maximum", 6000}, {"default", 120},
                                 {"description", "Iterations to let the scene run before Godot quits by itself. Only meaningful with run_scene."}}},
-                {"timeout_seconds", {{"type", "integer"}, {"minimum", 1}, {"maximum", 600}, {"default", 120}}}
+                {"timeout_seconds", {{"type", "integer"}, {"minimum", 1}, {"maximum", 600}, {"default", 120}}},
+                {"discard_unsaved", {{"type", "boolean"}, {"default", false},
+                                     {"description", "A scene this rewrites that is open in the editor is reloaded from the new file. Pass true to allow that when its tab has unsaved changes, which are lost, or before Godot 4.7, which cannot report them; without it such a call writes nothing."}}}
             }},
             {"required", json::array({"changes"})},
             {"additionalProperties", false}
@@ -4612,7 +4650,9 @@ void ToolRegistry::registerAllDefaultTools() {
                             {"description", "The Godot identifier to rename: a variable, function or signal name. A res:// path or a node path is a different operation and is refused."}}},
                 {"new_name", {{"type", "string"}, {"minLength", 1}, {"maxLength", 256},
                               {"description", "The identifier to rename it to. Refused if a scene connection or animation track already uses it, because that would merge two different symbols."}}},
-                {"max_impacts", {{"type", "integer"}, {"minimum", 1}, {"maximum", 5000}, {"default", 500}}}
+                {"max_impacts", {{"type", "integer"}, {"minimum", 1}, {"maximum", 5000}, {"default", 500}}},
+                {"discard_unsaved", {{"type", "boolean"}, {"default", false},
+                                     {"description", "A scene this rewrites that is open in the editor is reloaded from the new file. Pass true to allow that when its tab has unsaved changes, which are lost, or before Godot 4.7, which cannot report them; without it such a call writes nothing."}}}
             }},
             {"required", json::array({"target", "new_name"})},
             {"additionalProperties", false}

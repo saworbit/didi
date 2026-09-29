@@ -1738,6 +1738,9 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
         "runtime.injectInput", "physics.raycast", "physics.raycastBatch",
         "physics.clearance", "vision.frustumQuery", "nav.queryPath",
         "anim.listTracks", "anim.playTrack", "anim.addLibrary", "resource.refreshCached",
+        // Editor only: the scenes open in its tabs, asked before a writer
+        // replaces one (#1068).
+        "editor.openScenes",
         "export.reloadPresets",
         "vision.setCameraTransform",
         "vision.toggleDebugDraw", "tilemap.setCells", "tilemap.getUsedRect",
