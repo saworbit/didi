@@ -252,6 +252,40 @@ function Get-ObservedPostStateCases {
            Agree = { param($s)
                Agree "uid" $s.call.uid $s.witness.returned.uid
                Agree "uid_registered" $s.call.uid_registered $s.witness.returned.uid_registered } },
+        # Didi's own file, read back after the save and compared with the file
+        # as Godot parses it (#1019). One board, in order: a write, a patch,
+        # a task through its life, then the clear that leaves it empty.
+        @{ Tool = "blackboard_write"; Session = "editor"; Steps = @(
+            (Step "call" "blackboard_write" @{ board = "observed_probe"; path = "probe.alpha"; value = 7; author = "observed" }),
+            (Witness "witness" "board_file" @("observed_probe")))
+           Agree = { param($s)
+               Agree "revision" $s.call.revision $s.witness.returned.revision
+               Agree "metadata" $s.call.metadata $s.witness.returned.meta.'probe.alpha'
+               Agree "value" $s.call.value $s.witness.returned.state.probe.alpha } },
+        @{ Tool = "blackboard_patch"; Session = "editor"; Steps = @(
+            (Step "call" "blackboard_patch" @{ board = "observed_probe"; operations = @(@{ op = "replace"; path = "/probe/alpha"; value = 8 }) }),
+            (Witness "witness" "board_file" @("observed_probe")))
+           Agree = { param($s) Agree "revision" $s.call.revision $s.witness.returned.revision } },
+        @{ Tool = "blackboard_task_create"; Session = "editor"; Steps = @(
+            (Step "call" "blackboard_task_create" @{ board = "observed_probe"; task_id = "observed-task"; title = "Observed task" }),
+            (Witness "witness" "board_file" @("observed_probe")))
+           Agree = { param($s) Agree "task" $s.call.task $s.witness.returned.tasks.'observed-task' } },
+        @{ Tool = "blackboard_task_claim"; Session = "editor"; Steps = @(
+            (Step "call" "blackboard_task_claim" @{ board = "observed_probe"; agent_id = "observed-agent"; task_id = "observed-task" }),
+            (Witness "witness" "board_file" @("observed_probe")))
+           Agree = { param($s) Agree "task" $s.call.task $s.witness.returned.tasks.'observed-task' } },
+        @{ Tool = "blackboard_task_update"; Session = "editor"; Steps = @(
+            (Step "call" "blackboard_task_update" @{ board = "observed_probe"; task_id = "observed-task"; agent_id = "observed-agent"; progress = 50; note = "halfway" }),
+            (Witness "witness" "board_file" @("observed_probe")))
+           Agree = { param($s) Agree "task" $s.call.task $s.witness.returned.tasks.'observed-task' } },
+        @{ Tool = "blackboard_task_complete"; Session = "editor"; Steps = @(
+            (Step "call" "blackboard_task_complete" @{ board = "observed_probe"; task_id = "observed-task"; agent_id = "observed-agent" }),
+            (Witness "witness" "board_file" @("observed_probe")))
+           Agree = { param($s) Agree "task" $s.call.task $s.witness.returned.tasks.'observed-task' } },
+        @{ Tool = "blackboard_clear"; Session = "editor"; Steps = @(
+            (Step "call" "blackboard_clear" @{ board = "observed_probe"; path = "probe" }),
+            (Witness "witness" "board_file" @("observed_probe")))
+           Agree = { param($s) Agree "revision" $s.call.revision $s.witness.returned.revision } },
         @{ Tool = "runtime_set_paused"; Session = "game"; Steps = @(
             (Step "call" "runtime_set_paused" @{ paused = $false }),
             (Step "witness" "runtime_get_tree" @{ root_path = "/root/RuntimeRoot"; max_depth = 1 }))
