@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import shutil
 import subprocess
 import uuid
 from datetime import datetime, timezone
@@ -73,6 +74,37 @@ def coverage_delta(previous: dict | None, current: dict) -> dict:
     }
 
 
+# The Claude tester's whole environment, pinned so one run can be compared with
+# the next (#1007). ToolSearch stays, because Didi's tools arrive deferred and
+# the tester loads them through it; without it the server under test is out of
+# reach. Only the project's own settings load, so the host's hooks and plugins
+# do not, and skills are off. Measured with Claude Code 2.1.220: a tester
+# launched this way can call exactly these seven tools, and the Didi tools
+# through ToolSearch.
+CLAUDE_TESTER_ENVIRONMENT = {
+    "tools": ["Bash", "Read", "Edit", "Write", "Glob", "Grep", "ToolSearch"],
+    "skills": "disabled",
+    "setting_sources": "project",
+    "mcp_servers": "strict",
+}
+
+
+def keep_transcript(target: Path, session_id: str, projects_root: Path | None = None) -> Path:
+    """The Claude tester's transcript, copied into the trial directory.
+
+    The client files it under its own projects store, and a trial scored there
+    kept only the numbers: trial 05's transcript is gone, and nothing left in its
+    directory can reproduce its coverage or its bridge verdict (#1005). The copy
+    is what gets scored, the same name trial 03's hand-made copy used, so every
+    trial directory holds its own evidence whichever client hosted it.
+    """
+    filed = runner.transcript_path(target, session_id, projects_root)
+    kept = target / "transcript.jsonl"
+    if filed.is_file():
+        shutil.copyfile(filed, kept)
+    return kept
+
+
 def trial_summary(
     trial_id: str,
     phases: list[dict],
@@ -83,6 +115,7 @@ def trial_summary(
     issues: list[dict] | None = None,
     engine: str = runner.CLAUDE,
     model: str | None = None,
+    tester_environment: dict | None = None,
 ) -> dict:
     return {
         "trial_id": trial_id,
@@ -93,6 +126,9 @@ def trial_summary(
         # the first thing anyone comparing two runs needs to know.
         "engine": engine,
         "model": model,
+        # What the tester could use, so a change to it shows up between runs
+        # rather than in a transcript someone has to read (#1007).
+        "tester_environment": tester_environment,
         "baseline": baseline,
         "coverage": delta,
         "bridge": bridge_report,
@@ -260,6 +296,7 @@ def main(argv: list[str] | None = None) -> int:
         summary = trial_summary(
             trial_id, phases, outcome, baseline, delta, bridge_report, issues,
             engine=args.engine, model=args.model,
+            tester_environment=CLAUDE_TESTER_ENVIRONMENT if args.engine == runner.CLAUDE else None,
         )
         destination = target if target.exists() else args.artifacts / trial_id
         destination.mkdir(parents=True, exist_ok=True)
@@ -337,9 +374,11 @@ def main(argv: list[str] | None = None) -> int:
             budget_usd=args.budget_usd,
             mcp_config=str(target / ".mcp.json"),
             permission_mode="bypassPermissions",
-            allowed_tools=["Bash", "Read", "Edit", "Write", "Glob", "Grep", "mcp__didi"],
             add_dirs=[str(REPOSITORY)],
             model=args.model,
+            tools=CLAUDE_TESTER_ENVIRONMENT["tools"],
+            disable_slash_commands=True,
+            setting_sources=CLAUDE_TESTER_ENVIRONMENT["setting_sources"],
         )
     started = datetime.now(timezone.utc).isoformat()
     try:
@@ -365,7 +404,7 @@ def main(argv: list[str] | None = None) -> int:
         transcript = target / "agent.jsonl"
         transcript.write_text(completed.stdout or "", encoding="utf-8")
     else:
-        transcript = runner.transcript_path(target, session_id)
+        transcript = keep_transcript(target, session_id)
     if not transcript.is_file():
         record("score", "failed", f"no transcript at {transcript}")
         return finish("no_transcript")

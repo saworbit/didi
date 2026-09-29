@@ -27,6 +27,9 @@ def build_command(
     allowed_tools: list[str] | None = None,
     add_dirs: list[str] | None = None,
     model: str | None = None,
+    tools: list[str] | None = None,
+    disable_slash_commands: bool = False,
+    setting_sources: str | None = None,
 ) -> list[str]:
     """The exact argv for one non-interactive agent run.
 
@@ -58,6 +61,17 @@ def build_command(
         command += ["--mcp-config", mcp_config, "--strict-mcp-config"]
     if allowed_tools:
         command += ["--allowed-tools", *allowed_tools]
+    # What the tester can use at all. --allowed-tools only pre-approves, and
+    # under bypassPermissions everything is approved anyway, so it restricted
+    # nothing: trial 06's tester also reached PowerShell, and skills from the
+    # host's own plugins reached earlier ones (#1007). These three pin the
+    # built-in tools, turn skills off and choose which settings files load.
+    if tools is not None:
+        command += ["--tools", ",".join(tools)]
+    if disable_slash_commands:
+        command.append("--disable-slash-commands")
+    if setting_sources is not None:
+        command += ["--setting-sources", setting_sources]
     if add_dirs:
         for directory in add_dirs:
             command += ["--add-dir", directory]

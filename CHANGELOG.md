@@ -367,6 +367,15 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **A field trial keeps its evidence and pins its tester (#1005, #1007).**
+  `trial.py` scored a Claude tester's transcript where the client filed it and
+  never copied it, so trial 05 can no longer be rescored. It now copies it into
+  the trial directory as `transcript.jsonl` and scores the copy. And its
+  `--allowed-tools` list restricted nothing under `bypassPermissions`: trial
+  06's tester also used `PowerShell`, and earlier ones met the host's skills.
+  The tester now runs with `--tools` naming seven built-in tools (including
+  `ToolSearch`, which Didi's deferred tools need), skills off, and only project
+  settings, and `trial.json` records that as `tester_environment`.
 - **Engine output and helper answers carry text, not terminal noise (#1028).**
   `runtime_read_output` relayed Godot's colour escape codes in its records, 40
   of a fresh headless editor's first 41, so a match against the visible text
