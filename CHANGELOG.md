@@ -367,6 +367,14 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **The seven blackboard writers answer with what they saved (#1019, in
+  part).** `blackboard_write`, `blackboard_patch`, `blackboard_clear` and the
+  four task calls built their answers from the board in memory before it was
+  saved, and never read the saved board back. Each now reads the file back
+  after the save and answers from it; `blackboard_write` also returns the
+  `value` now stored. They move from exempt to observed in
+  `tests/observed_post_state.json`, and the live harness compares each answer
+  with the board file as Godot parses it. Fifteen tools remain on #1019.
 - **The local asan lane is no longer killed for memory (#1050).**
   `tools/localci` built every lane with Ninja's default of CPUs + 2 jobs, and
   ASan builds of the largest files need several GB each, so on a 16 GB Docker

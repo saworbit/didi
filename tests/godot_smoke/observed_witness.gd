@@ -167,6 +167,17 @@ func load_fresh(path: String, properties: Array) -> Dictionary:
 	return answer
 
 
+## A blackboard as its file holds it, parsed here with Godot's own JSON reader
+## and not by Didi, which is the point of a witness (#1019). Numbers come back
+## as floats, which the harness compares to float precision.
+func board_file(board: String) -> Dictionary:
+	var text := FileAccess.get_file_as_string("res://.didi/blackboard/%s.json" % board)
+	if text.is_empty():
+		return {"exists": false}
+	var parsed = JSON.parse_string(text)
+	return parsed if parsed is Dictionary else {"exists": false}
+
+
 ## Loads a file and keeps it, so the editor holds a copy of it the way it does
 ## of anything an open scene uses (#1047). The copy goes when this node does.
 func hold(path: String) -> bool:

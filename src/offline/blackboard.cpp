@@ -313,6 +313,28 @@ Result<bool> saveBoard(const std::filesystem::path& file, const Board& board) {
     return true;
 }
 
+// Saves the board and reads it back from the file (#1019). Every mutation's
+// answer is built from what this returns, not from the copy it held in memory,
+// so a save the file did not keep cannot read as done: each observed field is
+// what the next read of the board will see.
+Result<Board> saveAndReadBack(const std::filesystem::path& file, const Board& board) {
+    auto saved = saveBoard(file, board);
+    if (saved.isErr()) return saved.error();
+    auto stored = loadBoard(file);
+    if (stored.isErr()) return stored.error();
+    if (stored.value().revision != board.revision) {
+        return Error::internal("the blackboard was saved and reads back at revision " +
+                               std::to_string(stored.value().revision) + ", not " +
+                               std::to_string(board.revision));
+    }
+    return stored;
+}
+
+json storedTask(const Board& stored, const std::string& task_id) {
+    const auto found = stored.tasks.find(task_id);
+    return found == stored.tasks.end() ? json(nullptr) : *found;
+}
+
 json boundsPayload() {
     return {
         {"max_value_bytes", kBlackboardMaxValueBytes},
@@ -628,14 +650,18 @@ Result<json> blackboardWrite(const BlackboardWriteRequest& request, BlackboardCl
         }
 
         ++board.revision;
-        result["revision"] = board.revision;
         board.state = candidate_state;
         board.meta[path] = entry;
         // The path exists again, so the record of its last lapse is history
         // nobody should be shown in place of the value now sitting there.
         board.expired.erase(path);
-        auto saved = saveBoard(file, board);
-        if (saved.isErr()) return saved.error();
+        auto stored = saveAndReadBack(file, board);
+        if (stored.isErr()) return stored.error();
+        const auto pointer = pointerFor(parts);
+        result["revision"] = stored.value().revision;
+        result["metadata"] = stored.value().meta.value(path, json(nullptr));
+        result["value"] = stored.value().state.contains(pointer) ? stored.value().state.at(pointer)
+                                                                  : json(nullptr);
         return result;
     });
 }
@@ -916,11 +942,11 @@ Result<json> blackboardPatch(const BlackboardPatchRequest& request, BlackboardCl
         }
 
         ++board.revision;
-        result["revision"] = board.revision;
         board.state = patched;
         board.meta = meta;
-        auto saved = saveBoard(file, board);
-        if (saved.isErr()) return saved.error();
+        auto stored = saveAndReadBack(file, board);
+        if (stored.isErr()) return stored.error();
+        result["revision"] = stored.value().revision;
         return result;
     });
 }
@@ -1061,10 +1087,18 @@ Result<json> blackboardClear(const BlackboardClearRequest& request, BlackboardCl
         board.audit.push_back(std::move(event));
         while (board.audit.size() > kBlackboardMaxAuditRecords) board.audit.erase(0);
         ++board.revision;
-        result["revision"] = board.revision;
 
-        auto saved = saveBoard(file, board);
-        if (saved.isErr()) return saved.error();
+        auto stored = saveAndReadBack(file, board);
+        if (stored.isErr()) return stored.error();
+        // What it says it removed is gone from the stored board, or the answer
+        // would be reporting the plan rather than the result.
+        const bool still_there = parts.empty() ? !stored.value().state.empty()
+                                               : stored.value().state.contains(pointerFor(parts));
+        if (still_there) {
+            return Error::internal("the blackboard was saved and still holds '" + path +
+                                   "', which this clear removed");
+        }
+        result["revision"] = stored.value().revision;
         return result;
     });
 }
@@ -1162,8 +1196,9 @@ Result<json> blackboardTaskCreate(const BlackboardTaskCreateRequest& request,
         if (request.dry_run) return result;
 
         board.tasks[task_id] = task;
-        auto saved = saveBoard(file, board);
-        if (saved.isErr()) return saved.error();
+        auto stored = saveAndReadBack(file, board);
+        if (stored.isErr()) return stored.error();
+        result["task"] = storedTask(stored.value(), task_id);
         return result;
     });
 }
@@ -1319,8 +1354,9 @@ Result<json> blackboardTaskClaim(const BlackboardTaskClaimRequest& request, Blac
         if (request.dry_run) return result;
 
         board.tasks[chosen] = claimed;
-        auto saved = saveBoard(file, board);
-        if (saved.isErr()) return saved.error();
+        auto stored = saveAndReadBack(file, board);
+        if (stored.isErr()) return stored.error();
+        result["task"] = storedTask(stored.value(), chosen);
         return result;
     });
 }
@@ -1419,8 +1455,11 @@ Result<json> blackboardTaskUpdate(const BlackboardTaskUpdateRequest& request,
 
         board.tasks[request.task_id] = task;
         refreshTasks(board, now_ms);
-        auto saved = saveBoard(file, board);
-        if (saved.isErr()) return saved.error();
+        auto stored = saveAndReadBack(file, board);
+        if (stored.isErr()) return stored.error();
+        // Read back after the refresh that runs ahead of the save, which can
+        // move the task on from what was captured above.
+        result["task"] = storedTask(stored.value(), request.task_id);
         return result;
     });
 }
@@ -1496,8 +1535,9 @@ Result<json> blackboardTaskComplete(const BlackboardTaskCompleteRequest& request
         if (request.dry_run) return result;
 
         board.tasks = projected.tasks;
-        auto saved = saveBoard(file, board);
-        if (saved.isErr()) return saved.error();
+        auto stored = saveAndReadBack(file, board);
+        if (stored.isErr()) return stored.error();
+        result["task"] = storedTask(stored.value(), request.task_id);
         return result;
     });
 }

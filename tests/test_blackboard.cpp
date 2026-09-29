@@ -71,6 +71,64 @@ json writeValue(const std::string& path, const json& value, int64_t* now_ms = nu
     return result.value();
 }
 
+// Every mutation answers with the board it saved, read back from the file,
+// not the copy it held in memory (#1019). Parsed here straight from disk, so
+// the comparison shares nothing with the reader the tools use.
+void test_blackboard_mutations_answer_with_the_stored_board() {
+    BoardFixture fixture("stored-answers");
+    const auto stored = [&] { return json::parse(fixture.rawBoardFile()); };
+
+    const auto written = writeValue("design.speed", 7);
+    auto file = stored();
+    ASSERT_EQ(written["revision"], file["revision"]);
+    ASSERT_EQ(written["metadata"], file["meta"]["design.speed"]);
+    ASSERT_EQ(written["value"], file["state"]["design"]["speed"]);
+
+    BlackboardPatchRequest patch;
+    patch.operations = json::array({{{"op", "replace"}, {"path", "/design/speed"}, {"value", 8}}});
+    auto patched = blackboardPatch(patch);
+    ASSERT_TRUE(patched.isOk());
+    ASSERT_EQ(patched.value()["revision"], stored()["revision"]);
+
+    BlackboardTaskCreateRequest create;
+    create.task_id = "t1";
+    create.title = "Task one";
+    auto created = blackboardTaskCreate(create);
+    ASSERT_TRUE(created.isOk());
+    ASSERT_EQ(created.value()["task"], stored()["tasks"]["t1"]);
+
+    BlackboardTaskClaimRequest claim;
+    claim.agent_id = "agent";
+    claim.task_id = std::string("t1");
+    auto claimed = blackboardTaskClaim(claim);
+    ASSERT_TRUE(claimed.isOk());
+    ASSERT_EQ(claimed.value()["task"], stored()["tasks"]["t1"]);
+
+    BlackboardTaskUpdateRequest update;
+    update.task_id = "t1";
+    update.agent_id = "agent";
+    update.progress = 40;
+    update.note = "halfway";
+    auto updated = blackboardTaskUpdate(update);
+    ASSERT_TRUE(updated.isOk());
+    ASSERT_EQ(updated.value()["task"], stored()["tasks"]["t1"]);
+
+    BlackboardTaskCompleteRequest complete;
+    complete.task_id = "t1";
+    complete.agent_id = "agent";
+    auto completed = blackboardTaskComplete(complete);
+    ASSERT_TRUE(completed.isOk());
+    ASSERT_EQ(completed.value()["task"], stored()["tasks"]["t1"]);
+
+    BlackboardClearRequest clear;
+    clear.path = "design";
+    auto cleared = blackboardClear(clear);
+    ASSERT_TRUE(cleared.isOk());
+    file = stored();
+    ASSERT_EQ(cleared.value()["revision"], file["revision"]);
+    ASSERT_TRUE(!file["state"].contains("design"));
+}
+
 void test_blackboard_write_read_round_trip() {
     BoardFixture fixture("round-trip");
 
@@ -1118,6 +1176,8 @@ void test_tasks_list_filters() {
 struct Register {
     Register() {
         registerTest("Blackboard.WriteReadRoundTrip", test_blackboard_write_read_round_trip);
+        registerTest("Blackboard.MutationsAnswerWithTheStoredBoard",
+                     test_blackboard_mutations_answer_with_the_stored_board);
         registerTest("Blackboard.PathRejection", test_blackboard_path_rejection);
 #if defined(_WIN32)
         registerTest("Blackboard.SaveNeverDeletesTheBoard",

@@ -37,32 +37,48 @@
       "witness": "AudioServer through observed_witness.gd"
     },
     "blackboard_clear": {
-      "exempt": "removed_keys and revision come from the in-memory board before it is saved, and the saved board is never reloaded.",
-      "issue": 1019
+      "observed": [
+        "revision"
+      ],
+      "witness": "the board file, parsed by observed_witness.gd"
     },
     "blackboard_patch": {
-      "exempt": "operations_applied counts the request and revision comes from memory before the save, and the saved board is never reloaded.",
-      "issue": 1019
+      "observed": [
+        "revision"
+      ],
+      "witness": "the board file, parsed by observed_witness.gd"
     },
     "blackboard_task_claim": {
-      "exempt": "task is the in-memory record before the board is saved, and the saved board is never reloaded.",
-      "issue": 1019
+      "observed": [
+        "task"
+      ],
+      "witness": "the board file, parsed by observed_witness.gd"
     },
     "blackboard_task_complete": {
-      "exempt": "task is the in-memory record before the board is saved, and the saved board is never reloaded.",
-      "issue": 1019
+      "observed": [
+        "task"
+      ],
+      "witness": "the board file, parsed by observed_witness.gd"
     },
     "blackboard_task_create": {
-      "exempt": "task is the in-memory record before the board is saved, and the saved board is never reloaded.",
-      "issue": 1019
+      "observed": [
+        "task"
+      ],
+      "witness": "the board file, parsed by observed_witness.gd"
     },
     "blackboard_task_update": {
-      "exempt": "task is captured before the refresh that runs ahead of the save, so it can differ from what is stored, and the saved board is never reloaded.",
-      "issue": 1019
+      "observed": [
+        "task"
+      ],
+      "witness": "the board file, parsed by observed_witness.gd"
     },
     "blackboard_write": {
-      "exempt": "revision and metadata come from the in-memory board before it is saved, and the saved board is never reloaded.",
-      "issue": 1019
+      "observed": [
+        "revision",
+        "metadata",
+        "value"
+      ],
+      "witness": "the board file, parsed by observed_witness.gd"
     },
     "editor_redo": {
       "observed": [
