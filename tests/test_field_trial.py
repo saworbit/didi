@@ -1458,5 +1458,63 @@ class EngineSummaryTests(unittest.TestCase):
         ))
 
 
+class TesterEnvironmentTests(unittest.TestCase):
+    """Break caught: --allowed-tools only pre-approves, and under
+    bypassPermissions everything is approved anyway, so trial 06's tester also
+    reached PowerShell, and the host's skills reached earlier ones (#1007)."""
+
+    def test_the_command_pins_tools_skills_and_settings(self):
+        command = RUNNER.build_command(
+            session_id="11111111-2222-3333-4444-555555555555", budget_usd=5.0,
+            tools=["Bash", "ToolSearch"], disable_slash_commands=True,
+            setting_sources="project")
+        self.assertEqual(command[command.index("--tools") + 1], "Bash,ToolSearch")
+        self.assertIn("--disable-slash-commands", command)
+        self.assertEqual(command[command.index("--setting-sources") + 1], "project")
+
+    def test_nothing_is_pinned_unless_asked(self):
+        command = RUNNER.build_command(
+            session_id="11111111-2222-3333-4444-555555555555", budget_usd=5.0)
+        for flag in ("--tools", "--disable-slash-commands", "--setting-sources"):
+            self.assertNotIn(flag, command)
+
+    def test_the_tester_keeps_the_way_to_the_server_under_test(self):
+        # Didi's tools arrive deferred and load through ToolSearch; a tool set
+        # without it leaves the tester unable to reach the server at all.
+        environment = TRIAL.CLAUDE_TESTER_ENVIRONMENT
+        self.assertIn("ToolSearch", environment["tools"])
+        self.assertNotIn("PowerShell", environment["tools"])
+        self.assertEqual(environment["skills"], "disabled")
+
+    def test_the_environment_is_recorded_with_the_result(self):
+        summary = TRIAL.trial_summary(
+            "trial-x", [], "scored", tester_environment=TRIAL.CLAUDE_TESTER_ENVIRONMENT)
+        self.assertEqual(summary["tester_environment"]["tools"],
+                         TRIAL.CLAUDE_TESTER_ENVIRONMENT["tools"])
+
+
+class KeepTranscriptTests(unittest.TestCase):
+    """Break caught: a Claude-hosted trial was scored where the client filed its
+    transcript and never copied it, so once that store lost it, nothing in the
+    trial directory could reproduce the scores (#1005)."""
+
+    def test_the_transcript_is_copied_and_outlives_the_client_copy(self):
+        with tempfile.TemporaryDirectory() as store, tempfile.TemporaryDirectory() as trial:
+            session = "22222222-3333-4444-5555-666666666666"
+            filed = RUNNER.transcript_path(Path(trial), session, Path(store))
+            filed.parent.mkdir(parents=True)
+            filed.write_text('{"type": "assistant"}\n', encoding="utf-8")
+
+            kept = TRIAL.keep_transcript(Path(trial), session, Path(store))
+            self.assertEqual(kept, Path(trial) / "transcript.jsonl")
+            filed.unlink()
+            self.assertEqual(kept.read_text(encoding="utf-8"), '{"type": "assistant"}\n')
+
+    def test_no_filed_transcript_is_still_no_transcript(self):
+        with tempfile.TemporaryDirectory() as store, tempfile.TemporaryDirectory() as trial:
+            kept = TRIAL.keep_transcript(Path(trial), "no-such-session", Path(store))
+            self.assertFalse(kept.is_file())
+
+
 if __name__ == "__main__":
     unittest.main()
