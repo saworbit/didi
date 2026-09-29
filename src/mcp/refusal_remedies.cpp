@@ -404,6 +404,16 @@ const std::map<std::string, Rule>& rules() {
         {"invariant_watch_active", [](const Refusal&) { return retryAfter(5000); }},
         {"reimport_idle_timeout", [](const Refusal&) { return retryAfter(5000); }},
         {"editor_scanning", [](const Refusal&) { return retryWith({{"timeout_ms", 10000}}); }},
+        {"not_approved", [](const Refusal& r) {
+            // A dismissed prompt was never answered, so asking again is fair; a
+            // declined one was answered, and sending it again asks the same
+            // person the same question.
+            const auto action = r.data.find("action");
+            if (action != r.data.end() && action->is_string() && *action == "cancel") {
+                return retryAfter(0);
+            }
+            return noRemedy("The person declined this change. Do not send it again unless they ask for it.");
+        }},
         {"forbidden", [](const Refusal& r) {
             if (r.tool == "eval_gdscript") return field("expression");
             if (isOneOf(r.tool, {"script_get_symbols", "script_check_syntax"})) return retryAfter(1000);

@@ -18,9 +18,14 @@ class ManagedRecovery {
     Result<void> beforeMutation(const std::string& tool, const json& args);
     mcp::CallToolResult afterMutation(const std::string& tool, const json& args,
                                       mcp::CallToolResult result, bool not_started = false);
-    mcp::CallToolResult annotate(mcp::CallToolResult result);
+    // `error`, when given, is an error envelope put beside the tool's answer
+    // and the receipt, for a result that is an error only because of what
+    // happened after the tool succeeded.
+    mcp::CallToolResult annotate(mcp::CallToolResult result, json error = nullptr);
 
   private:
+    mcp::CallToolResult appliedButUnprotected(mcp::CallToolResult result,
+                                              const std::string& what_failed);
     Result<void> launchAndAttach();
     Result<void> journal();
     Result<json> snapshot(const std::string& label);

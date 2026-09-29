@@ -5,6 +5,7 @@
 #include "didi/mcp/mutation_safety.hpp"
 #include "didi/mcp/tool_availability.hpp"
 #include "didi/mcp/argument_normalization.hpp"
+#include "didi/mcp/error_data.hpp"
 #include "didi/runtime/session_kind_policy.hpp"
 #include "didi/tools/resolved_tool_binding.hpp"
 #include <algorithm>
@@ -925,12 +926,20 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
             const auto action = responses[kConfirmationRequestKey].value("action", "cancel");
             if (action != "accept") {
                 // Refusal and dismissal are different answers, and an agent that
-                // cannot tell them apart will retry the one it should not.
+                // cannot tell them apart will retry the one it should not. This
+                // answer never passes through the registry, so it is given its
+                // own code and the floor the registry would apply, or it read as
+                // any other 403 with no remedy (#1043).
+                const auto* refused_tool = ToolRegistry::instance().getTool(name);
+                json refusal = {{"code", 403},
+                                {"message", "Mutation was not approved"},
+                                {"data", {{"code", "not_approved"}, {"action", action},
+                                          {"retryable", action == "cancel"}}}};
+                applyErrorDataFloor(refusal, name,
+                                    refused_tool ? std::string(refused_tool->canonical_name) : name);
                 return JsonRpcResponse::makeSuccess(
-                    req.id, encode(CallToolResult::errorJson(
-                                403, "Mutation was not approved",
-                                {{"tool", name}, {"action", action},
-                                 {"retryable", action == "cancel"}})));
+                    req.id, encode(CallToolResult::errorJson(403, "Mutation was not approved",
+                                                             refusal["data"])));
             }
             json approved = arguments;
             approved["confirmation_token"] = state->at("token");

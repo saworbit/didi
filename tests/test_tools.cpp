@@ -31,6 +31,7 @@
 #include "didi/tools/hierarchy_view.hpp"
 #include "didi/mcp/error_data.hpp"
 #include "didi/tools/editor_copy_refresh.hpp"
+#include "didi/runtime/managed_recovery.hpp"
 
 #include <thread>
 #include <memory>
@@ -4603,6 +4604,92 @@ static void test_a_rename_reloads_the_editor_copies_it_rewrote() {
     // None was held here, so none was reloaded, and the answer says that much.
     ASSERT_TRUE(report["editor_copies_reloaded"].empty());
     ASSERT_TRUE(!report.contains("editor_copy_errors"));
+}
+
+// An editor whose scene save can be made to fail, for the recovery receipts.
+class SaveSceneClient final : public didi::runtime::IRuntimeSessionClient {
+public:
+    bool connect(const std::string&, int) override { return true; }
+    void disconnect() override {}
+    bool isConnected() const override { return true; }
+    didi::Result<didi::json> sendRequest(const std::string& method, const didi::json&, int) override {
+        if (method == "editor.saveScene" && fail_save) return didi::Error(500, "The scene could not be saved");
+        return didi::json{{"status", "saved"}};
+    }
+    didi::Result<didi::json> listSessions(const std::optional<std::string>&) override {
+        return didi::json{{"sessions", didi::json::array()}};
+    }
+    didi::Result<didi::json> attachSession(const std::string&) override { return didi::json::object(); }
+    didi::Result<didi::json> detachSession() override { return didi::json::object(); }
+    std::optional<didi::runtime::SessionDescriptor> activeSession() const override { return std::nullopt; }
+
+    bool fail_save{false};
+};
+
+static void test_an_applied_change_that_was_not_protected_says_so_as_an_error() {
+    // Break caught: a change the editor made whose save, checkpoint or journal
+    // then failed set isError on the tool's own answer and nothing more. There
+    // was no code and no remedy, and nothing a caller could branch on said the
+    // change was in and must not be sent again (#1043).
+    const auto container = std::filesystem::temp_directory_path() /
+                           ("didi-unprotected-" +
+                            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    const auto applied = [] {
+        return didi::mcp::CallToolResult::successJson({{"status", "success"}, {"value", 3}});
+    };
+    const auto unprotected = [](const didi::mcp::CallToolResult& result, const std::string& outcome) {
+        ASSERT_TRUE(result.isError);
+        // Not const: a missing key must fail the assertion below, not reach a
+        // const operator[] on a key that is not there.
+        auto payload = didi::json::parse(result.content[0].text);
+        ASSERT_TRUE(payload.contains("error"));
+        // The tool's answer and the receipt, as they were.
+        ASSERT_EQ(payload["status"], "success");
+        ASSERT_EQ(payload["value"], 3);
+        ASSERT_EQ(payload["recovery"]["operation"]["outcome"], outcome);
+        // And beside them, the error that says what to do.
+        auto& error = payload["error"];
+        ASSERT_EQ(error["code"], 500);
+        ASSERT_TRUE(error["message"].get<std::string>().find("Do not send it again") != std::string::npos);
+        ASSERT_EQ(error["data"]["outcome"], outcome);
+        ASSERT_EQ(error["data"]["retryable"], false);
+        ASSERT_EQ(error["data"]["next_call"]["tool"], "runtime_recovery_status");
+        ASSERT_TRUE(result.structuredContent.has_value());
+        ASSERT_EQ(result.structuredContent->value("error", didi::json()), error);
+    };
+
+    auto refusing = std::make_shared<SaveSceneClient>();
+    refusing->fail_save = true;
+    auto saving = std::make_shared<SaveSceneClient>();
+
+    // The save failed.
+    didi::runtime::ManagedRecovery save_failed(container / "save", "", refusing);
+    unprotected(save_failed.afterMutation("scene_set_property", didi::json::object(), applied()),
+                "applied_persistence_failed");
+
+    // Saved, and the checkpoint after it failed: there is no project to copy.
+    didi::runtime::ManagedRecovery checkpoint_failed(container / "checkpoint", "", saving);
+    unprotected(checkpoint_failed.afterMutation("scene_set_property", didi::json::object(), applied()),
+                "applied_checkpoint_failed");
+
+    // Saved and checkpointed, and the journal could not be written, because
+    // its temporary file's name is taken by a directory.
+    std::filesystem::create_directories(container / "journal" / "project");
+    std::ofstream(container / "journal" / "project" / "project.godot") << "config_version=5\n";
+    std::filesystem::create_directories(container / "journal" / "recovery.json.tmp");
+    didi::runtime::ManagedRecovery journal_failed(container / "journal", "", saving);
+    unprotected(journal_failed.afterMutation("scene_set_property", didi::json::object(), applied()),
+                "applied_journal_failed");
+
+    // A change that was protected answers as the tool did, with no error.
+    std::filesystem::remove_all(container / "journal" / "recovery.json.tmp");
+    didi::runtime::ManagedRecovery protected_change(container / "journal", "", saving);
+    const auto kept = protected_change.afterMutation("scene_set_property", didi::json::object(), applied());
+    ASSERT_TRUE(!kept.isError);
+    ASSERT_TRUE(!didi::json::parse(kept.content[0].text).contains("error"));
+
+    std::error_code ignored;
+    std::filesystem::remove_all(container, ignored);
 }
 
 static void test_resource_create_type_guard_keeps_the_reference_when_no_engine_answers() {
@@ -9243,6 +9330,8 @@ struct RegisterToolTests {
         registerTest("Tools.ResourceCreateRefusesRes", test_resource_create_refuses_a_res_path);
         registerTest("Tools.ResourceCreateRefreshesEditorCopy",
                      test_resource_create_refreshes_the_editor_copy_it_overwrote);
+        registerTest("Tools.AppliedButUnprotectedChangeIsAnError",
+                     test_an_applied_change_that_was_not_protected_says_so_as_an_error);
         registerTest("Tools.ScriptWritersReloadTheEditorCopy",
                      test_script_writers_reload_the_editor_copy_they_replaced);
         registerTest("Tools.BatchWriterAccountsForEveryEditorCopy",

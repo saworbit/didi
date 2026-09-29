@@ -396,8 +396,9 @@ mcp::CallToolResult ManagedRecovery::afterMutation(const std::string& tool, cons
             m_operation["outcome"] = "applied_persistence_failed";
             m_operation["persistence_error"] = saved.error().message;
             journal();
-            result.isError = true;
-            return annotate(std::move(result));
+            return appliedButUnprotected(std::move(result),
+                                         "saving the scene failed, so the saved files and the "
+                                         "recovery checkpoint do not have it");
         }
     }
     auto after = snapshot("after " + tool);
@@ -405,8 +406,9 @@ mcp::CallToolResult ManagedRecovery::afterMutation(const std::string& tool, cons
         m_operation["outcome"] = "applied_checkpoint_failed";
         m_operation["persistence_error"] = after.error().message;
         journal();
-        result.isError = true;
-        return annotate(std::move(result));
+        return appliedButUnprotected(std::move(result),
+                                     "it was saved, and the checkpoint after it failed, so a "
+                                     "restore cannot return to this state");
     }
     m_operation["outcome"] = "completed_saved_files_checkpointed";
     m_operation["after_checkpoint"] = after.value().at("id");
@@ -415,11 +417,33 @@ mcp::CallToolResult ManagedRecovery::afterMutation(const std::string& tool, cons
     if (receipt.isErr()) {
         m_needsReconciliation = true;
         m_operation["outcome"] = "applied_journal_failed";
-        result.isError = true;
+        return appliedButUnprotected(std::move(result),
+                                     "it was saved and checkpointed, and the recovery journal "
+                                     "could not be written");
     }
     return annotate(std::move(result));
 }
-mcp::CallToolResult ManagedRecovery::annotate(mcp::CallToolResult result) {
+
+// A change the editor made whose protection then failed. It set isError on the
+// tool's own answer and nothing else, so the answer had no code and no remedy,
+// and nothing a caller could branch on said the one thing that matters: the
+// change is in, and sending it again applies it twice (#1043). The tool's
+// answer and the receipt stay as they were, with an error beside them.
+mcp::CallToolResult ManagedRecovery::appliedButUnprotected(mcp::CallToolResult result,
+                                                           const std::string& what_failed) {
+    result.isError = true;
+    return annotate(std::move(result),
+                    json{{"code", 500},
+                         {"message", "The change was applied, and " + what_failed +
+                                         ". Do not send it again."},
+                         {"data", {{"outcome", m_operation.value("outcome", std::string())},
+                                   {"retryable", false},
+                                   {"next_call",
+                                    {{"tool", "runtime_recovery_status"},
+                                     {"reason", "The change applied and must not be sent again. "
+                                                "Read the recovery state before anything else."}}}}}});
+}
+mcp::CallToolResult ManagedRecovery::annotate(mcp::CallToolResult result, json error) {
     json payload = result.structuredContent.value_or(json::object());
     if (!payload.is_object())
         payload = {{"result", payload}};
@@ -436,6 +460,7 @@ mcp::CallToolResult ManagedRecovery::annotate(mcp::CallToolResult result) {
     }
     if (!payload.is_object())
         payload = {{"result", payload}};
+    if (error.is_object() && !payload.contains("error")) payload["error"] = std::move(error);
     // A compact persistence receipt on normal calls; full history is available
     // once through runtime_recovery_status, not repeated in every LLM response.
     payload["recovery"] = {
