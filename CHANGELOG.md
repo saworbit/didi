@@ -367,6 +367,12 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **The local asan lane is no longer killed for memory (#1050).**
+  `tools/localci` built every lane with Ninja's default of CPUs + 2 jobs, and
+  ASan builds of the largest files need several GB each, so on a 16 GB Docker
+  VM the compiler was killed with a message that reads like a compile error.
+  The asan lane now runs one job per 2 GB of the container's memory, the lane
+  prints the count it chose, and `DIDI_LOCALCI_JOBS` overrides it.
 - **A field trial keeps its evidence and pins its tester (#1005, #1007).**
   `trial.py` scored a Claude tester's transcript where the client filed it and
   never copied it, so trial 05 can no longer be rescored. It now copies it into

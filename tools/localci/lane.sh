@@ -88,8 +88,31 @@ asan)
 esac
 fi
 
-say "build"
-cmake --build "$BUILD" --parallel
+# How many compilers run at once. Ninja's default is CPUs + 2, and an ASan
+# build of the largest translation units needs several GB each: on a 16.7 GB,
+# 24-CPU Docker VM the asan lane was killed for memory, "Killed signal
+# terminated program cc1plus", which reads like a compile error (#1050). That
+# lane gets one job per 2 GB of the container's memory, never more than its
+# CPUs. The other two keep Ninja's default, which they have never outgrown.
+# DIDI_LOCALCI_JOBS overrides either.
+jobs_for_memory() {
+    local cpus memory_kb by_memory
+    cpus=$(nproc)
+    memory_kb=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)
+    by_memory=$(( memory_kb / (2 * 1024 * 1024) ))
+    [ "$by_memory" -ge 1 ] || by_memory=1
+    if [ "$by_memory" -lt "$cpus" ]; then echo "$by_memory"; else echo "$cpus"; fi
+}
+JOBS="${DIDI_LOCALCI_JOBS:-}"
+if [ -z "$JOBS" ] && [ "$LANE" = "asan" ]; then JOBS=$(jobs_for_memory); fi
+
+if [ -n "$JOBS" ]; then
+    say "build ($JOBS jobs)"
+    cmake --build "$BUILD" --parallel "$JOBS"
+else
+    say "build (Ninja's default: CPUs + 2)"
+    cmake --build "$BUILD" --parallel
+fi
 
 if [ "$LANE" = "asan" ]; then
     # The sanitizer job runs the native tests and stops there. Same options as

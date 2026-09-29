@@ -121,7 +121,9 @@ for lane in "${LANES[@]}"; do
     # need a writable checkout. Each was patchable with another tmpfs and the
     # list was obviously not finished.
     volume="didi-localci-work-$lane"
+    # DIDI_LOCALCI_JOBS reaches the lane only when it is set here.
     common=(--rm
+        -e DIDI_LOCALCI_JOBS
         -v "$REPO_ROOT:/src-ro:ro"
         -v "$volume:/work"
         -w /work)
