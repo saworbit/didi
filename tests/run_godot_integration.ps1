@@ -173,7 +173,16 @@ if (-not $fixtureRoot.StartsWith($buildRoot + [IO.Path]::DirectorySeparatorChar,
 . (Join-Path $PSScriptRoot 'refusal_remedies.ps1')
 . (Join-Path $PSScriptRoot 'follow_ups.ps1')
 Remove-TestDirectory -Path $fixtureRoot
-Copy-Item -LiteralPath $sourceFixtureRoot -Destination $fixtureRoot -Recurse
+# Only what the fixture tracks. The Python suites run the server against
+# tests/godot_smoke and leave runtime state in its .didi/, which a whole copy
+# carried into this run, and a suite running at the same time held a lock in
+# there that failed the copy before the first assertion (#1036). .godot/ is an
+# editor's cache from whoever last opened the source tree. Neither exists in a
+# CI checkout, so what CI copies does not change.
+New-Item -ItemType Directory -Path $fixtureRoot | Out-Null
+Get-ChildItem -LiteralPath $sourceFixtureRoot -Force |
+    Where-Object { $_.Name -notin @(".didi", ".godot") } |
+    ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $fixtureRoot -Recurse -Force }
 
 # scene_call_method awaits a coroutine through a GDScript helper that ships in
 # the addon, so the fixture needs it. Copied from the repository's own addon

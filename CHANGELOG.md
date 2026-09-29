@@ -367,6 +367,12 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **The live harness copies only the fixture it tracks (#1036).** It copied
+  `tests/godot_smoke` whole, including the `.didi/` runtime state the Python
+  suites leave there, so a local run started from that state, and a suite
+  running at the same time held a lock that failed the copy before the first
+  assertion. The copy now leaves out `.didi/` and `.godot/`, which a CI
+  checkout never has.
 - **The seven blackboard writers answer with what they saved (#1019, in
   part).** `blackboard_write`, `blackboard_patch`, `blackboard_clear` and the
   four task calls built their answers from the board in memory before it was
