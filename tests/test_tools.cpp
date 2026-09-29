@@ -4665,8 +4665,11 @@ static void test_a_rename_reloads_the_scenes_open_in_clean_tabs() {
     ASSERT_TRUE(!renamed.isError);
     const auto report = didi::json::parse(renamed.content[0].text);
     ASSERT_EQ(editor->open_scene_requests, 1);
-    ASSERT_EQ(report["editor_scenes_reloaded"],
-              didi::json::array({"res://scenes/hud.tscn", "res://scenes/player.tscn"}));
+    // In the order the rename wrote them, which is the scan's and differs by
+    // filesystem, so compared as a set.
+    auto reloaded = report["editor_scenes_reloaded"].get<std::vector<std::string>>();
+    std::sort(reloaded.begin(), reloaded.end());
+    ASSERT_EQ(reloaded, (std::vector<std::string>{"res://scenes/hud.tscn", "res://scenes/player.tscn"}));
     ASSERT_EQ(editor->requests, 2);
     ASSERT_TRUE(!report.contains("editor_copy_errors"));
     // Without discard_unsaved, which the bridge then applies itself.
