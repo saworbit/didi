@@ -157,6 +157,16 @@ function Get-ObservedPostStateCases {
             (Step "call" "scene_duplicate_node" @{ target_node = "$observedRoot/Spawned" }),
             (Witness "after" "children" @(".")))
            Agree = { param($s) Agree "duplicated_node" $s.call.duplicated_node (Get-ObservedNewChild $s.before.returned $s.after.returned) } },
+        # The copy just made, moved and then removed, each answer read after
+        # its commit (#1019).
+        @{ Tool = "scene_reparent_node"; Session = "editor"; Steps = @(
+            (Step "call" "scene_reparent_node" @{ target_node = "$observedRoot/SpawnedCopy"; new_parent_path = "$observedRoot/Subject" }),
+            (Witness "witness" "node_info" @("Subject/SpawnedCopy")))
+           Agree = { param($s) Agree "node_path" $s.call.node_path $s.witness.returned.path } },
+        @{ Tool = "scene_remove_node"; Session = "editor"; Steps = @(
+            (Step "call" "scene_remove_node" @{ target_node = "$observedRoot/Subject/SpawnedCopy" }),
+            (Witness "witness" "node_info" @("Subject/SpawnedCopy")))
+           Agree = { param($s) Agree "exists" $s.call.exists $s.witness.returned.exists } },
         @{ Tool = "script_attach_to_node"; Session = "editor"; Steps = @(
             (Step "call" "script_attach_to_node" @{ target_node = "$observedRoot/Spawned"; script_path = "res://subject.gd" }),
             (Witness "witness" "node_info" @("Spawned")))
