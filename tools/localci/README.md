@@ -51,6 +51,13 @@ addon check verbatim, with the Linux library name.
 invocations, same test commands. A failure in them is a failure CI will
 reproduce.
 
+The `asan` lane builds with one job per 2 GB of the container's memory, never
+more than its CPUs, because ASan builds of the largest files need several GB
+each and Ninja's default of CPUs + 2 got the compiler killed on a 16 GB VM
+(#1050). The other lanes keep Ninja's default. Each lane prints the job count
+it chose, and `DIDI_LOCALCI_JOBS=<n> bash tools/localci/run.sh <lane>`
+overrides it.
+
 ## macOS: a real Mac, or nothing
 
 **A container cannot be a Mac.** Containers share the host kernel and macOS
