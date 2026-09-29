@@ -371,8 +371,9 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
   (#1002).** `signal_connect`'s `target_script_not_compiled` note and
   `LLM_INSTRUCTIONS` said to restart the editor or call
   `editor_reload_project`. `project_set_autoload` says the rescan does not
-  register the singleton, and that is what the engine does: the live harness
-  now calls it and the script still does not compile. Both now say to restart.
+  register the singleton, and that is what the engine does: called after
+  `project_set_autoload` on 4.5.1, 4.6.2 and 4.7.2, the script still does not
+  compile. Both now say to restart.
 - **Two failures that skipped the error floor now name their fix (#1043).** A
   confirmation the person declined or dismissed answered `403` with no code
   and no remedy, so it read as any other 403. It now carries `data.code:
