@@ -367,6 +367,13 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **A harness run that fails reports the failure, not the teardown guard
+  (#1044).** The live harness stops its engines in a `finally` behind a guard
+  that refuses a reused process id, and that refusal threw over the failure the
+  run had just rethrown. A run that failed in the scenario and then tripped the
+  guard reported only the guard. With a failure already recorded, the refusal
+  is now a warning naming both, and the run still fails on the guard when
+  nothing else went wrong.
 - **A Godot that will not start reads as engine_unavailable, not a server fault
   (#1045).** `shader_check_compile`, `project_export` and
   `gridmap_export_mesh_library` answered a launch failure as `500
