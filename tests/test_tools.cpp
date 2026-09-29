@@ -4631,7 +4631,10 @@ static void test_an_applied_change_that_was_not_protected_says_so_as_an_error() 
     // then failed set isError on the tool's own answer and nothing more. There
     // was no code and no remedy, and nothing a caller could branch on said the
     // change was in and must not be sent again (#1043).
-    const auto container = std::filesystem::temp_directory_path() /
+    // Canonical, as the checkpoint tests do: macOS reaches its temporary
+    // directory through /var, a symlink, and the checkpoint store refuses a
+    // symlinked ancestor, so every case there failed at the checkpoint.
+    const auto container = std::filesystem::canonical(std::filesystem::temp_directory_path()) /
                            ("didi-unprotected-" +
                             std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     const auto applied = [] {
