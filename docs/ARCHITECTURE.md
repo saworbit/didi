@@ -108,7 +108,8 @@ Godot's `SceneTree`, `EditorInterface`, and `RenderingServer` are **not thread-s
        │
        ├─► Native GDExtension main-loop frame callback
        │    (bounded to 64 commands per frame; none taken
-       │     from a nested frame or inside an import pass)
+       │     from a nested frame, inside an import pass, or
+       │     while the editor's progress dialog is open)
        ▼
 [Godot Main Thread / Engine Context]
        │

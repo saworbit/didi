@@ -6040,6 +6040,36 @@ static void test_nothing_is_dequeued_inside_an_import_pass() {
     ASSERT_EQ(answer["error"]["data"]["code"], "session_kind_rejected");
 }
 
+static void test_nothing_is_dequeued_inside_an_editor_progress_task() {
+    // Break caught: applying a scan runs its script class and documentation
+    // updates under the editor's progress dialog, which pumps the main loop,
+    // so a command queued for Didi ran inside that work and started it again
+    // (#995). A frame with a progress task open is held like an import pass.
+    auto& hook = didi::godot::EditorHook::instance();
+    hook.cancelPendingCommands("test reset");
+    didi::godot::EditorHookTestAccess::setSessionKind(hook, didi::runtime::SessionKind::editor);
+    didi::godot::EditorHookTestAccess::setImportPassOpen(hook, false);
+    didi::godot::EditorHookTestAccess::setProgressTaskOpen(hook, true);
+    auto queued = didi::godot::EditorHookTestAccess::enqueue(hook, "runtime.injectInput");
+    hook.processQueue();
+    hook.processQueue();
+    const bool held = didi::godot::EditorHookTestAccess::queueDepth(hook) == 1u &&
+                      !queued.control->hasEverStarted() &&
+                      queued.response.wait_for(std::chrono::seconds(0)) != std::future_status::ready;
+    didi::godot::EditorHookTestAccess::setProgressTaskOpen(hook, false);
+    hook.processQueue();
+    const bool answered =
+        queued.response.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
+    const auto answer = answered ? queued.response.get() : didi::json();
+    didi::godot::EditorHookTestAccess::setProgressTaskOpen(hook, std::nullopt);
+    didi::godot::EditorHookTestAccess::setImportPassOpen(hook, std::nullopt);
+    didi::godot::EditorHookTestAccess::setSessionKind(hook, std::nullopt);
+    hook.cancelPendingCommands("test reset");
+    ASSERT_TRUE(held);
+    ASSERT_TRUE(answered);
+    ASSERT_EQ(answer["error"]["data"]["code"], "session_kind_rejected");
+}
+
 static void test_a_write_is_applied_when_every_member_landed() {
     // Break caught: a colour or vector write that landed correctly reports
     // applied: false, because the comparison was exact for composites (#618).
@@ -9300,6 +9330,8 @@ struct RegisterToolTests {
                      test_a_scan_is_settled_once_its_results_are_applied);
         registerTest("EditorHook.NothingIsDequeuedInsideAnImportPass",
                      test_nothing_is_dequeued_inside_an_import_pass);
+        registerTest("EditorHook.NothingIsDequeuedInsideAProgressTask",
+                     test_nothing_is_dequeued_inside_an_editor_progress_task);
         registerTest("Tools.ShaderWriteAppliedComparesMembers",
                      test_a_write_is_applied_when_every_member_landed);
         registerTest("Tools.WriteThatDidNotLandSaysWhichOfTheTwo",
