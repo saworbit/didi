@@ -110,18 +110,28 @@ std::optional<std::string> validateExpressionContextPath(const std::string& path
     return std::nullopt;
 }
 
+// subject is the session a call named, when it named one. Its error is about
+// that session, so the selection's engine and the remembered obstruction are
+// told only when they are that session's too. Attaching an editor used to
+// answer with the incident of a game this caller had stopped (#1001).
 CallToolResult sessionError(const Error& error,
-                            const std::shared_ptr<runtime::IRuntimeSessionClient>& sessions) {
+                            const std::shared_ptr<runtime::IRuntimeSessionClient>& sessions,
+                            const std::string& subject = {}) {
     const auto active = sessions ? sessions->activeSession()
                                  : std::optional<runtime::SessionDescriptor>{};
     // Same reading of the same facts the live routes get. A session error that
     // said less than a tool error would send a caller looking in two places.
     Error annotated = error;
-    runtime::annotateEngineState(annotated, active);
+    if (subject.empty() || (active.has_value() && active->session_id == subject)) {
+        runtime::annotateEngineState(annotated, active);
+    }
     // With no session left to classify, annotateEngineState says nothing. The
     // remembered obstruction is the only thing that can, and runtime_get_session
     // is the tool a caller reaches for once the engine has gone (#527, #536).
-    runtime::annotateRouteObstruction(annotated);
+    const auto obstruction = runtime::lastRouteObstruction();
+    if (subject.empty() || (obstruction.has_value() && obstruction->session_id == subject)) {
+        runtime::annotateRouteObstruction(annotated);
+    }
     json data = annotated.data.is_object() ? annotated.data : json::object();
     if (!annotated.data.is_null() && !annotated.data.is_object()) data["details"] = annotated.data;
     json envelope = {{"execution_mode", "local_session_management"},
@@ -260,7 +270,8 @@ CallToolResult handleRuntimeAttachSession(const json& args, std::shared_ptr<runt
     }
     const bool allow_foreign_project = args.value("allow_foreign_project", false);
     auto result = sessions->attachSession(session_id, allow_foreign_project);
-    return result.isOk() ? localSessionSuccess(result.value()) : sessionError(result.error(), sessions);
+    return result.isOk() ? localSessionSuccess(result.value())
+                         : sessionError(result.error(), sessions, session_id);
 }
 
 CallToolResult handleRuntimeDetachSession(const json&, std::shared_ptr<runtime::IRuntimeSessionClient> sessions) {
