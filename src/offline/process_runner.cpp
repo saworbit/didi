@@ -158,7 +158,11 @@ Result<ProcessResult> runProcess(const ProcessRequest& request) {
     if (!launched) {
         const DWORD code = GetLastError();
         CloseHandle(read_pipe);
-        return Error::internal("Failed to launch process (Windows error " + std::to_string(code) + ")");
+        // Marked, so a caller can tell the executable it was given from a
+        // fault of this process's own without reading the sentence (#1045).
+        // POSIX reaches the same point as exit code 127 from the child.
+        return Error(500, "Failed to launch process (Windows error " + std::to_string(code) + ")",
+                     json{{"stage", "launch"}, {"os_error", static_cast<uint64_t>(code)}});
     }
 
     HANDLE job = CreateJobObjectW(nullptr, nullptr);

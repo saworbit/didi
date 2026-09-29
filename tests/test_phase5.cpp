@@ -33,6 +33,14 @@ using didi::offline::parseGodotDiagnostics;
 using didi::offline::parseMsBuildDiagnostics;
 using didi::offline::parseMsBuildProjectOutputCount;
 
+namespace didi::mcp {
+// Defined in src/tools/deep_domain_tools.cpp. Called directly because both are
+// confirmation-gated through the registry, and what is under test is the
+// launch, which the gate never reaches.
+CallToolResult handleGridmapExportMeshLibrary(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleProjectExport(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+} // namespace didi::mcp
+
 namespace {
 
 class ScopedPhase5Project {
@@ -56,6 +64,32 @@ public:
 private:
     std::filesystem::path original;
     std::filesystem::path root;
+};
+
+// GODOT_BIN naming a file that exists and is not an executable, for as long as
+// the test runs. Windows refuses to start it (error 193) and a POSIX exec of it
+// fails in the child, which exits 127.
+class ScopedUnstartableGodot {
+public:
+    ScopedUnstartableGodot() : path(std::filesystem::current_path() / "not_godot.txt") {
+        std::ofstream(path) << "not an engine\n";
+        if (const char* value = std::getenv("GODOT_BIN")) previous = value;
+        set(path.string());
+    }
+    ~ScopedUnstartableGodot() { set(previous); }
+
+    std::filesystem::path path;
+
+private:
+    static void set(const std::string& value) {
+#if defined(_WIN32)
+        _putenv_s("GODOT_BIN", value.c_str());
+#else
+        if (value.empty()) unsetenv("GODOT_BIN");
+        else setenv("GODOT_BIN", value.c_str(), 1);
+#endif
+    }
+    std::string previous;
 };
 
 class RecordingUiClient final : public didi::ipc::IIpcClient {
@@ -740,6 +774,42 @@ TEST(Phase5, DiagnosticsRejectWrongResourceTypesBeforeProcessLaunch) {
     registry.registerAllDefaultTools();
     ASSERT_TRUE(registry.callTool("shader_check_compile", {{"shader_path", "res://not_shader.txt"}}).isError);
     ASSERT_TRUE(registry.callTool("csharp_check_build", {{"project_file", "res://not_csharp.txt"}}).isError);
+}
+
+TEST(Phase5, AnEngineThatWillNotStartIsEngineUnavailable) {
+    // Break caught: the three tools that start their own Godot answered a
+    // launch failure as 500 internal_error, a fault in the server with no
+    // remedy, when the cause is the engine this server was pointed at and
+    // GODOT_BIN is the fix. script_check_syntax already said so (#1045).
+    ScopedPhase5Project project("engine-unstartable");
+    std::ofstream("probe.gdshader") << "shader_type spatial;\n";
+    std::ofstream("mesh_source.tscn") << "[gd_scene format=3]\n\n[node name=\"Root\" type=\"Node3D\"]\n";
+    std::ofstream("export_presets.cfg")
+        << "[preset.0]\nname=\"Phase5 Pack\"\nplatform=\"Windows Desktop\"\nrunnable=true\n"
+           "export_filter=\"all_resources\"\nexport_path=\"build/game.pck\"\n\n[preset.0.options]\n";
+    ScopedUnstartableGodot godot;
+    const auto unavailable = [](const didi::mcp::CallToolResult& result) {
+        ASSERT_TRUE(result.isError);
+        const auto envelope = didi::json::parse(result.content[0].text);
+        ASSERT_EQ(envelope["error"]["code"], 503);
+        ASSERT_EQ(envelope["error"]["data"]["code"], "engine_unavailable");
+        ASSERT_TRUE(envelope["error"]["data"]["engine_executable"].get<std::string>().find(
+                        "not_godot.txt") != std::string::npos);
+        return envelope;
+    };
+
+    // Through the registry, so the remedy the error floor gives the code is
+    // part of what is checked.
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    const auto shader = unavailable(
+        registry.callTool("shader_check_compile", {{"shader_path", "res://probe.gdshader"}}));
+    ASSERT_TRUE(shader["error"]["data"].contains("restart_with"));
+
+    unavailable(didi::mcp::handleGridmapExportMeshLibrary(
+        {{"source_scene", "res://mesh_source.tscn"}, {"output_path", "res://library.tres"}}, nullptr));
+    unavailable(didi::mcp::handleProjectExport(
+        {{"preset", "Phase5 Pack"}, {"output_path", "res://build/game.pck"}, {"mode", "pack"}}, nullptr));
 }
 
 TEST(Phase5, UiHitTestIsLiveOnlyWithBoundedSchema) {
