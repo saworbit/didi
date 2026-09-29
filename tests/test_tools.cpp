@@ -30,6 +30,7 @@
 #include "didi/common/atomic_write.hpp"
 #include "didi/tools/hierarchy_view.hpp"
 #include "didi/mcp/error_data.hpp"
+#include "didi/tools/editor_copy_refresh.hpp"
 
 #include <thread>
 #include <memory>
@@ -66,6 +67,12 @@ CallToolResult handleGetSceneHierarchy(const json& args, std::shared_ptr<ipc::II
 // schema now refuses the empty string before any handler runs, and the
 // handler's own refusal has to be observable on its own (#554).
 CallToolResult handleCreateVisualTestLab(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+// Defined in src/tools/script_tools.cpp and src/tools/asset_tools.cpp. Called
+// directly so what each asks an attached editor after its write can be seen
+// against a stub (#1047).
+CallToolResult handleScriptCreate(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleScriptPatchMethod(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleProjectRenameReferences(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 } // namespace mcp
 } // namespace didi
 
@@ -4472,6 +4479,130 @@ static void test_resource_create_refreshes_the_editor_copy_it_overwrote() {
         nullptr);
     ASSERT_TRUE(!offline.isError);
     ASSERT_TRUE(!didi::json::parse(offline.content[0].text).contains("editor_copy_reloaded"));
+}
+
+// An editor that holds some files and answers resource.refreshCached for them,
+// in either form: one `path`, or `paths` for a writer that changed several.
+class EditorCopyClient final : public didi::ipc::IIpcClient {
+public:
+    bool connect(const std::string&, int) override { return true; }
+    void disconnect() override {}
+    bool isConnected() const override { return true; }
+    didi::Result<didi::json> sendRequest(const std::string& method, const didi::json& params,
+                                         int) override {
+        if (method != "resource.refreshCached") return didi::Error(404, "Unknown method: " + method);
+        ++requests;
+        if (requests > answer_requests) return didi::Error(504, "no answer");
+        const auto answer = [&](const std::string& path) {
+            asked.push_back(path);
+            if (!held.count(path)) return didi::json{{"path", path}, {"cached", false}, {"reloaded", false}};
+            if (broken.count(path)) {
+                return didi::json{{"path", path}, {"cached", true}, {"reloaded", false},
+                                  {"reload_error", "The editor's copy did not compile after the write (Godot error 43)."}};
+            }
+            return didi::json{{"path", path}, {"cached", true}, {"reloaded", true}};
+        };
+        if (!params.contains("paths")) return answer(params.value("path", std::string()));
+        didi::json results = didi::json::array();
+        for (const auto& path : params["paths"]) results.push_back(answer(path.get<std::string>()));
+        return didi::json{{"results", std::move(results)}};
+    }
+
+    std::set<std::string> held;
+    std::set<std::string> broken;
+    std::vector<std::string> asked;
+    int requests{0};
+    int answer_requests{1000};
+};
+
+static void test_script_writers_reload_the_editor_copy_they_replaced() {
+    // A script is the one file a CACHE_MODE_REPLACE load does not refresh, and
+    // script_create and script_patch_method never asked at all, so an attached
+    // editor went on running the old code until it restarted (#1047).
+    ScopedToolProject project("script-editor-copy");
+    auto editor = std::make_shared<EditorCopyClient>();
+    editor->held.insert("res://mover.gd");
+
+    const auto created = didi::mcp::handleScriptCreate(
+        {{"script_path", "res://mover.gd"}, {"source_text", "extends Node\nfunc speed():\n\treturn 1\n"}},
+        editor);
+    ASSERT_TRUE(!created.isError);
+    const auto created_report = didi::json::parse(created.content[0].text);
+    ASSERT_EQ(created_report["editor_copy_reloaded"], true);
+    ASSERT_TRUE(!created_report.contains("editor_copy_error"));
+    ASSERT_EQ(editor->asked, std::vector<std::string>{"res://mover.gd"});
+
+    // A patch the editor's copy then fails to compile is said, not passed over.
+    editor->broken.insert("res://mover.gd");
+    const auto patched = didi::mcp::handleScriptPatchMethod(
+        {{"file_path", "res://mover.gd"}, {"method_name", "speed"},
+         {"new_definition", "func speed():\n\treturn 2\n"}},
+        editor);
+    ASSERT_TRUE(!patched.isError);
+    const auto patched_report = didi::json::parse(patched.content[0].text);
+    ASSERT_EQ(patched_report["editor_copy_reloaded"], false);
+    ASSERT_TRUE(patched_report["editor_copy_error"].get<std::string>().find("did not compile") !=
+                std::string::npos);
+
+    // A file the editor never loaded has nothing to reload, and says so.
+    const auto fresh = didi::mcp::handleScriptCreate(
+        {{"script_path", "res://unseen.gd"}, {"source_text", "extends Node\n"}}, editor);
+    ASSERT_EQ(didi::json::parse(fresh.content[0].text)["editor_copy_reloaded"], false);
+
+    // No editor: the offline answer it always was.
+    const auto offline = didi::mcp::handleScriptCreate(
+        {{"script_path", "res://offline.gd"}, {"source_text", "extends Node\n"}}, nullptr);
+    ASSERT_TRUE(!didi::json::parse(offline.content[0].text).contains("editor_copy_reloaded"));
+}
+
+static void test_every_file_a_batch_writer_names_is_accounted_for() {
+    // A rename can touch hundreds of files, and the bridge takes 256 a request.
+    // Every file the editor held is either reloaded or named with a reason,
+    // including the ones in a request the editor did not answer.
+    std::vector<std::string> paths;
+    auto editor = std::make_shared<EditorCopyClient>();
+    for (int index = 0; index < 300; ++index) {
+        paths.push_back("res://levels/level_" + std::to_string(index) + ".tscn");
+        if (index % 2 == 0) editor->held.insert(paths.back());
+    }
+    editor->answer_requests = 1;
+    const auto refresh = didi::mcp::refreshEditorCopies(editor, paths);
+    ASSERT_EQ(editor->requests, 2);
+    ASSERT_TRUE(refresh.answered);
+    ASSERT_EQ(refresh.reloaded.size(), 128u);
+    // The 44 in the unanswered request are unknown, held or not.
+    ASSERT_EQ(refresh.failed.size(), 44u);
+    ASSERT_TRUE(refresh.failed[0]["reason"].get<std::string>().find("did not answer") != std::string::npos);
+
+    didi::json payload = didi::json::object();
+    didi::mcp::reportEditorCopies(payload, refresh);
+    ASSERT_EQ(payload["editor_copies_reloaded"].size(), 128u);
+    ASSERT_EQ(payload["editor_copy_errors"].size(), 44u);
+
+    // Nothing answered at all is nothing known, and nothing is said.
+    auto silent = std::make_shared<EditorCopyClient>();
+    silent->answer_requests = 0;
+    didi::json quiet = didi::json::object();
+    didi::mcp::reportEditorCopies(quiet, didi::mcp::refreshEditorCopies(silent, paths));
+    ASSERT_TRUE(quiet.empty());
+}
+
+static void test_a_rename_reloads_the_editor_copies_it_rewrote() {
+    ScopedToolProject project("rename-editor-copy");
+    writeImpactFixture();
+    auto editor = std::make_shared<EditorCopyClient>();
+    const auto renamed = didi::mcp::handleProjectRenameReferences(
+        {{"target", "character_health"}, {"new_name", "vitality"}}, editor);
+    ASSERT_TRUE(!renamed.isError);
+    const auto report = didi::json::parse(renamed.content[0].text);
+    ASSERT_TRUE(report["updated_file_count"].get<size_t>() > 0);
+    std::vector<std::string> rewritten;
+    for (const auto& file : report["updated_files"]) rewritten.push_back(file["path"].get<std::string>());
+    // Asked about exactly the files it rewrote, after rewriting them.
+    ASSERT_EQ(editor->asked, rewritten);
+    // None was held here, so none was reloaded, and the answer says that much.
+    ASSERT_TRUE(report["editor_copies_reloaded"].empty());
+    ASSERT_TRUE(!report.contains("editor_copy_errors"));
 }
 
 static void test_resource_create_type_guard_keeps_the_reference_when_no_engine_answers() {
@@ -9082,6 +9213,12 @@ struct RegisterToolTests {
         registerTest("Tools.ResourceCreateRefusesRes", test_resource_create_refuses_a_res_path);
         registerTest("Tools.ResourceCreateRefreshesEditorCopy",
                      test_resource_create_refreshes_the_editor_copy_it_overwrote);
+        registerTest("Tools.ScriptWritersReloadTheEditorCopy",
+                     test_script_writers_reload_the_editor_copy_they_replaced);
+        registerTest("Tools.BatchWriterAccountsForEveryEditorCopy",
+                     test_every_file_a_batch_writer_names_is_accounted_for);
+        registerTest("Tools.RenameReloadsTheEditorCopiesItRewrote",
+                     test_a_rename_reloads_the_editor_copies_it_rewrote);
         registerTest("Tools.ResourceCreateOverwriteGuard",
                      test_resource_create_preserves_existing_file_without_overwrite);
     registerTest("resource_create type guard asks the attached engine",

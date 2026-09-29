@@ -1991,6 +1991,89 @@ UncompiledScript uncompiledScriptOn(GDExtensionObjectPtr node, const std::string
     return report;
 }
 
+// Reloads the editor's copy of one file the server has just written, if the
+// editor holds one.
+//
+// A resource is reloaded with CACHE_MODE_REPLACE (2), which updates the cached
+// resource and its subresources in place and keeps their identity, so anything
+// holding one -- a player holding a library, a node holding a material -- shows
+// the new contents. Not REPLACE_DEEP: that re-reads every file the written one
+// depends on as well, which throws away an unsaved edit the editor holds in one
+// of them, and reloading a VisualShader in place makes the engine print
+// `Condition "g->nodes.has(p_id)" is true` for every node it already had.
+// Neither mode does anything for a script: the load hands back the held copy
+// with its old source and old behaviour, on 4.5.1, 4.6.2 and 4.7.2 (#1047). A
+// script is reloaded the way the Script editor
+// reloads one that changed on disk: read it with CACHE_MODE_IGNORE, give its
+// text to the held copy, and reload that keeping state. Script.set_source_code
+// is 83702148 and Script.reload 1633102583 on all three lines.
+Result<json> refreshCachedCopy(GDExtensionObjectPtr loader, const std::string& path) {
+    auto path_value = makeString(path);
+    auto hint = makeString("");
+    if (path_value.isErr() || hint.isErr()) return Error::internal("Failed to construct reload arguments");
+    auto cached_value = callObject(loader, "ResourceLoader", "has_cached", 2323990056LL,
+                                   {&path_value.value()});
+    if (cached_value.isErr()) return cached_value.error();
+    auto cached = scalarFromVariant<GDExtensionBool>(cached_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+    if (cached.isErr()) return cached.error();
+    if (!cached.value()) return json{{"path", path}, {"cached", false}, {"reloaded", false}};
+
+    const auto load = [&](int64_t cache_mode) -> Result<VariantValue> {
+        auto mode = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, cache_mode);
+        if (mode.isErr()) return mode.error();
+        return callObject(loader, "ResourceLoader", "load", 3358495409LL,
+                          {&path_value.value(), &hint.value(), &mode.value()});
+    };
+    auto held_value = load(1);
+    if (held_value.isErr()) return held_value.error();
+    auto held = objectFromVariant(held_value.value());
+    auto script_class = makeString("Script");
+    if (script_class.isErr()) return script_class.error();
+    bool is_script = false;
+    if (held.isOk() && held.value()) {
+        auto answer = callObject(held.value(), "Object", "is_class", 3927539163LL, {&script_class.value()});
+        if (answer.isErr()) return answer.error();
+        auto flag = scalarFromVariant<GDExtensionBool>(answer.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+        if (flag.isErr()) return flag.error();
+        is_script = flag.value();
+    }
+    if (!is_script) {
+        auto reloaded = load(2);
+        auto object = reloaded.isOk() ? objectFromVariant(reloaded.value())
+                                      : Result<GDExtensionObjectPtr>(reloaded.error());
+        json result{{"path", path}, {"cached", true},
+                    {"reloaded", object.isOk() && object.value() != nullptr}};
+        if (!result["reloaded"].get<bool>()) result["reload_error"] = "The file did not load.";
+        return result;
+    }
+
+    auto fresh_value = load(0);
+    auto fresh = fresh_value.isOk() ? objectFromVariant(fresh_value.value())
+                                    : Result<GDExtensionObjectPtr>(fresh_value.error());
+    if (fresh.isErr() || !fresh.value()) {
+        return json{{"path", path}, {"cached", true}, {"reloaded", false},
+                    {"reload_error", "The script file did not load."}};
+    }
+    auto source = callObject(fresh.value(), "Script", "get_source_code", 201670096LL);
+    if (source.isErr()) return source.error();
+    auto assigned = callObject(held.value(), "Script", "set_source_code", 83702148LL, {&source.value()});
+    if (assigned.isErr()) return assigned.error();
+    auto keep_state = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(1));
+    if (keep_state.isErr()) return keep_state.error();
+    auto reloaded = callObject(held.value(), "Script", "reload", 1633102583LL, {&keep_state.value()});
+    if (reloaded.isErr()) return reloaded.error();
+    auto code = scalarFromVariant<int64_t>(reloaded.value(), GDEXTENSION_VARIANT_TYPE_INT);
+    if (code.isErr()) return code.error();
+    json result{{"path", path}, {"cached", true}, {"reloaded", code.value() == 0}};
+    if (code.value() != 0) {
+        // 43 is ERR_PARSE_ERROR, which is what a script that does not compile
+        // answers, and the editor's copy is then one that cannot be instanced.
+        result["reload_error"] = "The editor's copy did not compile after the write (Godot error " +
+                                 std::to_string(code.value()) + ").";
+    }
+    return result;
+}
+
 // The sentence script_check_syntax already carries for this condition, so the
 // same fact reads the same way whichever tool the caller met it through.
 const char* const kAutoloadRestartNote =
@@ -8745,45 +8828,51 @@ json GodotBridge::execute(const std::string& method, const json& params,
         return liveResult({{"reload_requested", true}});
     }
     if (method == "resource.refreshCached") {
-        // resource_create asks this after it has overwritten a file. The editor
-        // keeps what it has loaded and does not re-read a file that changed
-        // underneath it, so a reader in this process answers from the old copy
-        // until something reloads it. CACHE_MODE_REPLACE_DEEP (4) reloads the
-        // cached objects in place, keeping their identity, so anything holding
-        // the resource -- a player holding a library, a node holding a material
-        // -- shows the new contents. Measured on 4.5.1, 4.6.2 and 4.7.2.
-        // ResourceLoader.has_cached is 2323990056 on all three.
+        // Asked after the server has written a file. The editor keeps what it
+        // has loaded and does not re-read a file that changed underneath it, so
+        // a reader in this process answers from the old copy until something
+        // reloads it. One path, or up to 256 in `paths` for a writer that
+        // changed several files. ResourceLoader.has_cached is 2323990056 on
+        // 4.5.1, 4.6.2 and 4.7.2.
         if (session_kind != "editor") return bridgeError(409, "session_kind_rejected");
-        const std::string path = params.value("path", "");
-        if (validateResPath(path, "").isErr()) {
-            return errorJson(400, "path must be a normalized res:// path");
+        std::vector<std::string> paths;
+        const bool batch = params.contains("paths");
+        if (batch) {
+            const auto& listed = params["paths"];
+            if (!listed.is_array() || listed.empty() || listed.size() > 256) {
+                return errorJson(400, "paths must be an array of 1 to 256 res:// paths");
+            }
+            for (const auto& entry : listed) {
+                if (!entry.is_string()) return errorJson(400, "paths must hold only strings");
+                paths.push_back(entry.get<std::string>());
+            }
+        } else {
+            paths.push_back(params.value("path", ""));
+        }
+        for (const auto& path : paths) {
+            if (validateResPath(path, "").isErr()) {
+                return errorJson(400, "path must be a normalized res:// path: " + path);
+            }
         }
         for (const auto& bind : {std::make_tuple("ResourceLoader", "has_cached", 2323990056LL),
-                                 std::make_tuple("ResourceLoader", "load", 3358495409LL)}) {
+                                 std::make_tuple("ResourceLoader", "load", 3358495409LL),
+                                 std::make_tuple("Object", "is_class", 3927539163LL),
+                                 std::make_tuple("Script", "get_source_code", 201670096LL),
+                                 std::make_tuple("Script", "set_source_code", 83702148LL),
+                                 std::make_tuple("Script", "reload", 1633102583LL)}) {
             if (requireMethodBind(std::get<0>(bind), std::get<1>(bind), std::get<2>(bind)).isErr()) {
                 return bridgeError(501, "required_bind_unavailable");
             }
         }
         auto loader = singleton("ResourceLoader");
         if (loader.isErr()) return errorJson(loader.error().code, loader.error().message);
-        auto path_value = makeString(path);
-        auto hint = makeString("");
-        auto replace_deep = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(4));
-        if (path_value.isErr() || hint.isErr() || replace_deep.isErr()) {
-            return errorJson(500, "Failed to construct reload arguments");
+        json results = json::array();
+        for (const auto& path : paths) {
+            auto refreshed = refreshCachedCopy(loader.value(), path);
+            if (refreshed.isErr()) return errorJson(500, refreshed.error().message);
+            results.push_back(std::move(refreshed.value()));
         }
-        auto cached_value = callObject(loader.value(), "ResourceLoader", "has_cached", 2323990056LL,
-                                       {&path_value.value()});
-        if (cached_value.isErr()) return errorJson(500, cached_value.error().message);
-        auto cached = scalarFromVariant<GDExtensionBool>(cached_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
-        if (cached.isErr()) return errorJson(500, cached.error().message);
-        if (!cached.value()) return liveResult({{"path", path}, {"cached", false}, {"reloaded", false}});
-        auto reloaded = callObject(loader.value(), "ResourceLoader", "load", 3358495409LL,
-                                   {&path_value.value(), &hint.value(), &replace_deep.value()});
-        auto object = reloaded.isOk() ? objectFromVariant(reloaded.value())
-                                      : Result<GDExtensionObjectPtr>(reloaded.error());
-        return liveResult({{"path", path}, {"cached", true},
-                           {"reloaded", object.isOk() && object.value() != nullptr}});
+        return batch ? liveResult({{"results", std::move(results)}}) : liveResult(results[0]);
     }
     if (method == "asset.readImportedStream") {
         // What asset_configure_import checks a value against and reads back

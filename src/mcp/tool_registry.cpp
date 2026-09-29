@@ -260,7 +260,7 @@ std::optional<Error> refuseUnusableSignalArguments(const ResolvedToolBinding& bi
 
 CallToolResult handleScriptCheckSyntax(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleProjectVerifyChanges(const json& args);
-CallToolResult handleProjectApplyChanges(const json& args);
+CallToolResult handleProjectApplyChanges(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleScriptReflectClass(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleScriptGetSymbols(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleScriptPatchMethod(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
@@ -3548,7 +3548,7 @@ void ToolRegistry::registerAllDefaultTools() {
             }},
             {"required", {"script_path", "source_text"}}
         };
-        create.handler = [this](const json& args) { return handleScriptCreate(args, m_ipcClient); };
+        create.handler = [this](const json& args) { return handleScriptCreate(args, m_sourceIpcClient); };
         registerTool(std::move(create));
     }
     {
@@ -3569,12 +3569,12 @@ void ToolRegistry::registerAllDefaultTools() {
             }},
             {"required", {"file_path", "method_name", "new_definition"}}
         };
-        t.handler = [this](const json& args) { return handleScriptPatchMethod(args, m_ipcClient); };
+        t.handler = [this](const json& args) { return handleScriptPatchMethod(args, m_sourceIpcClient); };
         registerTool(t);
 
         // Alias
         t.name = "patch_script_symbols";
-        t.handler = [this](const json& args) { return handleScriptPatchMethod(args, m_ipcClient); };
+        t.handler = [this](const json& args) { return handleScriptPatchMethod(args, m_sourceIpcClient); };
         registerTool(t);
     }
 
@@ -3664,12 +3664,12 @@ void ToolRegistry::registerAllDefaultTools() {
             }},
             {"required", {"target_resource_path"}}
         };
-        t.handler = [this](const json& args) { return handleCreateVisualTestLab(args, m_ipcClient); };
+        t.handler = [this](const json& args) { return handleCreateVisualTestLab(args, m_sourceIpcClient); };
         registerTool(t);
 
         // Alias
         t.name = "create_visual_test_lab";
-        t.handler = [this](const json& args) { return handleCreateVisualTestLab(args, m_ipcClient); };
+        t.handler = [this](const json& args) { return handleCreateVisualTestLab(args, m_sourceIpcClient); };
         registerTool(t);
     }
     {
@@ -3847,7 +3847,7 @@ void ToolRegistry::registerAllDefaultTools() {
             {"required", json::array({"changes"})},
             {"additionalProperties", false}
         };
-        t.handler = [](const json& args) { return handleProjectApplyChanges(args); };
+        t.handler = [this](const json& args) { return handleProjectApplyChanges(args, m_sourceIpcClient); };
         registerTool(std::move(t));
     }
     {
@@ -4617,7 +4617,7 @@ void ToolRegistry::registerAllDefaultTools() {
             {"required", json::array({"target", "new_name"})},
             {"additionalProperties", false}
         };
-        t.handler = [this](const json& args) { return handleProjectRenameReferences(args, m_ipcClient); };
+        t.handler = [this](const json& args) { return handleProjectRenameReferences(args, m_sourceIpcClient); };
         registerTool(std::move(t));
     }
     {
@@ -5209,7 +5209,7 @@ void ToolRegistry::registerAllDefaultTools() {
             {"overwrite", {{"type", "boolean"}, {"default", false}}},
             {"timeout_seconds", {{"type", "integer"}, {"minimum", 1}, {"maximum", 300}, {"default", 60}}}
         }}, {"required", {"source_scene", "output_path"}}};
-        t.handler = [this](const json& args) { return handleGridmapExportMeshLibrary(args, m_ipcClient); };
+        t.handler = [this](const json& args) { return handleGridmapExportMeshLibrary(args, m_sourceIpcClient); };
         registerTool(std::move(t));
     }
     {

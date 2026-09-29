@@ -1,5 +1,6 @@
 #include "didi/mcp/mcp_protocol.hpp"
 #include "didi/tools/visual_test_lab_path.hpp"
+#include "didi/tools/editor_copy_refresh.hpp"
 #include "didi/common/atomic_write.hpp"
 #include "didi/common/project_path.hpp"
 #include "didi/tools/phase7_live_forward.hpp"
@@ -305,7 +306,6 @@ CallToolResult handleViewportSetCameraTransform(const ResolvedToolBinding& bindi
 }
 
 CallToolResult handleCreateVisualTestLab(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
-    (void)ipc;
     std::string target_path = args.value("target_resource_path", "");
     std::string env = args.value("environment", "studio_neutral");
     bool ortho = args.value("orthographic", false);
@@ -409,6 +409,7 @@ CallToolResult handleCreateVisualTestLab(const json& args, std::shared_ptr<ipc::
         // is being steered onto the deprecated surface (#408).
         {"message", "Created sandbox scene at " + lab_scene_path + ". Open Godot Editor to view live or run `runtime_launch`."}
     };
+    reportEditorCopy(res, refreshEditorCopies(ipc, {lab_scene_path}));
     return CallToolResult::successJson(res);
 }
 

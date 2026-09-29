@@ -533,6 +533,8 @@ Writes a new GDScript file under the project root and runs the same diagnostics 
 
 `status` is `created_offline` or `replaced_offline`. Diagnostics are computed against the file after it is written, so they include the Godot compiler check when a Godot binary is discoverable.
 
+With an editor attached, the editor's copy of the script is reloaded after the write, so a node already using it runs the new code. The answer says `editor_copy_reloaded: true`; `false` means the editor held no copy, or held one that did not compile after the write, and then `editor_copy_error` says so. The field is absent when no editor answered. The script is reloaded the way Godot's Script editor reloads one that changed on disk, because a `CACHE_MODE_REPLACE` load leaves a script's code as it was (#1047).
+
 `script_path` in the result is the resolved path in the spelling every reader uses, not the argument: `res://d1/../reported.gd` is reported as `res://reported.gd`. When a file is already there it is reported in its on-disk case, so on a case-insensitive filesystem a call naming `res://PLAYER.gd` reports `res://player.gd`, which is the file `overwrite` replaces. The confirmation preview's `before.path` and the 409 conflict name the same file the same way.
 
 ### `script_patch_method` — Offline
@@ -547,6 +549,8 @@ Rewrites a matching GDScript symbol in a project-root-confined file, then runs t
 - Legacy alias: `patch_script_symbols`.
 
 The call holds the script's lock under `.didi/locks` from its read of the file to its write, so two servers patching one script take turns and both methods land. A call held off for five seconds is refused `409` with `data.code: "project_file_busy"` and `retryable: true`, and the file is not touched. The diagnostics run after the lock is released.
+
+With an editor attached, its copy of the script is reloaded after the write, as `script_create` does, and the answer carries `editor_copy_reloaded` and, when the reload failed, `editor_copy_error`.
 
 The replacement is read before it is spliced. A `new_definition` that declares nothing, declares a different name, or declares a different kind of symbol is refused with a 400 and no write, because the old behaviour was to splice it anyway: a mistyped name deleted the target and still reported the method patched.
 
@@ -670,6 +674,8 @@ The lab lives at the project root, not under `addons/didi`, so `project_audit_as
 - Legacy alias: `create_visual_test_lab`.
 
 The confirmation preview is about `res://didi_test_lab.tscn`, the one file this call replaces, and not about `target_resource_path`, which it reads and leaves alone. It reports `preview_kind: "target_state"` with the file's size and content digest, and `target_checked_on_confirm: true`, so a token approved against one lab scene is refused if that file changes inside the window.
+
+With an editor attached, its copy of the lab scene is reloaded after the write, and `editor_copy_reloaded` says whether it held one.
 
 ### `viewport_set_camera_transform` — Live (editor only)
 
@@ -911,7 +917,7 @@ Didi does not instantiate the requested Resource class in Godot. It does check t
 
 `save_path` must end in `.tres`. The body is Godot text-resource markup and nothing else, so any other target is refused rather than written; use `script_create` for a `.gd` file. A `.res` is refused with the `.tres` spelling in `retry_with`: `.res` is Godot's binary format, the loader reads it as binary whatever it holds, and text written into one does not load. It used to be accepted, and every such file put an "Unrecognized binary resource file" error in the editor's log on every start.
 
-With an editor attached, an overwrite also reloads the editor's copy of the file. The editor keeps every resource it has loaded and does not re-read a file that changed underneath it, not even on `editor_reload_project`, so a live reader went on answering from the old copy. The copy is reloaded in place from the new file, which is what the editor does itself when it notices a change, and the answer says `editor_copy_reloaded: true`; `false` means the editor had no copy to refresh, and the field is absent when no editor answered.
+With an editor attached, an overwrite also reloads the editor's copy of the file. The editor keeps every resource it has loaded and does not re-read a file that changed underneath it, not even on `editor_reload_project`, so a live reader went on answering from the old copy. The copy is reloaded in place from the new file, which is what the editor does itself when it notices a change, and the answer says `editor_copy_reloaded: true`; `false` means the editor had no copy to refresh, or could not reload the one it had, and then `editor_copy_error` says why. The field is absent when no editor answered.
 
 - `resource_type` (`string`, default `"StandardMaterial3D"`).
 - `save_path` (`string`, required).
@@ -991,6 +997,8 @@ A failure of the check itself, as opposed to a proposal that did not hold up, an
 
 Every file is staged before any is replaced, so the write cannot stop half applied because the last file was the one that could not be written. If a replacement still fails, the error names `committed_files` and `unchanged_files` rather than reporting a failure that sounds total. `applied_files` lists what reached the working tree.
 
+With an editor attached, its copy of each written file is reloaded, and `editor_copies_reloaded` names the files it held. A file it held and could not reload is listed in `editor_copy_errors` with the reason.
+
 Always requires a confirmation token. It writes a set of files at once, there is no editor undo stack behind a file on disk, and unlike the writers that take one path it can replace several existing files in one call. Save or close open scenes first, since an editor holding unsaved changes will write over them.
 
 ### `project_analyze_impact` — Offline
@@ -1042,6 +1050,8 @@ Rewritten: the `signal` and `method` attributes of a `[connection]`, and the pro
 An `autoload` is the same file `project_analyze_impact` reads for the same target, so the two tools report the same sites. That key is what defines the global every script in the project can name, so renaming the symbol and leaving it gives those scripts a name that no longer exists -- edit `project.godot` along with the code references. It is reported rather than rewritten because an autoload key and a symbol that shares its spelling can be different things, and rewriting the definition of a global on a whole-word match is the silent breakage the `code_reference` rule exists to prevent. It is listed first, so `max_impacts` reaches a use of the name before it reaches the definition, and the `limitations` sentence about it is added only when the project has one.
 
 Every file is staged before any is replaced, so the change cannot stop half applied because the last file was the one that could not be written. If a replacement still fails, the error names `committed_files` and `unchanged_files` rather than reporting a failure that sounds total.
+
+With an editor attached, its copy of each rewritten file is reloaded, and `editor_copies_reloaded` names the files it held. A file it held and could not reload is listed in `editor_copy_errors` with the reason.
 
 Refused: a `new_name` a connection or track already uses, because that merges two symbols with no way back; a target and `new_name` that are the same; and any run against a truncated project scan, because renaming the files that were read and leaving the rest is the breakage this exists to prevent. A scan is truncated either because the project holds more resources than the indexer will list or because a file was over the scan's size bounds; the refusal says which, and carries `skipped_files`. Always requires a confirmation token. The dry run returns the plan: `before` carries `updated_files` with a `changed_lines` count per file, `updated_file_count`, `changed_lines`, `code_reference_count`, and `code_references_not_updated` itself -- every site the rename will leave behind, the declaration among them -- so what is confirmed is the work rather than the two identifiers that were typed. The preview and the confirm return the same list for the same arguments. The confirmation is bound to that plan, so a project that changes in between is refused rather than rewritten against a plan nobody saw. `project_analyze_impact` on the same target lists every individual site. Save or close open scenes first, since an editor holding unsaved changes will write over the files.
 
@@ -1819,6 +1829,9 @@ Requires an existing `.tscn` `source_scene` and a normalized `.meshlib` `output_
 
 
 The confirmation preview describes `output_path`, which is the file the call writes and `overwrite` destroys, with its size and content digest when it is already there; `source_scene` appears beside it as context. A `source_scene` that does not exist is still refused at the preview. When the conversion fails, the reason is an envelope with `engine_output` under `error.data` rather than a message that ends in a colon with nothing after it.
+
+With an editor attached, its copy of `output_path` is reloaded after the export, and `editor_copy_reloaded` says whether it held one.
+
 ### `ui_list_controls` — Live (editor or game)
 
 Lists the Control nodes under a root, with where each one is and what it says.
