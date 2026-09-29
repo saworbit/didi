@@ -834,7 +834,8 @@ Result<RenamePlan> planRename(const std::string& root_dir, const ProjectRenameOp
         bool collisions_truncated = false;
         return Error(409, "new_name is already used by a scene connection or an animation track, "
                           "so renaming onto it would merge two different symbols",
-                     {{"conflicts", impactsToJson(collisions, options.max_impacts,
+                     {{"field", "new_name"},
+                      {"conflicts", impactsToJson(collisions, options.max_impacts,
                                                   collisions_truncated)}});
     }
 
@@ -940,8 +941,10 @@ Result<RenamePlan> planRename(const std::string& root_dir, const ProjectRenameOp
             "a [connection], and the property segment of a NodePath in an animation track.",
             "A reference built at runtime cannot be followed, so an empty report is not proof "
             "that nothing else names the symbol.",
-            "Save or close the scenes in an open editor first. This writes the files on disk, "
-            "and an editor holding unsaved changes will write over them."
+            "A scene this rewrites that is open in the attached editor is reloaded from the "
+            "new file, and one whose tab may hold unsaved changes stops the call before "
+            "anything is written. An editor Didi is not attached to keeps its old copy, and "
+            "its next save writes that back, so close the scenes there first."
         })}
     };
 
@@ -984,6 +987,12 @@ Result<json> renameReferences(const std::string& root_dir, const ProjectRenameOp
     if (plan.isErr()) return plan.error();
     auto result = std::move(plan.value().report);
     const auto planned = std::move(plan.value().planned);
+    if (options.before_write) {
+        std::vector<std::string> rewritten;
+        rewritten.reserve(planned.size());
+        for (const auto& file : planned) rewritten.push_back(file.path);
+        if (auto refused = options.before_write(rewritten)) return *refused;
+    }
 
     // Everything that can fail on the way to disk fails here, before any
     // destination is replaced. What is left after this loop is the renames, so a

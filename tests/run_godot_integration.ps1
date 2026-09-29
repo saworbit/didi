@@ -172,6 +172,7 @@ if (-not $fixtureRoot.StartsWith($buildRoot + [IO.Path]::DirectorySeparatorChar,
 . (Join-Path $PSScriptRoot 'bounded_reads.ps1')
 . (Join-Path $PSScriptRoot 'refusal_remedies.ps1')
 . (Join-Path $PSScriptRoot 'follow_ups.ps1')
+. (Join-Path $PSScriptRoot 'scene_tab_reload.ps1')
 Remove-TestDirectory -Path $fixtureRoot
 # Only what the fixture tracks. The Python suites run the server against
 # tests/godot_smoke and leave runtime state in its .didi/, which a whole copy
@@ -3359,6 +3360,8 @@ try {
     $libraryAfter = & $copyHeld 2733
     Assert-True ($libraryAfter.shape_entries -gt 0) "After gridmap_export_mesh_library, the editor's copy of the library still had no collision shapes: $($libraryAfter | ConvertTo-Json -Compress)"
     Assert-True (-not $copyById[2735].result.isError) "main.tscn did not reopen after the editor copy block: $($copyById[2735].result.content[0].text)"
+
+    Invoke-SceneTabReloadBlock -EditorSession $editorSession -FixtureRoot $fixtureRoot -DirtyStateReadable $dirtyStateReadable
 
     $previousGodotBin = $env:GODOT_BIN
     try {

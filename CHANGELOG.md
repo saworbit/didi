@@ -367,6 +367,14 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **A write to a scene open in the editor no longer comes undone on the next
+  save (#1068).** `project_rename_references` and `project_apply_changes`
+  reloaded only the editor's cached copies, and an open tab is not one, so
+  `editor_save_scene` wrote the old scene back over the file. The tab is now
+  rebuilt from the new file and named in `editor_scenes_reloaded`. A tab with
+  unsaved changes, or any open tab before Godot 4.7, stops the call before it
+  writes, unless `discard_unsaved: true` is passed. The rename's refusal of a
+  `new_name` already in use now names `new_name` as the field to change.
 - **Removing and moving a node answer with what the tree now holds (#1019, in
   part).** `scene_remove_node` and `scene_reparent_node` answered `action`
   alone, with nothing read after the commit, and the reparented node's new path

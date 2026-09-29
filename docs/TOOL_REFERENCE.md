@@ -679,7 +679,7 @@ The lab lives at the project root, not under `addons/didi`, so `project_audit_as
 
 The confirmation preview is about `res://didi_test_lab.tscn`, the one file this call replaces, and not about `target_resource_path`, which it reads and leaves alone. It reports `preview_kind: "target_state"` with the file's size and content digest, and `target_checked_on_confirm: true`, so a token approved against one lab scene is refused if that file changes inside the window.
 
-With an editor attached, its copy of the lab scene is reloaded after the write, and `editor_copy_reloaded` says whether it held one.
+With an editor attached, its copy of the lab scene is reloaded after the write, and `editor_copy_reloaded` says whether it held one. A tab that has the lab open is rebuilt from the new file whatever it holds, since `overwrite: true` already accepted replacing it, and `editor_scene_reloaded: true` says so.
 
 ### `viewport_set_camera_transform` — Live (editor only)
 
@@ -992,6 +992,7 @@ Checks a proposal in an isolated copy and, only if it passes, writes it into the
 
 - `changes` (`array`, required): the same shape `project_verify_changes` takes.
 - `run_scene` (`string`, optional), `run_frames` (`integer`, default 120), `timeout_seconds` (`integer`, default 120): the same arguments, doing the same thing, before the decision to write.
+- `discard_unsaved` (`boolean`, default `false`): lets a scene open in the editor be reloaded from the new file when its tab has unsaved changes, or before Godot 4.7, which cannot report them. Those changes are lost.
 
 The verification runs here rather than being taken on trust from an earlier call. A caller that verified a minute ago is describing a project that may have moved since, and the point of this tool is that what reaches the working tree is the thing that was just proved.
 
@@ -1001,9 +1002,11 @@ A failure of the check itself, as opposed to a proposal that did not hold up, an
 
 Every file is staged before any is replaced, so the write cannot stop half applied because the last file was the one that could not be written. If a replacement still fails, the error names `committed_files` and `unchanged_files` rather than reporting a failure that sounds total. `applied_files` lists what reached the working tree.
 
-With an editor attached, its copy of each written file is reloaded, and `editor_copies_reloaded` names the files it held. A file it held and could not reload is listed in `editor_copy_errors` with the reason.
+With an editor attached, its copy of each written file is reloaded, and `editor_copies_reloaded` names the files it held. A scene open in one of its tabs is rebuilt from the new file, and `editor_scenes_reloaded` names it; without that, the next `editor_save_scene` wrote the old scene back over the file (#1068). A file it held and could not reload, a tab among them, is listed in `editor_copy_errors` with the reason.
 
-Always requires a confirmation token. It writes a set of files at once, there is no editor undo stack behind a file on disk, and unlike the writers that take one path it can replace several existing files in one call. Save or close open scenes first, since an editor holding unsaved changes will write over them.
+Rebuilding a tab drops its unsaved changes, so a scene the proposal writes that is open with unsaved changes stops the call before the check runs and before anything is written: `409 unsaved_changes`, naming it in `open_scenes`. Before Godot 4.7 the engine cannot say whether a tab has any, so every open one stops it, as `409 dirty_state_unavailable`. Save the scene first if it has changes to keep, then pass `discard_unsaved: true`, which both refusals carry in `retry_with`. An editor Didi is not attached to is not asked, and keeps its old copy.
+
+Always requires a confirmation token. It writes a set of files at once, there is no editor undo stack behind a file on disk, and unlike the writers that take one path it can replace several existing files in one call. The preview makes the same open-tab check, so it refuses what the call would.
 
 ### `project_analyze_impact` — Offline
 
@@ -1048,6 +1051,7 @@ Renames a symbol in the places Godot serializes it, across every file at once, a
 - `target` (`string`, required): the identifier to rename. A `res://` path or a node path is a different operation and is refused.
 - `new_name` (`string`, required): the identifier to rename it to.
 - `max_impacts` (`integer`, default `500`): caps the reported code references.
+- `discard_unsaved` (`boolean`, default `false`): lets a scene open in the editor be reloaded from the rewritten file when its tab has unsaved changes, or before Godot 4.7, which cannot report them. Those changes are lost.
 
 Rewritten: the `signal` and `method` attributes of a `[connection]`, and the property segment of a `NodePath` in an animation track. Not rewritten: node paths in `from` and `to`, node names, the `[autoload]` key in `project.godot`, and anything in GDScript or C#. Everything not rewritten is reported in `code_references_not_updated` with a file, a line and a `kind`, capped at `max_impacts` with `code_references_truncated` saying when the cap bit. A `code_reference` is GDScript or C#, and is reported rather than rewritten because the language is dynamically typed, so a whole-word match may be this symbol or an unrelated local that shares the name; `script_patch_method` is the tool for those. A `resource_reference` is a scene or resource line, which `script_patch_method` cannot touch, so read the kind before acting on the list.
 
@@ -1055,9 +1059,9 @@ An `autoload` is the same file `project_analyze_impact` reads for the same targe
 
 Every file is staged before any is replaced, so the change cannot stop half applied because the last file was the one that could not be written. If a replacement still fails, the error names `committed_files` and `unchanged_files` rather than reporting a failure that sounds total.
 
-With an editor attached, its copy of each rewritten file is reloaded, and `editor_copies_reloaded` names the files it held. A file it held and could not reload is listed in `editor_copy_errors` with the reason.
+With an editor attached, its copy of each rewritten file is reloaded, and `editor_copies_reloaded` names the files it held. A scene open in one of its tabs is rebuilt from the rewritten file, and `editor_scenes_reloaded` names it; without that, the next `editor_save_scene` wrote the old connection back over the file (#1068). A file it held and could not reload, a tab among them, is listed in `editor_copy_errors` with the reason.
 
-Refused: a `new_name` a connection or track already uses, because that merges two symbols with no way back; a target and `new_name` that are the same; and any run against a truncated project scan, because renaming the files that were read and leaving the rest is the breakage this exists to prevent. A scan is truncated either because the project holds more resources than the indexer will list or because a file was over the scan's size bounds; the refusal says which, and carries `skipped_files`. Always requires a confirmation token. The dry run returns the plan: `before` carries `updated_files` with a `changed_lines` count per file, `updated_file_count`, `changed_lines`, `code_reference_count`, and `code_references_not_updated` itself -- every site the rename will leave behind, the declaration among them -- so what is confirmed is the work rather than the two identifiers that were typed. The preview and the confirm return the same list for the same arguments. The confirmation is bound to that plan, so a project that changes in between is refused rather than rewritten against a plan nobody saw. `project_analyze_impact` on the same target lists every individual site. Save or close open scenes first, since an editor holding unsaved changes will write over the files.
+Refused: a `new_name` a connection or track already uses, because that merges two symbols with no way back; a target and `new_name` that are the same; and any run against a truncated project scan, because renaming the files that were read and leaving the rest is the breakage this exists to prevent. A scan is truncated either because the project holds more resources than the indexer will list or because a file was over the scan's size bounds; the refusal says which, and carries `skipped_files`. Always requires a confirmation token. The dry run returns the plan: `before` carries `updated_files` with a `changed_lines` count per file, `updated_file_count`, `changed_lines`, `code_reference_count`, and `code_references_not_updated` itself -- every site the rename will leave behind, the declaration among them -- so what is confirmed is the work rather than the two identifiers that were typed. The preview and the confirm return the same list for the same arguments. The confirmation is bound to that plan, so a project that changes in between is refused rather than rewritten against a plan nobody saw. `project_analyze_impact` on the same target lists every individual site. Also refused, by the preview as well as the call and before anything is written: a rewritten scene open in the editor with unsaved changes, `409 unsaved_changes`, or before Godot 4.7, which cannot report them, any open one, `409 dirty_state_unavailable`. Both name the scenes in `open_scenes` and carry `discard_unsaved: true` in `retry_with`; save the scene first if it has changes to keep. An editor Didi is not attached to is not asked, so close the scenes there first.
 
 ### `project_audit_assets` — Live or offline
 

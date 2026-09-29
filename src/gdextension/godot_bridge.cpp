@@ -3693,6 +3693,148 @@ json unsavedScenesReport(GDExtensionObjectPtr editor) {
     return report;
 }
 
+// The res:// path of every scene open in an editor tab. The list has one entry
+// per tab, so the same bound as the unsaved list applies.
+// EditorInterface.get_open_scenes is 1139954409 on 4.5.1, 4.6.2 and 4.7.2.
+Result<std::vector<std::string>> openScenePaths(GDExtensionObjectPtr editor) {
+    auto listed = callObject(editor, "EditorInterface", "get_open_scenes", 1139954409LL);
+    if (listed.isErr()) return listed.error();
+    auto size = callVariant(listed.value(), "size");
+    if (size.isErr()) return size.error();
+    auto count = scalarFromVariant<int64_t>(size.value(), GDEXTENSION_VARIANT_TYPE_INT);
+    if (count.isErr()) return count.error();
+    constexpr int64_t kMaxOpenScenesRead = 1024;
+    if (count.value() > kMaxOpenScenesRead) {
+        return Error(409, "The editor has more scenes open than Didi will read (" +
+                              std::to_string(count.value()) + ")");
+    }
+    std::vector<std::string> paths;
+    for (int64_t index = 0; index < count.value(); ++index) {
+        auto index_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
+        if (index_value.isErr()) return index_value.error();
+        auto entry = callVariant(listed.value(), "get", {&index_value.value()});
+        if (entry.isErr()) return entry.error();
+        auto path = stringFromVariant(entry.value(),
+                                      GodotApi::instance().variant_get_type(entry.value().ptr()));
+        if (path.isErr()) return path.error();
+        paths.push_back(path.value());
+    }
+    return paths;
+}
+
+// The instance id of the root of the tab that holds path, or 0 when no tab
+// does. EditorInterface.get_open_scene_roots is 3995934104 on all three lines.
+Result<uint64_t> openSceneRootId(GDExtensionObjectPtr editor, const std::string& path) {
+    auto roots = callObject(editor, "EditorInterface", "get_open_scene_roots", 3995934104LL);
+    if (roots.isErr()) return roots.error();
+    auto size = callVariant(roots.value(), "size");
+    if (size.isErr()) return size.error();
+    auto count = scalarFromVariant<int64_t>(size.value(), GDEXTENSION_VARIANT_TYPE_INT);
+    if (count.isErr()) return count.error();
+    for (int64_t index = 0; index < count.value(); ++index) {
+        auto index_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
+        if (index_value.isErr()) return index_value.error();
+        auto entry = callVariant(roots.value(), "get", {&index_value.value()});
+        if (entry.isErr()) return entry.error();
+        auto root = objectFromVariant(entry.value());
+        if (root.isErr()) return root.error();
+        if (!root.value()) continue;
+        auto root_path = nodeString(root.value(), "get_scene_file_path", 201670096LL);
+        if (root_path.isErr()) return root_path.error();
+        if (root_path.value() == path) {
+            return static_cast<uint64_t>(GodotApi::instance().object_get_instance_id(root.value()));
+        }
+    }
+    return uint64_t{0};
+}
+
+// Brings the editor tab that holds a rewritten scene in line with the file.
+//
+// An open tab is a node tree the editor built from the file, not a cached
+// PackedScene, so a cache refresh never reaches it, and the next save wrote
+// the tree from before the write back over the file (#1068).
+// EditorInterface.reload_scene_from_path rebuilds the tab from disk: measured
+// on 4.5.1, 4.6.2 and 4.7.2, it returns with a new root holding the new
+// contents, keeps whichever tab was current, and drops the tab's unsaved
+// changes and its undo history. That last part is why a tab that has unsaved
+// changes, or on 4.5 and 4.6 one that cannot be shown not to, is reloaded
+// only when the caller said to discard them.
+//
+// Two more facts decide how it is called. On 4.5 and 4.6 a second reload in
+// the same frame does nothing and says nothing, because the editor is still
+// switching scenes from the first, so one tab is reloaded per request and the
+// rest are answered pending; the server asks again. And on those lines a
+// reload of a path no tab holds clears the current scene's undo history, so it
+// is only ever asked for a path get_open_scenes lists. Whether it took is read
+// from the root: a reload that happened replaced it.
+void reloadOpenSceneTab(GDExtensionObjectPtr editor, const std::string& path,
+                        bool discard_unsaved, const json& unsaved, bool& reloaded_one,
+                        json& result) {
+    result["scene_open"] = true;
+    result["scene_reloaded"] = false;
+    const auto stale =
+        " It still holds the scene from before the write, and saving it would put that back "
+        "over the file. Close it with scene_close and discard_unsaved: true to keep the file "
+        "as written.";
+    if (!discard_unsaved) {
+        if (!unsaved.value("unsaved_scenes_readable", false)) {
+            result["scene_reload_error"] =
+                std::string("The scene is open in the editor, and Godot before 4.7 cannot say "
+                            "whether its tab has unsaved changes, so the tab was not reloaded.") +
+                stale;
+            return;
+        }
+        for (const auto& entry : unsaved["unsaved_scenes"]) {
+            if (entry.is_string() && entry.get<std::string>() == path) {
+                result["scene_reload_error"] =
+                    std::string("The scene is open in the editor with unsaved changes, so its "
+                                "tab was not reloaded.") +
+                    stale;
+                return;
+            }
+        }
+    }
+    if (reloaded_one) {
+        result["scene_reload_pending"] = true;
+        return;
+    }
+    auto before = openSceneRootId(editor, path);
+    if (before.isErr()) {
+        result["scene_reload_error"] = "The editor's tab could not be read: " + before.error().message;
+        return;
+    }
+    auto path_value = makeString(path);
+    if (path_value.isErr()) {
+        result["scene_reload_error"] = "Failed to construct the reload argument";
+        return;
+    }
+    auto reloaded = callObject(editor, "EditorInterface", "reload_scene_from_path", 83702148LL,
+                               {&path_value.value()});
+    if (reloaded.isErr()) {
+        result["scene_reload_error"] = "The editor did not reload the tab: " + reloaded.error().message;
+        return;
+    }
+    auto after = openSceneRootId(editor, path);
+    if (after.isErr()) {
+        result["scene_reload_error"] = "The editor's tab could not be read after the reload: " +
+                                       after.error().message;
+        return;
+    }
+    if (after.value() == 0) {
+        result["scene_reload_error"] =
+            "The editor could not load the rewritten file, so it closed the scene's tab.";
+        return;
+    }
+    if (after.value() == before.value()) {
+        // The editor was still switching scenes, from this request or an
+        // earlier one, and the call did nothing. Nothing was lost; ask again.
+        result["scene_reload_pending"] = true;
+        return;
+    }
+    reloaded_one = true;
+    result["scene_reloaded"] = true;
+}
+
 } // namespace
 
 // The admission rule the property tools apply, reading the JSON alone. It is
@@ -8828,6 +8970,24 @@ json GodotBridge::execute(const std::string& method, const json& params,
         }
         return liveResult({{"reload_requested", true}});
     }
+    if (method == "editor.openScenes") {
+        // Asked before a writer replaces scene files, so a scene open in a tab
+        // that may hold unsaved changes stops the write before anything on disk
+        // changes (#1068). The unsaved list is the same report editor.getState
+        // carries, null with readable false before 4.7.
+        if (session_kind != "editor") return bridgeError(409, "session_kind_rejected");
+        if (!hasOnlyKeys(params, {})) return errorJson(400, "editor.openScenes takes no parameters");
+        if (requireMethodBind("EditorInterface", "get_open_scenes", 1139954409LL).isErr()) {
+            return bridgeError(501, "required_bind_unavailable");
+        }
+        auto editor = editorInterface();
+        if (editor.isErr()) return errorJson(editor.error().code, editor.error().message);
+        auto open = openScenePaths(editor.value());
+        if (open.isErr()) return errorJson(open.error().code, open.error().message);
+        json answer = {{"open_scenes", open.value()}};
+        answer.update(unsavedScenesReport(editor.value()));
+        return liveResult(answer);
+    }
     if (method == "resource.refreshCached") {
         // Asked after the server has written a file. The editor keeps what it
         // has loaded and does not re-read a file that changed underneath it, so
@@ -8835,7 +8995,15 @@ json GodotBridge::execute(const std::string& method, const json& params,
         // reloads it. One path, or up to 256 in `paths` for a writer that
         // changed several files. ResourceLoader.has_cached is 2323990056 on
         // 4.5.1, 4.6.2 and 4.7.2.
+        //
+        // A path open in a tab also has its tab reloaded, which
+        // reloadOpenSceneTab describes. discard_unsaved says the caller accepts
+        // losing a tab's unsaved changes to it.
         if (session_kind != "editor") return bridgeError(409, "session_kind_rejected");
+        if (params.contains("discard_unsaved") && !params["discard_unsaved"].is_boolean()) {
+            return errorJson(400, "discard_unsaved must be a boolean");
+        }
+        const bool discard_unsaved = params.value("discard_unsaved", false);
         std::vector<std::string> paths;
         const bool batch = params.contains("paths");
         if (batch) {
@@ -8860,17 +9028,31 @@ json GodotBridge::execute(const std::string& method, const json& params,
                                  std::make_tuple("Object", "is_class", 3927539163LL),
                                  std::make_tuple("Script", "get_source_code", 201670096LL),
                                  std::make_tuple("Script", "set_source_code", 83702148LL),
-                                 std::make_tuple("Script", "reload", 1633102583LL)}) {
+                                 std::make_tuple("Script", "reload", 1633102583LL),
+                                 std::make_tuple("EditorInterface", "get_open_scenes", 1139954409LL),
+                                 std::make_tuple("EditorInterface", "get_open_scene_roots", 3995934104LL),
+                                 std::make_tuple("EditorInterface", "reload_scene_from_path", 83702148LL)}) {
             if (requireMethodBind(std::get<0>(bind), std::get<1>(bind), std::get<2>(bind)).isErr()) {
                 return bridgeError(501, "required_bind_unavailable");
             }
         }
         auto loader = singleton("ResourceLoader");
         if (loader.isErr()) return errorJson(loader.error().code, loader.error().message);
+        auto editor = editorInterface();
+        if (editor.isErr()) return errorJson(editor.error().code, editor.error().message);
+        auto open = openScenePaths(editor.value());
+        if (open.isErr()) return errorJson(open.error().code, open.error().message);
+        const std::set<std::string> open_scenes(open.value().begin(), open.value().end());
+        const json unsaved = open_scenes.empty() ? json::object() : unsavedScenesReport(editor.value());
+        bool reloaded_one = false;
         json results = json::array();
         for (const auto& path : paths) {
             auto refreshed = refreshCachedCopy(loader.value(), path);
             if (refreshed.isErr()) return errorJson(500, refreshed.error().message);
+            if (open_scenes.count(path)) {
+                reloadOpenSceneTab(editor.value(), path, discard_unsaved, unsaved, reloaded_one,
+                                   refreshed.value());
+            }
             results.push_back(std::move(refreshed.value()));
         }
         return batch ? liveResult({{"results", std::move(results)}}) : liveResult(results[0]);

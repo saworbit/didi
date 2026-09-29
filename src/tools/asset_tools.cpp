@@ -1534,6 +1534,18 @@ CallToolResult handleProjectRenameReferences(const json& args, std::shared_ptr<i
         }
         options.max_impacts = static_cast<size_t>(value.get<int64_t>());
     }
+    if (args.contains("discard_unsaved") && !args["discard_unsaved"].is_boolean()) {
+        return CallToolResult::errorJson(
+            400, "Invalid rename request: discard_unsaved must be a boolean");
+    }
+    const bool discard_unsaved = args.value("discard_unsaved", false);
+    // A scene open in the editor is reloaded from the rewritten file after
+    // the write, or the next save puts the old tree back over it. A tab that
+    // may hold unsaved changes stops the call here instead, before anything
+    // is written, unless the caller said to discard them (#1068).
+    options.before_write = [&](const std::vector<std::string>& rewritten) {
+        return refuseUnsavedOpenScenes(ipc, rewritten, discard_unsaved);
+    };
 
     auto report = offline::renameReferences(".", options);
     if (report.isErr()) {
@@ -1550,8 +1562,19 @@ CallToolResult handleProjectRenameReferences(const json& args, std::shared_ptr<i
             rewritten.push_back(file["path"].get<std::string>());
         }
     }
-    reportEditorCopies(payload, refreshEditorCopies(ipc, rewritten));
+    reportEditorCopies(payload, refreshEditorCopies(ipc, rewritten, discard_unsaved));
     return CallToolResult::successJson(std::move(payload));
+}
+
+static std::vector<std::string> proposalResourcePaths(const offline::SpeculativeVerifyRequest& request) {
+    // Spelled as the editor spells the file, the way the refresh after the
+    // write asks. A file not there yet cannot be open.
+    std::vector<std::string> paths;
+    for (const auto& change : request.changes) {
+        auto resolved = paths::resolveProjectFile(change.path);
+        if (resolved.isOk()) paths.push_back(paths::resourcePathOf(resolved.value()));
+    }
+    return paths;
 }
 
 CallToolResult handleProjectVerifyChanges(const json& args) {
@@ -1567,9 +1590,29 @@ CallToolResult handleProjectVerifyChanges(const json& args) {
 }
 
 CallToolResult handleProjectApplyChanges(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
-    auto parsed = offline::parseSpeculativeVerifyRequest(args);
+    // discard_unsaved is this tool's alone; the proposal is the shape
+    // project_verify_changes takes, and its parser refuses anything else.
+    json proposal = args;
+    bool discard_unsaved = false;
+    if (proposal.is_object() && proposal.contains("discard_unsaved")) {
+        if (!proposal["discard_unsaved"].is_boolean()) {
+            return CallToolResult::errorJson(
+                400, "Invalid apply request: discard_unsaved must be a boolean");
+        }
+        discard_unsaved = proposal["discard_unsaved"].get<bool>();
+        proposal.erase("discard_unsaved");
+    }
+    auto parsed = offline::parseSpeculativeVerifyRequest(proposal);
     if (parsed.isErr()) {
         return CallToolResult::fromError(parsed.error(), "Invalid apply request: ");
+    }
+    // Before the verification run, which can take minutes, and so before
+    // anything is written: a scene open in the editor that may hold unsaved
+    // changes stops the call, because its tab is reloaded from the new file
+    // after the write (#1068).
+    if (auto refused = refuseUnsavedOpenScenes(ipc, proposalResourcePaths(parsed.value()),
+                                               discard_unsaved)) {
+        return CallToolResult::fromError(*refused);
     }
     auto applied = offline::applyVerifiedChanges(parsed.value());
     if (applied.isErr()) {
@@ -1590,7 +1633,7 @@ CallToolResult handleProjectApplyChanges(const json& args, std::shared_ptr<ipc::
             auto resolved = paths::resolveProjectFile(path);
             if (resolved.isOk()) written.push_back(paths::resourcePathOf(resolved.value()));
         }
-        reportEditorCopies(payload, refreshEditorCopies(ipc, written));
+        reportEditorCopies(payload, refreshEditorCopies(ipc, written, discard_unsaved));
         return CallToolResult::successJson(std::move(payload));
     }
     // A proposal the check rejected writes nothing, which is what the tool
