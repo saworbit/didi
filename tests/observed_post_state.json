@@ -248,12 +248,16 @@
       "witness": "Node.is_in_group through observed_witness.gd"
     },
     "scene_remove_node": {
-      "exempt": "Answers action remove_node and reads nothing after the commit, so nothing in the answer says the node left the tree.",
-      "issue": 1019
+      "observed": [
+        "exists"
+      ],
+      "witness": "the edited scene's tree through observed_witness.gd"
     },
     "scene_reparent_node": {
-      "exempt": "Answers action reparent_node and reads nothing after the commit; the node's new path is not in the answer.",
-      "issue": 1019
+      "observed": [
+        "node_path"
+      ],
+      "witness": "the edited scene's tree through observed_witness.gd"
     },
     "scene_set_property": {
       "observed": [

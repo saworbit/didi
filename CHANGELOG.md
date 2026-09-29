@@ -367,6 +367,12 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **Removing and moving a node answer with what the tree now holds (#1019, in
+  part).** `scene_remove_node` and `scene_reparent_node` answered `action`
+  alone, with nothing read after the commit, and the reparented node's new path
+  was not in the answer. A remove now answers `exists: false` once the path no
+  longer resolves, and a reparent answers `node_path`, read from the node where
+  it now is. Either refuses a change the tree does not reflect.
 - **Group edits answer with the membership they left (#1019, in part).**
   `scene_add_to_group` and `scene_remove_from_group` answered `added` and
   `removed` as constants, having read membership only before the write. Both

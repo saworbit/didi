@@ -13990,7 +13990,15 @@ json GodotBridge::execute(const std::string& method, const json& params,
             }
             auto committed = commitAction(manager.value());
             if (committed.isErr()) return errorJson(committed.error().code, committed.error().message);
-            return liveSceneMutation({{"status", "success"}, {"action", "remove_node"}, {"undo_redo_registered", true}});
+            // Read after the commit: the path the call named no longer
+            // resolves. The answer used to be `action` alone, with nothing read
+            // after the change (#1019).
+            const std::string target = params.value("target_node", "");
+            if (resolveNode(root.value(), target).isOk()) {
+                return errorJson(500, "The remove was committed and " + target + " still resolves");
+            }
+            return liveSceneMutation({{"status", "success"}, {"action", "remove_node"}, {"exists", false},
+                                      {"undo_redo_registered", true}});
         }
 
         if (method == "scene.reparentNode") {
@@ -14041,7 +14049,21 @@ json GodotBridge::execute(const std::string& method, const json& params,
             }
             auto committed = commitAction(manager.value());
             if (committed.isErr()) return errorJson(committed.error().code, committed.error().message);
-            return liveSceneMutation({{"status", "success"}, {"action", "reparent_node"}, {"undo_redo_registered", true}});
+            // Where the node is now, read from the node after the commit. The
+            // answer used to be `action` alone, so the caller had to guess the
+            // new path to reach the node again (#1019).
+            auto moved_parent_value = callObject(node.value(), "Node", "get_parent", 3160264692LL);
+            auto moved_parent = moved_parent_value.isOk() ? objectFromVariant(moved_parent_value.value())
+                                                          : Result<GDExtensionObjectPtr>(moved_parent_value.error());
+            if (moved_parent.isErr() || moved_parent.value() != new_parent.value()) {
+                const std::string wanted_parent = params.value("new_parent_path", std::string());
+                return errorJson(500, "The reparent was committed and the node is not under " +
+                                          wanted_parent + " afterwards");
+            }
+            auto moved_path = logicalPathFromEditedRoot(root.value(), node.value());
+            if (moved_path.isErr()) return errorJson(moved_path.error().code, moved_path.error().message);
+            return liveSceneMutation({{"status", "success"}, {"action", "reparent_node"},
+                                      {"node_path", moved_path.value()}, {"undo_redo_registered", true}});
         }
 
         auto flags = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(15));

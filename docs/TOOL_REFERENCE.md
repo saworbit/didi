@@ -198,6 +198,8 @@ Detaches a node through UndoRedo while retaining its lifetime for undo/redo. Und
 
 - `target_node` (`string`, required).
 
+The answer carries `exists: false`, read after the commit: the path it named no longer resolves. A remove the tree does not reflect is refused rather than reported (#1019).
+
 Refused with `409` before anything is touched, on the real call and on the dry run, for a node the file cannot lose: `data.code: "node_not_owned"` for a node inside an instanced sub-scene the edited scene has not marked editable, naming `owner_scene` and `instance_root`, and `data.code: "node_inherited"` for a node the scene inherits, naming `base_scene`. A `.tscn` has no deletion marker, so the live removal was reported as success and dropped by the save; the editor refuses both in the same place.
 
 ### `scene_reparent_node` — Live
@@ -207,6 +209,8 @@ Calls Godot's `Node.reparent` through UndoRedo.
 - `target_node` (`string`, required).
 - `new_parent_path` (`string`, required).
 - `keep_global_transform` (`boolean`, default `true`).
+
+The answer carries `node_path`, the node's path read from it after the commit, which is the path to reach it by from now on. A reparent that did not leave the node under `new_parent_path` is refused rather than reported (#1019).
 
 The `node_not_owned` and `node_inherited` refusals of `scene_remove_node` apply to `target_node`, and `new_parent_path` is refused with `node_not_owned` when it lies inside an instance that is not editable, because a node placed there is dropped on save.
 
