@@ -367,6 +367,14 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **A command no longer runs inside the editor's own scan work (#995, part
+  one).** Applying a scan updates script classes and their documentation under
+  the editor's progress dialog, which runs the main loop on every step, and a
+  command queued for Didi was taken there. One that registered a uid or
+  reimported a new file ran the same update again inside it: the engine printed
+  "Task 'update_script_paths_documentation' already exists" and the file was
+  not reimported. Commands now wait while the progress dialog has a task open,
+  as they already did during an import pass.
 - **Six file writers no longer leave an attached editor holding the old copy
   (#1047).** `script_create`, `script_patch_method`, `project_apply_changes`,
   `project_rename_references`, `gridmap_export_mesh_library` and

@@ -206,6 +206,10 @@ private:
     // Whether this frame is inside an import pass, the editor's or Didi's own.
     // See ImportPassObservation.
     bool editorImportPassOpen();
+    // Whether the editor's modal progress dialog has a task open. The dialog
+    // pumps the main loop on every step, so this frame is then inside that
+    // work, whoever started it (#995).
+    bool editorProgressTaskOpen();
     // Runs a scene_call_method, and parks it when the method is a coroutine.
     // Returns false when the request is not one of these, so the caller runs
     // the ordinary synchronous path.
@@ -362,6 +366,8 @@ private:
     bool m_pumping{false};
     // Test seam for editorImportPassOpen, which otherwise asks the engine.
     std::optional<bool> m_importPassOverride;
+    // Test seam for editorProgressTaskOpen, which otherwise asks the engine.
+    std::optional<bool> m_progressTaskOverride;
     std::optional<int64_t> m_pendingQuitExitCode;
     int m_pendingQuitFrames{0};
 
@@ -386,6 +392,7 @@ public:
     static bool pumping(const EditorHook& hook);
     static void setPumping(EditorHook& hook, bool pumping);
     static void setImportPassOpen(EditorHook& hook, std::optional<bool> open);
+    static void setProgressTaskOpen(EditorHook& hook, std::optional<bool> open);
     static bool hasPendingQuit(const EditorHook& hook);
 };
 

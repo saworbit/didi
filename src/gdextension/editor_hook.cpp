@@ -162,7 +162,17 @@ void EditorHook::processQueue() {
     // the editor's, which opened a second "reimport" progress task and left the
     // engine printing three errors, so a frame inside any import pass is
     // treated as a nested one.
-    if (m_pumping || editorImportPassOpen()) {
+    //
+    // So is a frame inside the editor's modal progress dialog (#995). Applying
+    // a scan updates script classes and then their documentation, each under
+    // an EditorProgress once more than one script is queued, and the dialog
+    // pumps the main loop on every step. A command dequeued there that calls
+    // EditorFileSystem.update_file -- a reimport of a file with no sidecar, or
+    // any write that registers its uid -- ran the same update again inside the
+    // one in progress: "Task 'update_script_paths_documentation' already
+    // exists", and the file was not reimported. Didi's own scans already wait
+    // for their apply (#994); this holds commands through the editor's own.
+    if (m_pumping || editorImportPassOpen() || editorProgressTaskOpen()) {
         processRuntimeStepFrame();
         processAssetReimportFrame();
         processProfilerFrame();
@@ -1204,6 +1214,14 @@ bool EditorHook::editorImportPassOpen() {
     return importPassOpen(GodotBridge::instance().observeEditorImportPass());
 }
 
+bool EditorHook::editorProgressTaskOpen() {
+    if (m_progressTaskOverride.has_value()) return *m_progressTaskOverride;
+    // A game has no editor progress dialog, and looking for one there would
+    // report it missing.
+    if (m_sessionKind != runtime::SessionKind::editor) return false;
+    return GodotBridge::instance().editorProgressOpen();
+}
+
 void EditorHook::processAssetReimportFrame() {
     std::optional<PendingAssetReimport> completed;
     json response;
@@ -1944,6 +1962,10 @@ void EditorHookTestAccess::setPumping(EditorHook& hook, bool pumping) {
 
 void EditorHookTestAccess::setImportPassOpen(EditorHook& hook, std::optional<bool> open) {
     hook.m_importPassOverride = open;
+}
+
+void EditorHookTestAccess::setProgressTaskOpen(EditorHook& hook, std::optional<bool> open) {
+    hook.m_progressTaskOverride = open;
 }
 
 bool EditorHookTestAccess::hasPendingQuit(const EditorHook& hook) {
