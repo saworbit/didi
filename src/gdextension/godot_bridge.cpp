@@ -12358,8 +12358,22 @@ json GodotBridge::execute(const std::string& method, const json& params,
         if (apply.isErr() || revert.isErr()) return errorJson(500, "Failed to register group UndoRedo transaction");
         auto committed = commitAction(manager.value());
         if (committed.isErr()) return errorJson(committed.error().code, committed.error().message);
+        // Membership read again after the commit, and the answer built from
+        // it. added and removed were constants, and membership was read only
+        // before the write, so a commit the node did not take read as done
+        // (#1019).
+        auto after_value = callObject(node.value(), "Node", "is_in_group", 2619796661LL, {&group_name.value()});
+        if (after_value.isErr()) return errorJson(after_value.error().code, after_value.error().message);
+        auto in_group = scalarFromVariant<GDExtensionBool>(after_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+        if (in_group.isErr()) return errorJson(in_group.error().code, in_group.error().message);
+        if (static_cast<bool>(in_group.value()) != adding) {
+            return errorJson(500, std::string("The group change was committed and the node is ") +
+                                      (in_group.value() ? "still" : "not") + " in group " + group +
+                                      " afterwards");
+        }
         return liveSceneMutation({{"status", "success"}, {"target_node", params.value("target_node", "")},
-                                  {"group", group}, {"added", adding}, {"removed", !adding},
+                                  {"group", group}, {"in_group", static_cast<bool>(in_group.value())},
+                                  {"added", adding}, {"removed", !adding},
                                   {"undo_redo_registered", true}});
     }
 

@@ -252,6 +252,16 @@ function Get-ObservedPostStateCases {
            Agree = { param($s)
                Agree "uid" $s.call.uid $s.witness.returned.uid
                Agree "uid_registered" $s.call.uid_registered $s.witness.returned.uid_registered } },
+        # Membership read back after the commit, not the constant the answer
+        # used to carry (#1019).
+        @{ Tool = "scene_add_to_group"; Session = "editor"; Steps = @(
+            (Step "call" "scene_add_to_group" @{ target_node = "$observedRoot/Subject"; group = "observed_group" }),
+            (Witness "witness" "in_group" @("Subject", "observed_group")))
+           Agree = { param($s) Agree "in_group" $s.call.in_group $s.witness.returned } },
+        @{ Tool = "scene_remove_from_group"; Session = "editor"; Steps = @(
+            (Step "call" "scene_remove_from_group" @{ target_node = "$observedRoot/Subject"; group = "observed_group" }),
+            (Witness "witness" "in_group" @("Subject", "observed_group")))
+           Agree = { param($s) Agree "in_group" $s.call.in_group $s.witness.returned } },
         # Didi's own file, read back after the save and compared with the file
         # as Godot parses it (#1019). One board, in order: a write, a patch,
         # a task through its life, then the clear that leaves it empty.

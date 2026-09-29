@@ -367,6 +367,12 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **Group edits answer with the membership they left (#1019, in part).**
+  `scene_add_to_group` and `scene_remove_from_group` answered `added` and
+  `removed` as constants, having read membership only before the write. Both
+  now read it again after the commit, answer `in_group`, and refuse a change the
+  node does not reflect. The live harness compares `in_group` with the node's
+  own `is_in_group`.
 - **The local clang lane builds main again (#1026).** It used Ubuntu 24.04's
   default clang and libc++ 18, which has no floating-point `std::from_chars`,
   so `argument_normalization.cpp` did not compile there while the macOS
