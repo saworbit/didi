@@ -367,6 +367,13 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **A Godot that will not start reads as engine_unavailable, not a server fault
+  (#1045).** `shader_check_compile`, `project_export` and
+  `gridmap_export_mesh_library` answered a launch failure as `500
+  internal_error`, with no remedy. They now answer `503` with `data.code:
+  "engine_unavailable"`, `engine_executable` and `restart_with` naming
+  `GODOT_BIN`, as `script_check_syntax` does. Windows marks the failed launch
+  in the error's data; on POSIX it is the child's exit code 127.
 - **A command no longer runs inside the editor's own scan work (#995, part
   one).** Applying a scan updates script classes and their documentation under
   the editor's progress dialog, which runs the main loop on every step, and a

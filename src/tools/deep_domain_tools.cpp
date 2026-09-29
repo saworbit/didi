@@ -320,7 +320,30 @@ Result<offline::ProcessResult> runGodot(const std::filesystem::path& root,
     request.working_directory = root;
     request.timeout = std::chrono::seconds(timeout_seconds);
     request.max_output_bytes = kMaxProcessOutput;
-    return offline::runProcess(request);
+    auto run = offline::runProcess(request);
+    // An engine that could not be started is the engine this server was
+    // pointed at, not a fault in the server, and GODOT_BIN is what fixes it.
+    // It answered 500 internal_error with no remedy, where script_check_syntax
+    // says engine_unavailable (#1045). Windows fails the launch itself; POSIX
+    // forks, and the exec that fails in the child exits 127.
+    bool not_started = run.isErr() && run.error().data.is_object() &&
+                       run.error().data.value("stage", std::string()) == "launch";
+#if !defined(_WIN32)
+    not_started = not_started ||
+                  (run.isOk() && !run.value().timed_out && run.value().exit_code == 127);
+#endif
+    if (!not_started) return run;
+    json data = {{"code", "engine_unavailable"},
+                 {"engine_executable", request.executable},
+                 {"retryable", false}};
+    const auto configured = offline::resolveGodotExecutableDetailed();
+    versions::annotateConfiguredEngine(data, configured.configured, configured.configured_rejected);
+    const std::string cause =
+        run.isErr() ? run.error().message : std::string("the executable could not be run (exit 127)");
+    return Error(503,
+                 "Godot could not be started: " + cause + ". Engine tried: " + request.executable +
+                     ". Set GODOT_BIN to a Godot executable.",
+                 std::move(data));
 }
 
 // A helper Godot that ran out of time. More time can finish it, up to the
