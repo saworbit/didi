@@ -5859,9 +5859,20 @@ catch {
     }
 }
 finally {
-    Stop-RuntimeProcess $game $gameEnginePid $gameEngineStartedAtMs
-    Stop-RuntimeProcess $shutdownGame $shutdownGameEnginePid $shutdownGameEngineStartedAtMs
-    Stop-RuntimeProcess $godot $editorEnginePid $editorEngineStartedAtMs
+    # The process guard is an assertion, and a throw from here replaces the
+    # failure the catch rethrew, so a run reported the guard and not what
+    # stopped it (#1044). With a primary failure the refusal is a warning
+    # beside it, the way leftover descriptors are below; without one it
+    # still fails the run. The same processes are stopped either way.
+    try {
+        Stop-RuntimeProcess $game $gameEnginePid $gameEngineStartedAtMs
+        Stop-RuntimeProcess $shutdownGame $shutdownGameEnginePid $shutdownGameEngineStartedAtMs
+        Stop-RuntimeProcess $godot $editorEnginePid $editorEngineStartedAtMs
+    }
+    catch {
+        if (-not $primaryFailureMessage) { throw }
+        Write-Warning "$($_.Exception.Message) (preserving primary failure: $primaryFailureMessage)"
+    }
 
     # A forced exit cannot run the extension's normal descriptor destructor.
     # Remove only the descriptor whose filename and embedded process identity
