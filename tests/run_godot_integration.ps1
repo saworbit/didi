@@ -4796,6 +4796,13 @@ try {
     Assert-True ($refusal.error.data.script_path -eq "res://signal_uses_autoload.gd") "The refusal did not name the script."
     Assert-True (@($refusal.error.data.unresolved_autoloads) -contains "SignalProbeState") "The refusal did not name the autoload the script cannot resolve."
     Assert-True ($refusal.error.data.note -match "restart") "The refusal carries no note about the editor restart."
+    # A rescan does not register the singleton, which is what
+    # project_set_autoload says; the note used to offer one as the fix (#1002).
+    # Measured by calling it here on 4.5.1, 4.6.2 and 4.7.2. It is not kept as
+    # a live step, because a scan_sources in the middle of this run meets
+    # files other blocks wrote behind the editor and draws engine errors about
+    # them on 4.5 and 4.6.
+    Assert-True ($refusal.error.data.note -notmatch "or call editor_reload_project" -and $refusal.error.data.note -match "does not register") "The refusal still offers editor_reload_project as the fix: $($refusal.error.data.note)"
 
     # The other half has to keep working: a method that is genuinely not in the
     # file is still a plain not-found, not a compile story.
