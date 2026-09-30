@@ -74,6 +74,7 @@ a useful report contains.
 | 📋 [**Phase 7 Approved Executable Plan**](docs/PHASE_7_IMPLEMENTATION_PLAN.md) | **Developers / Governance** | Approved atomic 83/83 plan, stopped at its feasibility gate. |
 | 🛠️ [**Tool Reference Manual**](docs/TOOL_REFERENCE.md) | **Developers / LLMs** | Current behavior and limits for 120 canonical tools plus 10 legacy names. |
 | 🏛️ [**Architecture & System Topology**](docs/ARCHITECTURE.md) | **Engineers / Architects** | Deep-dive into C++20 design, dual execution topology, threading safety, and named-pipe IPC. |
+| 🔬 [**Token Efficiency Analysis**](docs/research/TOKEN_EFFICIENCY_EXPLORATION.md) | **Engineers / LLMs** | Token footprint, tool schemas, and response economy vs typical Godot MCP bridges. |
 | 📦 [**Dynamic Resources & Prompts**](docs/RESOURCES_AND_PROMPTS.md) | **Developers / LLMs** | Technical specs for `godot://...` resources and prompt workflows. |
 | 🔌 [**Integration Guide**](docs/INTEGRATION_GUIDE.md) | **Developers / Integrators** | Installing the addon into an existing project and wiring each supported assistant to it. |
 | 🛡️ [**Administrator & Operations Guide**](docs/ADMIN_GUIDE.md) | **DevOps / Admins** | Security DACL hardening, CI/CD headless execution, observability, and troubleshooting. |
