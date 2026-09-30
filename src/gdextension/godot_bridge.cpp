@@ -4074,6 +4074,31 @@ bool GodotBridge::editorProgressOpen() {
 // extension holds at least the file that declares it. The frames the editor
 // runs between the swap and the scenes opening are inside progress tasks.
 // get_filesystem is 842323275 and both counts 3905245786 on all three lines.
+void GodotBridge::reportEditedSceneSaved(json& result) {
+    auto editor = editorInterface();
+    if (editor.isErr()) return;
+    auto root = editedSceneRoot(editor.value());
+    if (root.isErr() || !root.value()) return;
+    const auto unsaved = unsavedScenesReport(editor.value());
+    if (!unsaved.value("unsaved_scenes_readable", false) || !unsaved["unsaved_scenes"].is_array()) {
+        const std::string limitation =
+            "Godot before 4.7 cannot say whether this left the edited scene with unsaved "
+            "changes. Save it with editor_save_scene if it should be on disk.";
+        const auto existing = result.find("limitation");
+        result["limitation"] = existing != result.end() && existing->is_string()
+                                   ? existing->get<std::string>() + " " + limitation
+                                   : limitation;
+        return;
+    }
+    // A scene never saved has no path, and nothing on disk to match.
+    const std::string path = editedScenePath(root.value());
+    bool saved = !path.empty();
+    for (const auto& entry : unsaved["unsaved_scenes"]) {
+        if (entry.is_string() && entry.get<std::string>() == path) saved = false;
+    }
+    result["scene_saved"] = saved;
+}
+
 bool GodotBridge::editorFirstScanApplied() {
     static bool applied = false;
     static bool unreadable_reported = false;
@@ -5021,11 +5046,15 @@ json GodotBridge::callScriptMethod(const json& params,
 
     auto value = variantToJson(returned.value(), 0, true);
     if (value.isErr()) return fail(value.error().code, value.error().message);
-    return json{{"status", "success"},
-                {"target_node", params["target_node"]},
-                {"method_name", method_name},
-                {"awaited", false},
-                {"returned", value.value()}};
+    // Project code, which can change the scene with or without an undo entry
+    // (#1049).
+    json called = {{"status", "success"},
+                   {"target_node", params["target_node"]},
+                   {"method_name", method_name},
+                   {"awaited", false},
+                   {"returned", value.value()}};
+    reportEditedSceneSaved(called);
+    return called;
 }
 
 Result<bool> GodotBridge::isEditorFilesystemScanning() {
@@ -11269,11 +11298,15 @@ json GodotBridge::execute(const std::string& method, const json& params,
                                {"rollback", "not_available"}});
         }
         if (emit_code.value() != 0) return bridgeError(500, "signal_emit_failed");
-        return liveResult({{"emitted", true},
-                           {"connection_count", connection_count},
-                           {"argument_count", emit_arguments.size()},
-                           {"outcome", "completed"},
-                           {"rollback", "not_available"}});
+        // The connections ran project code, which can change the scene with
+        // or without an undo entry (#1049).
+        json emitted_answer = {{"emitted", true},
+                               {"connection_count", connection_count},
+                               {"argument_count", emit_arguments.size()},
+                               {"outcome", "completed"},
+                               {"rollback", "not_available"}};
+        reportEditedSceneSaved(emitted_answer);
+        return liveResult(emitted_answer);
     }
 
     if (method == "project.resolveUids") {
@@ -14464,9 +14497,13 @@ json GodotBridge::execute(const std::string& method, const json& params,
                                  " while a mouse button is held down in the editor.",
                              {{"code", "editor_declined"}, {"retryable", true}});
         }
-        return liveResult({{"status", "success"},
-                           {"action", is_undo ? "undo" : "redo"},
-                           {"history", moved.value() == HistoryMoved::Scene ? "scene" : "global"}});
+        // A step can land on the saved version as well as move off it, so
+        // the answer reads which (#1049).
+        json stepped = {{"status", "success"},
+                        {"action", is_undo ? "undo" : "redo"},
+                        {"history", moved.value() == HistoryMoved::Scene ? "scene" : "global"}};
+        reportEditedSceneSaved(stepped);
+        return liveResult(stepped);
     }
 
     if (method == "editor.saveScene") {

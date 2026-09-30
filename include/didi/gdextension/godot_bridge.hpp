@@ -331,6 +331,10 @@ public:
     // when it opens the scenes it restores, or the project's main scene (#1069).
     // True once seen and from then on, and true when it cannot be read.
     bool editorFirstScanApplied();
+    // Sets scene_saved on the answer to a call that can leave the edited scene
+    // saved or not, an undo or redo, or project code the editor ran (#1049).
+    // Only Godot 4.7 can say; before it the answer says so in limitation.
+    void reportEditedSceneSaved(json& result);
     // A wait for scan work already under way, begun now. Empty when the
     // addon's watch is unavailable, which leaves nothing to wait on.
     std::optional<ScanSettle> beginScanSettle();

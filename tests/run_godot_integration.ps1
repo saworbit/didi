@@ -4525,6 +4525,19 @@ try {
         Assert-True (@($stateAfterUndo.unsaved_scenes) -contains "res://duplicate_probe.tscn") "A scene undone past its save read as saved: $($stateAfterUndo.unsaved_scenes | ConvertTo-Json -Compress)"
     }
     Assert-True (-not $byId[2505].result.isError) "The duplicate could not be redone."
+    # Whether a history step left the scene unsaved: off the saved version
+    # after the undo, back on it after the redo. Only 4.7 can say (#1049).
+    $undone = Tool-Payload $byId[2504]
+    $redone = Tool-Payload $byId[2505]
+    if ($dirtyStateReadable) {
+        Assert-True ($undone.scene_saved -eq $false -and @($undone.follow_up.work) -contains "save") "An undo past the save did not say the scene was left unsaved: $($undone | ConvertTo-Json -Depth 4 -Compress)"
+        Assert-True ($redone.scene_saved -eq $true -and $null -eq $redone.PSObject.Properties["follow_up"]) "A redo back onto the saved version did not say the scene was saved: $($redone | ConvertTo-Json -Depth 4 -Compress)"
+    }
+    else {
+        foreach ($stepped in $undone, $redone) {
+            Assert-True ($null -eq $stepped.PSObject.Properties["scene_saved"] -and [string]$stepped.limitation -match "before 4.7") "Before 4.7 a history step claimed a saved state it cannot read: $($stepped | ConvertTo-Json -Depth 4 -Compress)"
+        }
+    }
     Assert-True ((Tool-Payload $byId[2506]).status -eq "saved") "The redone duplicate could not be saved."
     # The answer is read in the console's code page, so the bytes are taken
     # back out of it and read as the UTF-8 Didi wrote. Compared by code point,

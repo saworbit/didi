@@ -367,6 +367,12 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **Undo, redo and project code say whether they left the scene unsaved
+  (#1049).** `editor_undo`, `editor_redo`, `scene_call_method` and a delivered
+  `signal_emit` said nothing about it, so no save step followed them. On Godot
+  4.7 they now carry `scene_saved`, and a save step when it is `false`. Before
+  4.7 a `limitation` says the engine cannot tell.
+
 - **A writer that rebuilds an open tab says whether the tab had unsaved
   changes (#1082).** `scene_create`, `scene_pack_branch` and
   `viewport_create_test_lab` with `overwrite: true` rebuild a tab whatever it
