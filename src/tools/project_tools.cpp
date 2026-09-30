@@ -458,6 +458,29 @@ CallToolResult handleProjectSetSetting(const json& args, std::shared_ptr<ipc::II
          "to have the name checked."}
     };
     if (report.existed) payload["previous_value"] = report.previous_literal;
+    // With an editor attached a string for an int, bool or array setting is
+    // refused as a type mismatch. Offline there is no engine to ask what the
+    // setting holds, and a String setting can hold "1152", so the text is
+    // written as sent. What it reads as is said, with the typed form to send
+    // instead: a stringified editor_plugins/enabled wrote a plugin list the
+    // editor never loads, and nothing in the answer said why (#1016).
+    if (!remove && args["value"].is_string()) {
+        const auto typed = json::parse(args["value"].get_ref<const std::string&>(), nullptr, false);
+        const char* reads_as = typed.is_boolean() ? "a boolean"
+                               : typed.is_number() ? "a number"
+                               : typed.is_array()  ? "an array"
+                               : typed.is_object() ? "an object"
+                                                   : nullptr;
+        if (reads_as != nullptr) {
+            payload["value_text_reads_as"] = typed;
+            payload["retry_with"] = {{"value", typed}};
+            payload["limitation"] =
+                payload["limitation"].get<std::string>() + " value arrived as text that reads as " +
+                reads_as + ", and it was written as a String, quotes included. If the setting "
+                "holds " + reads_as + ", send the value as that JSON type, not as text: "
+                "retry_with carries it.";
+        }
+    }
     return CallToolResult::successJson(std::move(payload));
 }
 
