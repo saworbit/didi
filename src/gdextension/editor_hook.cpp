@@ -1215,6 +1215,7 @@ void EditorHook::processScriptCallFrame() {
                     {"execution_mode", "live"},
                     {"is_live_engine", true},
                     {"session_kind", "editor"}};
+        GodotBridge::instance().reportEditedSceneSaved(response);
         DIDI_LOG_INFO("EDITOR_HOOK", "Coroutine ", ready->method_name, " completed");
     }
     ready->control->markCompleted();
