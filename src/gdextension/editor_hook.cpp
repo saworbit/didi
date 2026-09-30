@@ -1237,11 +1237,29 @@ bool EditorHook::editorProgressTaskOpen() {
     return GodotBridge::instance().editorProgressOpen();
 }
 
+// The first scan's sources_changed also starts the editor's script
+// documentation threads, and a scene opened in the next frames can crash the
+// editor: the thread that finishes the documentation joins the loader thread,
+// which a second regeneration on the main thread has already joined, and it
+// traps on a thread that is no longer started (#285, godotengine/godot#123273).
+// Released on the frame after the scan, scene_open met it on 4.6.2 runners in
+// two of five CI runs. The harness fixture's smoke plugin has waited out the
+// same moment with four seconds since #296, and so does this.
+constexpr auto kStartupSettle = std::chrono::seconds(4);
+
+bool startupStillSettling(std::optional<std::chrono::steady_clock::time_point>& settles_at,
+                          bool first_scan_applied, std::chrono::steady_clock::time_point now) {
+    if (!first_scan_applied) return true;
+    if (!settles_at.has_value()) settles_at = now + kStartupSettle;
+    return now < *settles_at;
+}
+
 bool EditorHook::editorStarting() {
     if (m_editorStartingOverride.has_value()) return *m_editorStartingOverride;
     // A game opens no editor scenes.
     if (m_sessionKind != runtime::SessionKind::editor) return false;
-    return !GodotBridge::instance().editorFirstScanApplied();
+    return startupStillSettling(m_startupSettlesAt, GodotBridge::instance().editorFirstScanApplied(),
+                                std::chrono::steady_clock::now());
 }
 
 void EditorHook::processAssetReimportFrame() {

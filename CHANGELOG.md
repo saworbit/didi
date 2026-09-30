@@ -367,6 +367,12 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **Opening a scene at editor startup no longer lands on the moment the editor
+  starts its documentation threads (#1069, #285).** The wait added for #1069
+  released the open on the frame after the first scan, which is when those
+  threads start, and a Godot bug there crashed the editor on CI's 4.6.2 runner.
+  The open now waits four seconds more, as the harness fixture has since #296.
+
 - **Undo, redo and project code say whether they left the scene unsaved
   (#1049).** `editor_undo`, `editor_redo`, `scene_call_method` and a delivered
   `signal_emit` said nothing about it, so no save step followed them. On Godot
