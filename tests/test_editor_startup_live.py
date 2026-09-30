@@ -140,9 +140,14 @@ class EditorStartupSceneLive(unittest.TestCase):
     def test_a_scene_opened_at_startup_stays_current(self):
         self._start_host()
         launcher_options = {'start_new_session': True} if os.name != 'nt' else {}
+        # The editor's output, with the extension's own INFO lines in it, is
+        # what a failure on a runner has to go on.
+        editor_env = dict(self.env, DIDI_LOG_LEVEL='INFO')
+        self.editor_output = open(self.root / 'editor.out', 'w')
+        self.addCleanup(self.editor_output.close)
         self.editor = subprocess.Popen([self.godot, '--editor', '--path', str(self.project)],
-                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                       env=self.env, **launcher_options)
+                                       stdout=self.editor_output, stderr=subprocess.STDOUT,
+                                       env=editor_env, **launcher_options)
         session = None
         deadline = time.monotonic() + 180
         while session is None and time.monotonic() < deadline:
@@ -165,7 +170,7 @@ class EditorStartupSceneLive(unittest.TestCase):
             if not errored or data.get('outcome') != 'not_started' or time.monotonic() > deadline:
                 break
             time.sleep(1)
-        self.assertFalse(errored, opened)
+        self.assertFalse(errored, f'{opened}\n{self._diagnostics()}')
         self.assertTrue(opened['opened'], opened)
 
         reads = []
@@ -173,7 +178,18 @@ class EditorStartupSceneLive(unittest.TestCase):
             time.sleep(1)
             errored, hierarchy = self.tool('scene_get_hierarchy', max_depth=1)
             reads.append(hierarchy if errored else hierarchy.get('scene_file_path'))
-        self.assertEqual(reads, ['res://tab.tscn'] * READS)
+        self.assertEqual(reads, ['res://tab.tscn'] * READS, self._diagnostics())
+
+    def _diagnostics(self):
+        try:
+            _, listed = self.tool('runtime_list_sessions')
+        except Exception as error:  # the server may be what failed
+            listed = repr(error)
+        try:
+            output = (self.root / 'editor.out').read_text(encoding='utf-8', errors='replace')[-6000:]
+        except OSError as error:
+            output = repr(error)
+        return f'sessions: {json.dumps(listed)[:2000]}\n--- editor output ---\n{output}'
 
 
 if __name__ == '__main__':
