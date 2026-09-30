@@ -130,6 +130,12 @@ class EngineIdentityTests(unittest.TestCase):
         environment.pop("GODOT_BIN", None)
         result = _call("runtime_launch", {"timeout_seconds": 5}, environment)
         body = json.loads(result["content"][0]["text"])
+        if result.get("isError"):
+            # A machine with no Godot: nothing ran, and the refusal names the
+            # engine it tried, as the other tools that start Godot do (#1076).
+            self.assertEqual(body["error"]["data"]["code"], "engine_unavailable", body)
+            self.assertTrue(body["error"]["data"]["engine_executable"], body)
+            return
         for field in ("engine_executable", "engine_version", "attached_engine_version",
                       "matches_attached_engine"):
             self.assertIn(field, body, body)
