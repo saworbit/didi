@@ -39,6 +39,7 @@ namespace didi::mcp {
 // launch, which the gate never reaches.
 CallToolResult handleGridmapExportMeshLibrary(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleProjectExport(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleCSharpCheckBuild(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 } // namespace didi::mcp
 
 namespace {
@@ -87,6 +88,49 @@ private:
 #else
         if (value.empty()) unsetenv("GODOT_BIN");
         else setenv("GODOT_BIN", value.c_str(), 1);
+#endif
+    }
+    std::string previous;
+};
+
+// DOTNET_BIN naming a script that answers --version with an SDK version after
+// about two seconds, and anything else at once, for as long as the test runs.
+class ScopedSlowDotnet {
+public:
+    ScopedSlowDotnet() {
+#if defined(_WIN32)
+        path = std::filesystem::current_path() / "slow_dotnet.cmd";
+        // ping, because timeout.exe refuses a standard input that is not a
+        // console, and the runner gives it NUL.
+        std::ofstream(path) << "@echo off\r\n"
+                               "if \"%~1\"==\"--version\" (\r\n"
+                               "  ping -n 3 127.0.0.1 >nul\r\n"
+                               "  echo 8.0.100\r\n"
+                               "  exit /b 0\r\n"
+                               ")\r\n"
+                               "echo Build succeeded.\r\n";
+#else
+        path = std::filesystem::current_path() / "slow_dotnet.sh";
+        std::ofstream(path) << "#!/bin/sh\n"
+                               "if [ \"$1\" = \"--version\" ]; then sleep 2; echo 8.0.100; exit 0; fi\n"
+                               "echo Build succeeded.\n";
+        std::filesystem::permissions(path, std::filesystem::perms::owner_all,
+                                     std::filesystem::perm_options::add);
+#endif
+        if (const char* value = std::getenv("DOTNET_BIN")) previous = value;
+        set(path.string());
+    }
+    ~ScopedSlowDotnet() { set(previous); }
+
+    std::filesystem::path path;
+
+private:
+    static void set(const std::string& value) {
+#if defined(_WIN32)
+        _putenv_s("DOTNET_BIN", value.c_str());
+#else
+        if (value.empty()) unsetenv("DOTNET_BIN");
+        else setenv("DOTNET_BIN", value.c_str(), 1);
 #endif
     }
     std::string previous;
@@ -774,6 +818,30 @@ TEST(Phase5, DiagnosticsRejectWrongResourceTypesBeforeProcessLaunch) {
     registry.registerAllDefaultTools();
     ASSERT_TRUE(registry.callTool("shader_check_compile", {{"shader_path", "res://not_shader.txt"}}).isError);
     ASSERT_TRUE(registry.callTool("csharp_check_build", {{"project_file", "res://not_csharp.txt"}}).isError);
+}
+
+TEST(Phase5, ASlowDotnetIsGivenTheCallsBudgetAndNotCalledMissing) {
+    // Break caught: the SDK probe had a fixed 30 seconds whatever
+    // timeout_seconds said, and a probe that ran out answered 503
+    // toolchain_unavailable, retryable: false, telling a caller who had asked
+    // for 300 seconds to install the SDK (#1078). The probe now runs under the
+    // call's budget, and running out of it is a retryable timeout.
+    ScopedPhase5Project project("slow-dotnet");
+    std::ofstream("Game.csproj") << "<Project Sdk=\"Microsoft.NET.Sdk\"></Project>\n";
+    ScopedSlowDotnet dotnet;
+    const auto slow = didi::mcp::handleCSharpCheckBuild({{"timeout_seconds", 1}}, nullptr);
+    ASSERT_TRUE(slow.isError);
+    const auto envelope = toolPayload(slow);
+    ASSERT_EQ(envelope["error"]["code"], 504);
+    ASSERT_EQ(envelope["error"]["data"]["code"], "timeout");
+    ASSERT_EQ(envelope["error"]["data"]["retryable"], true);
+    ASSERT_EQ(envelope["error"]["data"]["timeout_seconds"], 1);
+    ASSERT_TRUE(envelope["error"]["message"].get<std::string>().find("Install") == std::string::npos);
+
+    // Given the time, the same dotnet answers and the build runs.
+    const auto patient = didi::mcp::handleCSharpCheckBuild({{"timeout_seconds", 30}}, nullptr);
+    ASSERT_TRUE(!patient.isError);
+    ASSERT_EQ(toolPayload(patient)["dotnet_version"], "8.0.100");
 }
 
 TEST(Phase5, AnEngineThatWillNotStartIsEngineUnavailable) {

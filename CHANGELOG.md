@@ -367,6 +367,12 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **`csharp_check_build` no longer calls a slow .NET SDK missing (#1078).**
+  Its `dotnet --version` probe stopped at a fixed 30 seconds, whatever
+  `timeout_seconds` said, and then told the caller to install the SDK. The
+  probe now runs under the call's `timeout_seconds`, and running out of it is
+  `504 timeout`, retryable.
+
 - **`scene_create` over a scene open in another tab opens it on Godot 4.5 and
   4.6 (#1079, #1073).** It rebuilt the tab and then opened it in one request,
   and the editor ignores a scene change for the rest of that frame, so it
