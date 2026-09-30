@@ -367,6 +367,12 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **An empty answer object no longer agrees with the engine in the observed
+  post-state check (#1097).** An answer object may say less than the witness,
+  so one with no fields agreed with anything, and a read-back that returned
+  nothing could pass. It now agrees only with an empty witness, and the
+  harness checks that rule before it starts an engine.
+
 - **The harness recognizes the #285 engine crash on Godot 4.6.2 too (#1098).**
   Its crash classifier knew only the 4.7.2 stack, so the same documentation
   thread crash on 4.6.2 failed a run instead of being retried. The 4.6.2
