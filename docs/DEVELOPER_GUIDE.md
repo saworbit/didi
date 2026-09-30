@@ -279,6 +279,13 @@ python -m unittest discover -s tests -t tests -p "test_managed_recovery*.py"
 
 See [Managed Recovery verification](MANAGED_RECOVERY.md#verification) for the live and adversarial suite scope. These are opt-in engine tests; a skipped test is not live recovery evidence.
 
+`tests/test_editor_startup_live.py` launches a fresh editor on a project with a main scene, opens another scene as soon as the session is listed, and reads the edited scene for ten seconds (#1069). Set `DIDI_STARTUP_GODOT` to a Godot executable beside `DIDI_TEST_BINARY`; CI runs it on every engine line after the recovery suites. It retries an open the route deadline cut short, and it skips, rather than fails, only when the editor died on the documentation-thread crash #285 tracks. It keeps the editor's output and prints it on any other failure.
+
+```powershell
+$env:DIDI_STARTUP_GODOT = "C:/Godot/Godot_v4.6.2-stable_win64_console.exe"
+python -m unittest tests.test_editor_startup_live -v
+```
+
 The Windows live integration harness copies the tracked fixture into `build/` and starts real Godot processes. It preserves the Phase 1/2 sequence, adds Phase 3 concurrent editor/game routing, and now exercises Phase 4 bounded search, SVG reimport, reversible isolation, capture IDs, mutation diffs, exact undo restoration, and cleanup. The Phase 8 import block runs a menu scene whose music stops, as the control, then sets the loop options on an OGG and a WAV import with `asset_configure_import` after a dry run, checks seven refusals, and runs the scene again to see the music still playing. The earlier coverage still checks scripts, groups, autoloads, nested settings, InputEvent forms, persistence rollback, scene lifecycle, resource ownership, unsafe paths, and honest errors:
 
 ```powershell
