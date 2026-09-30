@@ -689,6 +689,27 @@ jobs:
           $env:PYTHONPATH = Join-Path $PWD 'tests'
           python -m unittest tests.test_managed_recovery_live tests.test_managed_recovery_adversarial -v
 
+      # An editor opens its startup scenes once its first scan is applied, and
+      # a scene opened before then was replaced (#1069). The integration
+      # harness cannot see it: its fixture plugin opens a scene of its own once
+      # startup is over, so this launches a fresh editor and opens one at once.
+      - name: Verify a scene opened at editor startup stays current
+        shell: pwsh
+        env:
+          GODOT_VERSION: ${{ matrix.godot-version }}
+        run: |
+          $godot = Get-ChildItem -Path godot-bin -Filter "Godot_v${env:GODOT_VERSION}-stable_win64_console.exe" |
+                   Select-Object -First 1
+          if (-not $godot) {
+            $godot = Get-ChildItem -Path godot-bin -Filter "Godot_v${env:GODOT_VERSION}-stable_win64*.exe" |
+                     Where-Object { $_.Name -notlike "*console*" } | Select-Object -First 1
+          }
+          if (-not $godot) { throw "Godot executable not found under godot-bin" }
+          $env:DIDI_TEST_BINARY = (Resolve-Path build/didi.exe).Path
+          $env:DIDI_STARTUP_GODOT = $godot.FullName
+          $env:PYTHONPATH = Join-Path $PWD 'tests'
+          python -m unittest tests.test_editor_startup_live -v
+
       # tests/contract_snapshots/live-<line>.json: the listings once an editor
       # on this line is attached, and the answers to the read-only calls in
       # calls.json against tests/contract_fixture (Q3). It runs whenever the

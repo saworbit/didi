@@ -194,10 +194,24 @@ void EditorHook::processQueue() {
         std::optional<json> session_rejection;
     };
     std::vector<QueuedCommand> commands;
+    // Asked before the queue is locked, because it asks the engine.
+    const bool starting = editorStarting();
     {
         std::lock_guard<std::mutex> lock(m_queueMutex);
         constexpr size_t kMaxCommandsPerFrame = 64;
         while (!m_commandQueue.empty() && commands.size() < kMaxCommandsPerFrame) {
+            // The editor opens its startup scenes once its first scan is
+            // applied, and makes one of them current. A scene opened or
+            // created before then answered opened: true and was replaced a
+            // moment later, so every scene call after it acted on another
+            // scene (#1069). Those two wait at the front of the queue, and
+            // what is behind them waits with them, so nothing overtakes
+            // them. The route deadline still applies, and a command that
+            // never started says so.
+            if (starting && (m_commandQueue.front().method == "scene.open" ||
+                             m_commandQueue.front().method == "scene.create")) {
+                break;
+            }
             auto session_rejection = validateSessionKindForMethod(
                 m_commandQueue.front().method, m_sessionKind);
             commands.push_back(
@@ -1222,6 +1236,13 @@ bool EditorHook::editorProgressTaskOpen() {
     return GodotBridge::instance().editorProgressOpen();
 }
 
+bool EditorHook::editorStarting() {
+    if (m_editorStartingOverride.has_value()) return *m_editorStartingOverride;
+    // A game opens no editor scenes.
+    if (m_sessionKind != runtime::SessionKind::editor) return false;
+    return !GodotBridge::instance().editorFirstScanApplied();
+}
+
 void EditorHook::processAssetReimportFrame() {
     std::optional<PendingAssetReimport> completed;
     json response;
@@ -1969,6 +1990,10 @@ void EditorHookTestAccess::setImportPassOpen(EditorHook& hook, std::optional<boo
 
 void EditorHookTestAccess::setProgressTaskOpen(EditorHook& hook, std::optional<bool> open) {
     hook.m_progressTaskOverride = open;
+}
+
+void EditorHookTestAccess::setEditorStarting(EditorHook& hook, std::optional<bool> starting) {
+    hook.m_editorStartingOverride = starting;
 }
 
 bool EditorHookTestAccess::hasPendingQuit(const EditorHook& hook) {

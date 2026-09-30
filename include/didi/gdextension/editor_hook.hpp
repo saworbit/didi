@@ -210,6 +210,10 @@ private:
     // pumps the main loop on every step, so this frame is then inside that
     // work, whoever started it (#995).
     bool editorProgressTaskOpen();
+    // Whether the editor has yet to open its startup scenes. It opens them
+    // once its first scan is applied and makes one current, so a scene opened
+    // before then is not the edited scene for long (#1069).
+    bool editorStarting();
     // Runs a scene_call_method, and parks it when the method is a coroutine.
     // Returns false when the request is not one of these, so the caller runs
     // the ordinary synchronous path.
@@ -368,6 +372,8 @@ private:
     std::optional<bool> m_importPassOverride;
     // Test seam for editorProgressTaskOpen, which otherwise asks the engine.
     std::optional<bool> m_progressTaskOverride;
+    // Test seam for editorStarting, which otherwise asks the engine.
+    std::optional<bool> m_editorStartingOverride;
     std::optional<int64_t> m_pendingQuitExitCode;
     int m_pendingQuitFrames{0};
 
@@ -393,6 +399,7 @@ public:
     static void setPumping(EditorHook& hook, bool pumping);
     static void setImportPassOpen(EditorHook& hook, std::optional<bool> open);
     static void setProgressTaskOpen(EditorHook& hook, std::optional<bool> open);
+    static void setEditorStarting(EditorHook& hook, std::optional<bool> starting);
     static bool hasPendingQuit(const EditorHook& hook);
 };
 
