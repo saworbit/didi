@@ -128,28 +128,38 @@
       "issue": 1020
     },
     "project_remove_autoload": {
-      "exempt": "removed is the request and persisted is the save's return code; project.godot is not read back.",
-      "issue": 1019
+      "observed": [
+        "autoload"
+      ],
+      "witness": "ConfigFile reads the autoload section of project.godot through observed_witness.gd"
     },
     "project_remove_input_action": {
-      "exempt": "deadzone and event_count are read before the removal, and nothing is read afterwards.",
-      "issue": 1019
+      "observed": [
+        "defined_by_project"
+      ],
+      "witness": "ConfigFile reads the input section of project.godot through observed_witness.gd"
     },
     "project_rename_references": {
       "exempt": "Nothing in the live harness drives it.",
       "issue": 1020
     },
     "project_set_autoload": {
-      "exempt": "name, path and singleton are the request and persisted is the save's return code; project.godot is not read back.",
-      "issue": 1019
+      "observed": [
+        "autoload"
+      ],
+      "witness": "ConfigFile reads the autoload section of project.godot through observed_witness.gd"
     },
     "project_set_input_action": {
-      "exempt": "deadzone and event_count are the request and persisted is the save's return code; the action is not read back.",
-      "issue": 1019
+      "observed": [
+        "defined_by_project"
+      ],
+      "witness": "ConfigFile reads the input section of project.godot through observed_witness.gd"
     },
     "project_set_setting": {
-      "exempt": "setting and removed are the request and persisted is the save's return code; the value written is never read back, live or offline (#1016).",
-      "issue": 1019
+      "observed": [
+        "value_written"
+      ],
+      "witness": "ConfigFile reads project.godot through observed_witness.gd, and var_to_str spells the value"
     },
     "resource_create": {
       "observed": [

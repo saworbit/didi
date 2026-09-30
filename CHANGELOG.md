@@ -377,6 +377,13 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **The project writers answer with what project.godot holds after the save
+  (#1019).** `project_set_setting` answers `value_written` read back from the
+  file, live and offline, and `null` when the file has no line for it. The
+  autoload writers answer `autoload`, the entry the file declares, and the
+  input action writers answer `defined_by_project`. Each has a live case that
+  reads the file with Godot's own ConfigFile and compares.
+
 - **resource_create answers with the file it wrote (#1019).** It reads the
   file back after the write and answers `file_bytes` and the `resource_type`
   its header declares. The live harness loads the file past the editor's cache

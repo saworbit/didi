@@ -11,6 +11,7 @@
 #include "didi/common/json_bounds.hpp"
 #include "didi/common/project_path.hpp"
 #include "didi/common/scene_node_path.hpp"
+#include "didi/offline/project_settings_file.hpp"
 #include "didi/runtime/input_injection.hpp"
 #include "didi/runtime/ghost_preview.hpp"
 #include "didi/runtime/spatial_queries.hpp"
@@ -8877,6 +8878,38 @@ ProjectInputActions projectFileInputActions() {
     return declared;
 }
 
+// What project.godot holds after a save, read back from the file. The three
+// project writers answered with the request and the save's return code, and
+// ProjectSettings holds whatever was set whether or not the save wrote it, so
+// nothing in the answer had been read after the write (#1019). The file is
+// what the next start loads, so it is the state to report.
+
+// The literal the file holds for one setting, or null when it has no line for
+// it: after a removal, or for a built-in set to its default, which Godot does
+// not write.
+Result<json> projectFileSettingLiteral(const std::string& setting) {
+    auto directory = projectDirectoryOnDisk();
+    if (directory.isErr()) return directory.error();
+    auto read = didi::offline::readProjectSetting(std::filesystem::path(directory.value()), setting);
+    if (read.isErr()) return read.error();
+    if (!read.value().existed) return json(nullptr);
+    return json(read.value().literal);
+}
+
+// The autoload the file declares under this name, or null when it declares none.
+Result<json> projectFileAutoload(const std::string& name) {
+    auto directory = projectDirectoryOnDisk();
+    if (directory.isErr()) return directory.error();
+    auto read = didi::offline::readProjectAutoloads(std::filesystem::path(directory.value()));
+    if (read.isErr()) return read.error();
+    for (const auto& autoload : read.value()) {
+        if (autoload.name != name) continue;
+        return json{{"name", autoload.name}, {"path", autoload.path},
+                    {"singleton", autoload.singleton}};
+    }
+    return json(nullptr);
+}
+
 Result<bool> projectFileDefinesInputAction(const std::string& action) {
     auto declared = projectFileInputActions();
     if (declared.failure) {
@@ -11603,8 +11636,16 @@ json GodotBridge::execute(const std::string& method, const json& params,
             }
             return errorJson(500, "ProjectSettings.save failed; mutation was rolled back (" + detail + ")");
         }
+        auto stored = projectFileSettingLiteral(setting);
+        if (stored.isErr()) {
+            return errorJson(500, "ProjectSettings.save reported success, and project.godot could not "
+                                  "be read back to confirm it: " + stored.error().message);
+        }
         json result = {{"status", "success"}, {"setting", setting}, {"persisted", true},
                        {"removed", remove},
+                       // What the file holds now, read back after the save
+                       // (#1019). Null when it has no line for the setting.
+                       {"value_written", stored.value()},
                        // Whether the engine knew this name before the write. A
                        // caller that passed create: true gets to see which of the
                        // two things it did.
@@ -11741,6 +11782,11 @@ json GodotBridge::execute(const std::string& method, const json& params,
             if (rollback.isErr()) return errorJson(500, "Autoload save failed and rollback failed: " + rollback.error().message);
             return errorJson(500, "ProjectSettings.save failed; autoload mutation was rolled back");
         }
+        auto stored = projectFileAutoload(autoload_name);
+        if (stored.isErr()) {
+            return errorJson(500, "ProjectSettings.save reported success, and project.godot could not "
+                                  "be read back to confirm it: " + stored.error().message);
+        }
         // Say what this did and did not do. Writing the setting is not the same
         // as the attached editor knowing about it: Godot registers an autoload's
         // global name through editor-internal paths a GDExtension cannot reach,
@@ -11750,6 +11796,9 @@ json GodotBridge::execute(const std::string& method, const json& params,
         // debugging their own scripts for a state this call had created.
         return liveResult({{"status", "success"}, {"name", autoload_name}, {"path", resource_path},
                            {"singleton", autoload_singleton}, {"removed", removing}, {"persisted", true},
+                           // The entry project.godot declares after the save,
+                           // or null once it declares none (#1019).
+                           {"autoload", stored.value()},
                            {"registered_in_attached_editor", false},
                            {"requires_editor_restart", true},
                            {"limitation",
@@ -11991,6 +12040,11 @@ json GodotBridge::execute(const std::string& method, const json& params,
             if (rollback.isErr()) return errorJson(500, "InputMap save failed and rollback failed: " + rollback.error().message);
             return errorJson(500, "ProjectSettings.save failed; InputMap mutation was rolled back");
         }
+        auto stored = projectFileDefinesInputAction(action);
+        if (stored.isErr()) {
+            return errorJson(500, "ProjectSettings.save reported success, and project.godot could not "
+                                  "be read back to confirm it: " + stored.error().message);
+        }
         if (removing) {
             // The remove path never filled these in, so it echoed the defaults
             // rather than what the action had. Read them off the value that was
@@ -12021,6 +12075,9 @@ json GodotBridge::execute(const std::string& method, const json& params,
         }
         json result = {{"status", "success"}, {"action", action}, {"deadzone", deadzone},
                        {"event_count", event_count}, {"removed", removing}, {"persisted", true},
+                       // Whether project.godot declares the action after the
+                       // save, read back from the file (#1019).
+                       {"defined_by_project", stored.value()},
                        // Kept for callers that read it, and false because the
                        // editor's InputMap is no longer reloaded (#925).
                        {"runtime_reloaded", false},

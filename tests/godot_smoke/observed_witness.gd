@@ -211,6 +211,41 @@ func file_length(path: String) -> int:
 	return file.get_length() if file != null else -1
 
 
+## What project.godot holds for one setting, read with ConfigFile rather than
+## ProjectSettings and written back out the way the file spells it. Null when
+## the file has no line for it.
+func project_setting_text(setting: String) -> Variant:
+	var config := ConfigFile.new()
+	if config.load("res://project.godot") != OK:
+		return "unreadable"
+	var slash := setting.find("/")
+	var section := setting.substr(0, slash)
+	var key := setting.substr(slash + 1)
+	if not config.has_section_key(section, key):
+		return null
+	return var_to_str(config.get_value(section, key))
+
+
+## The autoload project.godot declares under a name, in the shape Didi answers
+## with, or null when it declares none.
+func autoload_entry(autoload_name: String) -> Variant:
+	var config := ConfigFile.new()
+	if config.load("res://project.godot") != OK:
+		return "unreadable"
+	if not config.has_section_key("autoload", autoload_name):
+		return null
+	var text := String(config.get_value("autoload", autoload_name))
+	return {"name": autoload_name, "path": text.trim_prefix("*"), "singleton": text.begins_with("*")}
+
+
+## Whether project.godot declares an input action.
+func input_action_declared(action: String) -> Variant:
+	var config := ConfigFile.new()
+	if config.load("res://project.godot") != OK:
+		return "unreadable"
+	return config.has_section_key("input", action)
+
+
 ## Loads a file and keeps it, so the editor holds a copy of it the way it does
 ## of anything an open scene uses (#1047). The copy goes when this node does.
 func hold(path: String) -> bool:
