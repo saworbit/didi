@@ -4054,6 +4054,54 @@ bool GodotBridge::editorProgressOpen() {
     return flag.isOk() && flag.value() != 0;
 }
 
+// The editor opens the scenes it restores from its layout, and the project's
+// main scene on a first open, in its handler for the first scan's
+// sources_changed (EditorNode::_sources_changed while waiting_for_first_scan,
+// 4.5.1, 4.6.2 and 4.7.2). Nothing binds that flag. The file index says the
+// same thing: EditorFileSystem starts with an empty root and swaps the scanned
+// one in just before it emits sources_changed, and a project that loads this
+// extension holds at least the file that declares it. The frames the editor
+// runs between the swap and the scenes opening are inside progress tasks.
+// get_filesystem is 842323275 and both counts 3905245786 on all three lines.
+bool GodotBridge::editorFirstScanApplied() {
+    static bool applied = false;
+    static bool unreadable_reported = false;
+    if (applied) return true;
+    // Not known is not a reason to hold anything, so it answers true, and it
+    // is asked again on the next frame.
+    const auto unreadable = [] {
+        if (!unreadable_reported) {
+            unreadable_reported = true;
+            DIDI_LOG_WARN("GODOT_BRIDGE", "The editor's file index cannot be read, so scene_open "
+                          "and scene_create do not wait for the editor to open its startup scenes.");
+        }
+        return true;
+    };
+    auto editor = editorInterface();
+    if (editor.isErr()) return unreadable();
+    auto filesystem = callObject(editor.value(), "EditorInterface", "get_resource_filesystem", 780151678LL);
+    auto filesystem_object = filesystem.isOk() ? objectFromVariant(filesystem.value())
+                                               : Result<GDExtensionObjectPtr>(filesystem.error());
+    if (filesystem_object.isErr() || !filesystem_object.value()) return unreadable();
+    auto root = callObject(filesystem_object.value(), "EditorFileSystem", "get_filesystem", 842323275LL);
+    auto root_object = root.isOk() ? objectFromVariant(root.value())
+                                   : Result<GDExtensionObjectPtr>(root.error());
+    if (root_object.isErr()) return unreadable();
+    // No root at all is an editor taking its filesystem down, not one starting.
+    if (!root_object.value()) return true;
+    for (const char* count : {"get_subdir_count", "get_file_count"}) {
+        auto value = callObject(root_object.value(), "EditorFileSystemDirectory", count, 3905245786LL);
+        auto number = value.isOk() ? scalarFromVariant<int64_t>(value.value(), GDEXTENSION_VARIANT_TYPE_INT)
+                                   : Result<int64_t>(value.error());
+        if (number.isErr()) return unreadable();
+        if (number.value() > 0) {
+            applied = true;
+            return true;
+        }
+    }
+    return false;
+}
+
 bool GodotBridge::assetImportSettled(const std::string& resource_path) {
     const auto slash = resource_path.find_last_of('/');
     if (slash == std::string::npos || slash + 1 >= resource_path.size()) return true;

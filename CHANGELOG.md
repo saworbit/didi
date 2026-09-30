@@ -367,6 +367,11 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **A scene opened straight after an editor starts stays the edited scene
+  (#1069).** `scene_open` and `scene_create` now wait until the editor has
+  opened its startup scenes, which it does once its first scan is applied.
+  Before, the startup made the main scene current a moment after the answer.
+
 - **A pack over a scene open in another tab no longer comes undone on the next
   save (#1072).** `scene_pack_branch` with `overwrite: true` left that tab
   holding the old tree, and `editor_save_scene` wrote it back over the pack.

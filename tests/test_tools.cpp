@@ -6460,6 +6460,62 @@ static void test_nothing_is_dequeued_inside_an_editor_progress_task() {
     ASSERT_EQ(answer["error"]["data"]["code"], "session_kind_rejected");
 }
 
+static void test_a_scene_open_waits_for_the_editor_to_open_its_startup_scenes() {
+    // Break caught: the editor opens the scenes it restores, or the project's
+    // main scene, once its first scan is applied and makes one of them
+    // current, so a scene_open answered before then was replaced a moment
+    // later (#1069). Opening or creating a scene waits at the front of the
+    // queue until then, nothing queued behind it overtakes it, and any other
+    // command is not held.
+    using didi::godot::EditorHookTestAccess;
+    auto& hook = didi::godot::EditorHook::instance();
+    const auto ready = [](auto& ticket) {
+        return ticket.response.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
+    };
+    hook.cancelPendingCommands("test reset");
+    EditorHookTestAccess::setSessionKind(hook, didi::runtime::SessionKind::editor);
+    EditorHookTestAccess::setImportPassOpen(hook, false);
+    EditorHookTestAccess::setProgressTaskOpen(hook, false);
+    EditorHookTestAccess::setEditorStarting(hook, true);
+    // Game-only, so on an editor session it answers from the session policy
+    // and touches no engine.
+    auto other = EditorHookTestAccess::enqueue(hook, "runtime.injectInput");
+    hook.processQueue();
+    const bool other_answered = ready(other);
+    bool scene_calls_held = true;
+    bool scene_calls_released = true;
+    for (const char* method : {"scene.open", "scene.create"}) {
+        EditorHookTestAccess::setEditorStarting(hook, true);
+        auto scene_call = EditorHookTestAccess::enqueue(hook, method);
+        auto behind = EditorHookTestAccess::enqueue(hook, "runtime.injectInput");
+        hook.processQueue();
+        hook.processQueue();
+        scene_calls_held = scene_calls_held && EditorHookTestAccess::queueDepth(hook) == 2u &&
+                           !scene_call.control->hasEverStarted() && !ready(scene_call) &&
+                           !ready(behind);
+        // The route deadline passing while it waited, so that releasing it
+        // runs nothing in the engine.
+        scene_call.control->tryCancelPending();
+        EditorHookTestAccess::setEditorStarting(hook, false);
+        hook.processQueue();
+        const bool both = ready(scene_call) && ready(behind);
+        auto cancelled = both ? scene_call.response.get() : didi::json::object();
+        auto rejected = both ? behind.response.get() : didi::json::object();
+        scene_calls_released = scene_calls_released && both &&
+                               EditorHookTestAccess::queueDepth(hook) == 0u &&
+                               cancelled["error"]["data"]["code"] == "command_cancelled" &&
+                               rejected["error"]["data"]["code"] == "session_kind_rejected";
+    }
+    EditorHookTestAccess::setEditorStarting(hook, std::nullopt);
+    EditorHookTestAccess::setProgressTaskOpen(hook, std::nullopt);
+    EditorHookTestAccess::setImportPassOpen(hook, std::nullopt);
+    EditorHookTestAccess::setSessionKind(hook, std::nullopt);
+    hook.cancelPendingCommands("test reset");
+    ASSERT_TRUE(other_answered);
+    ASSERT_TRUE(scene_calls_held);
+    ASSERT_TRUE(scene_calls_released);
+}
+
 static void test_a_write_is_applied_when_every_member_landed() {
     // Break caught: a colour or vector write that landed correctly reports
     // applied: false, because the comparison was exact for composites (#618).
@@ -9738,6 +9794,8 @@ struct RegisterToolTests {
                      test_nothing_is_dequeued_inside_an_import_pass);
         registerTest("EditorHook.NothingIsDequeuedInsideAProgressTask",
                      test_nothing_is_dequeued_inside_an_editor_progress_task);
+        registerTest("EditorHook.SceneOpenWaitsForTheStartupScenes",
+                     test_a_scene_open_waits_for_the_editor_to_open_its_startup_scenes);
         registerTest("Tools.ShaderWriteAppliedComparesMembers",
                      test_a_write_is_applied_when_every_member_landed);
         registerTest("Tools.WriteThatDidNotLandSaysWhichOfTheTwo",

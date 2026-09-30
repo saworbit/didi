@@ -327,6 +327,10 @@ public:
     // reimport started in one collides with it. False when the editor's
     // ProgressDialog cannot be found, with one warning.
     bool editorProgressOpen();
+    // Whether the editor has applied its first scan of the project, which is
+    // when it opens the scenes it restores, or the project's main scene (#1069).
+    // True once seen and from then on, and true when it cannot be read.
+    bool editorFirstScanApplied();
     // A wait for scan work already under way, begun now. Empty when the
     // addon's watch is unavailable, which leaves nothing to wait on.
     std::optional<ScanSettle> beginScanSettle();
