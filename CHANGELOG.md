@@ -367,6 +367,16 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **A pack over a scene open in another tab no longer comes undone on the next
+  save (#1072).** `scene_pack_branch` with `overwrite: true` left that tab
+  holding the old tree, and `editor_save_scene` wrote it back over the pack.
+  The tab is now rebuilt from the packed file, and the answer carries
+  `editor_scene_reloaded`. `overwrite: true` is the consent to lose the tab's
+  unsaved changes. On Godot 4.5 and 4.6, rebuilding a tab left of the current
+  last tab also made it the edited scene, for this and the #1068 writers, so
+  later scene calls acted on the wrong scene. The scene you were editing is now
+  made current again. `scene_create` over a scene no tab holds no longer asks
+  the editor to reload it, which printed `Can't reload scene` on Godot 4.7.
 - **A write to a scene open in the editor no longer comes undone on the next
   save (#1068).** `project_rename_references` and `project_apply_changes`
   reloaded only the editor's cached copies, and an open tab is not one, so

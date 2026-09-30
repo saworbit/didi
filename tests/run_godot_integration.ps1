@@ -3362,6 +3362,7 @@ try {
     Assert-True (-not $copyById[2735].result.isError) "main.tscn did not reopen after the editor copy block: $($copyById[2735].result.content[0].text)"
 
     Invoke-SceneTabReloadBlock -EditorSession $editorSession -FixtureRoot $fixtureRoot -DirtyStateReadable $dirtyStateReadable
+    Invoke-PackBranchTabBlock -EditorSession $editorSession -FixtureRoot $fixtureRoot
 
     $previousGodotBin = $env:GODOT_BIN
     try {
@@ -5823,7 +5824,7 @@ text = "Not a key"
     # names the request that causes it on purpose; any other line fails the run.
     $allowedEngineLines = @(
         @{ Pattern = "Couldn't save project\.godot"; Cause = "requests 201, 203 and 205 deny the project file to prove rollback" },
-        @{ Pattern = 'Identifier "SignalProbeState" not declared|Failed to load script "res://signal_uses_autoload\.gd"'; Cause = "signal_uses_autoload.gd does not compile, on purpose, for target_script_not_compiled" },
+        @{ Pattern = 'Identifier "SignalProbeState" not declared|Failed to load script "res://signal_uses_autoload\.gd"|Failed parse script res://signal_uses_autoload\.gd'; Cause = "signal_uses_autoload.gd does not compile, on purpose, for target_script_not_compiled; a GDScript language server client re-parses it on connect" },
         @{ Pattern = "corrupt_asset\.png|IHDR: CRC error|ERR_FILE_CORRUPT"; Cause = "request 2700 imports a PNG with a wrong CRC on every chunk" },
         @{ Pattern = "didi_output_canary_warning"; Cause = "the runtime fixture prints a warning canary for runtime_read_output" },
         # The host, not a request. A CI runner has no GPU and no audio device,

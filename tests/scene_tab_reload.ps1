@@ -84,3 +84,69 @@ function Invoke-SceneTabReloadBlock {
     Assert-True ($savedText.Contains("position = Vector2(9, 9)")) "The edit made after the rename did not reach the file: $savedText"
     Assert-True (-not $tabById[2757].result.isError) "main.tscn did not reopen after the tab reload block: $($tabById[2757].result.content[0].text)"
 }
+
+# scene_pack_branch over a scene open in another tab (#1072). The pack saves
+# inside the editor, not through the file writers above, and the tab kept the
+# tree it had, so saving it put the old scene back over the pack.
+# overwrite: true is the consent to lose that tab's changes, so the tab is
+# rebuilt on every line with no discard_unsaved. A second session then closes
+# the target and overwrites it with scene_create, the case where no tab holds
+# the path: that reload printed "Can't reload scene" on 4.7, which the
+# engine-output gate reads.
+function Invoke-PackBranchTabBlock {
+    param(
+        [Parameter(Mandatory = $true)] [object]$EditorSession,
+        [Parameter(Mandatory = $true)] [string]$FixtureRoot
+    )
+    $target = "res://pack_target.tscn"
+    $source = "res://pack_source.tscn"
+    $attach = {
+        param($first)
+        (@{ jsonrpc = "2.0"; id = $first; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress)
+        (Tool-Request ($first + 1) "runtime_attach_session" @{ session_id = $EditorSession.session_id })
+    }
+    $responses = {
+        param($raw)
+        $byId = @{}
+        foreach ($response in @($raw | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.PSObject.Properties.Name -contains "id" })) { $byId[[int]$response.id] = $response }
+        $byId
+    }
+    $packRequests = @(& $attach 2758) + @(
+        (Tool-Request 2760 "scene_create" @{ scene_path = $target; root_type = "Node2D"; root_name = "PackTarget"; overwrite = $true }),
+        (Tool-Request 2761 "editor_save_scene" @{}),
+        (Tool-Request 2762 "scene_create" @{ scene_path = $source; root_type = "Node2D"; root_name = "PackSource"; overwrite = $true }),
+        (Tool-Request 2763 "scene_instantiate_node" @{ node_type = "Sprite2D"; parent_path = "/root/PackSource"; name = "Child" }),
+        (Tool-Request 2764 "editor_save_scene" @{}),
+        (Tool-Request 2765 "scene_pack_branch" @{ target_node = "/root/PackSource/Child"; scene_path = $target; overwrite = $true }),
+        (Tool-Request 2766 "scene_get_hierarchy" @{ max_depth = 1 }),
+        # The steps #1072 reported: switch to the target's tab and save it.
+        (Tool-Request 2767 "scene_open" @{ scene_path = $target }),
+        (Tool-Request 2768 "scene_get_hierarchy" @{ max_depth = 1 }),
+        (Tool-Request 2769 "editor_save_scene" @{})
+    )
+    $packById = & $responses (Invoke-Didi -Requests $packRequests -Arguments @("--project", $FixtureRoot, "--yolo"))
+    foreach ($id in 2760, 2762, 2763) { [void](Tool-Payload $packById[$id]) }
+    foreach ($id in 2761, 2764, 2769) {
+        Assert-True ((Tool-Payload $packById[$id]).status -eq "saved") "The pack scenes were not saved by request ${id}: $($packById[$id].result.content[0].text)"
+    }
+    $packed = Tool-Payload $packById[2765]
+    Assert-True ($packed.saved -eq $true -and $packed.editor_scene_reloaded -eq $true -and $null -eq $packed.editor_copy_error) "A pack over a scene open in another tab did not rebuild that tab: $($packed | ConvertTo-Json -Depth 6 -Compress)"
+    Assert-True ((Tool-Payload $packById[2766]).scene_file_path -eq $source) "Rebuilding the target's tab moved the edited scene off the pack's source."
+    $targetTab = Tool-Payload $packById[2768]
+    Assert-True ($targetTab.scene_tree.name -eq "Child") "The target's tab still held the scene from before the pack: $($targetTab | ConvertTo-Json -Depth 4 -Compress)"
+    $savedText = Get-Content -LiteralPath (Join-Path $FixtureRoot "pack_target.tscn") -Raw
+    Assert-True ($savedText.Contains("[node name=`"Child`" type=`"Sprite2D`"") -and -not $savedText.Contains("PackTarget")) "Saving the target's tab put the old scene back over the pack: $savedText"
+
+    $recreateRequests = @(& $attach 2770) + @(
+        (Tool-Request 2772 "scene_close" @{ discard_unsaved = $true }),
+        (Tool-Request 2773 "scene_create" @{ scene_path = $target; root_type = "Node2D"; root_name = "Recreated"; overwrite = $true }),
+        (Tool-Request 2774 "scene_get_hierarchy" @{ max_depth = 1 }),
+        (Tool-Request 2775 "scene_close" @{ discard_unsaved = $true }),
+        (Tool-Request 2776 "scene_close" @{ discard_unsaved = $true }),
+        (Tool-Request 2777 "scene_open" @{ scene_path = "res://main.tscn" })
+    )
+    $recreateById = & $responses (Invoke-Didi -Requests $recreateRequests -Arguments @("--project", $FixtureRoot, "--yolo"))
+    foreach ($id in 2772, 2773, 2775, 2776) { [void](Tool-Payload $recreateById[$id]) }
+    Assert-True ((Tool-Payload $recreateById[2774]).scene_tree.name -eq "Recreated") "scene_create did not replace a scene no tab held."
+    Assert-True (-not $recreateById[2777].result.isError) "main.tscn did not reopen after the pack block: $($recreateById[2777].result.content[0].text)"
+}

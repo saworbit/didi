@@ -3755,10 +3755,17 @@ Result<uint64_t> openSceneRootId(GDExtensionObjectPtr editor, const std::string&
 // the tree from before the write back over the file (#1068).
 // EditorInterface.reload_scene_from_path rebuilds the tab from disk: measured
 // on 4.5.1, 4.6.2 and 4.7.2, it returns with a new root holding the new
-// contents, keeps whichever tab was current, and drops the tab's unsaved
-// changes and its undo history. That last part is why a tab that has unsaved
-// changes, or on 4.5 and 4.6 one that cannot be shown not to, is reloaded
-// only when the caller said to discard them.
+// contents and drops the tab's unsaved changes and its undo history. That last
+// part is why a tab that has unsaved changes, or on 4.5 and 4.6 one that
+// cannot be shown not to, is reloaded only when the caller said to discard
+// them.
+//
+// On 4.7 the reload keeps whichever tab was current. On 4.5 and 4.6 it ends
+// with TabBar.set_current_tab(previous index), which does nothing when the bar
+// is already there, so a rebuilt tab left of a current last tab stays the
+// edited scene (#1072). The switch back cannot happen in this frame, because
+// the editor ignores open requests while it changes scenes, so the answer
+// names the scene it moved from and the server opens it on a later one.
 //
 // Two more facts decide how it is called. On 4.5 and 4.6 a second reload in
 // the same frame does nothing and says nothing, because the editor is still
@@ -3808,6 +3815,9 @@ void reloadOpenSceneTab(GDExtensionObjectPtr editor, const std::string& path,
         result["scene_reload_error"] = "Failed to construct the reload argument";
         return;
     }
+    auto current_before = editedSceneRoot(editor);
+    const std::string edited_before =
+        current_before.isOk() ? editedScenePath(current_before.value()) : std::string();
     auto reloaded = callObject(editor, "EditorInterface", "reload_scene_from_path", 83702148LL,
                                {&path_value.value()});
     if (reloaded.isErr()) {
@@ -3833,6 +3843,11 @@ void reloadOpenSceneTab(GDExtensionObjectPtr editor, const std::string& path,
     }
     reloaded_one = true;
     result["scene_reloaded"] = true;
+    auto current_after = editedSceneRoot(editor);
+    if (current_before.isOk() && edited_before != path && current_after.isOk() &&
+        editedScenePath(current_after.value()) == path) {
+        result["edited_scene_moved_from"] = edited_before;
+    }
 }
 
 } // namespace
@@ -12928,9 +12943,16 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 auto refreshed = callObject(loader.value(), "ResourceLoader", "load", 3358495409LL,
                                             {&path.value(), &packed_hint.value(), &replace_cache.value()});
                 if (refreshed.isErr()) return openFailure(refreshed.error());
-                auto reloaded = callObject(editor, "EditorInterface", "reload_scene_from_path", 83702148LL,
-                                           {&path.value()});
-                if (reloaded.isErr()) return openFailure(reloaded.error());
+                // Only a tab that holds the scene is rebuilt. A reload of a path
+                // no tab holds printed "Can't reload scene" on 4.7, and on 4.5
+                // and 4.6 clears the current scene's undo history.
+                auto open_root = openSceneRootId(editor, scene_path);
+                if (open_root.isErr()) return openFailure(open_root.error());
+                if (open_root.value() != 0) {
+                    auto reloaded = callObject(editor, "EditorInterface", "reload_scene_from_path",
+                                               83702148LL, {&path.value()});
+                    if (reloaded.isErr()) return openFailure(reloaded.error());
+                }
             }
             // What was open before this call replaces it. `opened: true` said
             // the new scene was open and nothing said the old one no longer

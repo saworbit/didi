@@ -33,12 +33,26 @@ std::string text(const json& result, const char* key) {
     return found != result.end() && found->is_string() ? found->get<std::string>() : std::string();
 }
 
+// The scene the editor had current before a rebuild moved it. On 4.5 and 4.6
+// rebuilding a tab can leave that tab current, and only a later frame can
+// switch back, so it is opened once the tabs are done. The first move names
+// the scene the caller was on; a later rebuild moves away from the first.
+struct EditedSceneRestore {
+    bool needed{false};
+    std::string scene;
+    std::string rebuilt;
+};
+
 // The tab half of one path's answer. A pending tab is asked about again.
 void readTab(EditorCopyRefresh& refresh, const std::string& path, const json& result,
-             std::vector<std::string>& pending) {
+             std::vector<std::string>& pending, EditedSceneRestore& restore) {
     if (!flag(result, "scene_open")) return;
     if (flag(result, "scene_reloaded")) {
         refresh.scenes_reloaded.push_back(path);
+        const auto moved = result.find("edited_scene_moved_from");
+        if (!restore.needed && moved != result.end() && moved->is_string()) {
+            restore = {true, moved->get<std::string>(), path};
+        }
     } else if (flag(result, "scene_reload_pending")) {
         pending.push_back(path);
     } else {
@@ -52,10 +66,10 @@ void readTab(EditorCopyRefresh& refresh, const std::string& path, const json& re
 }
 
 void readResult(EditorCopyRefresh& refresh, const json& result, std::vector<std::string>& pending,
-                bool tab_only) {
+                EditedSceneRestore& restore, bool tab_only) {
     if (!result.is_object() || !result.contains("path") || !result["path"].is_string()) return;
     const auto path = result["path"].get<std::string>();
-    readTab(refresh, path, result, pending);
+    readTab(refresh, path, result, pending, restore);
     if (tab_only) return;
     if (flag(result, "reloaded")) {
         refresh.reloaded.push_back(path);
@@ -100,6 +114,7 @@ EditorCopyRefresh refreshEditorCopies(const std::shared_ptr<ipc::IIpcClient>& ip
     EditorCopyRefresh refresh;
     if (!ipc || res_paths.empty() || !ipc->isConnected()) return refresh;
     std::vector<std::string> pending;
+    EditedSceneRestore restore;
     for (size_t start = 0; start < res_paths.size(); start += kPathsPerRequest) {
         const size_t end = std::min(res_paths.size(), start + kPathsPerRequest);
         const bool batch = end - start > 1;
@@ -123,10 +138,10 @@ EditorCopyRefresh refreshEditorCopies(const std::shared_ptr<ipc::IIpcClient>& ip
         refresh.answered = true;
         if (batch) {
             for (const auto& result : answer.value()["results"]) {
-                readResult(refresh, result, pending, false);
+                readResult(refresh, result, pending, restore, false);
             }
         } else {
-            readResult(refresh, answer.value(), pending, false);
+            readResult(refresh, answer.value(), pending, restore, false);
         }
     }
 
@@ -148,14 +163,14 @@ EditorCopyRefresh refreshEditorCopies(const std::shared_ptr<ipc::IIpcClient>& ip
             for (const auto& path : asked) {
                 refresh.failed.push_back({{"path", path}, {"reason", reason}});
             }
-            return refresh;
+            break;
         }
         if (batch) {
             for (const auto& result : answer.value()["results"]) {
-                readResult(refresh, result, pending, true);
+                readResult(refresh, result, pending, restore, true);
             }
         } else {
-            readResult(refresh, answer.value(), pending, true);
+            readResult(refresh, answer.value(), pending, restore, true);
         }
     }
     for (const auto& path : pending) {
@@ -164,6 +179,22 @@ EditorCopyRefresh refreshEditorCopies(const std::shared_ptr<ipc::IIpcClient>& ip
              {"reason", std::string("The editor was still switching scenes and did not reload "
                                     "the scene's tab.") +
                             kStaleTab}});
+    }
+    if (restore.needed) {
+        // A scene never saved has no path to open it by.
+        auto back = restore.scene.empty()
+                        ? Result<json>(Error(409, "it was never saved, so it has no path to open"))
+                        : ipc->sendRequest("scene.open", {{"scene_path", restore.scene}},
+                                           kRefreshTimeoutMs);
+        if (back.isErr()) {
+            refresh.failed.push_back(
+                {{"path", restore.rebuilt},
+                 {"reason", "Rebuilding the tab left it the edited scene in place of " +
+                                (restore.scene.empty() ? std::string("an unsaved scene")
+                                                       : restore.scene) +
+                                ", and switching back failed: " + back.error().message +
+                                ". Open the scene you were editing with scene_open."}});
+        }
     }
     return refresh;
 }

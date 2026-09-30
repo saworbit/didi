@@ -2,6 +2,7 @@
 #include "didi/common/ipc_channel.hpp"
 #include "didi/common/logger.hpp"
 #include "didi/common/project_path.hpp"
+#include "didi/tools/editor_copy_refresh.hpp"
 #include "didi/tools/hierarchy_view.hpp"
 #include <fstream>
 #include <regex>
@@ -613,7 +614,21 @@ CallToolResult handleSceneClose(const json& args, std::shared_ptr<ipc::IIpcClien
     return forwardLiveSceneWiring(args, ipc, "scene.close", "close the active scene");
 }
 CallToolResult handleScenePackBranch(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
-    return forwardLiveSceneWiring(args, ipc, "scene.packBranch", "pack a scene branch");
+    auto packed = forwardLiveSceneWiring(args, ipc, "scene.packBranch", "pack a scene branch");
+    if (packed.isError || !packed.structuredContent.has_value() ||
+        !packed.structuredContent->is_object() ||
+        !packed.structuredContent->value("saved", false)) {
+        return packed;
+    }
+    // The pack writes its file inside the editor, and a tab that has that scene
+    // open keeps the tree it had, so the next save put the old scene back over
+    // the pack (#1072). Replacing an existing scene took overwrite: true, which
+    // is the caller accepting its loss, so the tab is rebuilt from the new file
+    // whatever it holds, the way scene_create reloads the scene it overwrites.
+    auto payload = *packed.structuredContent;
+    const auto scene_path = payload.value("scene_path", args.value("scene_path", std::string()));
+    reportEditorCopy(payload, refreshEditorCopies(ipc, {scene_path}, true));
+    return CallToolResult::successJson(payload);
 }
 
 } // namespace mcp

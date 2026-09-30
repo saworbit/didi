@@ -75,6 +75,9 @@ CallToolResult handleScriptCreate(const json& args, std::shared_ptr<ipc::IIpcCli
 CallToolResult handleScriptPatchMethod(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleProjectRenameReferences(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleProjectApplyChanges(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+// Defined in src/tools/scene_tools.cpp. The pack writes inside the editor, so
+// what it asks afterwards is seen against a stub (#1072).
+CallToolResult handleScenePackBranch(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 } // namespace mcp
 } // namespace didi
 
@@ -4500,6 +4503,19 @@ public:
     bool isConnected() const override { return true; }
     didi::Result<didi::json> sendRequest(const std::string& method, const didi::json& params,
                                          int) override {
+        methods.push_back(method);
+        if (method == "scene.packBranch") {
+            if (refuse_pack) {
+                return didi::Error(409, "Scene target already exists; pass overwrite: true to replace it");
+            }
+            return didi::json{{"status", "success"}, {"saved", true},
+                              {"scene_path", params.value("scene_path", std::string())}};
+        }
+        if (method == "scene.open") {
+            if (refuse_open) return didi::Error(500, "Godot did not activate the requested scene");
+            current = params.value("scene_path", std::string());
+            return didi::json{{"status", "success"}, {"opened", true}, {"scene_path", current}};
+        }
         if (method == "editor.openScenes" && knows_open_scenes) {
             ++open_scene_requests;
             return didi::json{{"open_scenes", std::vector<std::string>(open.begin(), open.end())},
@@ -4537,6 +4553,10 @@ public:
                 rebuilt_one = true;
                 result["scene_reloaded"] = true;
                 rebuilt.push_back(path);
+                if (stays_current.count(path) && path != current) {
+                    result["edited_scene_moved_from"] = current;
+                    current = path;
+                }
             }
             return result;
         };
@@ -4558,6 +4578,13 @@ public:
     int open_scene_requests{0};
     std::vector<std::string> rebuilt;
     std::vector<didi::json> refresh_params;
+    std::vector<std::string> methods;
+    bool refuse_pack{false};
+    // The edited scene, and the tabs a rebuild leaves current, as 4.5 and 4.6
+    // do for a tab left of a current last tab.
+    std::string current;
+    std::set<std::string> stays_current;
+    bool refuse_open{false};
 };
 
 static void test_script_writers_reload_the_editor_copy_they_replaced() {
@@ -4756,6 +4783,83 @@ static void test_a_tab_that_cannot_be_rebuilt_after_a_write_is_named() {
     didi::mcp::reportEditorCopy(payload, cut_off);
     ASSERT_EQ(payload["editor_scene_reloaded"], true);
     ASSERT_TRUE(payload.contains("editor_copy_error"));
+}
+
+static void test_a_pack_rebuilds_the_tab_of_the_scene_it_overwrote() {
+    // scene_pack_branch saves inside the editor, and a tab that had the target
+    // open kept its tree, so the next save put the old scene back over the
+    // pack (#1072). overwrite: true is the caller accepting the old scene's
+    // loss, so the tab is rebuilt after the pack whatever it holds, here on an
+    // engine that cannot say whether it has unsaved changes.
+    auto editor = std::make_shared<EditorCopyClient>();
+    editor->held = {"res://pack_target.tscn"};
+    editor->open = {"res://pack_target.tscn"};
+    editor->unsaved_readable = false;
+    const didi::json args = {{"target_node", "/root/Main/Child"},
+                             {"scene_path", "res://pack_target.tscn"},
+                             {"overwrite", true}};
+    const auto packed = didi::mcp::handleScenePackBranch(args, editor);
+    ASSERT_TRUE(!packed.isError);
+    const auto report = didi::json::parse(packed.content[0].text);
+    ASSERT_EQ(report["saved"], true);
+    ASSERT_EQ(report["editor_copy_reloaded"], true);
+    ASSERT_EQ(report["editor_scene_reloaded"], true);
+    ASSERT_TRUE(!report.contains("editor_copy_error"));
+    ASSERT_EQ(*packed.structuredContent, report);
+    ASSERT_EQ(editor->rebuilt, std::vector<std::string>{"res://pack_target.tscn"});
+    ASSERT_EQ(editor->refresh_params[0]["discard_unsaved"], true);
+    // Asked after the pack, never before it: rebuilding first would rebuild
+    // the scene the pack is about to replace.
+    ASSERT_EQ(editor->methods,
+              (std::vector<std::string>{"scene.packBranch", "resource.refreshCached"}));
+
+    // A pack the bridge refused wrote nothing, and nothing is reloaded.
+    auto refusing = std::make_shared<EditorCopyClient>();
+    refusing->open = {"res://pack_target.tscn"};
+    refusing->refuse_pack = true;
+    auto without_overwrite = args;
+    without_overwrite.erase("overwrite");
+    ASSERT_TRUE(didi::mcp::handleScenePackBranch(without_overwrite, refusing).isError);
+    ASSERT_EQ(refusing->methods, std::vector<std::string>{"scene.packBranch"});
+}
+
+static void test_a_rebuild_that_moves_the_edited_scene_is_switched_back() {
+    // On 4.5 and 4.6 a rebuilt tab left of a current last tab stays the edited
+    // scene, so every later scene_* call acted on it (#1072). The scene the
+    // caller was on is opened again once the tabs are done. The first move
+    // names it; the second rebuild moves away from the first.
+    auto editor = std::make_shared<EditorCopyClient>();
+    editor->open = {"res://a.tscn", "res://b.tscn", "res://c.tscn"};
+    editor->current = "res://c.tscn";
+    editor->stays_current = {"res://a.tscn", "res://b.tscn"};
+    const auto refresh =
+        didi::mcp::refreshEditorCopies(editor, {"res://a.tscn", "res://b.tscn"}, true);
+    ASSERT_EQ(refresh.scenes_reloaded.size(), 2u);
+    ASSERT_TRUE(refresh.failed.empty());
+    ASSERT_EQ(editor->current, "res://c.tscn");
+    ASSERT_EQ(std::count(editor->methods.begin(), editor->methods.end(), "scene.open"), 1);
+    ASSERT_EQ(editor->methods.back(), "scene.open");
+
+    // A switch back the editor refuses is named with the way out.
+    auto refusing = std::make_shared<EditorCopyClient>();
+    refusing->open = {"res://a.tscn", "res://c.tscn"};
+    refusing->current = "res://c.tscn";
+    refusing->stays_current = {"res://a.tscn"};
+    refusing->refuse_open = true;
+    const auto stuck = didi::mcp::refreshEditorCopies(refusing, {"res://a.tscn"}, true);
+    ASSERT_EQ(stuck.scenes_reloaded, std::vector<std::string>{"res://a.tscn"});
+    ASSERT_EQ(stuck.failed.size(), 1u);
+    ASSERT_EQ(stuck.failed[0]["path"], "res://a.tscn");
+    const auto reason = stuck.failed[0]["reason"].get<std::string>();
+    ASSERT_TRUE(reason.find("res://c.tscn") != std::string::npos);
+    ASSERT_TRUE(reason.find("scene_open") != std::string::npos);
+
+    // A rebuild that keeps the current scene, as 4.7 always does, asks nothing more.
+    auto keeping = std::make_shared<EditorCopyClient>();
+    keeping->open = {"res://a.tscn", "res://c.tscn"};
+    keeping->current = "res://c.tscn";
+    ASSERT_TRUE(didi::mcp::refreshEditorCopies(keeping, {"res://a.tscn"}, true).failed.empty());
+    ASSERT_EQ(std::count(keeping->methods.begin(), keeping->methods.end(), "scene.open"), 0);
 }
 
 static void test_the_open_tab_check_asks_only_when_it_can_matter() {
@@ -9543,6 +9647,10 @@ struct RegisterToolTests {
                      test_a_rename_refuses_a_scene_open_with_unsaved_changes);
         registerTest("Tools.TabNotRebuiltAfterAWriteIsNamed",
                      test_a_tab_that_cannot_be_rebuilt_after_a_write_is_named);
+        registerTest("Tools.RebuildThatMovesTheEditedSceneIsSwitchedBack",
+                     test_a_rebuild_that_moves_the_edited_scene_is_switched_back);
+        registerTest("Tools.PackRebuildsTheTabOfTheSceneItOverwrote",
+                     test_a_pack_rebuilds_the_tab_of_the_scene_it_overwrote);
         registerTest("Tools.OpenTabCheckAsksOnlyWhenItCanMatter",
                      test_the_open_tab_check_asks_only_when_it_can_matter);
         registerTest("Tools.ApplyRefusesASceneOpenWithUnsavedChanges",
