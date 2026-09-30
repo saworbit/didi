@@ -21,11 +21,14 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 import shutil
 import subprocess
+import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Mapping
 
 HERE = Path(__file__).resolve().parent
 REPOSITORY = HERE.parents[1]
@@ -105,6 +108,99 @@ def keep_transcript(target: Path, session_id: str, projects_root: Path | None = 
     return kept
 
 
+DRAFTS_FILE = "ISSUE_DRAFTS.md"
+
+# The brief's filing section as a drafts run hands it over. Everything else in
+# the brief stays as it is, because the task and the ledger are what two runs
+# are compared on. Trial 06 made this edit by hand, and a tester whose report
+# blamed the server for what its own client did showed why a finding should be
+# read before it is public (#1000, #1008).
+DRAFTS_SECTION = """## Issue drafts
+
+Do not file issues in this run. `gh` is not available to you, and nothing is to be written to GitHub in any way. Write each report as a draft in `ISSUE_DRAFTS.md` in your working directory instead. The drafts are read before anything is filed. Drafting is deliberately expensive. Before you write one:
+
+1. Re-read the relevant part of Didi's `docs` folder. Behaviour that is documented and wrong is still worth reporting, under a different label.
+2. Reduce it to a minimal reproduction: exact tool name, exact arguments, exact response.
+3. Choose a label. `bug` when behaviour contradicts the documentation. `documentation` when the documentation is wrong or missing. `enhancement` when the capability is simply absent.
+
+Start each draft with a `## ` heading that holds its title. Under it give its label and the fields the bug report template asks for: Didi version, Godot version, operating system, reproduction, expected, actual.
+
+One draft per root cause, never one per occurrence. Stop after twenty. Later findings go in the ledger with a note that the cap was reached.
+
+Write in first person and in plain sentences. No em dashes, no emoji. Do not describe the report as generated, and do not name a model, an assistant, an agent, or a tool as its author.
+
+Do not commit, branch, push, or open a pull request anywhere.
+"""
+
+# The other two places the brief assumes an issue has a number.
+DRAFTS_REWORDINGS = (
+    ("Issue:     issue number, or none and why", "Issue:     draft title, or none and why"),
+    ("issues filed, and the one change", "issue drafts written, and the one change"),
+)
+
+# What gh reads a credential from besides its own store.
+DRAFTS_TOKEN_VARIABLES = ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN")
+
+GH_STUB_MESSAGE = "gh is disabled for this field trial. Write the finding to ISSUE_DRAFTS.md instead."
+
+
+def drafts_brief(brief: str) -> str:
+    """The brief with its filing section swapped for the drafts one.
+
+    Refuses rather than guessing when the brief no longer has the text it
+    expects. A brief that still says to file with gh, handed to a run that was
+    asked to hold its findings, would file them live.
+    """
+    start = brief.find("## Filing issues\n")
+    end = brief.find("\n## ", start + 1)
+    if start < 0 or end < 0:
+        raise ValueError("TRIAL_BRIEF.md has no '## Filing issues' section followed by another, "
+                         "so a drafts run cannot replace it")
+    swapped = brief[:start] + DRAFTS_SECTION + brief[end:]
+    for old, new in DRAFTS_REWORDINGS:
+        if swapped.count(old) != 1:
+            raise ValueError(f"TRIAL_BRIEF.md no longer says {old!r} exactly once, "
+                             "so a drafts run cannot reword it")
+        swapped = swapped.replace(old, new)
+    return swapped
+
+
+def write_gh_stub(directory: Path) -> Path:
+    """A gh that refuses, for the front of the tester's PATH.
+
+    Written for both shells a tester reaches for: a shell script for Bash and a
+    batch file for cmd and PowerShell. It is a guard, not a sandbox. The real gh
+    is still further down the PATH and reads its own credential store, which is
+    why the report phase still reads the tracker after a drafts run.
+    """
+    directory.mkdir(parents=True, exist_ok=True)
+    script = directory / "gh"
+    script.write_text(f'#!/bin/sh\necho "{GH_STUB_MESSAGE}" >&2\nexit 1\n',
+                      encoding="utf-8", newline="\n")
+    script.chmod(0o755)
+    for name in ("gh.cmd", "gh.bat"):
+        (directory / name).write_text(f"@echo {GH_STUB_MESSAGE} 1>&2\r\n@exit /b 1\r\n",
+                                      encoding="utf-8", newline="")
+    return directory
+
+
+def drafts_environment(base: Mapping[str, str], stub_directory: Path) -> dict[str, str]:
+    """The tester's environment for a drafts run: no token, and the stub first."""
+    environment = {key: value for key, value in base.items()
+                   if key.upper() not in DRAFTS_TOKEN_VARIABLES}
+    path_key = next((key for key in environment if key.upper() == "PATH"), "PATH")
+    environment[path_key] = str(stub_directory) + os.pathsep + environment.get(path_key, "")
+    return environment
+
+
+def read_drafts(path: Path) -> list[str]:
+    """The drafts' titles, one per `## ` heading."""
+    if not path.is_file():
+        return []
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    return [line[3:].strip() for line in lines if line.startswith("## ")]
+
+
 def trial_summary(
     trial_id: str,
     phases: list[dict],
@@ -116,6 +212,7 @@ def trial_summary(
     engine: str = runner.CLAUDE,
     model: str | None = None,
     tester_environment: dict | None = None,
+    drafts: list[str] | None = None,
 ) -> dict:
     return {
         "trial_id": trial_id,
@@ -133,6 +230,10 @@ def trial_summary(
         "coverage": delta,
         "bridge": bridge_report,
         "issues_filed": issues or [],
+        # A drafts run holds its findings for review, so what it wrote is listed
+        # where the filed issues go on a live run (#1008).
+        "filing": "live" if drafts is None else "drafts",
+        "issue_drafts": drafts or [],
         "phases": phases,
         "failed_phase": next((p["name"] for p in phases if p["status"] == "failed"), None),
         "finished_utc": datetime.now(timezone.utc).isoformat(),
@@ -194,9 +295,20 @@ def render_summary(summary: dict) -> str:
         if delta.get("no_longer_called"):
             lines.append(f"\nNo longer reached: {', '.join(delta['no_longer_called'])}")
 
+    drafting = summary.get("filing") == "drafts"
+    if drafting:
+        drafts = summary.get("issue_drafts") or []
+        lines += ["", "## Issue drafts", "",
+                  f"{len(drafts)} held in `{DRAFTS_FILE}` for review. None of them is filed."]
+        if drafts:
+            lines.append("")
+            lines += [f"- {title}" for title in drafts]
+
     issues = summary.get("issues_filed") or []
     if issues:
         lines += ["", "## Issues filed", ""]
+        if drafting:
+            lines += ["This was a drafts run and should have filed nothing.", ""]
         lines += [f"- #{issue['number']} {issue['title']}" for issue in issues]
 
     lines += ["", "## Phases", "", "| Phase | Status | Detail |", "| :--- | :--- | :--- |"]
@@ -277,6 +389,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--reasoning-effort",
                         help="Reasoning effort for the tester session (Codex)")
     parser.add_argument("--compare", type=Path, help="A previous run's coverage.json")
+    parser.add_argument("--drafts", action="store_true",
+                        help="Hold findings in ISSUE_DRAFTS.md for review instead of filing them")
     parser.add_argument("--dry-run", action="store_true",
                         help="Exercise the orchestration without launching a tester")
     args = parser.parse_args(argv)
@@ -288,6 +402,7 @@ def main(argv: list[str] | None = None) -> int:
     delta: dict | None = None
     bridge_report: dict | None = None
     issues: list[dict] = []
+    drafts: list[str] | None = [] if args.drafts else None
 
     def record(name: str, status: str, detail: str = "") -> None:
         phases.append({"name": name, "status": status, "detail": detail})
@@ -297,6 +412,7 @@ def main(argv: list[str] | None = None) -> int:
             trial_id, phases, outcome, baseline, delta, bridge_report, issues,
             engine=args.engine, model=args.model,
             tester_environment=CLAUDE_TESTER_ENVIRONMENT if args.engine == runner.CLAUDE else None,
+            drafts=drafts,
         )
         destination = target if target.exists() else args.artifacts / trial_id
         destination.mkdir(parents=True, exist_ok=True)
@@ -354,13 +470,22 @@ def main(argv: list[str] | None = None) -> int:
                          f"build {baseline.get('server_build_id') or 'unreported'}, "
                          f"manifest {baseline['manifest_source']}")
 
+    # Swapped before a dry run returns, so a dry run proves the swap still
+    # applies to the brief as it stands.
+    brief = (HERE / "TRIAL_BRIEF.md").read_text(encoding="utf-8")
+    if args.drafts:
+        try:
+            brief = drafts_brief(brief)
+        except ValueError as error:
+            record("brief", "failed", str(error))
+            return finish("brief_failed")
+
     if args.dry_run:
         for name in ("run", "score", "bridge", "report"):
             record(name, "skipped", "dry run")
         return finish("dry_run")
 
     session_id = str(uuid.uuid4())
-    brief = (HERE / "TRIAL_BRIEF.md").read_text(encoding="utf-8")
     if args.engine == runner.CODEX:
         command = runner.build_codex_command(
             mcp_config=runner.read_mcp_config(target / ".mcp.json"),
@@ -381,9 +506,15 @@ def main(argv: list[str] | None = None) -> int:
             setting_sources=CLAUDE_TESTER_ENVIRONMENT["setting_sources"],
         )
     started = datetime.now(timezone.utc).isoformat()
+    environment = None
+    stub_directory = None
+    if args.drafts:
+        stub_directory = Path(tempfile.mkdtemp(prefix="didi-trial-gh-"))
+        environment = drafts_environment(os.environ, write_gh_stub(stub_directory))
     try:
         completed = runner.run_agent(
-            command, brief, target, args.timeout_seconds, target / "agent.log"
+            command, brief, target, args.timeout_seconds, target / "agent.log",
+            env=environment,
         )
     except subprocess.TimeoutExpired:
         # Kept, not discarded. A tester that ran out of clock still built
@@ -393,6 +524,9 @@ def main(argv: list[str] | None = None) -> int:
     except OSError as error:
         record("run", "failed", f"could not launch the tester: {error}")
         return finish("tester_unavailable")
+    finally:
+        if stub_directory is not None:
+            shutil.rmtree(stub_directory, ignore_errors=True)
     record("run", "ok" if completed.returncode == 0 else "failed",
            f"exit {completed.returncode}")
 
@@ -436,7 +570,12 @@ def main(argv: list[str] | None = None) -> int:
            bridge_report["note"][:150])
 
     issues = issues_filed_since(args.repo, started)
-    record("report", "ok", f"{len(issues)} issue(s) filed during the run")
+    if args.drafts:
+        drafts = read_drafts(target / DRAFTS_FILE)
+        record("report", "ok" if not issues else "failed",
+               f"{len(drafts)} draft(s) in {DRAFTS_FILE}, {len(issues)} issue(s) filed during the run")
+    else:
+        record("report", "ok", f"{len(issues)} issue(s) filed during the run")
     return finish("scored")
 
 

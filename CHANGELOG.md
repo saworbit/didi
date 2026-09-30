@@ -51,6 +51,11 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Added
 
+- **A field trial can hold its findings for review (#1008).** With `--drafts`,
+  `trial.py` has the tester write each finding to `ISSUE_DRAFTS.md` instead of
+  filing it, puts a `gh` that refuses first on its `PATH` with the tokens
+  removed, and lists the drafts in `TRIAL.md` where filed issues go.
+
 - **A mutation that leaves work undone names it as a step (Q6 part 3, #1040).**
   The answer carries `follow_up`, a list of `{work, tool, reason}`: a live edit
   of the open scene names `editor_save_scene`, and a change the attached editor
@@ -1123,6 +1128,10 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
   said.
 
 ### Changed
+
+- **The argument validation paragraphs sit with the schema rules (#1037).** In
+  `docs/API_SPECIFICATION.md` they moved beside the `inputSchema` paragraph, and
+  the mutation safety section now starts at `dry_run`.
 
 - **The roadmap says what to build next, and why.** `docs/BUILD_QUEUE.md`
   is the ordered list of the next sixteen capabilities. Each item carries the
