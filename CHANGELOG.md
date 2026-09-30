@@ -367,6 +367,12 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **`runtime_launch` with a Godot that cannot be started says so (#1076).** It
+  answered `success: false` with `exit_code: 0`, which is what a game that ran
+  and failed looks like, and said to put godot on PATH whatever `GODOT_BIN`
+  named. It now answers `503 engine_unavailable`, like the other tools that
+  start their own Godot.
+
 - **`csharp_check_build` no longer calls a slow .NET SDK missing (#1078).**
   Its `dotnet --version` probe stopped at a fixed 30 seconds, whatever
   `timeout_seconds` said, and then told the caller to install the SDK. The

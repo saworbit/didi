@@ -581,11 +581,15 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
     // job, and a child that spawns during that window escapes it permanently.
     const BOOL spawned = CreateProcessW(application_name, cmd_writable.data(), NULL, NULL, TRUE,
                                         creation_flags, NULL, NULL, &six.StartupInfo, &pi);
+    const DWORD launch_error = spawned ? 0 : GetLastError();
     if (attribute_list) DeleteProcThreadAttributeList(attribute_list);
     if (!spawned) {
         CloseHandle(hWritePipe);
         if (hReadPipe != INVALID_HANDLE_VALUE) CloseHandle(hReadPipe);
         result.success = false;
+        result.launch_failed = true;
+        result.launch_error =
+            "the process could not be launched (Windows error " + std::to_string(launch_error) + ")";
         result.summary = "Failed to spawn Godot process. Ensure 'godot' is in system PATH.";
         return result;
     }

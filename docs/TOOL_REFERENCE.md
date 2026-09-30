@@ -1306,6 +1306,8 @@ Launches a separate Godot process, optionally headless, captures stdout/stderr, 
 - `detach` (`boolean`, default `false`): start the game and leave it running.
 - Legacy alias: `execute_test_session`.
 
+A Godot that cannot be started, because the file at `GODOT_BIN` is not an executable, is refused `503` with `data.code: "engine_unavailable"` and `engine_executable`, the way the Phase 5 tools refuse it. It used to answer `success: false` with `exit_code: 0`, the shape of a game that ran and failed (#1076). A detached launch on POSIX cannot see this, because the game execs after the call has its pid; it answers that no session was published.
+
 #### Detached: a game you can still drive
 
 Blocking is the default and is right for a test: run the project, see what it printed, get the exit code. It is the wrong shape for playing one. A game that runs is reported `success: false`, `exit_code: 124`, "timed out", and is gone by the time the answer arrives, which left the interactive half of the runtime surface -- `runtime_inject_input`, `runtime_step`, `runtime_set_paused`, `runtime_read_output`, `runtime_get_tree`, `runtime_explore_scene`, `runtime_watch_invariants`, `runtime_checkpoint` -- reachable only for a game somebody else had started.
