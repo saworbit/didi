@@ -155,6 +155,11 @@ struct TestSessionResult {
     // nothing under it. False on POSIX, where the process group does that job
     // and always works.
     bool contained{false};
+    // The engine was never started: Windows refused to create the process.
+    // POSIX finds out in the child, which exits 127. Kept apart from a run
+    // that failed, because the fix is GODOT_BIN, not the game.
+    bool launch_failed{false};
+    std::string launch_error;
     // How the wait for the killed process tree ended.
     //
     // The timeout path terminates the job and then waits for it to empty, so

@@ -424,6 +424,43 @@ void test_detached_launch_selects_the_game_it_started() {
     ASSERT_EQ(fake->attached, std::string("aaaabbbbccccddddeeeeffff00001111"));
 }
 
+void test_an_engine_that_will_not_start_is_engine_unavailable() {
+    // Break caught: with a GODOT_BIN that cannot be started, runtime_launch
+    // answered isError: false, success: false and exit_code 0, the shape of a
+    // game that ran and failed, and said to put godot on PATH. The other tools
+    // that start their own Godot answer 503 engine_unavailable (#1045, #1076).
+    // A file that is not an executable: Windows refuses it (error 193), and a
+    // POSIX exec of it fails in the child, which exits 127.
+    const auto directory = std::filesystem::temp_directory_path() / "didi-launch-unstartable";
+    std::filesystem::create_directories(directory);
+    const auto not_godot = directory / "not_godot.txt";
+    std::ofstream(not_godot) << "not an engine\n";
+    ScopedEnvironmentVariable godot_bin("GODOT_BIN");
+    godot_bin.set(not_godot.string());
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    for (const bool detach : {false, true}) {
+        const auto result = registry.callTool(
+            "runtime_launch",
+            {{"scene_path", "res://none.tscn"}, {"timeout_seconds", 2}, {"detach", detach}});
+#if !defined(_WIN32)
+        // A detached POSIX game execs after the call has its pid, so its
+        // failure is not the launch's to see.
+        if (detach) continue;
+#endif
+        ASSERT_TRUE(result.isError);
+        const auto envelope = didi::json::parse(result.content[0].text);
+        ASSERT_EQ(envelope["error"]["code"], 503);
+        ASSERT_EQ(envelope["error"]["data"]["code"], "engine_unavailable");
+        ASSERT_TRUE(envelope["error"]["data"]["engine_executable"].get<std::string>().find(
+                        "not_godot.txt") != std::string::npos);
+        ASSERT_TRUE(envelope["error"]["message"].get<std::string>().find("GODOT_BIN") !=
+                    std::string::npos);
+    }
+    std::error_code ignored;
+    std::filesystem::remove_all(directory, ignored);
+}
+
 struct RegisterTestRunnerTests {
     RegisterTestRunnerTests() {
         registerTest("RuntimeLaunch.CrashKeepsItsLocation",
@@ -431,6 +468,8 @@ struct RegisterTestRunnerTests {
         registerTest("RuntimeLaunch.TimeoutSchema", test_runtime_launch_schema_bounds_timeout);
         registerTest("RuntimeLaunch.TimeoutValidation", test_runtime_launch_rejects_timeout_outside_public_range);
         registerTest("RuntimeLaunch.Godot451Discovery", test_resolver_finds_documented_godot_451_layout);
+        registerTest("RuntimeLaunch.AnEngineThatWillNotStartIsEngineUnavailable",
+                     test_an_engine_that_will_not_start_is_engine_unavailable);
 #if defined(_WIN32)
         registerTest("RuntimeLaunch.WindowsExit259", test_windows_exit_code_259_is_completed_not_timed_out);
         registerTest("RuntimeLaunch.WindowsBoundedOutputDrain", test_windows_completed_parent_does_not_wait_for_inherited_stdout);

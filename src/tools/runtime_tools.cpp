@@ -457,6 +457,37 @@ CallToolResult handleExecuteTestSession(const json& args, std::shared_ptr<ipc::I
     offline::TestRunner runner;
     auto session_res =
         runner.runSession(scene_path, timeout_sec, headless, break_on_error, extra_args, detach);
+    // A game that never started is not a game that ran and failed. It answered
+    // success: false and exit_code 0, the shape of a run with errors, and told
+    // the caller to put godot on PATH whatever GODOT_BIN said, where the other
+    // tools that start their own Godot say engine_unavailable (#1045, #1076).
+    // Windows refuses the launch itself; POSIX forks, and the exec that fails
+    // in the child exits 127.
+    bool not_started = session_res.launch_failed;
+#if !defined(_WIN32)
+    not_started = not_started ||
+                  (!detach && !session_res.timed_out && session_res.exit_code == 127);
+#endif
+    if (not_started) {
+        const std::string cause = session_res.launch_error.empty()
+                                      ? std::string("the executable could not be run (exit 127)")
+                                      : session_res.launch_error;
+        json data = {{"code", "engine_unavailable"},
+                     {"engine_executable", session_res.engine_executable.empty()
+                                               ? json(nullptr)
+                                               : json(session_res.engine_executable)},
+                     {"retryable", false}};
+        const auto configured_engine = offline::resolveGodotExecutableDetailed();
+        versions::annotateConfiguredEngine(data, configured_engine.configured,
+                                           configured_engine.configured_rejected);
+        return CallToolResult::errorJson(
+            503,
+            "Godot could not be started: " + cause + ". Engine tried: " +
+                (session_res.engine_executable.empty() ? std::string("none found")
+                                                       : session_res.engine_executable) +
+                ". Set GODOT_BIN to a Godot executable.",
+            std::move(data));
+    }
     json result = session_res.toJson();
 
     // A detached game is only useful once it has published a session, because
