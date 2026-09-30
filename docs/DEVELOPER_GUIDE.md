@@ -463,7 +463,7 @@ files move between lines: the audio fallback prints from
 `Where`. A developer machine prints none of these, and the first CI run is the
 first place they show.
 
-Two things catch people out running the harness by hand on Windows.
+Three things catch people out running the harness by hand on Windows.
 
 **Build every target, not just `didi` and `didi_tests`.** The addon is its own
 target, and the editor the harness starts loads whatever build of it was last
@@ -482,6 +482,13 @@ to start. Every exchange now goes through one helper that relaxes the preference
 for the duration of the call, so the run survives either way, but the output is
 still easier to read unpiped. CI uses pwsh 7, where the redirection was always
 harmless.
+
+**An IDE may connect to the harness's editor.** The editor serves the GDScript
+language server on port 6005, and an extension such as godot-tools connects to
+whichever editor is there. On connect the editor re-parses every script, so the
+fixture script that is broken on purpose prints `Failed parse script` from
+`reload_all_workspace_scripts`. The allow list names that wording, so it shows
+in the tally and passes. Any other line it brings is still a finding.
 
 The native runner accepts `--list` to print every registered case and
 `--filter=<substring>` to run a subset. The value goes after an `=` with no
