@@ -22,6 +22,8 @@ namespace didi::mcp {
 // save writes the tab's tree back over the file (#1068). Its tab is reloaded
 // from the file, which drops the tab's unsaved changes, so that happens only
 // for a tab the editor can show is clean or when the caller said to discard.
+// On 4.5 and 4.6 a rebuild can leave the rebuilt tab current, and the scene
+// the caller was editing is then opened again once the tabs are done (#1072).
 struct EditorCopyRefresh {
     // An editor answered. When it did not -- none attached, a game selected,
     // or a bridge too old to know the request -- nothing is said, because
