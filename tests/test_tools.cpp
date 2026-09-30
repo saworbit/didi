@@ -79,6 +79,7 @@ CallToolResult handleProjectApplyChanges(const json& args, std::shared_ptr<ipc::
 // what it asks afterwards is seen against a stub (#1072).
 CallToolResult handleScenePackBranch(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleSceneCreate(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleProjectSetSetting(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 } // namespace mcp
 } // namespace didi
 
@@ -2415,6 +2416,39 @@ static void test_dry_run_reads_its_target_before_describing_it() {
     ASSERT_TRUE(setting["mutation_preview"]["changes"][0]["before"]["literal"]
                     .get<std::string>()
                     .find("Probe") != std::string::npos);
+}
+
+static void test_offline_setting_text_that_reads_as_a_type_says_so() {
+    // Break caught: offline, "1152" went into viewport_width as the String
+    // "1152" and answered success, and a stringified editor_plugins/enabled
+    // wrote a plugin list the editor never loads. Only value_written showed the
+    // quotes, and a caller had to know to read it (#1016).
+    ScopedToolProject project("setting-text-type");
+    writeAuditFile("project.godot", "config_version=5\n");
+    const auto write = [](const char* setting, const didi::json& value) {
+        const auto result =
+            didi::mcp::handleProjectSetSetting({{"setting", setting}, {"value", value}}, nullptr);
+        ASSERT_TRUE(!result.isError);
+        return didi::json::parse(result.content[0].text);
+    };
+    const auto number = write("display/window/size/viewport_width", "1152");
+    ASSERT_EQ(number["value_text_reads_as"], 1152);
+    ASSERT_EQ(number["retry_with"]["value"], 1152);
+    ASSERT_TRUE(number["limitation"].get<std::string>().find("reads as a number") !=
+                std::string::npos);
+    const auto plugins = write("editor_plugins/enabled", "[\"res://addons/didi/plugin.cfg\"]");
+    ASSERT_EQ(plugins["retry_with"]["value"], didi::json::array({"res://addons/didi/plugin.cfg"}));
+    ASSERT_EQ(write("rendering/misc/flag", "true")["retry_with"]["value"], true);
+
+    // A typed value, and text that reads as nothing else, carry no such note.
+    for (const auto& [setting, value] :
+         std::vector<std::pair<const char*, didi::json>>{
+             {"display/window/size/viewport_width", 1152},
+             {"application/config/name", "wide"},
+             {"application/config/description", "null"}}) {
+        const auto plain = write(setting, value);
+        ASSERT_TRUE(!plain.contains("value_text_reads_as") && !plain.contains("retry_with"));
+    }
 }
 
 static void test_an_empty_new_definition_never_mints_a_token() {
@@ -9813,6 +9847,8 @@ struct RegisterToolTests {
                      test_a_rebuild_that_moves_the_edited_scene_is_switched_back);
         registerTest("Tools.PackRebuildsTheTabOfTheSceneItOverwrote",
                      test_a_pack_rebuilds_the_tab_of_the_scene_it_overwrote);
+        registerTest("Tools.OfflineSettingTextThatReadsAsATypeSaysSo",
+                     test_offline_setting_text_that_reads_as_a_type_says_so);
         registerTest("Tools.CreateOverAnOpenTabRebuildsItAfterTheSwitch",
                      test_a_create_over_an_open_tab_rebuilds_it_after_the_switch);
         registerTest("Tools.RebuildSaysWhetherItDiscardedUnsavedChanges",

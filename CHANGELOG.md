@@ -367,6 +367,12 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **An offline `project_set_setting` says when text reads as another type
+  (#1016).** A `value` of `"1152"`, or a plugin list sent as text, was written as a
+  String and answered success, and only `value_written` showed the quotes. The
+  answer now carries `value_text_reads_as` and `retry_with` with the typed
+  value, and says so in `limitation`.
+
 - **The local CI lanes run from a git worktree (#1070).** A worktree's `.git`
   is a file naming a directory the container cannot see, so every test that runs
   git failed with 128. The lane now makes a repository of its own from the
