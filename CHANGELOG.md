@@ -367,6 +367,14 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **The editor startup test retries a held open and names the engine crash it
+  can meet (#1069, #285).** A `scene_open` held past the route deadline answers
+  a retryable `504`, which the test read wrongly and failed on. And the
+  editor's own documentation thread can crash a fresh project's startup on
+  Godot's bug, before Didi runs anything; the test now skips that one crash,
+  as the harness has since #292. The four second settle added after the open
+  was blamed for it is gone: the open was still held every time.
+
 - **`editor_save_scene` reads the file it saved (#1019).** Godot's `save_scene`
   answers OK for a scene the editor then does not write, so a save into a
   file the editor could not replace answered `saved`. The tool now checks the
@@ -383,12 +391,6 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
   is a file naming a directory the container cannot see, so every test that runs
   git failed with 128. The lane now makes a repository of its own from the
   synced tree there, and prints the commit the tree came from.
-
-- **Opening a scene at editor startup no longer lands on the moment the editor
-  starts its documentation threads (#1069, #285).** The wait added for #1069
-  released the open on the frame after the first scan, which is when those
-  threads start, and a Godot bug there crashed the editor on CI's 4.6.2 runner.
-  The open now waits four seconds more, as the harness fixture has since #296.
 
 - **Undo, redo and project code say whether they left the scene unsaved
   (#1049).** `editor_undo`, `editor_redo`, `scene_call_method` and a delivered
