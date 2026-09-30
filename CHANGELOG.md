@@ -367,6 +367,12 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **`editor_save_scene` reads the file it saved (#1019).** Godot's `save_scene`
+  answers OK for a scene the editor then does not write, so a save into a
+  file the editor could not replace answered `saved`. The tool now checks the
+  file's modified time, refuses an unwritten save as `409 save_not_written`,
+  and answers `file_bytes` read back from disk.
+
 - **An offline `project_set_setting` says when text reads as another type
   (#1016).** A `value` of `"1152"`, or a plugin list sent as text, was written as a
   String and answered success, and only `value_written` showed the quotes. The

@@ -293,6 +293,10 @@ const std::map<std::string, Rule>& rules() {
             return nextCall("editor_save_scene", json::object(),
                             "This engine cannot say whether the scene is saved; save it first.");
         }},
+        {"save_not_written", [](const Refusal&) {
+            return nextCall("runtime_read_output", json::object(),
+                            "The editor printed why it did not write the scene.");
+        }},
         {"scene_never_saved", [](const Refusal&) {
             return retryWith({{"discard_unsaved", true}});
         }},

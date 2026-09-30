@@ -184,6 +184,12 @@ func board_file(board: String) -> Dictionary:
 	return parsed if parsed is Dictionary else {"exists": false}
 
 
+## A file's length on disk, read here and not by Didi (#1019).
+func file_length(path: String) -> int:
+	var file := FileAccess.open(path, FileAccess.READ)
+	return file.get_length() if file != null else -1
+
+
 ## Loads a file and keeps it, so the editor holds a copy of it the way it does
 ## of anything an open scene uses (#1047). The copy goes when this node does.
 func hold(path: String) -> bool:

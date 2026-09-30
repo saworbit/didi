@@ -91,8 +91,10 @@
       "issue": 1020
     },
     "editor_save_scene": {
-      "exempt": "Answers status saved from save_scene's return code, which the engine reports as OK whether or not the file was written, and reads nothing from the file.",
-      "issue": 1019
+      "observed": [
+        "file_bytes"
+      ],
+      "witness": "FileAccess length of the saved file through observed_witness.gd"
     },
     "editor_undo": {
       "observed": [

@@ -306,6 +306,13 @@ function Get-ObservedPostStateCases {
             (Step "call" "blackboard_clear" @{ board = "observed_probe"; path = "probe" }),
             (Witness "witness" "board_file" @("observed_probe")))
            Agree = { param($s) Agree "revision" $s.call.revision $s.witness.returned.revision } },
+        # The save reads the file it wrote, since save_scene answers OK whether
+        # or not the editor wrote it (#1019). Last of the editor cases, so the
+        # observed scene goes to disk with every edit above.
+        @{ Tool = "editor_save_scene"; Session = "editor"; Steps = @(
+            (Step "call" "editor_save_scene" @{}),
+            (Witness "witness" "file_length" @($observedScenePath)))
+           Agree = { param($s) Agree "file_bytes" $s.call.file_bytes $s.witness.returned } },
         @{ Tool = "runtime_set_paused"; Session = "game"; Steps = @(
             (Step "call" "runtime_set_paused" @{ paused = $false }),
             (Step "witness" "runtime_get_tree" @{ root_path = "/root/RuntimeRoot"; max_depth = 1 }))

@@ -14519,6 +14519,28 @@ json GodotBridge::execute(const std::string& method, const json& params,
         // cannot be switched off from here, so what is reported is that the
         // save completed with an engine diagnostic, and what it was.
         const auto before = EditorHook::instance().engineOutput().nextSequence();
+        // The file, read around the save. save_scene answers OK for any open
+        // scene with a path, including one the editor then refuses to write
+        // behind a dialog (a cyclic instance, a missing dependency), so
+        // "saved" came from a return code that says nothing about the file
+        // (#1019). A write moves the modified time; one that did not is
+        // refused, and what was written is read back.
+        namespace fs = std::filesystem;
+        auto saving_root = editedSceneRoot(editor);
+        const std::string scene_path =
+            saving_root.isOk() && saving_root.value() ? editedScenePath(saving_root.value()) : std::string();
+        fs::path scene_file;
+        if (strings::startsWith(scene_path, "res://")) {
+            auto project_path = resolveGodotProjectPath();
+            if (project_path.isOk()) {
+                scene_file = didi::paths::projectPathFromUtf8(project_path.value()) /
+                             didi::paths::projectPathFromUtf8(scene_path.substr(6));
+            }
+        }
+        std::error_code before_error;
+        const auto written_before = scene_file.empty() ? fs::file_time_type{}
+                                                       : fs::last_write_time(scene_file, before_error);
+        const bool existed_before = !scene_file.empty() && !before_error;
         auto saved = callObject(editor, "EditorInterface", "save_scene", 166280745LL);
         if (saved.isErr()) return errorJson(saved.error().code, saved.error().message);
         auto code = scalarFromVariant<int64_t>(saved.value(), GDEXTENSION_VARIANT_TYPE_INT);
@@ -14528,7 +14550,23 @@ json GodotBridge::execute(const std::string& method, const json& params,
                              "Godot save_scene failed with " +
                                  ::didi::godot::describeGodotError(code.value()));
         }
-        json result = {{"status", "saved"}};
+        json result = {{"status", "saved"}, {"scene_path", scene_path}};
+        if (!scene_file.empty()) {
+            std::error_code after_error;
+            const auto written_after = fs::last_write_time(scene_file, after_error);
+            std::error_code size_error;
+            const auto bytes = after_error ? std::uintmax_t{0} : fs::file_size(scene_file, size_error);
+            if (after_error || size_error || (existed_before && written_after == written_before)) {
+                return errorJson(409,
+                                 "The editor accepted the save and did not write " + scene_path +
+                                     ". It refuses a scene it cannot save behind a dialog of its "
+                                     "own, such as one that instances itself or names a missing "
+                                     "dependency; its reason is in the editor's output.",
+                                 {{"code", "save_not_written"}, {"scene_path", scene_path}});
+            }
+            result["file_bytes"] = static_cast<uint64_t>(bytes);
+        }
+        reportEditedSceneSaved(result);
         constexpr size_t kMaxSaveDiagnostics = 8;
         auto during = EditorHook::instance().engineOutput().read(before, kMaxSaveDiagnostics,
                                                                  "error");
