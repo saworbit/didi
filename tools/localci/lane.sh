@@ -30,12 +30,33 @@ say() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
 # `git -C /work rev-parse HEAD` returning 128. A checkout is what CI has and
 # what parts of this repository assume; the first sync pays for it once and
 # rsync keeps the rest cheap.
+#
+# A git worktree's .git is a file, one line naming a gitdir on the host
+# (`gitdir: D:/didi/.git/worktrees/<name>`), and that path does not exist in
+# here, so every `git -C /work ...` in the Python suite failed with 128 (#1070).
+# From a worktree the lane leaves .git out of the sync and makes a repository
+# of its own from the synced tree, the way macos.sh does, printing the host
+# commit beside the one it made.
+worktree_git=()
+[ -f /src-ro/.git ] && worktree_git=(--exclude=/.git)
 say "syncing the working tree into $WORK"
 rsync -a --delete \
     --exclude=/build \
     --exclude=/build-ninja \
+    "${worktree_git[@]}" \
     /src-ro/ "$WORK/"
 cd "$WORK"
+if [ ${#worktree_git[@]} -gt 0 ]; then
+    say "git repository for the tests that need one"
+    source_commit="${DIDI_LOCALCI_SOURCE_COMMIT:-unknown}"
+    # Whatever .git an earlier run left is another commit's; start again.
+    rm -rf "$WORK/.git"
+    git init -q
+    git add -A
+    git -c user.email=localci@invalid -c user.name='didi localci' \
+        commit -qm "working tree synced by tools/localci, from $source_commit"
+    echo "  synthetic repo; the tree came from the worktree at $source_commit"
+fi
 
 # Configure once per build volume, not once per run.
 #

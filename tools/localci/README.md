@@ -180,7 +180,10 @@ a fully writable checkout — which is what a CI runner has.
   does not delete excluded paths on the receiver, so the build tree survives and
   stays incremental. `--clean` drops the volumes.
 - **`.git` is copied**, which costs about 73 MiB on the first sync and almost
-  nothing after.
+  nothing after. From a git worktree (a checkout under `.worktrees/`), `.git` is
+  a file naming a directory on the host that the container cannot see, so it is
+  left out, and the lane makes a repository of its own from the synced tree and
+  prints the commit the tree came from, as the macOS lane does.
 
 ### Why a copy rather than building in place
 
