@@ -834,6 +834,8 @@ Writes or erases cells on a `TileMapLayer` in one undoable batch.
 
 A coordinate is `[x, y]` or `{"x": .., "y": ..}`, whichever you have. Vectors are objects everywhere else on this surface and `tilemap_get_used_rect` answers with objects, so a used rect can be fed straight back into a write. `coords` and `position` are the same field: this tool and `gridmap_set_cells` each take the other's name.
 
+The answer's `cells` lists, in request order, what each requested cell holds as the layer reports it: `coords`, `source_id`, `atlas_coords` and `alternative_tile`, read after the commit for a cell that changed, and from the read before it for one that did not. An erased cell reads `source_id: -1`. `gridmap_set_cells` answers the same way with `position`, `item` and `orientation` (#1019).
+
 ### `tilemap_get_used_rect` — Live
 
 Returns the used cell boundaries of a `TileMapLayer` without changing it.

@@ -107,8 +107,10 @@
       "issue": 1020
     },
     "gridmap_set_cells": {
-      "exempt": "changed_cells and unchanged_cells are counted before the write. The cells are read again afterwards and a mismatch is refused, but what they hold is not in the answer.",
-      "issue": 1019
+      "observed": [
+        "cells"
+      ],
+      "witness": "GridMap.get_cell_item and get_cell_item_orientation through observed_witness.gd"
     },
     "project_add_export_preset": {
       "observed": [
@@ -318,8 +320,10 @@
       "issue": 1020
     },
     "tilemap_set_cells": {
-      "exempt": "changed_cells and unchanged_cells are counted before the write. The cells are read again afterwards and a mismatch is refused, but what they hold is not in the answer.",
-      "issue": 1019
+      "observed": [
+        "cells"
+      ],
+      "witness": "TileMapLayer.get_cell_source_id, get_cell_atlas_coords and get_cell_alternative_tile through observed_witness.gd"
     },
     "viewport_create_test_lab": {
       "exempt": "Nothing in the live harness drives it.",

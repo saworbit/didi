@@ -367,6 +367,12 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **`tilemap_set_cells` and `gridmap_set_cells` answer with the cells they
+  read back (#1019).** They re-read every changed cell after the commit and
+  refused a mismatch, but answered only counts taken before the write. The
+  answer now carries `cells`, what each requested cell holds as the layer or
+  grid reports it.
+
 - **`editor_save_scene` reads the file it saved (#1019).** Godot's `save_scene`
   answers OK for a scene the editor then does not write, so a save into a
   file the editor could not replace answered `saved`. The tool now checks the

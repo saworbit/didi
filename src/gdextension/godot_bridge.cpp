@@ -9702,8 +9702,27 @@ json GodotBridge::execute(const std::string& method, const json& params,
                                  old_source.value(), std::move(old_atlas.value()), old_alt.value(), changed});
         }
         const size_t changed_count = std::count_if(cells.begin(), cells.end(), [](const Cell& cell) { return cell.changed; });
-        if (changed_count == 0) return liveResult({{"requested_cells", cells.size()}, {"changed_cells", 0},
-            {"unchanged_cells", cells.size()}, {"undo_redo_registered", false}, {"outcome", "completed"}, {"rollback", "not_required"}});
+        // What each requested cell holds, read from the layer: the snapshot
+        // for a cell nothing changed, the read after the commit for the rest.
+        // The counts are about the request, and nothing in the answer came
+        // from the layer after the write (#1019).
+        json observed_cells = json::array();
+        const auto observedCell = [](VariantValue& coords, int64_t source, const json& atlas,
+                                     int64_t alternative) {
+            auto coords_json = integerVectorToJson(coords, 2);
+            return json{{"coords", coords_json.isOk() ? coords_json.value() : json(nullptr)},
+                        {"source_id", source}, {"atlas_coords", atlas}, {"alternative_tile", alternative}};
+        };
+        const auto snapshotCell = [&](Cell& cell) {
+            auto atlas = integerVectorToJson(cell.old_atlas, 2);
+            return observedCell(cell.coords, cell.old_source, atlas.isOk() ? atlas.value() : json(nullptr),
+                                cell.old_alternative);
+        };
+        if (changed_count == 0) {
+            for (auto& cell : cells) observed_cells.push_back(snapshotCell(cell));
+            return liveResult({{"requested_cells", cells.size()}, {"changed_cells", 0},
+                {"unchanged_cells", cells.size()}, {"cells", std::move(observed_cells)}, {"undo_redo_registered", false}, {"outcome", "completed"}, {"rollback", "not_required"}});
+        }
         auto manager = undoManager(editor);
         if (manager.isErr()) return errorJson(manager.error().code, manager.error().message);
         auto action = createAction(manager.value(), "Didi: set TileMapLayer cells", layer.value());
@@ -9723,7 +9742,11 @@ json GodotBridge::execute(const std::string& method, const json& params,
         }
         auto committed = commitAction(manager.value());
         if (committed.isErr()) return errorJson(500, committed.error().message);
-        for (auto& cell : cells) if (cell.changed) {
+        for (auto& cell : cells) {
+            if (!cell.changed) {
+                observed_cells.push_back(snapshotCell(cell));
+                continue;
+            }
             auto observed_source_value = callObject(layer.value(), "TileMapLayer", "get_cell_source_id", 2485466453LL, {&cell.coords});
             auto observed_atlas_value = callObject(layer.value(), "TileMapLayer", "get_cell_atlas_coords", 3050897911LL, {&cell.coords});
             auto observed_alt_value = callObject(layer.value(), "TileMapLayer", "get_cell_alternative_tile", 2485466453LL, {&cell.coords});
@@ -9740,9 +9763,11 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 const auto restored = undoLastAction(manager.value(), root.value());
                 return bridgeError(500, "tilemap_postcondition_mismatch", {{"outcome", restored.isOk() ? "rolled_back" : "unknown"}});
             }
+            observed_cells.push_back(observedCell(cell.coords, observed_source.value(),
+                                                  observed_atlas.value(), observed_alt.value()));
         }
         return liveSceneMutation({{"requested_cells", cells.size()}, {"changed_cells", changed_count},
-            {"unchanged_cells", cells.size() - changed_count}, {"undo_redo_registered", true}, {"outcome", "completed"}, {"rollback", "undo_redo"}});
+            {"unchanged_cells", cells.size() - changed_count}, {"cells", std::move(observed_cells)}, {"undo_redo_registered", true}, {"outcome", "completed"}, {"rollback", "undo_redo"}});
     }
 
     if (method == "gridmap.setCells") {
@@ -9825,8 +9850,19 @@ json GodotBridge::execute(const std::string& method, const json& params,
             cells.push_back(Cell{std::move(position.value()), item, orientation, old_item.value(), old_orientation.value(), changed});
         }
         const size_t changed_count = std::count_if(cells.begin(), cells.end(), [](const Cell& cell) { return cell.changed; });
-        if (changed_count == 0) return liveResult({{"requested_cells", cells.size()}, {"changed_cells", 0},
-            {"unchanged_cells", cells.size()}, {"undo_redo_registered", false}, {"outcome", "completed"}, {"rollback", "not_required"}});
+        // What each requested cell holds, read from the grid, as the layer
+        // writer does (#1019).
+        json observed_cells = json::array();
+        const auto observedCell = [](VariantValue& position, int64_t item, int64_t orientation) {
+            auto position_json = integerVectorToJson(position, 3);
+            return json{{"position", position_json.isOk() ? position_json.value() : json(nullptr)},
+                        {"item", item}, {"orientation", orientation}};
+        };
+        if (changed_count == 0) {
+            for (auto& cell : cells) observed_cells.push_back(observedCell(cell.position, cell.old_item, cell.old_orientation));
+            return liveResult({{"requested_cells", cells.size()}, {"changed_cells", 0},
+                {"unchanged_cells", cells.size()}, {"cells", std::move(observed_cells)}, {"undo_redo_registered", false}, {"outcome", "completed"}, {"rollback", "not_required"}});
+        }
         auto manager = undoManager(editor);
         if (manager.isErr()) return errorJson(manager.error().code, manager.error().message);
         auto action = createAction(manager.value(), "Didi: set GridMap cells", grid.value());
@@ -9842,7 +9878,11 @@ json GodotBridge::execute(const std::string& method, const json& params,
         }
         auto committed = commitAction(manager.value());
         if (committed.isErr()) return errorJson(500, committed.error().message);
-        for (auto& cell : cells) if (cell.changed) {
+        for (auto& cell : cells) {
+            if (!cell.changed) {
+                observed_cells.push_back(observedCell(cell.position, cell.old_item, cell.old_orientation));
+                continue;
+            }
             auto observed_item_value = callObject(grid.value(), "GridMap", "get_cell_item", 3724960147LL, {&cell.position});
             auto observed_orientation_value = callObject(grid.value(), "GridMap", "get_cell_item_orientation", 3724960147LL, {&cell.position});
             auto observed_item = observed_item_value.isOk() ? scalarFromVariant<int64_t>(observed_item_value.value(), GDEXTENSION_VARIANT_TYPE_INT)
@@ -9855,9 +9895,10 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 const auto restored = undoLastAction(manager.value(), root.value());
                 return bridgeError(500, "gridmap_postcondition_mismatch", {{"outcome", restored.isOk() ? "rolled_back" : "unknown"}});
             }
+            observed_cells.push_back(observedCell(cell.position, observed_item.value(), observed_orientation.value()));
         }
         return liveSceneMutation({{"requested_cells", cells.size()}, {"changed_cells", changed_count},
-            {"unchanged_cells", cells.size() - changed_count}, {"undo_redo_registered", true}, {"outcome", "completed"}, {"rollback", "undo_redo"}});
+            {"unchanged_cells", cells.size() - changed_count}, {"cells", std::move(observed_cells)}, {"undo_redo_registered", true}, {"outcome", "completed"}, {"rollback", "undo_redo"}});
     }
 
     if (method == "vision.setCameraTransform") {
