@@ -8,7 +8,6 @@
 #include "didi/runtime/profiler_collector.hpp"
 #include "didi/runtime/invariant_watch.hpp"
 #include "didi/runtime/scene_exploration.hpp"
-#include <chrono>
 #include <queue>
 #include <mutex>
 #include <future>
@@ -139,12 +138,6 @@ public:
 private:
     std::atomic<bool> m_active{false};
 };
-
-// Whether scene_open and scene_create still wait at editor startup: until
-// the first scan is applied, and for a settle after it. settles_at is set on
-// the first call that sees the scan applied. See EditorHook::editorStarting.
-bool startupStillSettling(std::optional<std::chrono::steady_clock::time_point>& settles_at,
-                          bool first_scan_applied, std::chrono::steady_clock::time_point now);
 
 class EditorHook {
 public:
@@ -381,9 +374,6 @@ private:
     std::optional<bool> m_progressTaskOverride;
     // Test seam for editorStarting, which otherwise asks the engine.
     std::optional<bool> m_editorStartingOverride;
-    // Main-thread only. When the startup settle ends, once the first scan has
-    // been seen applied.
-    std::optional<std::chrono::steady_clock::time_point> m_startupSettlesAt;
     std::optional<int64_t> m_pendingQuitExitCode;
     int m_pendingQuitFrames{0};
 
