@@ -12985,31 +12985,31 @@ json GodotBridge::execute(const std::string& method, const json& params,
                                             {"scene_path", scene_path}};
                 return failure;
             };
+            // What was open before this call replaces it. `opened: true` said
+            // the new scene was open and nothing said the old one no longer
+            // was, so every later scene_* call answered about a different file
+            // with no field naming either one. Read before anything moves it.
+            auto previous_root = editedSceneRoot(editor);
+            const std::string previous_scene =
+                previous_root.isOk() ? editedScenePath(previous_root.value()) : std::string();
+            bool tab_stale = false;
             if (target_exists.value()) {
                 auto replace_cache = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(4));
                 if (replace_cache.isErr()) return openFailure(replace_cache.error());
                 auto refreshed = callObject(loader.value(), "ResourceLoader", "load", 3358495409LL,
                                             {&path.value(), &packed_hint.value(), &replace_cache.value()});
                 if (refreshed.isErr()) return openFailure(refreshed.error());
-                // Only a tab that holds the scene is rebuilt. A reload of a path
-                // no tab holds printed "Can't reload scene" on 4.7, and on 4.5
-                // and 4.6 clears the current scene's undo history.
                 auto open_root = openSceneRootId(editor, scene_path);
                 if (open_root.isErr()) return openFailure(open_root.error());
-                if (open_root.value() != 0) {
-                    auto reloaded = callObject(editor, "EditorInterface", "reload_scene_from_path",
-                                               83702148LL, {&path.value()});
-                    if (reloaded.isErr()) return openFailure(reloaded.error());
-                }
+                tab_stale = open_root.value() != 0;
             }
-            // What was open before this call replaces it. `opened: true` said
-            // the new scene was open and nothing said the old one no longer
-            // was, so every later scene_* call answered about a different file
-            // with no field naming either one.
-            auto previous_root = editedSceneRoot(editor);
-            const std::string previous_scene =
-                previous_root.isOk() ? editedScenePath(previous_root.value()) : std::string();
-
+            // A tab that holds the scene still has the tree from before the
+            // write. The open below makes it current, and the server rebuilds
+            // it from the file on a later request, through the reload every
+            // writer uses. Rebuilding it here first left the editor switching
+            // scenes for the rest of the frame on 4.5 and 4.6, so the open did
+            // nothing and a tab right of the current one never came to the
+            // front (#1079). A current tab stays current when it is rebuilt.
             auto opened = open_and_verify();
             if (opened.isErr()) return openFailure(opened.error());
             json created = uidFields({{"status", "success"}, {"saved", true}, {"opened", true},
@@ -13018,6 +13018,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
             created["previous_scene_file_path"] =
                 previous_scene.empty() ? json(nullptr) : json(previous_scene);
             created["scene_file_path"] = scene_path;
+            if (tab_stale) created["scene_tab_stale"] = true;
             return liveResult(created);
         }
         return liveResult(uidFields({{"status", "success"}, {"saved", true},
