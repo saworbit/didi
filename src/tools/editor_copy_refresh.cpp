@@ -49,6 +49,10 @@ void readTab(EditorCopyRefresh& refresh, const std::string& path, const json& re
     if (!flag(result, "scene_open")) return;
     if (flag(result, "scene_reloaded")) {
         refresh.scenes_reloaded.push_back(path);
+        const auto discarded = result.find("scene_discarded_unsaved");
+        if (discarded != result.end() && (discarded->is_boolean() || discarded->is_null())) {
+            refresh.scenes_discarded_unsaved[path] = *discarded;
+        }
         const auto moved = result.find("edited_scene_moved_from");
         if (!restore.needed && moved != result.end() && moved->is_string()) {
             restore = {true, moved->get<std::string>(), path};
@@ -263,7 +267,16 @@ std::optional<Error> refuseUnsavedOpenScenes(const std::shared_ptr<ipc::IIpcClie
 void reportEditorCopy(json& payload, const EditorCopyRefresh& refresh) {
     if (!refresh.answered) return;
     payload["editor_copy_reloaded"] = !refresh.reloaded.empty();
-    if (!refresh.scenes_reloaded.empty()) payload["editor_scene_reloaded"] = true;
+    if (!refresh.scenes_reloaded.empty()) {
+        payload["editor_scene_reloaded"] = true;
+        // Only the writers that rebuild a tab whatever it holds get here with
+        // a tab that had changes, and their answer said nothing about losing
+        // them (#1082).
+        const auto discarded = refresh.scenes_discarded_unsaved.find(refresh.scenes_reloaded.front());
+        if (discarded != refresh.scenes_discarded_unsaved.end()) {
+            payload["editor_scene_discarded_unsaved"] = *discarded;
+        }
+    }
     if (!refresh.failed.empty()) payload["editor_copy_error"] = refresh.failed.front()["reason"];
 }
 
