@@ -28,6 +28,30 @@ $engineCrash = @(
     "END DIDI CRASH CAPTURE"
 ) -join "`r`n"
 
+# The 4.6.2 capture from #1086's run (#1098), with the module list its report
+# carries. Its offsets were checked against the release binary.
+$engineCrash462 = @(
+    "DIDI CRASH CAPTURE",
+    "exception: 0xc000001d  ILLEGAL_INSTRUCTION",
+    "flags: 0x00000000  (0 is first chance, 1 is non continuable)",
+    "address: 0x00007ff7f02b78a6  Godot_v4.6.2-stable_win64.exe+0x064678a6",
+    "process: 8532",
+    "thread: 1644  main thread: 7680  on main thread: no",
+    "stack:",
+    "  #00 0x00007ff7f02b78a6  Godot_v4.6.2-stable_win64.exe+0x064678a6",
+    "  #01 0x00007ff7eb430d96  Godot_v4.6.2-stable_win64.exe+0x015e0d96",
+    "  #02 0x00007ff7ed6520ad  Godot_v4.6.2-stable_win64.exe+0x038020ad",
+    "  #03 0x00007ff7ee9fe2fa  Godot_v4.6.2-stable_win64.exe+0x04bae2fa",
+    "  #04 0x00007ffc0baff0ad  msvcrt.dll+0x0003f0ad",
+    "  #05 0x00007ffc0baff17c  msvcrt.dll+0x0003f17c",
+    "  #06 0x00007ffc0b51e987  KERNEL32.DLL+0x0002e987",
+    "  #07 0x00007ffc0bd2c53c  ntdll.dll+0x0008c53c",
+    "loaded modules:",
+    "  0x00007ff7e9e50000  size 0x0a623000  D:\a\didi\godot-bin\Godot_v4.6.2-stable_win64.exe",
+    "  0x00007ffb00000000  size 0x00001000  C:\p\addons\didi\bin\didi_extension.dll",
+    "END DIDI CRASH CAPTURE"
+) -join "`r`n"
+
 function New-Report([string]$Find, [string]$ReplaceWith) {
     return ($engineCrash -replace [regex]::Escape($Find), $ReplaceWith)
 }
@@ -92,6 +116,18 @@ $cases = [ordered]@{
         @{ report = (New-Report $engineFrame "  #01 0x00007ff606446266  ntdll.dll+0x017a6266" `
                      -replace [regex]::Escape("  #00 0x00007ff60b3144b6  Godot_v4.7.2-stable_win64.exe+0x066744b6"),
                                "  #00 0x00007ff60b3144b6  ntdll.dll+0x066744b6"); expect = $false }
+
+    "captured 4.6.2 documentation worker" = @{ report = $engineCrash462; expect = $true }
+
+    # Each build is held to its own offsets and image size, not another's.
+    "4.6.2 offsets under the 4.7.2 name" =
+        @{ report = ($engineCrash462 -replace '4\.6\.2', '4.7.2'); expect = $false }
+    "4.6.2 with the 4.7.2 image size" =
+        @{ report = ($engineCrash462 -replace '0a623000', '0ae59000'); expect = $false }
+    "4.6.2 with a Didi frame on the stack" =
+        @{ report = ($engineCrash462 -replace [regex]::Escape('Godot_v4.6.2-stable_win64.exe+0x015e0d96'), 'didi_extension.dll+0x015e0d96'); expect = $false }
+    "4.6.2 on the main thread" =
+        @{ report = ($engineCrash462 -replace 'on main thread: no', 'on main thread: yes'); expect = $false }
 
     "not a capture report at all" = @{ report = "some other file"; expect = $false }
     "nothing at all" = @{ report = ""; expect = $false }

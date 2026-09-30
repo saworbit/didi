@@ -367,6 +367,12 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **The harness recognizes the #285 engine crash on Godot 4.6.2 too (#1098).**
+  Its crash classifier knew only the 4.7.2 stack, so the same documentation
+  thread crash on 4.6.2 failed a run instead of being retried. The 4.6.2
+  frames and image size, checked against the release binary, are now in its
+  table of verified builds.
+
 - **`tilemap_set_cells` and `gridmap_set_cells` answer with the cells they
   read back (#1019).** They re-read every changed cell after the commit and
   refused a mismatch, but answered only counts taken before the write. The

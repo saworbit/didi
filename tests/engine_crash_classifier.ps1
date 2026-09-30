@@ -12,6 +12,22 @@ $script:EngineCrashSystemModules = @(
     'ntdll.dll', 'kernel32.dll', 'kernelbase.dll', 'msvcrt.dll', 'ucrtbase.dll'
 )
 
+# The builds whose #285 stack has been checked against the release binary:
+# the trap stub, EditorHelp's thread that finishes script documentation
+# returning from Thread::wait_to_finish, Thread::callback, and the thread
+# trampoline. ASLR changes absolute addresses, not RVAs. A build that is not
+# here fails normally until its stack is verified.
+$script:EngineWorkerCrashBuilds = @(
+    # Run 34089765718, job 101640706240, recorded in #285.
+    @{ Module = 'Godot_v4.7.2-stable_win64.exe'; ImageSize = '0ae59000'
+       Offsets = @('066744b6', '017a6266', '03928abd', '04cf4b1a') },
+    # #1086's run, job 109761470970, recorded in #1098. The same four frames:
+    # ud2 at the first, wait_to_finish at 0x3802210 branching to it, and the
+    # callback and trampoline byte for byte what they are in 4.7.2.
+    @{ Module = 'Godot_v4.6.2-stable_win64.exe'; ImageSize = '0a623000'
+       Offsets = @('064678a6', '015e0d96', '038020ad', '04bae2fa') }
+)
+
 function Test-EngineWorkerCrashReport([string]$Report) {
     if ([string]::IsNullOrWhiteSpace($Report)) { return $false }
     if ([regex]::Matches($Report, '(?m)^DIDI CRASH CAPTURE\r?$').Count -ne 1) { return $false }
@@ -20,14 +36,19 @@ function Test-EngineWorkerCrashReport([string]$Report) {
     if ($Report -notmatch '(?m)^exception: 0xc000001d\s+ILLEGAL_INSTRUCTION\r?$') { return $false }
     if ($Report -notmatch '(?m)^thread: \d+  main thread: \d+  on main thread: no\r?$') { return $false }
 
-    # These four RVAs and image size come from run 34089765718, job
-    # 101640706240, recorded in #285. ASLR changes absolute addresses, not RVAs.
-    # An unrecognized release must fail normally until its stack is verified.
-    $engineModule = 'Godot_v4.7.2-stable_win64.exe'
-    $workerOffsets = @('066744b6', '017a6266', '03928abd', '04cf4b1a')
-    if ($Report -notmatch '(?m)^address: 0x[0-9a-f]+\s+Godot_v4\.7\.2-stable_win64\.exe\+0x066744b6\r?$') { return $false }
+    # The faulting address names the build, and every other check is that
+    # build's.
+    $build = $null
+    foreach ($candidate in $script:EngineWorkerCrashBuilds) {
+        $address = '(?m)^address: 0x[0-9a-f]+\s+' + [regex]::Escape($candidate.Module) + '\+0x' + $candidate.Offsets[0] + '\r?$'
+        if ($Report -match $address) { $build = $candidate; break }
+    }
+    if ($null -eq $build) { return $false }
+    $engineModule = $build.Module
+    $workerOffsets = $build.Offsets
     $modules = [regex]::Match($Report, '(?ms)^loaded modules:\r?$(.*?)^END DIDI CRASH CAPTURE\r?$')
-    if (-not $modules.Success -or $modules.Groups[1].Value -notmatch '(?m)^\s+0x[0-9a-f]+\s+size 0x0ae59000\s+[^\r\n]*[\\/]Godot_v4\.7\.2-stable_win64\.exe\r?$') { return $false }
+    $image = '(?m)^\s+0x[0-9a-f]+\s+size 0x' + $build.ImageSize + '\s+[^\r\n]*[\\/]' + [regex]::Escape($engineModule) + '\r?$'
+    if (-not $modules.Success -or $modules.Groups[1].Value -notmatch $image) { return $false }
 
     $stack = [regex]::Match($Report, '(?ms)^stack:\r?$(.*?)^loaded modules:')
     if (-not $stack.Success) { return $false }
