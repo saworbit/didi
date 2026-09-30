@@ -201,18 +201,24 @@ DotnetResolution resolveDotnet() {
 // depends on it.
 struct DotnetProbe {
     bool available{false};
+    // Ran out of time, which says the SDK is slow, not that it is missing.
+    bool timed_out{false};
     std::string version;
     std::string unavailable_reason;
 };
 
+// Under the call's own timeout_seconds. A fixed 30 seconds was shorter than a
+// dotnet on a loaded CI runner took to answer, and the call then told a
+// caller who had asked for 300 to install an SDK that was there (#1078).
 DotnetProbe probeDotnet(const std::string& executable,
-                        const std::filesystem::path& working_directory) {
+                        const std::filesystem::path& working_directory,
+                        std::chrono::seconds budget) {
     DotnetProbe probe;
     offline::ProcessRequest request;
     request.executable = executable;
     request.arguments = {"--version"};
     request.working_directory = working_directory;
-    request.timeout = std::chrono::seconds(30);
+    request.timeout = budget;
     request.max_output_bytes = 64 * 1024;
     auto run = offline::runProcess(request);
     if (run.isErr()) {
@@ -220,7 +226,9 @@ DotnetProbe probeDotnet(const std::string& executable,
         return probe;
     }
     if (run.value().timed_out) {
-        probe.unavailable_reason = "'--version' did not answer within 30 seconds";
+        probe.timed_out = true;
+        probe.unavailable_reason = "'--version' did not answer within " +
+                                   std::to_string(budget.count()) + " seconds";
         return probe;
     }
     const auto first_line = strings::trim(strings::split(run.value().output, '\n').empty()
@@ -477,7 +485,19 @@ CallToolResult handleCSharpCheckBuild(const json& args, std::shared_ptr<ipc::IIp
     if (timeout.isErr()) return CallToolResult::fromError(timeout.error());
 
     const auto dotnet = resolveDotnet();
-    const auto probe = probeDotnet(dotnet.executable, root.value());
+    const auto probe = probeDotnet(dotnet.executable, root.value(),
+                                   std::chrono::seconds(timeout.value()));
+    if (probe.timed_out) {
+        return CallToolResult::errorJson(
+            504,
+            "'" + dotnet.executable + "' " + probe.unavailable_reason +
+                ", so the build did not start and whether this project's C# compiles is "
+                "unknown. A dotnet that answers slowly is still there; send a larger "
+                "timeout_seconds.",
+            {{"code", "timeout"}, {"tool", "csharp_check_build"},
+             {"timeout_seconds", timeout.value()}, {"dotnet_executable", dotnet.executable},
+             {"retryable", true}});
+    }
     // A build that never ran is not C# with no errors.
     //
     // The same sentence #677 wrote for script_check_syntax, owed to the one
