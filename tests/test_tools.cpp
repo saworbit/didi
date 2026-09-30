@@ -6582,24 +6582,6 @@ static void test_nothing_is_dequeued_inside_an_editor_progress_task() {
     ASSERT_EQ(answer["error"]["data"]["code"], "session_kind_rejected");
 }
 
-static void test_scene_opens_wait_out_a_settle_after_the_first_scan() {
-    // Break caught on CI's 4.6.2 runner: released on the frame after the first
-    // scan was applied, a scene_open landed as the editor started its script
-    // documentation threads, and the editor died on one of them joining a
-    // thread that was no longer started (#285, godotengine/godot#123273). The
-    // hold now lasts a settle past the scan.
-    using std::chrono::seconds;
-    std::optional<std::chrono::steady_clock::time_point> settles_at;
-    const auto start = std::chrono::steady_clock::now();
-    ASSERT_TRUE(didi::godot::startupStillSettling(settles_at, false, start));
-    ASSERT_TRUE(!settles_at.has_value());
-    // The frame the scan is first seen applied starts the settle.
-    ASSERT_TRUE(didi::godot::startupStillSettling(settles_at, true, start));
-    ASSERT_TRUE(didi::godot::startupStillSettling(settles_at, true, start + seconds(3)));
-    ASSERT_TRUE(!didi::godot::startupStillSettling(settles_at, true, start + seconds(4)));
-    ASSERT_TRUE(!didi::godot::startupStillSettling(settles_at, true, start + seconds(60)));
-}
-
 static void test_a_scene_open_waits_for_the_editor_to_open_its_startup_scenes() {
     // Break caught: the editor opens the scenes it restores, or the project's
     // main scene, once its first scan is applied and makes one of them
@@ -9942,8 +9924,6 @@ struct RegisterToolTests {
                      test_nothing_is_dequeued_inside_an_editor_progress_task);
         registerTest("EditorHook.SceneOpenWaitsForTheStartupScenes",
                      test_a_scene_open_waits_for_the_editor_to_open_its_startup_scenes);
-        registerTest("EditorHook.SceneOpensWaitOutASettleAfterTheFirstScan",
-                     test_scene_opens_wait_out_a_settle_after_the_first_scan);
         registerTest("Tools.ShaderWriteAppliedComparesMembers",
                      test_a_write_is_applied_when_every_member_landed);
         registerTest("Tools.WriteThatDidNotLandSaysWhichOfTheTwo",

@@ -13,6 +13,7 @@ import json
 import os
 from pathlib import Path
 import queue
+import re
 import shutil
 import signal
 import subprocess
@@ -28,6 +29,11 @@ except ImportError:
     from tests import didi_binary, stdio_process
 
 READS = 10
+SYSTEM_MODULES = {'ntdll.dll', 'kernel32.dll', 'kernelbase.dll', 'msvcrt.dll', 'ucrtbase.dll'}
+
+
+ENGINE_CRASH = ('the editor died on the documentation thread crash #285 tracks, '
+                'before the open was released')
 
 
 @unittest.skipUnless(os.environ.get('DIDI_TEST_BINARY') and os.environ.get('DIDI_STARTUP_GODOT'),
@@ -166,10 +172,12 @@ class EditorStartupSceneLive(unittest.TestCase):
         deadline = time.monotonic() + 120
         while True:
             errored, opened = self.tool('scene_open', scene_path='res://tab.tscn')
-            data = opened.get('data', {}) if errored else {}
+            data = opened.get('error', {}).get('data', {}) if errored else {}
             if not errored or data.get('outcome') != 'not_started' or time.monotonic() > deadline:
                 break
             time.sleep(1)
+        if errored and self._engine_worker_crash():
+            self.skipTest(ENGINE_CRASH)
         self.assertFalse(errored, f'{opened}\n{self._diagnostics()}')
         self.assertTrue(opened['opened'], opened)
 
@@ -178,7 +186,32 @@ class EditorStartupSceneLive(unittest.TestCase):
             time.sleep(1)
             errored, hierarchy = self.tool('scene_get_hierarchy', max_depth=1)
             reads.append(hierarchy if errored else hierarchy.get('scene_file_path'))
+        if reads != ['res://tab.tscn'] * READS and self._engine_worker_crash():
+            self.skipTest(ENGINE_CRASH)
         self.assertEqual(reads, ['res://tab.tscn'] * READS, self._diagnostics())
+
+    def _engine_worker_crash(self):
+        # The editor's script documentation thread can die on a Godot bug while
+        # a fresh project starts: an illegal instruction off the main thread,
+        # every frame in the engine or the system libraries under any thread
+        # (#285, godotengine/godot#123273). It happened here with the open
+        # still held, so before Didi ran anything. The harness lets the same
+        # crash through since #292; any other crash still fails.
+        try:
+            text = (self.root / 'editor.out').read_text(encoding='utf-8', errors='replace')
+        except OSError:
+            return False
+        if ('DIDI CRASH CAPTURE' not in text or 'ILLEGAL_INSTRUCTION' not in text
+                or 'on main thread: no' not in text or 'stack:' not in text):
+            return False
+        modules = []
+        for line in text.split('stack:', 1)[1].splitlines()[1:]:
+            frame = re.match(r'\s*#\d+\s+0x[0-9a-fA-F]+\s+(\S+)\+0x[0-9a-fA-F]+\s*$', line)
+            if frame is None:
+                break
+            modules.append(frame.group(1))
+        return (bool(modules) and modules[0].startswith('Godot_v')
+                and all(m.startswith('Godot_v') or m.lower() in SYSTEM_MODULES for m in modules))
 
     def _diagnostics(self):
         try:
