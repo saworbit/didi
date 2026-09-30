@@ -33,6 +33,7 @@ record is kept for the reasoning, not because it describes today's behaviour.
 | [API and Protocol Specification](API_SPECIFICATION.md) | JSON-RPC 2.0 over the wire and the binary frame format. |
 | [Administrator and Operations Guide](ADMIN_GUIDE.md) | DACL hardening, headless CI, observability and troubleshooting. |
 | [Developer and Extension Guide](DEVELOPER_GUIDE.md) | Building from source, the test suites, and adding a tool. |
+| [Token Efficiency Exploration](research/TOKEN_EFFICIENCY_EXPLORATION.md) | Comparative token footprint, tool schemas, and response economy vs alternative Godot MCP architectures. |
 | [MCP Instructions and Capability Exploration](EXPLORATORY_MCP_INSTRUCTIONS.md) | Dated Windows evidence: handshake/concurrency edges, both normalization profiles, Godot 4.5.1/4.7.2, harness fixes, latency and known outstanding issues. |
 | [Test Inventory](TEST_INVENTORY.md) | Generated. What each suite contains and how many cases it runs, derived from the suites themselves. |
 | [Fuzz Targets](../fuzz/README.md) | The three decoders that read untrusted bytes, why those three, and how to run one locally. |
