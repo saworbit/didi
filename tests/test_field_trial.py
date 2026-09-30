@@ -3,6 +3,7 @@ import importlib.util
 import io
 import json
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -1136,6 +1137,90 @@ class TrialSummaryTests(unittest.TestCase):
                 [phase["status"] for phase in summary["phases"] if phase["name"] == "run"],
                 ["skipped"],
             )
+
+
+class DraftsModeTests(unittest.TestCase):
+    """A trial that holds its findings for review instead of filing them (#1008)."""
+
+    BRIEF = (REPOSITORY_ROOT / "tools" / "field-trial" / "TRIAL_BRIEF.md").read_text(encoding="utf-8")
+
+    def test_the_drafts_brief_swaps_filing_for_drafts_and_keeps_the_rest(self):
+        drafts = TRIAL.drafts_brief(self.BRIEF)
+        self.assertNotIn("## Filing issues", drafts)
+        self.assertNotIn("with `gh`", drafts)
+        self.assertIn("## Issue drafts", drafts)
+        self.assertIn("`ISSUE_DRAFTS.md`", drafts)
+        self.assertIn("Issue:     draft title, or none and why", drafts)
+        self.assertIn("issue drafts written", drafts)
+        # Only the filing instructions move. The task and the ledger are what two
+        # runs are compared on, so a drafts run has to be handed the same ones.
+        for heading in ("## What to build", "## Use Didi first", "## The ledger"):
+            start = self.BRIEF.index(heading)
+            section = self.BRIEF[start:self.BRIEF.index("\n## ", start + 1)]
+            if heading == "## The ledger":
+                section = section.replace("issue number, or none", "draft title, or none")
+            self.assertIn(section, drafts)
+
+    def test_a_brief_whose_filing_section_moved_is_refused(self):
+        # Failing here is the point. A brief that still told the tester to file
+        # with gh, handed over as a drafts run, would file live in my name.
+        with self.assertRaises(ValueError):
+            TRIAL.drafts_brief(self.BRIEF.replace("## Filing issues", "## Reporting"))
+        with self.assertRaises(ValueError):
+            TRIAL.drafts_brief(self.BRIEF.replace("issues filed, and", "findings, and"))
+
+    def test_the_tester_environment_has_no_token_and_a_gh_that_refuses(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            stub = TRIAL.write_gh_stub(Path(tmp) / "bin")
+            base = {"PATH": str(Path(sys.executable).parent), "GH_TOKEN": "a",
+                    "GITHUB_TOKEN": "b", "GH_ENTERPRISE_TOKEN": "c", "KEEP": "d"}
+            environment = TRIAL.drafts_environment(base, stub)
+            self.assertNotIn("GH_TOKEN", environment)
+            self.assertNotIn("GITHUB_TOKEN", environment)
+            self.assertNotIn("GH_ENTERPRISE_TOKEN", environment)
+            self.assertEqual(environment["KEEP"], "d")
+            self.assertTrue(environment["PATH"].startswith(str(stub)))
+            found = shutil.which("gh", path=environment["PATH"])
+            self.assertIsNotNone(found)
+            self.assertEqual(Path(found).parent, stub)
+            # Through a shell, the way a tester reaches it: cmd resolves gh.bat
+            # through PATHEXT, and sh runs the script.
+            completed = subprocess.run("gh issue create", shell=True, env=environment,
+                                       capture_output=True, text=True, check=False)
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertIn("ISSUE_DRAFTS.md", completed.stdout + completed.stderr)
+
+    def test_drafts_are_read_by_their_headings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "ISSUE_DRAFTS.md"
+            self.assertEqual(TRIAL.read_drafts(path), [])
+            path.write_text(
+                "# Issue drafts\n\nIntro.\n\n## 1. First finding\n\n### Reproduction\n\n"
+                "Steps.\n\n## 2. Second finding\n", encoding="utf-8")
+            self.assertEqual(TRIAL.read_drafts(path), ["1. First finding", "2. Second finding"])
+
+    def test_drafts_are_listed_where_filed_issues_go(self):
+        summary = TRIAL.trial_summary(
+            "trial-1", [{"name": "report", "status": "ok", "detail": ""}], "scored",
+            drafts=["1. First finding"],
+        )
+        self.assertEqual(summary["filing"], "drafts")
+        rendered = TRIAL.render_summary(summary)
+        self.assertIn("## Issue drafts", rendered)
+        self.assertIn("- 1. First finding", rendered)
+        self.assertIn("ISSUE_DRAFTS.md", rendered)
+        self.assertNotIn("## Issues filed", rendered)
+        live = TRIAL.trial_summary("trial-2", [], "scored")
+        self.assertEqual(live["filing"], "live")
+        self.assertNotIn("## Issue drafts", TRIAL.render_summary(live))
+
+    def test_an_issue_filed_during_a_drafts_run_is_called_out(self):
+        summary = TRIAL.trial_summary(
+            "trial-1", [], "scored", issues=[{"number": 7, "title": "Leaked"}], drafts=[],
+        )
+        rendered = TRIAL.render_summary(summary)
+        self.assertIn("- #7 Leaked", rendered)
+        self.assertIn("should have filed nothing", rendered)
 
 
 TRANSCRIPTS_PATH = REPOSITORY_ROOT / "tools" / "field-trial" / "transcripts.py"

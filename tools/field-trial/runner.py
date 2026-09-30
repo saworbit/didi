@@ -222,11 +222,13 @@ def run_agent(
     working_directory: Path,
     timeout_seconds: int,
     log_path: Path | None = None,
+    env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:
     """Run the agent to completion, recording everything it printed.
 
     A timeout is not the cost ceiling; `--max-budget-usd` is. This is the guard
-    against a run that has stopped spending and stopped finishing.
+    against a run that has stopped spending and stopped finishing. `env` replaces
+    the agent's environment when given, which is how a drafts run keeps gh away.
     """
     if not prompt.strip():
         raise ValueError("An agent run needs a prompt")
@@ -240,6 +242,7 @@ def run_agent(
         encoding="utf-8",
         errors="replace",
         timeout=timeout_seconds,
+        env=env,
         check=False,
     )
     if log_path is not None:
