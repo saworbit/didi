@@ -52,7 +52,8 @@ if [ ${#worktree_git[@]} -gt 0 ]; then
     # Whatever .git an earlier run left is another commit's; start again.
     rm -rf "$WORK/.git"
     git init -q
-    git add -A
+    # The host checkout has CRLF files; say nothing about each one.
+    git -c core.safecrlf=false add -A
     git -c user.email=localci@invalid -c user.name='didi localci' \
         commit -qm "working tree synced by tools/localci, from $source_commit"
     echo "  synthetic repo; the tree came from the worktree at $source_commit"
