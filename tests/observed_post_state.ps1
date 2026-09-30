@@ -69,7 +69,8 @@ function Test-ObservedNumber($Value) {
 
 # Whether what an answer says it observed matches what the witness read. An
 # object in the answer has to match on every field it carries; the witness may
-# say more. Numbers agree to float32 precision, because every engine value here
+# say more. An answer object with no fields carries nothing to match, so it
+# agrees only with a witness that has none either (#1097). Numbers agree to float32 precision, because every engine value here
 # passes through a float somewhere and the two readers print it differently.
 function Test-ObservedAgreement($Observed, $Witnessed) {
     if ($null -eq $Observed -or $null -eq $Witnessed) { return ($null -eq $Observed) -and ($null -eq $Witnessed) }
@@ -90,6 +91,7 @@ function Test-ObservedAgreement($Observed, $Witnessed) {
     # Not -is [pscustomobject], which is true of every object PowerShell wraps.
     if ($Observed -is [System.Management.Automation.PSCustomObject]) {
         if ($Witnessed -isnot [System.Management.Automation.PSCustomObject]) { return $false }
+        if (@($Observed.PSObject.Properties).Count -eq 0) { return @($Witnessed.PSObject.Properties).Count -eq 0 }
         foreach ($property in $Observed.PSObject.Properties) {
             $other = $Witnessed.PSObject.Properties[$property.Name]
             if ($null -eq $other -or -not (Test-ObservedAgreement $property.Value $other.Value)) { return $false }
