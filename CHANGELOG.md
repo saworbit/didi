@@ -367,6 +367,13 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **A writer that rebuilds an open tab says whether the tab had unsaved
+  changes (#1082).** `scene_create`, `scene_pack_branch` and
+  `viewport_create_test_lab` with `overwrite: true` rebuild a tab whatever it
+  holds, and the answer said only `editor_scene_reloaded: true`. It now carries
+  `editor_scene_discarded_unsaved`: `true` or `false` on Godot 4.7, `null`
+  before it.
+
 - **`runtime_launch` with a Godot that cannot be started says so (#1076).** It
   answered `success: false` with `exit_code: 0`, which is what a game that ran
   and failed looks like, and said to put godot on PATH whatever `GODOT_BIN`

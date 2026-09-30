@@ -3805,6 +3805,16 @@ void reloadOpenSceneTab(GDExtensionObjectPtr editor, const std::string& path,
         result["scene_reload_pending"] = true;
         return;
     }
+    // What the rebuild throws away, read before it: true or false where the
+    // engine can say, null before 4.7 where it cannot (#1082).
+    json held_unsaved = nullptr;
+    if (unsaved.value("unsaved_scenes_readable", false) && unsaved.contains("unsaved_scenes") &&
+        unsaved["unsaved_scenes"].is_array()) {
+        held_unsaved = false;
+        for (const auto& entry : unsaved["unsaved_scenes"]) {
+            if (entry.is_string() && entry.get<std::string>() == path) held_unsaved = true;
+        }
+    }
     auto before = openSceneRootId(editor, path);
     if (before.isErr()) {
         result["scene_reload_error"] = "The editor's tab could not be read: " + before.error().message;
@@ -3843,6 +3853,7 @@ void reloadOpenSceneTab(GDExtensionObjectPtr editor, const std::string& path,
     }
     reloaded_one = true;
     result["scene_reloaded"] = true;
+    result["scene_discarded_unsaved"] = held_unsaved;
     auto current_after = editedSceneRoot(editor);
     if (current_before.isOk() && edited_before != path && current_after.isOk() &&
         editedScenePath(current_after.value()) == path) {

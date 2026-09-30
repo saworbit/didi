@@ -96,7 +96,8 @@ function Invoke-SceneTabReloadBlock {
 function Invoke-PackBranchTabBlock {
     param(
         [Parameter(Mandatory = $true)] [object]$EditorSession,
-        [Parameter(Mandatory = $true)] [string]$FixtureRoot
+        [Parameter(Mandatory = $true)] [string]$FixtureRoot,
+        [Parameter(Mandatory = $true)] [bool]$DirtyStateReadable
     )
     $target = "res://pack_target.tscn"
     $source = "res://pack_source.tscn"
@@ -114,6 +115,9 @@ function Invoke-PackBranchTabBlock {
     $packRequests = @(& $attach 2758) + @(
         (Tool-Request 2760 "scene_create" @{ scene_path = $target; root_type = "Node2D"; root_name = "PackTarget"; overwrite = $true }),
         (Tool-Request 2761 "editor_save_scene" @{}),
+        # An edit the target's tab has not saved, which the pack throws away.
+        # The answer says so on 4.7 and cannot on 4.5 and 4.6 (#1082).
+        (Tool-Request 2793 "scene_set_property" @{ target_node = "/root/PackTarget"; property_name = "position"; value = @{ x = 3; y = 3 } }),
         (Tool-Request 2762 "scene_create" @{ scene_path = $source; root_type = "Node2D"; root_name = "PackSource"; overwrite = $true }),
         (Tool-Request 2763 "scene_instantiate_node" @{ node_type = "Sprite2D"; parent_path = "/root/PackSource"; name = "Child" }),
         (Tool-Request 2764 "editor_save_scene" @{}),
@@ -125,12 +129,14 @@ function Invoke-PackBranchTabBlock {
         (Tool-Request 2769 "editor_save_scene" @{})
     )
     $packById = & $responses (Invoke-Didi -Requests $packRequests -Arguments @("--project", $FixtureRoot, "--yolo"))
-    foreach ($id in 2760, 2762, 2763) { [void](Tool-Payload $packById[$id]) }
+    foreach ($id in 2760, 2762, 2763, 2793) { [void](Tool-Payload $packById[$id]) }
     foreach ($id in 2761, 2764, 2769) {
         Assert-True ((Tool-Payload $packById[$id]).status -eq "saved") "The pack scenes were not saved by request ${id}: $($packById[$id].result.content[0].text)"
     }
     $packed = Tool-Payload $packById[2765]
     Assert-True ($packed.saved -eq $true -and $packed.editor_scene_reloaded -eq $true -and $null -eq $packed.editor_copy_error) "A pack over a scene open in another tab did not rebuild that tab: $($packed | ConvertTo-Json -Depth 6 -Compress)"
+    $expectedDiscard = if ($DirtyStateReadable) { $true } else { $null }
+    Assert-True ($packed.PSObject.Properties.Name -contains "editor_scene_discarded_unsaved" -and $packed.editor_scene_discarded_unsaved -eq $expectedDiscard) "A pack over a tab with an unsaved edit did not say it threw the edit away ($expectedDiscard expected): $($packed | ConvertTo-Json -Depth 6 -Compress)"
     Assert-True ((Tool-Payload $packById[2766]).scene_file_path -eq $source) "Rebuilding the target's tab moved the edited scene off the pack's source."
     $targetTab = Tool-Payload $packById[2768]
     Assert-True ($targetTab.scene_tree.name -eq "Child") "The target's tab still held the scene from before the pack: $($targetTab | ConvertTo-Json -Depth 4 -Compress)"
@@ -162,7 +168,8 @@ function Invoke-PackBranchTabBlock {
 function Invoke-CreateOverOpenTabBlock {
     param(
         [Parameter(Mandatory = $true)] [object]$EditorSession,
-        [Parameter(Mandatory = $true)] [string]$FixtureRoot
+        [Parameter(Mandatory = $true)] [string]$FixtureRoot,
+        [Parameter(Mandatory = $true)] [bool]$DirtyStateReadable
     )
     $left = "res://create_tab_left.tscn"
     $right = "res://create_tab_right.tscn"
@@ -200,6 +207,9 @@ function Invoke-CreateOverOpenTabBlock {
         $payload = Tool-Payload $created
         Assert-True ($payload.opened -eq $true -and $payload.editor_scene_reloaded -eq $true -and $null -eq $payload.editor_copy_error -and $null -eq $payload.scene_tab_stale) "scene_create over a tab $($case.Where) did not open and rebuild it: $($payload | ConvertTo-Json -Depth 6 -Compress)"
         Assert-True ($payload.previous_scene_file_path -eq $case.Previous -and $payload.edited_scene_changed -eq $true) "scene_create over a tab $($case.Where) named the wrong previous scene: $($payload | ConvertTo-Json -Depth 6 -Compress)"
+        # Both tabs were saved, so nothing was thrown away, where the engine can say.
+        $expectedDiscard = if ($DirtyStateReadable) { $false } else { $null }
+        Assert-True ($payload.PSObject.Properties.Name -contains "editor_scene_discarded_unsaved" -and $payload.editor_scene_discarded_unsaved -eq $expectedDiscard) "scene_create over a saved tab $($case.Where) did not say whether it lost changes ($expectedDiscard expected): $($payload | ConvertTo-Json -Depth 6 -Compress)"
         $hierarchy = Tool-Payload $byId[$case.Hierarchy]
         Assert-True ($hierarchy.scene_file_path -eq $case.Scene -and $hierarchy.scene_tree.name -eq $case.Root) "After scene_create over a tab $($case.Where), the edited scene was not the new one: $($hierarchy | ConvertTo-Json -Depth 4 -Compress)"
     }

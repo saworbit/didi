@@ -33,6 +33,10 @@ struct EditorCopyRefresh {
     std::vector<std::string> reloaded;
     // The scenes open in a tab whose tab was rebuilt from the written file.
     std::vector<std::string> scenes_reloaded;
+    // For each rebuilt tab the editor said this about, whether the rebuild
+    // threw away unsaved changes: true or false, or null where the engine
+    // cannot say, which is Godot before 4.7.
+    json scenes_discarded_unsaved = json::object();
     // The files the editor held and could not reload, each with the reason.
     json failed = json::array();
 };

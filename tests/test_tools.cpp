@@ -4563,6 +4563,8 @@ public:
             } else {
                 rebuilt_one = true;
                 result["scene_reloaded"] = true;
+                result["scene_discarded_unsaved"] =
+                    unsaved_readable ? didi::json(unsaved.count(path) > 0) : didi::json(nullptr);
                 rebuilt.push_back(path);
                 if (stays_current.count(path) && path != current) {
                     result["edited_scene_moved_from"] = current;
@@ -4875,6 +4877,38 @@ static void test_a_create_over_an_open_tab_rebuilds_it_after_the_switch() {
     const auto stale = didi::mcp::handleSceneCreate(args, quiet);
     ASSERT_TRUE(!stale.isError);
     ASSERT_EQ(didi::json::parse(stale.content[0].text)["scene_tab_stale"], true);
+}
+
+static void test_a_rebuild_says_whether_it_discarded_unsaved_changes() {
+    // Break caught: a writer that rebuilds a tab whatever it holds answered
+    // editor_scene_reloaded: true and nothing else, so a tab's unsaved edits
+    // were thrown away with nothing naming it (#1082). The answer now says
+    // whether they were: true or false on 4.7, null where the engine cannot say.
+    const didi::json args = {{"target_node", "/root/Main/Child"},
+                             {"scene_path", "res://pack_target.tscn"},
+                             {"overwrite", true}};
+    const auto discarded = [&](bool readable, bool unsaved) {
+        auto editor = std::make_shared<EditorCopyClient>();
+        editor->held = {"res://pack_target.tscn"};
+        editor->open = {"res://pack_target.tscn"};
+        editor->unsaved_readable = readable;
+        if (unsaved) editor->unsaved = {"res://pack_target.tscn"};
+        const auto packed = didi::mcp::handleScenePackBranch(args, editor);
+        ASSERT_TRUE(!packed.isError);
+        const auto report = didi::json::parse(packed.content[0].text);
+        ASSERT_EQ(report["editor_scene_reloaded"], true);
+        ASSERT_TRUE(report.contains("editor_scene_discarded_unsaved"));
+        return report["editor_scene_discarded_unsaved"];
+    };
+    ASSERT_EQ(discarded(true, true), true);
+    ASSERT_EQ(discarded(true, false), false);
+    ASSERT_TRUE(discarded(false, false).is_null());
+
+    // A writer that rebuilt nothing says nothing about it.
+    auto nothing_open = std::make_shared<EditorCopyClient>();
+    nothing_open->held = {"res://pack_target.tscn"};
+    const auto packed = didi::mcp::handleScenePackBranch(args, nothing_open);
+    ASSERT_TRUE(!didi::json::parse(packed.content[0].text).contains("editor_scene_discarded_unsaved"));
 }
 
 static void test_a_rebuild_that_moves_the_edited_scene_is_switched_back() {
@@ -9763,6 +9797,8 @@ struct RegisterToolTests {
                      test_a_pack_rebuilds_the_tab_of_the_scene_it_overwrote);
         registerTest("Tools.CreateOverAnOpenTabRebuildsItAfterTheSwitch",
                      test_a_create_over_an_open_tab_rebuilds_it_after_the_switch);
+        registerTest("Tools.RebuildSaysWhetherItDiscardedUnsavedChanges",
+                     test_a_rebuild_says_whether_it_discarded_unsaved_changes);
         registerTest("Tools.OpenTabCheckAsksOnlyWhenItCanMatter",
                      test_the_open_tab_check_asks_only_when_it_can_matter);
         registerTest("Tools.ApplyRefusesASceneOpenWithUnsavedChanges",
