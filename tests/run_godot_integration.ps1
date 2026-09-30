@@ -5738,7 +5738,10 @@ text = "Not a key"
             (Tool-Request 203 "project_set_autoload" @{ name = "RollbackProbe"; path = "res://subject.gd" }),
             (Tool-Request 204 "project_list_autoloads" @{}),
             (Tool-Request 205 "project_set_input_action" @{ action = "rollback_probe"; events = @() }),
-            (Tool-Request 206 "project_list_input_actions" @{})
+            (Tool-Request 206 "project_list_input_actions" @{}),
+            # save_scene answers OK and writes nothing into a root that will
+            # not take a file, so the save has to notice for itself (#1019).
+            (Tool-Request 207 "editor_save_scene" @{})
         )
         $rawFailureResponses = Invoke-Didi -Requests $failureRequests -Arguments @("--project", $fixtureRoot)
         $failureResponses = @($rawFailureResponses | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.PSObject.Properties.Name -contains "id" })
@@ -5755,6 +5758,8 @@ text = "Not a key"
         Assert-True (-not (@((Tool-Payload $failureById[204]).autoloads.name) -contains "RollbackProbe")) "Failed autoload mutation remained in memory after rollback."
         Assert-True ([bool]$failureById[205].result.isError) "InputMap save failure returned fake success."
         Assert-True (-not (@((Tool-Payload $failureById[206]).actions.action) -contains "rollback_probe")) "Failed InputMap mutation remained live after rollback reload."
+        $notWritten = $failureById[207].result.content[0].text | ConvertFrom-Json
+        Assert-True ([bool]$failureById[207].result.isError -and $notWritten.error.code -eq 409 -and $notWritten.error.data.code -eq "save_not_written") "A scene save the editor could not write was reported as saved: $($failureById[207].result.content[0].text)"
     }
     finally {
         if ($IsWindows) {
@@ -5838,6 +5843,7 @@ text = "Not a key"
     # names the request that causes it on purpose; any other line fails the run.
     $allowedEngineLines = @(
         @{ Pattern = "Couldn't save project\.godot"; Cause = "requests 201, 203 and 205 deny the project file to prove rollback" },
+        @{ Pattern = "Cannot save file 'res://main\.tscn'"; Cause = "request 207 saves a scene into a root that will not take a file" },
         @{ Pattern = 'Identifier "SignalProbeState" not declared|Failed to load script "res://signal_uses_autoload\.gd"|Failed parse script res://signal_uses_autoload\.gd'; Cause = "signal_uses_autoload.gd does not compile, on purpose, for target_script_not_compiled; a GDScript language server client re-parses it on connect" },
         @{ Pattern = "corrupt_asset\.png|IHDR: CRC error|ERR_FILE_CORRUPT"; Cause = "request 2700 imports a PNG with a wrong CRC on every chunk" },
         @{ Pattern = "didi_output_canary_warning"; Cause = "the runtime fixture prints a warning canary for runtime_read_output" },
