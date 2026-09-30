@@ -367,6 +367,11 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **The local CI lanes run from a git worktree (#1070).** A worktree's `.git`
+  is a file naming a directory the container cannot see, so every test that runs
+  git failed with 128. The lane now makes a repository of its own from the
+  synced tree there, and prints the commit the tree came from.
+
 - **Opening a scene at editor startup no longer lands on the moment the editor
   starts its documentation threads (#1069, #285).** The wait added for #1069
   released the open on the frame after the first scan, which is when those
