@@ -367,6 +367,12 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **`tilemap_set_cells` and `gridmap_set_cells` answer with the cells they
+  read back (#1019).** They re-read every changed cell after the commit and
+  refused a mismatch, but answered only counts taken before the write. The
+  answer now carries `cells`, what each requested cell holds as the layer or
+  grid reports it.
+
 - **The editor startup test retries a held open and names the engine crash it
   can meet (#1069, #285).** A `scene_open` held past the route deadline answers
   a retryable `504`, which the test read wrongly and failed on. And the

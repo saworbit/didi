@@ -184,6 +184,27 @@ func board_file(board: String) -> Dictionary:
 	return parsed if parsed is Dictionary else {"exists": false}
 
 
+## A TileMapLayer cell as the layer holds it (#1019).
+func tilemap_cell(path: String, x: int, y: int) -> Dictionary:
+	var layer := _node(path) as TileMapLayer
+	if layer == null:
+		return {}
+	var coords := Vector2i(x, y)
+	var atlas := layer.get_cell_atlas_coords(coords)
+	return {"coords": {"x": x, "y": y}, "source_id": layer.get_cell_source_id(coords),
+			"atlas_coords": {"x": atlas.x, "y": atlas.y}, "alternative_tile": layer.get_cell_alternative_tile(coords)}
+
+
+## A GridMap cell as the grid holds it (#1019).
+func gridmap_cell(path: String, x: int, y: int, z: int) -> Dictionary:
+	var grid := _node(path) as GridMap
+	if grid == null:
+		return {}
+	var position := Vector3i(x, y, z)
+	return {"position": {"x": x, "y": y, "z": z}, "item": grid.get_cell_item(position),
+			"orientation": grid.get_cell_item_orientation(position)}
+
+
 ## A file's length on disk, read here and not by Didi (#1019).
 func file_length(path: String) -> int:
 	var file := FileAccess.open(path, FileAccess.READ)

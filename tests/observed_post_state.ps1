@@ -306,6 +306,24 @@ function Get-ObservedPostStateCases {
             (Step "call" "blackboard_clear" @{ board = "observed_probe"; path = "probe" }),
             (Witness "witness" "board_file" @("observed_probe")))
            Agree = { param($s) Agree "revision" $s.call.revision $s.witness.returned.revision } },
+        # The cells each writer read back after its commit (#1019).
+        @{ Tool = "tilemap_set_cells"; Session = "editor"; Steps = @(
+            (Step "call" "tilemap_set_cells" @{ tilemap_path = "$observedRoot/Tiles"; cells = @(@{ coords = @(2, 3); source_id = 0; atlas_coords = @(0, 0) }) }),
+            (Witness "witness" "tilemap_cell" @("Tiles", 2, 3)))
+           # Field by field: an answer object may say less than the witness,
+           # and a cell that says nothing would agree with anything.
+           Agree = { param($s)
+               $cell = @($s.call.cells)[0]
+               Agree "cells.source_id" $cell.source_id $s.witness.returned.source_id
+               Agree "cells.atlas_coords" $cell.atlas_coords $s.witness.returned.atlas_coords
+               Agree "cells.alternative_tile" $cell.alternative_tile $s.witness.returned.alternative_tile } },
+        @{ Tool = "gridmap_set_cells"; Session = "editor"; Steps = @(
+            (Step "call" "gridmap_set_cells" @{ gridmap_path = "$observedRoot/Grid"; cells = @(@{ position = @(1, 0, 2); item = 0; orientation = 10 }) }),
+            (Witness "witness" "gridmap_cell" @("Grid", 1, 0, 2)))
+           Agree = { param($s)
+               $cell = @($s.call.cells)[0]
+               Agree "cells.item" $cell.item $s.witness.returned.item
+               Agree "cells.orientation" $cell.orientation $s.witness.returned.orientation } },
         # The save reads the file it wrote, since save_scene answers OK whether
         # or not the editor wrote it (#1019). Last of the editor cases, so the
         # observed scene goes to disk with every edit above.
