@@ -125,9 +125,10 @@ for lane in "${LANES[@]}"; do
     # documented in lane.sh and never passed, so it could not be used.
     # The commit the tree came from, which lane.sh names beside the repository
     # it makes when this is a git worktree and the container cannot read the
-    # host's .git.
+    # host's .git. REPO_ROOT, because path conversion is off by now and Git for
+    # Windows cannot read the /d/... spelling.
     export DIDI_LOCALCI_SOURCE_COMMIT
-    DIDI_LOCALCI_SOURCE_COMMIT=$(git -C "$REPO_ROOT_UNIX" rev-parse HEAD 2>/dev/null || echo unknown)
+    DIDI_LOCALCI_SOURCE_COMMIT=$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)
     common=(--rm
         -e DIDI_LOCALCI_JOBS
         -e DIDI_LOCALCI_RECONFIGURE
