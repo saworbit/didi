@@ -367,6 +367,14 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **`scene_create` over a scene open in another tab opens it on Godot 4.5 and
+  4.6 (#1079, #1073).** It rebuilt the tab and then opened it in one request,
+  and the editor ignores a scene change for the rest of that frame, so it
+  answered `opened: false`. The tab is now brought to the front first and
+  rebuilt on a later request, through the reload the other writers use, and
+  the answer carries `editor_scene_reloaded`. `previous_scene_file_path` now
+  names the scene that was current before the call.
+
 - **A scene opened straight after an editor starts stays the edited scene
   (#1069).** `scene_open` and `scene_create` now wait until the editor has
   opened its startup scenes, which it does once its first scan is applied.

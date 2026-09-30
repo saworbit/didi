@@ -605,7 +605,25 @@ CallToolResult handleSceneGetGroupMembers(const json& args, std::shared_ptr<ipc:
     return result;
 }
 CallToolResult handleSceneCreate(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
-    return forwardLiveSceneWiring(args, ipc, "scene.create", "create a scene");
+    auto created = forwardLiveSceneWiring(args, ipc, "scene.create", "create a scene");
+    if (created.isError || !created.structuredContent.has_value() ||
+        !created.structuredContent->is_object() ||
+        !created.structuredContent->value("scene_tab_stale", false)) {
+        return created;
+    }
+    // The overwritten scene was open in a tab, which the bridge made current
+    // and left holding the tree from before the write. It is rebuilt here, on
+    // a later request than the one that switched to it, because on 4.5 and 4.6
+    // the editor ignores a scene change for the rest of the frame (#1079).
+    // overwrite: true is the consent to lose that tab's changes, as it is for
+    // scene_pack_branch.
+    // An editor that never answers the rebuild leaves scene_tab_stale saying so.
+    auto payload = *created.structuredContent;
+    const auto scene_path = payload.value("scene_path", args.value("scene_path", std::string()));
+    const auto refresh = refreshEditorCopies(ipc, {scene_path}, true);
+    if (refresh.answered) payload.erase("scene_tab_stale");
+    reportEditorCopy(payload, refresh);
+    return CallToolResult::successJson(payload);
 }
 CallToolResult handleSceneOpen(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     return forwardLiveSceneWiring(args, ipc, "scene.open", "open a scene");

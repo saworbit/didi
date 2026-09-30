@@ -78,6 +78,7 @@ CallToolResult handleProjectApplyChanges(const json& args, std::shared_ptr<ipc::
 // Defined in src/tools/scene_tools.cpp. The pack writes inside the editor, so
 // what it asks afterwards is seen against a stub (#1072).
 CallToolResult handleScenePackBranch(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleSceneCreate(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 } // namespace mcp
 } // namespace didi
 
@@ -4511,6 +4512,16 @@ public:
             return didi::json{{"status", "success"}, {"saved", true},
                               {"scene_path", params.value("scene_path", std::string())}};
         }
+        if (method == "scene.create") {
+            // Like the bridge: an overwritten scene a tab holds is made current
+            // and named stale, and the rebuild is left to a later request.
+            const auto path = params.value("scene_path", std::string());
+            didi::json created = {{"status", "success"}, {"saved", true}, {"opened", true},
+                                  {"scene_path", path}};
+            if (open.count(path)) created["scene_tab_stale"] = true;
+            current = path;
+            return created;
+        }
         if (method == "scene.open") {
             if (refuse_open) return didi::Error(500, "Godot did not activate the requested scene");
             current = params.value("scene_path", std::string());
@@ -4821,6 +4832,49 @@ static void test_a_pack_rebuilds_the_tab_of_the_scene_it_overwrote() {
     without_overwrite.erase("overwrite");
     ASSERT_TRUE(didi::mcp::handleScenePackBranch(without_overwrite, refusing).isError);
     ASSERT_EQ(refusing->methods, std::vector<std::string>{"scene.packBranch"});
+}
+
+static void test_a_create_over_an_open_tab_rebuilds_it_after_the_switch() {
+    // scene_create over a scene open in another tab rebuilt the tab and then
+    // opened it, in one request. On 4.5 and 4.6 the rebuild leaves the editor
+    // changing scenes for the rest of the frame, so the open did nothing and
+    // the call answered opened: false (#1079). The bridge now switches to the
+    // tab and says it is stale, and the tab is rebuilt from the file on a
+    // later request, whatever it holds, as a pack's is.
+    auto editor = std::make_shared<EditorCopyClient>();
+    editor->held = {"res://q_b.tscn"};
+    editor->open = {"res://q_a.tscn", "res://q_b.tscn"};
+    editor->current = "res://q_a.tscn";
+    editor->unsaved_readable = false;
+    const didi::json args = {{"scene_path", "res://q_b.tscn"}, {"overwrite", true}};
+    const auto created = didi::mcp::handleSceneCreate(args, editor);
+    ASSERT_TRUE(!created.isError);
+    const auto report = didi::json::parse(created.content[0].text);
+    ASSERT_EQ(report["opened"], true);
+    ASSERT_EQ(report["editor_scene_reloaded"], true);
+    ASSERT_TRUE(!report.contains("scene_tab_stale"));
+    ASSERT_TRUE(!report.contains("editor_copy_error"));
+    ASSERT_EQ(*created.structuredContent, report);
+    ASSERT_EQ(editor->rebuilt, std::vector<std::string>{"res://q_b.tscn"});
+    ASSERT_EQ(editor->refresh_params[0]["discard_unsaved"], true);
+    ASSERT_EQ(editor->methods,
+              (std::vector<std::string>{"scene.create", "resource.refreshCached"}));
+    ASSERT_EQ(editor->current, "res://q_b.tscn");
+
+    // A scene no tab held is opened from the new file, and nothing is rebuilt.
+    auto fresh = std::make_shared<EditorCopyClient>();
+    const auto plain = didi::mcp::handleSceneCreate({{"scene_path", "res://new.tscn"}}, fresh);
+    ASSERT_TRUE(!plain.isError);
+    ASSERT_TRUE(!didi::json::parse(plain.content[0].text).contains("editor_scene_reloaded"));
+    ASSERT_EQ(fresh->methods, std::vector<std::string>{"scene.create"});
+
+    // An editor that never answers the rebuild leaves the answer saying so.
+    auto quiet = std::make_shared<EditorCopyClient>();
+    quiet->open = {"res://q_b.tscn"};
+    quiet->answer_requests = 0;
+    const auto stale = didi::mcp::handleSceneCreate(args, quiet);
+    ASSERT_TRUE(!stale.isError);
+    ASSERT_EQ(didi::json::parse(stale.content[0].text)["scene_tab_stale"], true);
 }
 
 static void test_a_rebuild_that_moves_the_edited_scene_is_switched_back() {
@@ -9707,6 +9761,8 @@ struct RegisterToolTests {
                      test_a_rebuild_that_moves_the_edited_scene_is_switched_back);
         registerTest("Tools.PackRebuildsTheTabOfTheSceneItOverwrote",
                      test_a_pack_rebuilds_the_tab_of_the_scene_it_overwrote);
+        registerTest("Tools.CreateOverAnOpenTabRebuildsItAfterTheSwitch",
+                     test_a_create_over_an_open_tab_rebuilds_it_after_the_switch);
         registerTest("Tools.OpenTabCheckAsksOnlyWhenItCanMatter",
                      test_the_open_tab_check_asks_only_when_it_can_matter);
         registerTest("Tools.ApplyRefusesASceneOpenWithUnsavedChanges",

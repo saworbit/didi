@@ -3363,6 +3363,7 @@ try {
 
     Invoke-SceneTabReloadBlock -EditorSession $editorSession -FixtureRoot $fixtureRoot -DirtyStateReadable $dirtyStateReadable
     Invoke-PackBranchTabBlock -EditorSession $editorSession -FixtureRoot $fixtureRoot
+    Invoke-CreateOverOpenTabBlock -EditorSession $editorSession -FixtureRoot $fixtureRoot
 
     $previousGodotBin = $env:GODOT_BIN
     try {

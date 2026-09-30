@@ -150,3 +150,58 @@ function Invoke-PackBranchTabBlock {
     Assert-True ((Tool-Payload $recreateById[2774]).scene_tree.name -eq "Recreated") "scene_create did not replace a scene no tab held."
     Assert-True (-not $recreateById[2777].result.isError) "main.tscn did not reopen after the pack block: $($recreateById[2777].result.content[0].text)"
 }
+
+# scene_create with overwrite: true over a scene open in a tab that is not the
+# current one (#1079). It rebuilt the tab and then opened it in the same
+# request, and on 4.5 and 4.6 the editor ignores a scene change for the rest of
+# the frame after a rebuild, so a tab right of the current one never came to
+# the front and the call answered opened: false. The tab is now made current
+# first and rebuilt on a later request. The second overwrite is of a tab left
+# of a current last tab, which the rebuild used to leave current by accident on
+# those lines, with previous_scene_file_path naming the scene just written.
+function Invoke-CreateOverOpenTabBlock {
+    param(
+        [Parameter(Mandatory = $true)] [object]$EditorSession,
+        [Parameter(Mandatory = $true)] [string]$FixtureRoot
+    )
+    $left = "res://create_tab_left.tscn"
+    $right = "res://create_tab_right.tscn"
+    $requests = @(
+        (@{ jsonrpc = "2.0"; id = 2778; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
+        (Tool-Request 2779 "runtime_attach_session" @{ session_id = $EditorSession.session_id }),
+        (Tool-Request 2780 "scene_create" @{ scene_path = $left; root_type = "Node2D"; root_name = "LeftOld"; overwrite = $true }),
+        (Tool-Request 2781 "editor_save_scene" @{}),
+        (Tool-Request 2782 "scene_create" @{ scene_path = $right; root_type = "Node2D"; root_name = "RightOld"; overwrite = $true }),
+        (Tool-Request 2783 "editor_save_scene" @{}),
+        # The right tab is now to the right of the current one.
+        (Tool-Request 2784 "scene_open" @{ scene_path = $left }),
+        (Tool-Request 2785 "scene_create" @{ scene_path = $right; root_type = "Node2D"; root_name = "RightNew"; overwrite = $true }),
+        (Tool-Request 2786 "scene_get_hierarchy" @{ max_depth = 1 }),
+        # And the left tab is left of the current last one.
+        (Tool-Request 2787 "scene_create" @{ scene_path = $left; root_type = "Node2D"; root_name = "LeftNew"; overwrite = $true }),
+        (Tool-Request 2788 "scene_get_hierarchy" @{ max_depth = 1 }),
+        (Tool-Request 2789 "scene_close" @{ discard_unsaved = $true }),
+        (Tool-Request 2790 "scene_open" @{ scene_path = $right }),
+        (Tool-Request 2791 "scene_close" @{ discard_unsaved = $true }),
+        (Tool-Request 2792 "scene_open" @{ scene_path = "res://main.tscn" })
+    )
+    $raw = Invoke-Didi -Requests $requests -Arguments @("--project", $FixtureRoot, "--yolo")
+    $byId = @{}
+    foreach ($response in @($raw | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.PSObject.Properties.Name -contains "id" })) { $byId[[int]$response.id] = $response }
+    foreach ($id in 2780, 2782, 2784, 2789, 2790, 2791) { [void](Tool-Payload $byId[$id]) }
+    foreach ($id in 2781, 2783) {
+        Assert-True ((Tool-Payload $byId[$id]).status -eq "saved") "The create-over-tab scenes were not saved by request ${id}: $($byId[$id].result.content[0].text)"
+    }
+    foreach ($case in @(
+            @{ Id = 2785; Hierarchy = 2786; Scene = $right; Root = "RightNew"; Previous = $left; Where = "right of the current one" },
+            @{ Id = 2787; Hierarchy = 2788; Scene = $left; Root = "LeftNew"; Previous = $right; Where = "left of a current last tab" })) {
+        $created = $byId[$case.Id]
+        Assert-True (-not $created.result.isError) "scene_create over a scene open in a tab $($case.Where) did not open it: $($created.result.content[0].text)"
+        $payload = Tool-Payload $created
+        Assert-True ($payload.opened -eq $true -and $payload.editor_scene_reloaded -eq $true -and $null -eq $payload.editor_copy_error -and $null -eq $payload.scene_tab_stale) "scene_create over a tab $($case.Where) did not open and rebuild it: $($payload | ConvertTo-Json -Depth 6 -Compress)"
+        Assert-True ($payload.previous_scene_file_path -eq $case.Previous -and $payload.edited_scene_changed -eq $true) "scene_create over a tab $($case.Where) named the wrong previous scene: $($payload | ConvertTo-Json -Depth 6 -Compress)"
+        $hierarchy = Tool-Payload $byId[$case.Hierarchy]
+        Assert-True ($hierarchy.scene_file_path -eq $case.Scene -and $hierarchy.scene_tree.name -eq $case.Root) "After scene_create over a tab $($case.Where), the edited scene was not the new one: $($hierarchy | ConvertTo-Json -Depth 4 -Compress)"
+    }
+    Assert-True (-not $byId[2792].result.isError) "main.tscn did not reopen after the create-over-tab block: $($byId[2792].result.content[0].text)"
+}
