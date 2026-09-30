@@ -628,12 +628,90 @@ void refuses_a_scalar_the_declared_type_cannot_hold() {
     ASSERT_TRUE(!storage_only.isError);
 }
 
+// A JavaScript client cannot send 0.0: JSON.stringify(0.0) is "0". Inside an
+// untyped Array nothing declares a type, so a key meant as 0.0 was written as
+// the int 0, and an Animation value track whose first key is an int
+// interpolates ints, so the float property it drives never moves (#1003).
+void writes_a_number_as_the_type_it_names() {
+    ProjectFixture project("scalar-spelling");
+
+    const auto keys = create({
+        {"save_path", "res://art/throb.tres"},
+        {"resource_type", "Animation"},
+        // An array of entries, because tracks/0/keys names a numbered element.
+        {"properties", json::array({{{"name", "tracks/0/keys"}, {"value", {
+            {"values", json::array({{{"type", "float"}, {"value", 0}}, 0.45,
+                                    {{"type", "float"}, {"value", 0}}})},
+            {"counts", json::array({{{"type", "int"}, {"value", 3.0}}, 2})}}}}})}
+    });
+    ASSERT_TRUE(!keys.isError);
+    const auto tres = project.read("art/throb.tres");
+    ASSERT_TRUE(tres.find("\"values\": [0.0, 0.45, 0.0]") != std::string::npos);
+    ASSERT_TRUE(tres.find("\"counts\": [3, 2]") != std::string::npos);
+
+    // A slot that declares a type still rules on the number inside.
+    const auto radius = create({
+        {"save_path", "res://art/radius.tres"},
+        {"resource_type", "CircleShape2D"},
+        {"properties", {{"radius", {{"type", "float"}, {"value", 7}}}}}
+    });
+    ASSERT_TRUE(!radius.isError);
+    ASSERT_TRUE(project.read("art/radius.tres").find("radius = 7.0") != std::string::npos);
+    // The answer reports the file read back after the write (#1019).
+    const auto answer = payloadOf(radius);
+    ASSERT_EQ(answer.value("resource_type", std::string()), "CircleShape2D");
+    ASSERT_EQ(answer.value("file_bytes", size_t{0}), project.read("art/radius.tres").size());
+
+    struct Row {
+        const char* resource_type;
+        const char* property;
+        json value;
+        const char* expected_in_message;
+    };
+    const std::vector<Row> refused = {
+        {"Animation", "tracks/0/keys", json::array({{{"type", "int"}, {"value", 0.5}}}),
+         "not a whole number"},
+        {"Animation", "tracks/0/keys", json::array({{{"type", "float"}, {"value", "0"}}}),
+         "needs its number under"},
+        {"StyleBoxFlat", "corner_detail", {{"type", "float"}, {"value", 4.5}},
+         "truncates a fraction"},
+        {"CircleShape2D", "radius", {{"type", "int"}, {"value", true}}, "needs its number under"},
+    };
+    for (const auto& row : refused) {
+        const auto result = create({
+            {"save_path", "res://art/refused.tres"},
+            {"resource_type", row.resource_type},
+            {"properties", json::array({{{"name", row.property}, {"value", row.value}}})}
+        });
+        ASSERT_TRUE(result.isError);
+        const auto message = textOf(result);
+        ASSERT_TRUE(message.find(row.property) != std::string::npos);
+        ASSERT_TRUE(message.find(row.expected_in_message) != std::string::npos);
+        ASSERT_TRUE(!project.exists("art/refused.tres"));
+    }
+
+    // Only the exact two-key shape is a number. Anything else with a lowercase
+    // "type" is still the Dictionary it always was.
+    const auto dictionary = create({
+        {"save_path", "res://art/dictionary.tres"},
+        {"resource_type", "Animation"},
+        {"properties", json::array({{{"name", "tracks/0/keys"}, {"value", json::array({
+            {{"type", "float"}, {"value", 0}, {"note", "kept"}}})}}})}
+    });
+    ASSERT_TRUE(!dictionary.isError);
+    ASSERT_TRUE(project.read("art/dictionary.tres")
+                    .find("{\"note\": \"kept\", \"type\": \"float\", \"value\": 0}") !=
+                std::string::npos);
+}
+
 struct Register {
     Register() {
         registerTest("resource_references.writes_declared_vector_type",
                      writes_a_vector_as_the_type_the_property_declares);
         registerTest("resource_references.packed_composites_written_flat",
                      writes_composite_packed_arrays_flat);
+        registerTest("resource_references.number_written_as_named_type",
+                     writes_a_number_as_the_type_it_names);
         registerTest("resource_references.refuses_wrong_declared_scalar",
                      refuses_a_scalar_the_declared_type_cannot_hold);
         registerTest("resource_references.refuses_wrong_declared_type",

@@ -217,6 +217,16 @@ function Get-ObservedPostStateCases {
             (Step "call" "anim_add_library" @{ animation_player_path = "$observedRoot/Player"; library_path = "res://observed_library.tres"; library_name = "observed" }),
             (Witness "witness" "animation_libraries" @("Player")))
            Agree = { param($s) Agree "library_names" @($s.call.library_names | Sort-Object) $s.witness.returned.library_names } },
+        # The file read back after the write, not the request (#1019). The
+        # witness loads it past the editor's cache and reports the class the
+        # engine made from it.
+        @{ Tool = "resource_create"; Session = "editor"; Steps = @(
+            (Step "call" "resource_create" @{ save_path = "res://observed_shape.tres"; resource_type = "CircleShape2D"; properties = @{ radius = 3 }; overwrite = $true }),
+            (Witness "witness" "load_fresh" @("res://observed_shape.tres", @("radius"))),
+            (Witness "length" "file_length" @("res://observed_shape.tres")))
+           Agree = { param($s)
+               Agree "resource_type" $s.call.resource_type $s.witness.returned.class
+               Agree "file_bytes" $s.call.file_bytes $s.length.returned } },
         @{ Tool = "scene_pack_branch"; Session = "editor"; Steps = @(
             (Step "call" "scene_pack_branch" @{ target_node = "$observedRoot/Subject"; scene_path = "res://observed_packed.tscn" }),
             (Witness "witness" "load_fresh" @("res://observed_packed.tscn", @())))

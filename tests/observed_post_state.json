@@ -152,8 +152,11 @@
       "issue": 1019
     },
     "resource_create": {
-      "exempt": "Writes the file and never loads it back. properties_written lists the keys it rendered, and property_check is a type check made before the write.",
-      "issue": 1019
+      "observed": [
+        "file_bytes",
+        "resource_type"
+      ],
+      "witness": "FileAccess length and the class ResourceLoader loads with CACHE_MODE_IGNORE, through observed_witness.gd"
     },
     "runtime_checkpoint": {
       "exempt": "Managed mode only, which the live harness does not start; tests/test_managed_recovery_live.py drives it without comparing the answer with the engine.",

@@ -51,6 +51,11 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Added
 
+- **resource_create can name which number it writes (#1003).**
+  `{"type": "float", "value": 0}` is written `0.0` and `{"type": "int",
+  "value": 3}` is written `3`, so a JavaScript client that cannot send `0.0`
+  can still keep an Animation value track's keys as floats.
+
 - **A field trial can hold its findings for review (#1008).** With `--drafts`,
   `trial.py` has the tester write each finding to `ISSUE_DRAFTS.md` instead of
   filing it, puts a `gh` that refuses first on its `PATH` with the tokens
@@ -371,6 +376,11 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
   use it on the draft.
 
 ### Fixed
+
+- **resource_create answers with the file it wrote (#1019).** It reads the
+  file back after the write and answers `file_bytes` and the `resource_type`
+  its header declares. The live harness loads the file past the editor's cache
+  and compares both.
 
 - **An empty answer object no longer agrees with the engine in the observed
   post-state check (#1097).** An answer object may say less than the witness,

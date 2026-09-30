@@ -25,6 +25,7 @@
 #include <cstring>
 #include <fstream>
 #include <initializer_list>
+#include <iterator>
 #include <map>
 #include <sstream>
 #include <set>
@@ -171,6 +172,39 @@ bool asksForANamedType(const json& value) {
     if (type == value.end() || !type->is_string()) return false;
     const auto name = type->get<std::string>();
     return !name.empty() && name[0] >= 'A' && name[0] <= 'Z';
+}
+
+// Which of Godot's two numbers an object spells, or null when it is not one.
+//
+// JSON has one number and Godot has two, and a client that serialises through
+// JavaScript cannot send 0.0 at all: JSON.stringify(0.0) is "0". Where a slot
+// declares a type the check picks the literal, but inside an untyped Array or
+// Dictionary nothing does, so a key meant as 0.0 was written as the int 0. An
+// Animation value track takes its type from its keys, so a track whose first
+// key is an int moves nothing (#1003). Only the exact two-key shape counts,
+// because a Dictionary with an ordinary "type" field is still a Dictionary.
+const char* namedScalarType(const json& value) {
+    if (!value.is_object() || value.size() != 2 || !value.contains("value")) return nullptr;
+    const auto type = value.find("type");
+    if (type == value.end() || !type->is_string()) return nullptr;
+    if (*type == "float") return "float";
+    if (*type == "int") return "int";
+    return nullptr;
+}
+
+// The literal for a number whose type the caller named. A float always carries
+// a fractional part, which is what makes Godot read it as one, and an int is
+// refused rather than truncated when it is not whole.
+Result<std::string> namedScalarLiteral(const char* type, const json& number,
+                                       const std::string& property) {
+    const double value = number.get<double>();
+    if (std::strcmp(type, "float") == 0) return json(value).dump();
+    if (number.is_number_integer()) return number.dump();
+    if (!std::isfinite(value) || value != std::floor(value) || std::fabs(value) >= 9.2e18) {
+        return Error::invalidArgument("Property \"" + property + "\" declares type int, and " +
+                                      number.dump() + " is not a whole number.");
+    }
+    return json(static_cast<std::int64_t>(value)).dump();
 }
 
 // What a .tres needs at the top of the file for the references its body makes.
@@ -528,6 +562,18 @@ Result<std::string> tresNamedTypeLiteral(const json& value, const std::string& p
 // them the time they spend debugging the animation instead of the file.
 Result<std::string> tresLiteral(const json& value, const std::string& property,
                                 ReferenceScope* scope, const std::string* declared_type) {
+    if (const char* scalar = namedScalarType(value)) {
+        const auto& number = value.at("value");
+        if (!number.is_number()) {
+            return Error::invalidArgument("Property \"" + property + "\" declares type " + scalar +
+                                          ", which needs its number under \"value\"");
+        }
+        // A declared slot still rules on the number, with its own refusal.
+        if (declared_type && !declaredTypeAccepts(*declared_type, number)) {
+            return tresLiteral(number, property, scope, declared_type);
+        }
+        return namedScalarLiteral(scalar, number, property);
+    }
     // The declared type decides before the shape of the JSON does. A value the
     // slot cannot hold used to be written verbatim, reported in
     // properties_written with property_check checked: true, and then dropped by
@@ -966,6 +1012,16 @@ struct SubResourceSpec {
     std::vector<std::pair<std::string, json>> properties;
 };
 
+// The type a .tres header declares, read the way the engine reads it: the
+// [gd_resource type="..."] that opens the file. Empty when there is none.
+std::string storedResourceType(const std::string& text) {
+    const std::string opening = "[gd_resource type=\"";
+    if (text.rfind(opening, 0) != 0) return {};
+    const auto end = text.find('"', opening.size());
+    if (end == std::string::npos) return {};
+    return text.substr(opening.size(), end - opening.size());
+}
+
 bool isUsableSubResourceId(const std::string& id) {
     if (id.empty() || id.size() > 128) return false;
     for (unsigned char character : id) {
@@ -1257,6 +1313,21 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
     if (written.isErr()) {
         return CallToolResult::fromError(written.error(), "Failed to write resource file to disk: ");
     }
+    // What landed, read back from disk, so the answer reports the file rather
+    // than the text this call rendered (#1019). The type is the one the header
+    // declares, which is what the engine instantiates when it loads the file.
+    std::string stored;
+    {
+        std::ifstream input(target_p, std::ios::binary);
+        stored.assign(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
+    }
+    const auto stored_type = storedResourceType(stored);
+    if (stored_type.empty()) {
+        return CallToolResult::errorJson(
+            500, "resource_create wrote " + reported_path +
+                     " and could not read a resource header back from it, so it cannot say "
+                     "what the file holds.");
+    }
     // An editor that has this file loaded keeps its own copy, and nothing an
     // unattended editor does re-reads it: not editor_reload_project, not the
     // editor's own filesystem scan. So every live reader went on answering from
@@ -1269,7 +1340,8 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
     json created = {
         {"status", "created_offline"},
         {"save_path", reported_path},
-        {"resource_type", resource_type},
+        {"resource_type", stored_type},
+        {"file_bytes", stored.size()},
         // In file order, because that is the order Godot applies them in and
         // the caller has no other way to see what it got.
         {"properties_written", std::move(written_order)},
