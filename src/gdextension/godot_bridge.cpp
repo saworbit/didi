@@ -4399,7 +4399,8 @@ Result<void> GodotBridge::startProjectScan(ProjectScanWait& wait) {
     return Result<void>::ok();
 }
 
-Result<ReimportStart> GodotBridge::startAssetReimport(const ReimportBatch& batch) {
+Result<ReimportStart> GodotBridge::startAssetReimport(const ReimportBatch& batch,
+                                                      const std::optional<ScanSettle>& seen_scan) {
     auto editor = editorInterface();
     if (editor.isErr()) return editor.error();
     auto filesystem = callObject(editor.value(), "EditorInterface", "get_resource_filesystem", 780151678LL);
@@ -4479,6 +4480,13 @@ Result<ReimportStart> GodotBridge::startAssetReimport(const ReimportBatch& batch
     auto scanning = isEditorFilesystemScanning();
     if (scanning.isErr()) return scanning.error();
     if (scanning.value() && !start.settle.has_value()) start.settle = beginScanSettle();
+    // A scan that has finished and is not applied clears the flag, so only a
+    // caller that saw it running knows it is there. The editor applies it in
+    // its next frame, which reimport_files would run, and applying it imports
+    // what the scan found by calling reimport_files again: the engine refuses
+    // that as recursive and the asset stays unimported. Seen on 4.7.2 by
+    // tools/vibe/probes/reimport_in_scan_tail.py (#995).
+    if (!start.settle.has_value() && seen_scan.has_value()) start.settle = seen_scan;
     start.held = scanning.value() || editorProgressOpen() ||
                  (start.settle.has_value() && !scanSettled(*start.settle)) ||
                  !unindexedAssets(batch.reimported).empty();

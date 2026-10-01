@@ -8,16 +8,22 @@ not in it yet. #995 adds a second gap: the deferred re-index ran as soon as the
 scanning flag cleared, which is before the editor applies what the scan found.
 
 A sandbox gets `--fillers` scripts and is imported, then a windowed editor opens
-it. Each round writes `--fresh` new scripts behind the editor, asks
-`editor_reload_project` for a scan (it returned at once before #1114), and creates three
-scenes straight away. For each scene it prints what scene_create answered,
+it with `editor_scan.py`'s plugin enabled. Each round writes `--fresh` new
+scripts behind the editor, has the plugin start a scan, and creates three scenes
+straight away. The scan is the editor's own as far as Didi can tell, so nothing
+waits for it before the scenes are sent. Until #1114 the probe asked
+`editor_reload_project` for the scan, which then answered at once; it now
+answers once the scan is applied, and an editor session takes one client, so a
+reload can no longer open this window (#1122). For each scene it prints what
+scene_create answered, whether it was sent before the editor applied the scan,
 whether the scene's path was in `uid_cache.bin` when the answer arrived, which
 is what a game launched then would read, and how long it took to get there,
 polling for up to `--settle` seconds. A scene that never gets there was lost.
 
 A round is clean when every scene answered `uid_registered: true` and was in the
 cache when it answered. Before the fix, scenes created during the scan answer
-deferred and are missing from the cache at that moment.
+deferred and are missing from the cache at that moment. A round in which no
+scene was sent during the scan says nothing about one, and says so.
 
     python tools/vibe/sandbox.py SANDBOX --build-tree build-ninja
     python tools/vibe/probes/deferred_scene_uid.py -p SANDBOX --godot C:/Godot/Godot_v4.7.2-stable_win64_console.exe
@@ -34,6 +40,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import editor_scan  # noqa: E402
 from mcp_client import Session  # noqa: E402
 from wait_for_session import same_project  # noqa: E402
 
@@ -63,37 +70,35 @@ def mine(sessions: dict, project: Path) -> list[dict]:
             if x.get("kind", "editor") == "editor" and same_project(x, project)]
 
 
-def reload_project(s: Session) -> str:
-    preview, errored = s.call("editor_reload_project", {"dry_run": True})
-    token = (preview or {}).get("mutation_preview", {}).get("confirmation_token") if not errored else None
-    if not token:
-        return f"no token: {json.dumps(preview)[:200]}"
-    payload, errored = s.call("editor_reload_project", {"confirmation_token": token})
-    return "refused " + json.dumps(payload)[:200] if errored else "scan requested"
-
-
-def one_round(s: Session, project: Path, index: int, fresh: int, settle: float, reload: bool) -> bool:
+def one_round(s: Session, scan: editor_scan.EditorScan | None, project: Path, index: int, fresh: int,
+              settle: float) -> tuple[bool, bool]:
+    """Whether the round was clean, and whether a scene was sent during the scan."""
     folder = project / f"round_{index:02d}"
     folder.mkdir(exist_ok=True)
     for n in range(fresh):
         (folder / f"fresh_{n:04d}.gd").write_text(
             f"extends Node\n\nfunc value_{n}() -> int:\n\treturn {n}\n", encoding="utf-8", newline="\n")
     lines_before = len(s.engine_lines)
-    reloaded = reload_project(s) if reload else "no scan requested"
+    if scan is None:
+        scanning = "no scan requested"
+    else:
+        scanning = "the editor scanning" if scan.start() else "the plugin's scan was NOT running"
     answers = []
     for name in ("player", "enemy", "hud"):
         path = f"res://{folder.name}/{name}.tscn"
+        during = scan is not None and not scan.applied()
         started = time.monotonic()
         payload, errored = s.call("scene_create", {"scene_path": path})
         elapsed = time.monotonic() - started
         in_cache = path in cached_paths(project)
-        answers.append((path, payload, errored, elapsed, in_cache))
+        answers.append((path, payload, errored, elapsed, in_cache, during))
     clean = True
-    print(f"\n  round {index}: {reloaded}")
-    for path, payload, errored, elapsed, in_cache in answers:
+    print(f"\n  round {index}: {scanning}")
+    for path, payload, errored, elapsed, in_cache, during in answers:
         body = payload if isinstance(payload, dict) else {}
+        when = "" if scan is None else "sent during the scan, " if during else "sent after the scan, "
         if errored:
-            print(f"    {path}: REFUSED {json.dumps(body)[:240]}")
+            print(f"    {path}: {when}REFUSED {json.dumps(body)[:240]}")
             clean = False
             continue
         waited = None
@@ -110,7 +115,7 @@ def one_round(s: Session, project: Path, index: int, fresh: int, settle: float, 
         later = ("" if in_cache else
                  f", in the cache {waited:.1f} s later" if waited is not None else
                  f", NOT in the cache after {settle:.0f} s")
-        print(f"    {path}: answered in {elapsed:.2f} s, uid_registered {registered}, "
+        print(f"    {path}: {when}answered in {elapsed:.2f} s, uid_registered {registered}, "
               f"deferred {deferred}, in the cache when answered {in_cache}{later}")
         clean = clean and registered is True and in_cache
     if not clean:
@@ -118,8 +123,12 @@ def one_round(s: Session, project: Path, index: int, fresh: int, settle: float, 
         for entry in ((resolved or {}).get("resolved") or []) if not errored else []:
             print(f"    the editor's index now: {json.dumps(entry)[:300]}")
     engine = len(s.engine_lines) - lines_before
-    print(f"    engine lines this round: {engine}; {'clean' if clean else 'NOT clean'}")
-    return clean
+    in_window = any(a[5] for a in answers)
+    window = ("" if scan is None else
+              "; a scene was sent during the scan" if in_window else
+              "; NO scene was sent during the scan, so this round says nothing about one")
+    print(f"    engine lines this round: {engine}; {'clean' if clean else 'NOT clean'}{window}")
+    return clean, in_window
 
 
 def main() -> int:
@@ -131,7 +140,7 @@ def main() -> int:
     parser.add_argument("--fresh", type=int, default=300, help="scripts written behind the editor per round")
     parser.add_argument("--rounds", type=int, default=4)
     parser.add_argument("--settle", type=float, default=30.0, help="seconds to wait for the cache")
-    parser.add_argument("--no-reload", action="store_true",
+    parser.add_argument("--no-scan", action="store_true",
                         help="ask for no scan: only the new folder and scripts written behind the editor")
     parser.add_argument("--editor-output", help="a directory to keep the editor's stdout and stderr in")
     args = parser.parse_args()
@@ -139,6 +148,7 @@ def main() -> int:
     if not (project / "addons" / "didi").is_dir():
         print("no addon in this project; make it with sandbox.py --build-tree")
         return 2
+    editor_scan.install(project)
     filler = project / "filler"
     filler.mkdir(exist_ok=True)
     for index in range(args.fillers):
@@ -169,11 +179,15 @@ def main() -> int:
         if editor is None:
             print("the editor published no session in 180 s")
             return 1
-        time.sleep(3)
+        # See editor_scan.STARTUP_SETTLE: a scan this soon after startup can crash the editor.
+        time.sleep(editor_scan.STARTUP_SETTLE)
         with Session(project) as s:
             s.call("runtime_attach_session", {"session_id": editor})
-            clean = sum(one_round(s, project, index, args.fresh, args.settle, not args.no_reload) for index in range(args.rounds))
-            print(f"\n  clean in {clean} of {args.rounds} rounds")
+            scan = None if args.no_scan else editor_scan.EditorScan(project)
+            rounds = [one_round(s, scan, project, index, args.fresh, args.settle) for index in range(args.rounds)]
+            print(f"\n  clean in {sum(c for c, _ in rounds)} of {args.rounds} rounds")
+            if scan is not None:
+                print(f"  a scene was sent during the scan in {sum(w for _, w in rounds)} of {args.rounds} rounds")
             print()
             print(s.engine_summary())
     finally:

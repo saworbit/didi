@@ -1052,7 +1052,8 @@ void EditorHook::scheduleAssetReimport(
         promise, control, resolved.value().needs_scan
     });
 
-    auto started = GodotBridge::instance().startAssetReimport(resolved.value());
+    // A scan seen running, Didi's or the editor's own, until it is applied.
+    auto started = GodotBridge::instance().startAssetReimport(resolved.value(), m_filesystemSettle);
     if (started.isErr()) {
         m_pendingAssetReimport.reset();
         control->markCompleted();

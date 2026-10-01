@@ -394,6 +394,24 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **asset_reimport waits for a scan the editor started to be applied (#995).**
+  A scan clears its scanning flag before the editor applies what it found,
+  and an asset the editor already listed, named alone, was reimported in that
+  gap. On 4.7.2 the editor then applied the scan inside that reimport, and
+  applying it imports what the scan found by calling `reimport_files` again:
+  the engine refused that as recursive, the new asset stayed unimported, and
+  the call answered success. A reimport now waits for any scan Didi saw
+  running, its own or the editor's, until `sources_changed`. 4.5.1 and 4.6.2
+  did not show it. `tools/vibe/probes/reimport_in_scan_tail.py` holds that
+  gap open with a small editor plugin, `tools/vibe/editor_scan.py`, that
+  starts a scan Didi did not ask for.
+
+- **deferred_scene_uid.py creates scenes during a scan again (#1122).** Since
+  #1114 `editor_reload_project` answers once its scan is applied, and an
+  editor session takes one client, so the probe's scenes all came after the
+  scan. It now has the editor start the scan through `editor_scan.py` and
+  says, for each scene, whether it was sent before the scan was applied.
+
 - **project_list_resources answers in path order on every platform (#1121).**
   The resource index kept the order the directory walk met files in, which
   is name order on NTFS and not on ext4, so the same project was listed in a
