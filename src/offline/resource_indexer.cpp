@@ -355,6 +355,11 @@ void ResourceIndexer::scan(const std::string& root_dir) {
         // the same fact as the cap, and reported the same way (Q5).
         m_truncated = true;
     }
+    // The walk meets files in the filesystem's order, which is name order on
+    // NTFS and not on ext4, so the same project was listed differently on
+    // Linux (#1121). Every reader of the index sees it in path order.
+    std::sort(m_resources.begin(), m_resources.end(),
+              [](const ResourceInfo& a, const ResourceInfo& b) { return a.path < b.path; });
 }
 
 std::vector<ResourceInfo> ResourceIndexer::query(const std::string& search_path,

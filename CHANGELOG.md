@@ -394,6 +394,11 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **project_list_resources answers in path order on every platform (#1121).**
+  The resource index kept the order the directory walk met files in, which
+  is name order on NTFS and not on ext4, so the same project was listed in a
+  different order on Linux. The index is sorted by path once it is built.
+
 - **The Phase 7 success contracts are checked against real answers (#861).**
   `$defs.success` in each `schemas/phase7` file was compared with no answer,
   and four had drifted from what their tools say: `signal_list_connections`

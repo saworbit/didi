@@ -387,7 +387,10 @@ class Workspace:
         if with_addon:
             shutil.copytree(addon_for(binary), self.project / "addons" / "didi")
         self.sessions = self.root / "sessions"
-        self.sessions.mkdir()
+        # Owner-only, as Didi requires of a session directory; on POSIX a
+        # default one answers runtime_list_sessions with a diagnostic about it.
+        self.sessions.mkdir(mode=0o700)
+        os.chmod(self.sessions, 0o700)
         # The editor's own settings and project list, so nothing the person
         # recording has configured reaches an answer, and their project manager
         # does not collect a temporary project per run.

@@ -140,6 +140,27 @@ static void test_lookup_is_exact_and_listing_is_by_directory() {
     ASSERT_EQ(trailing[0].path, "res://scenes/level.tscn");
 }
 
+static void test_the_index_is_in_path_order_whatever_the_filesystem() {
+    // Break caught: the index kept the order the directory walk met files in,
+    // which is name order on NTFS and not on ext4, so project_list_resources
+    // answered the same project in a different order on Linux (#1121). An
+    // upper-case name shows it on Windows too: NTFS sorts without case, a
+    // byte comparison puts it first.
+    IndexFixture fixture;
+    fixture.write("b.gd", "extends Node\n");
+    fixture.write("a.gd", "extends Node\n");
+    fixture.write("C.gd", "extends Node\n");
+    fixture.write("a/z.tres", "[gd_resource type=\"Resource\" format=3]\n");
+
+    didi::offline::ResourceIndexer indexer;
+    indexer.scan(fixture.root());
+
+    std::vector<std::string> listed;
+    for (const auto& resource : indexer.query()) listed.push_back(resource.path);
+    const std::vector<std::string> expected = {"res://C.gd", "res://a.gd", "res://a/z.tres", "res://b.gd"};
+    ASSERT_EQ(listed, expected);
+}
+
 static void test_text_resources_report_their_dependencies() {
     // Break caught: dependency extraction ran for PackedScene only, so every
     // .tres material, theme and tileset reported an empty dependency list.
@@ -398,6 +419,8 @@ struct RegisterResourceIndexerTests {
                      test_invalidate_drops_the_per_file_memo_as_well);
         registerTest("ResourceIndexer.OutOfSourceBuildTreesAreSkipped",
                      test_out_of_source_build_trees_are_not_project_resources);
+        registerTest("ResourceIndexer.ListedInPathOrder",
+                     test_the_index_is_in_path_order_whatever_the_filesystem);
         registerTest("ResourceIndexer.TypeDetection", test_resource_type_detection);
         registerTest("ResourceIndexer.UidSidecar", test_uid_sidecar_fallback);
         registerTest("ResourceIndexer.ExternalUidSidecar", test_uid_sidecars_are_indexed_for_external_resources);
