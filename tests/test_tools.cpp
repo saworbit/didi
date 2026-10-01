@@ -2451,6 +2451,26 @@ static void test_offline_setting_text_that_reads_as_a_type_says_so() {
     }
 }
 
+static void test_offline_setting_answers_what_the_file_holds() {
+    // value_written was the literal this call rendered, so it said nothing about
+    // the file the next start loads. It is read back from project.godot after
+    // the write now, and a removal answers null (#1019).
+    ScopedToolProject project("setting-read-back");
+    writeAuditFile("project.godot", "config_version=5\n\n[application]\n\nconfig/name=\"Probe\"\n");
+    const auto set = didi::mcp::handleProjectSetSetting(
+        {{"setting", "didi_probe/answer"}, {"value", 42}}, nullptr);
+    ASSERT_TRUE(!set.isError);
+    ASSERT_EQ(didi::json::parse(set.content[0].text)["value_written"], "42");
+    const auto listed = didi::mcp::handleProjectSetSetting(
+        {{"setting", "didi_probe/names"}, {"value", didi::json::array({"a", "b"})}}, nullptr);
+    ASSERT_TRUE(!listed.isError);
+    ASSERT_EQ(didi::json::parse(listed.content[0].text)["value_written"], "[\"a\", \"b\"]");
+    const auto removed = didi::mcp::handleProjectSetSetting(
+        {{"setting", "didi_probe/answer"}, {"remove", true}}, nullptr);
+    ASSERT_TRUE(!removed.isError);
+    ASSERT_TRUE(didi::json::parse(removed.content[0].text)["value_written"].is_null());
+}
+
 static void test_an_empty_new_definition_never_mints_a_token() {
     // Break caught: new_definition had no minLength, so "" passed validation,
     // the dry run accepted it, read the target and minted a confirmation token,
@@ -9831,6 +9851,8 @@ struct RegisterToolTests {
                      test_a_pack_rebuilds_the_tab_of_the_scene_it_overwrote);
         registerTest("Tools.OfflineSettingTextThatReadsAsATypeSaysSo",
                      test_offline_setting_text_that_reads_as_a_type_says_so);
+        registerTest("Tools.OfflineSettingAnswersWhatTheFileHolds",
+                     test_offline_setting_answers_what_the_file_holds);
         registerTest("Tools.CreateOverAnOpenTabRebuildsItAfterTheSwitch",
                      test_a_create_over_an_open_tab_rebuilds_it_after_the_switch);
         registerTest("Tools.RebuildSaysWhetherItDiscardedUnsavedChanges",

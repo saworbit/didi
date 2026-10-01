@@ -217,6 +217,34 @@ function Get-ObservedPostStateCases {
             (Step "call" "anim_add_library" @{ animation_player_path = "$observedRoot/Player"; library_path = "res://observed_library.tres"; library_name = "observed" }),
             (Witness "witness" "animation_libraries" @("Player")))
            Agree = { param($s) Agree "library_names" @($s.call.library_names | Sort-Object) $s.witness.returned.library_names } },
+        # The project writers, each answered with project.godot read back after
+        # the save (#1019). The witness reads the file with ConfigFile, which
+        # shares nothing with Didi's reader, and each pair leaves the file as
+        # it found it.
+        @{ Tool = "project_set_setting"; Session = "editor"; Steps = @(
+            (Step "call" "project_set_setting" @{ setting = "didi_observed/answer"; value = 42; create = $true }),
+            (Witness "witness" "project_setting_text" @("didi_observed/answer")))
+           Agree = { param($s) Agree "value_written" $s.call.value_written $s.witness.returned } },
+        @{ Tool = "project_set_setting"; Session = "editor"; Steps = @(
+            (Step "call" "project_set_setting" @{ setting = "didi_observed/answer"; remove = $true }),
+            (Witness "witness" "project_setting_text" @("didi_observed/answer")))
+           Agree = { param($s) Agree "value_written" $s.call.value_written $s.witness.returned } },
+        @{ Tool = "project_set_autoload"; Session = "editor"; Steps = @(
+            (Step "call" "project_set_autoload" @{ name = "ObservedLoad"; path = "res://subject.gd"; singleton = $false }),
+            (Witness "witness" "autoload_entry" @("ObservedLoad")))
+           Agree = { param($s) Agree "autoload" $s.call.autoload $s.witness.returned } },
+        @{ Tool = "project_remove_autoload"; Session = "editor"; Steps = @(
+            (Step "call" "project_remove_autoload" @{ name = "ObservedLoad" }),
+            (Witness "witness" "autoload_entry" @("ObservedLoad")))
+           Agree = { param($s) Agree "autoload" $s.call.autoload $s.witness.returned } },
+        @{ Tool = "project_set_input_action"; Session = "editor"; Steps = @(
+            (Step "call" "project_set_input_action" @{ action = "observed_action"; deadzone = 0.25; events = @(@{ type = "key"; keycode = 70 }) }),
+            (Witness "witness" "input_action_declared" @("observed_action")))
+           Agree = { param($s) Agree "defined_by_project" $s.call.defined_by_project $s.witness.returned } },
+        @{ Tool = "project_remove_input_action"; Session = "editor"; Steps = @(
+            (Step "call" "project_remove_input_action" @{ action = "observed_action" }),
+            (Witness "witness" "input_action_declared" @("observed_action")))
+           Agree = { param($s) Agree "defined_by_project" $s.call.defined_by_project $s.witness.returned } },
         # The file read back after the write, not the request (#1019). The
         # witness loads it past the editor's cache and reports the class the
         # engine made from it.

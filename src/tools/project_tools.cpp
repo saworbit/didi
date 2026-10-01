@@ -421,6 +421,14 @@ CallToolResult handleProjectSetSetting(const json& args, std::shared_ptr<ipc::II
     }
 
     const auto& report = written.value();
+    // What the file holds now, read back after the write rather than the
+    // literal this call rendered (#1019). Null after a removal.
+    auto stored = offline::readProjectSetting(root, setting);
+    if (stored.isErr()) {
+        return CallToolResult::fromError(
+            Error(500, "project.godot was written and could not be read back to confirm it: " +
+                           stored.error().message));
+    }
     json payload{
         {"status", "success"},
         {"setting", report.setting},
@@ -443,7 +451,7 @@ CallToolResult handleProjectSetSetting(const json& args, std::shared_ptr<ipc::II
         // Say what went into the file. An offline write has no engine to
         // confirm it against, so the literal is the evidence that the value
         // arrived as the caller meant it, not as a string that looks like it.
-        {"value_written", report.literal},
+        {"value_written", stored.value().existed ? json(stored.value().literal) : json(nullptr)},
         // Nothing is running to read this. A setting that gates engine
         // start-up, editor_plugins/enabled above all, takes effect when Godot
         // is next launched and not before.
