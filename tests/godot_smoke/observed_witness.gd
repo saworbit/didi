@@ -246,6 +246,14 @@ func input_action_declared(action: String) -> Variant:
 	return config.has_section_key("input", action)
 
 
+## Whether an editor tab holds a scene.
+func scene_open(path: String) -> Variant:
+	var editor := Engine.get_singleton(&"EditorInterface")
+	if editor == null:
+		return "no editor"
+	return editor.get_open_scenes().has(path)
+
+
 ## Loads a file and keeps it, so the editor holds a copy of it the way it does
 ## of anything an open scene uses (#1047). The copy goes when this node does.
 func hold(path: String) -> bool:

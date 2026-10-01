@@ -377,6 +377,10 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **scene_close answers with the tabs it left (#1019).** It reads the editor's
+  open scenes after the close and answers `still_open`, `null` for a scene
+  that was never saved. A live case compares it with the editor's own list.
+
 - **The project writers answer with what project.godot holds after the save
   (#1019).** `project_set_setting` answers `value_written` read back from the
   file, live and offline, and `null` when the file has no line for it. The
