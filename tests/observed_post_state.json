@@ -177,8 +177,10 @@
       "issue": 1020
     },
     "runtime_inject_input": {
-      "exempt": "dispatched_event_count counts parse_input_event calls, which return nothing, and delivery is chosen from a pause state read before dispatch; what the game received is not read.",
-      "issue": 1019
+      "observed": [
+        "input_state"
+      ],
+      "witness": "the runtime fixture's _input, which reads Input the way a game does"
     },
     "runtime_launch": {
       "exempt": "Starts a game process, and the conformance block works against the game the harness already attached.",

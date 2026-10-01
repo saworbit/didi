@@ -49,6 +49,11 @@ func _process(_delta: float) -> void:
 func _input(event: InputEvent) -> void:
 	input_counter += 1
 	input_counter_node.name = "InputCounter_%d" % input_counter
+	# What Input holds once the event is handled, read the way a game reads
+	# it, as the witness for runtime_inject_input's input_state (#1019): x is
+	# whether ui_accept is pressed, y its strength.
+	$Spatial/AnimTarget/InputStateProbe.position = Vector2(
+		1.0 if Input.is_action_pressed("ui_accept") else 0.0, Input.get_action_strength("ui_accept"))
 	set_meta("last_input_class", event.get_class())
 	# Where a mouse event said it happened, so the harness can check that an
 	# injected click lands where it was aimed rather than at the origin (#597).

@@ -390,6 +390,17 @@ function Get-ObservedPostStateCases {
             (Step "call" "anim_play_track" @{ animation_player_path = "/root/RuntimeRoot/Spatial/Player"; animation_name = "probe"; custom_speed = 0.01 }),
             (Step "witness" "eval_gdscript" @{ expression = "node.get('current_animation')"; context_node = "/root/RuntimeRoot/Spatial/Player" }))
            Agree = { param($s) Agree "playing" $s.call.playing ($s.witness.value -eq "probe") } },
+        # parse_input_event only buffers, so the tool flushes and then reads
+        # what Input holds (#1019). The fixture's _input reads the same state
+        # the way a game would. The release puts ui_accept back.
+        @{ Tool = "runtime_inject_input"; Session = "game"; Steps = @(
+            (Step "call" "runtime_inject_input" @{ events = @(@{ type = "action"; action_name = "ui_accept"; pressed = $true; strength = 0.75 }) }),
+            (Step "witness" "eval_gdscript" @{ expression = "node.get('position')"; context_node = "/root/RuntimeRoot/Spatial/AnimTarget/InputStateProbe" }),
+            (Step "release" "runtime_inject_input" @{ events = @(@{ type = "action"; action_name = "ui_accept"; pressed = $false }) }))
+           Agree = { param($s)
+               $state = @($s.call.input_state)[0]
+               Agree "input_state.pressed" $state.pressed ($s.witness.value.x -eq 1)
+               Agree "input_state.strength" $state.strength $s.witness.value.y } },
         @{ Tool = "runtime_set_paused"; Session = "game"; Steps = @(
             (Step "call" "runtime_set_paused" @{ paused = $true }),
             (Step "witness" "runtime_get_tree" @{ root_path = "/root/RuntimeRoot"; max_depth = 1 }))

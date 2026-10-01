@@ -5558,6 +5558,103 @@ Result<bool> liveSceneTreeIsPaused() {
     return flag.value() != 0;
 }
 
+// What Input holds for each control a batch touched, in the order the batch
+// first named it. A pressed control reads back pressed only once the engine
+// has handled the event, so this is the game's view, not the request's.
+// Mouse motion moves nothing Input exposes, so it has no entry. Every bind
+// below carries the same hash on 4.5.1, 4.6.2 and 4.7.2.
+Result<json> injectedInputState(const std::vector<runtime::InjectedInputEvent>& specs,
+                                GDExtensionObjectPtr input) {
+    using Kind = runtime::InjectedInputEvent::Kind;
+    const auto read_bool = [&](const char* method, int64_t hash,
+                               std::vector<const VariantValue*> args) -> Result<bool> {
+        auto value = callObject(input, "Input", method, hash, args);
+        if (value.isErr()) return value.error();
+        auto flag = scalarFromVariant<GDExtensionBool>(value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+        if (flag.isErr()) return flag.error();
+        return flag.value() != 0;
+    };
+    const auto read_float = [&](const char* method, int64_t hash,
+                                std::vector<const VariantValue*> args) -> Result<double> {
+        auto value = callObject(input, "Input", method, hash, args);
+        if (value.isErr()) return value.error();
+        return scalarFromVariant<double>(value.value(), GDEXTENSION_VARIANT_TYPE_FLOAT);
+    };
+    json state = json::array();
+    std::set<std::string> seen;
+    for (const auto& spec : specs) {
+        switch (spec.kind) {
+            case Kind::action: {
+                if (!seen.insert("action:" + spec.action_name).second) break;
+                auto name = makeStringName(spec.action_name);
+                auto exact = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(0));
+                if (name.isErr()) return name.error();
+                if (exact.isErr()) return exact.error();
+                auto pressed = read_bool("is_action_pressed", 1558498928LL, {&name.value(), &exact.value()});
+                if (pressed.isErr()) return pressed.error();
+                auto strength = read_float("get_action_strength", 801543509LL, {&name.value(), &exact.value()});
+                if (strength.isErr()) return strength.error();
+                state.push_back({{"type", "action"}, {"action_name", spec.action_name},
+                                 {"pressed", pressed.value()}, {"strength", strength.value()}});
+                break;
+            }
+            case Kind::key: {
+                // A key named only by its physical position reads back that way.
+                const bool physical = spec.keycode == 0 && spec.physical_keycode != 0;
+                const int64_t code = physical ? spec.physical_keycode : spec.keycode;
+                const char* field = physical ? "physical_keycode" : "keycode";
+                if (code == 0 || !seen.insert(std::string(field) + ":" + std::to_string(code)).second) break;
+                auto key = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, code);
+                if (key.isErr()) return key.error();
+                auto pressed = read_bool(physical ? "is_physical_key_pressed" : "is_key_pressed",
+                                         1938909964LL, {&key.value()});
+                if (pressed.isErr()) return pressed.error();
+                state.push_back({{"type", "key"}, {field, code}, {"pressed", pressed.value()}});
+                break;
+            }
+            case Kind::mouse_button: {
+                if (!seen.insert("mouse:" + std::to_string(spec.button_index)).second) break;
+                auto button = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, spec.button_index);
+                if (button.isErr()) return button.error();
+                auto pressed = read_bool("is_mouse_button_pressed", 1821097125LL, {&button.value()});
+                if (pressed.isErr()) return pressed.error();
+                state.push_back({{"type", "mouse_button"}, {"button_index", spec.button_index},
+                                 {"pressed", pressed.value()}});
+                break;
+            }
+            case Kind::joypad_button: {
+                if (!seen.insert("joy:" + std::to_string(spec.device) + ":" +
+                                 std::to_string(spec.button_index)).second) break;
+                auto device = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, spec.device);
+                auto button = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, spec.button_index);
+                if (device.isErr()) return device.error();
+                if (button.isErr()) return button.error();
+                auto pressed = read_bool("is_joy_button_pressed", 787208542LL, {&device.value(), &button.value()});
+                if (pressed.isErr()) return pressed.error();
+                state.push_back({{"type", "joypad_button"}, {"device", spec.device},
+                                 {"button_index", spec.button_index}, {"pressed", pressed.value()}});
+                break;
+            }
+            case Kind::joypad_motion: {
+                if (!seen.insert("axis:" + std::to_string(spec.device) + ":" +
+                                 std::to_string(spec.axis)).second) break;
+                auto device = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, spec.device);
+                auto axis = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, spec.axis);
+                if (device.isErr()) return device.error();
+                if (axis.isErr()) return axis.error();
+                auto value = read_float("get_joy_axis", 4063175957LL, {&device.value(), &axis.value()});
+                if (value.isErr()) return value.error();
+                state.push_back({{"type", "joypad_motion"}, {"device", spec.device}, {"axis", spec.axis},
+                                 {"axis_value", value.value()}});
+                break;
+            }
+            case Kind::mouse_motion:
+                break;
+        }
+    }
+    return state;
+}
+
 json injectInput(const json& params, const std::string& session_kind) {
     if (session_kind != "game") return bridgeError(409, "session_kind_rejected");
     auto parsed = runtime::parseInputInjectionRequest(params);
@@ -5622,15 +5719,25 @@ json injectInput(const json& params, const std::string& session_kind) {
                                 {"max_queued_events", kMaxQueuedInjectedEvents}});
         }
         for (auto& event : events) g_queuedInjectedInput.push_back(std::move(event));
-        return liveResult({{"dispatched_event_count", 0}, {"queued_event_count", count},
-                           {"event_types", std::move(event_types)},
-                           {"outcome", "queued"}, {"rollback", "not_available"},
-                           {"paused", true}, {"delivery", "next_unpaused_frame"},
-                           {"message", "The game is paused, so a node that pauses would not receive "
-                                       "these events. They are held and handed to Input when "
-                                       "runtime_step or runtime_set_paused resumes the tree, and "
-                                       "land in the first frame that processes."},
-                           {"session_kind", session_kind}});
+        // Nothing reached Input, and what it holds says so: a held press
+        // reads back as not pressed until the tree resumes.
+        auto held_state = injectedInputState(parsed.value(), input.value());
+        json held = {{"dispatched_event_count", 0}, {"queued_event_count", count},
+                     {"event_types", std::move(event_types)},
+                     {"outcome", "queued"}, {"rollback", "not_available"},
+                     {"paused", true}, {"delivery", "next_unpaused_frame"},
+                     {"message", "The game is paused, so a node that pauses would not receive "
+                                 "these events. They are held and handed to Input when "
+                                 "runtime_step or runtime_set_paused resumes the tree, and "
+                                 "land in the first frame that processes."},
+                     {"session_kind", session_kind}};
+        if (held_state.isOk()) {
+            held["input_state"] = std::move(held_state.value());
+        } else {
+            held["input_state"] = nullptr;
+            held["limitation"] = "What Input holds could not be read: " + held_state.error().message;
+        }
+        return liveResult(held);
     }
     size_t dispatched = 0;
     for (auto& event : events) {
@@ -5644,11 +5751,30 @@ json injectInput(const json& params, const std::string& session_kind) {
         }
         ++dispatched;
     }
-    return liveResult({{"dispatched_event_count", dispatched}, {"queued_event_count", 0},
-                       {"event_types", std::move(event_types)},
-                       {"outcome", "completed"}, {"rollback", "not_available"},
-                       {"paused", false}, {"delivery", "immediate"},
-                       {"session_kind", session_kind}});
+    json answer = {{"dispatched_event_count", dispatched}, {"queued_event_count", 0},
+                   {"event_types", std::move(event_types)},
+                   {"outcome", "completed"}, {"rollback", "not_available"},
+                   {"paused", false}, {"delivery", "immediate"},
+                   {"session_kind", session_kind}};
+    // parse_input_event only buffers an event. Input's state, and every
+    // node's _input, see it when the engine next flushes, which it does at
+    // least once a frame: asked of 4.5.1, 4.6.2 and 4.7.2 from a headless
+    // game, nothing had changed straight after parse_input_event and
+    // everything had after flush_buffered_events. So the batch is flushed
+    // here, the call Godot documents for exactly this, and the answer says
+    // what Input holds now rather than how many calls were made (#1019).
+    auto flushed = callObject(input.value(), "Input", "flush_buffered_events", 3218959716LL);
+    auto state = flushed.isOk() ? injectedInputState(parsed.value(), input.value())
+                                : Result<json>(flushed.error());
+    if (state.isOk()) {
+        answer["input_state"] = std::move(state.value());
+    } else {
+        // The events went out either way; only the read of what they did failed.
+        answer["input_state"] = nullptr;
+        answer["limitation"] = "The events were sent, but what Input holds afterwards could not be "
+                               "read: " + state.error().message;
+    }
+    return liveResult(answer);
 }
 
 } // namespace
