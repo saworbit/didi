@@ -210,7 +210,7 @@ Calls Godot's `Node.reparent` through UndoRedo.
 - `new_parent_path` (`string`, required).
 - `keep_global_transform` (`boolean`, default `true`).
 
-The answer carries `node_path`, the node's path read from it after the commit, which is the path to reach it by from now on. A reparent that did not leave the node under `new_parent_path` is refused rather than reported (#1019).
+The answer carries `node_path`, the node's path read from it after the commit, which is the path to reach it by from now on. A reparent that did not leave the node under `new_parent_path` is refused rather than reported (#1019). When the new parent already has a child of the node's name, Godot gives the moved node a readable unique one, `Twin2` for `Twin`, as the editor's own reparent does; the answer then carries `node_name`, `requested_name` and `name_substituted: true`, the way `scene_instantiate_node` reports it, and undo restores the old name (#1126).
 
 The `node_not_owned` and `node_inherited` refusals of `scene_remove_node` apply to `target_node`, and `new_parent_path` is refused with `node_not_owned` when it lies inside an instance that is not editable, because a node placed there is dropped on save.
 

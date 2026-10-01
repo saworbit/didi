@@ -14697,17 +14697,30 @@ json GodotBridge::execute(const std::string& method, const json& params,
             if (new_parent_is_descendant.value()) {
                 return errorJson(400, "Cannot reparent a node beneath one of its descendants");
             }
+            // Node.reparent adds the node without asking for a readable name,
+            // so a parent that already had a child of that name gave it one
+            // like @Node3D@20131. Setting the same name again once it has moved
+            // makes Godot pick a readable one, Twin2, as the editor's own
+            // reparent does, and setting it back on undo restores it (#1126).
+            auto original_name = nodeString(node.value(), "get_name", 2002593661LL);
+            if (original_name.isErr()) return errorJson(original_name.error().code, original_name.error().message);
+            auto name_value = makeStringName(original_name.value());
+            if (name_value.isErr()) return errorJson(name_value.error().code, name_value.error().message);
             auto preflight = preflightNodeUndoTransaction();
             if (preflight.isErr()) return errorJson(preflight.error().code, preflight.error().message);
             auto action = createAction(manager.value(), "Didi: reparent node", root.value());
             if (action.isErr()) return errorJson(action.error().code, action.error().message);
             auto move = managerMethod(manager.value(), "add_do_method", node.value(), "reparent",
                                       {&new_parent_value.value(), &keep_global.value()});
+            auto rename = managerMethod(manager.value(), "add_do_method", node.value(), "set_name",
+                                        {&name_value.value()});
             auto restore = managerMethod(manager.value(), "add_undo_method", node.value(), "reparent",
                                          {&old_parent_value.value(), &keep_global.value()});
+            auto restore_name = managerMethod(manager.value(), "add_undo_method", node.value(), "set_name",
+                                              {&name_value.value()});
             auto restore_index = managerMethod(manager.value(), "add_undo_method", parent.value(), "move_child",
                                                {&child.value(), &old_index.value()});
-            if (move.isErr() || restore.isErr() || restore_index.isErr()) {
+            if (move.isErr() || rename.isErr() || restore.isErr() || restore_name.isErr() || restore_index.isErr()) {
                 abandonAction(manager.value());
                 return errorJson(500, "Failed to register reparent UndoRedo transaction");
             }
@@ -14726,8 +14739,19 @@ json GodotBridge::execute(const std::string& method, const json& params,
             }
             auto moved_path = logicalPathFromEditedRoot(root.value(), node.value());
             if (moved_path.isErr()) return errorJson(moved_path.error().code, moved_path.error().message);
-            return liveSceneMutation({{"status", "success"}, {"action", "reparent_node"},
-                                      {"node_path", moved_path.value()}, {"undo_redo_registered", true}});
+            json result = {{"status", "success"}, {"action", "reparent_node"},
+                           {"node_path", moved_path.value()}, {"undo_redo_registered", true}};
+            // In scene_instantiate_node's words, so a caller building its next
+            // path from the old name learns why it no longer resolves.
+            auto moved_name = nodeString(node.value(), "get_name", 2002593661LL);
+            if (moved_name.isOk()) {
+                result["node_name"] = moved_name.value();
+                if (moved_name.value() != original_name.value()) {
+                    result["requested_name"] = original_name.value();
+                    result["name_substituted"] = true;
+                }
+            }
+            return liveSceneMutation(std::move(result));
         }
 
         auto flags = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(15));

@@ -190,14 +190,22 @@ function Get-ObservedPostStateCases {
             (Witness "witness" "node_info" @("Subject/SpawnedCopy")))
            Agree = { param($s) Agree "node_path" $s.call.node_path $s.witness.returned.path } },
         # Into a parent that already has a child of the same name, so the
-        # engine renames the node it moves (#1126).
+        # engine renames the node it moves. The name it picks is a readable
+        # one, Spawned3, as in the editor's own reparent, not an internal
+        # @Node3D@N, and the answer says it was substituted (#1126).
         @{ Tool = "scene_reparent_node"; Session = "editor"; Steps = @(
             (Step "nest" "scene_instantiate_node" @{ node_type = "Node3D"; parent_path = $observedRoot; name = "Nest" }),
             (Step "namesake" "scene_instantiate_node" @{ node_type = "Node3D"; parent_path = "$observedRoot/Nest"; name = "Spawned2" }),
             (Witness "before" "children" @("Nest")),
             (Step "call" "scene_reparent_node" @{ target_node = "$observedRoot/Spawned2"; new_parent_path = "$observedRoot/Nest" }),
             (Witness "after" "children" @("Nest")))
-           Agree = { param($s) Agree "node_path" $s.call.node_path (Get-ObservedNewChild $s.before.returned $s.after.returned) } },
+           Agree = { param($s)
+               $moved = Get-ObservedNewChild $s.before.returned $s.after.returned
+               $name = ([string]$moved).Substring(([string]$moved).LastIndexOf("/") + 1)
+               Agree "node_path" $s.call.node_path $moved
+               Agree "node_name" $s.call.node_name $name
+               Agree "name_substituted" ($true -eq $s.call.name_substituted) ($name -ne "Spawned2")
+               Agree "node_name, readable" "a readable name" $(if ($name.StartsWith("@")) { $name } else { "a readable name" }) } },
         # A removal that succeeded cannot leave the node, and one that cannot
         # is refused, so no input makes exists differ from false.
         @{ Tool = "scene_remove_node"; Session = "editor"; Steps = @(

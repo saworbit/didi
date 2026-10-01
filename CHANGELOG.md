@@ -394,6 +394,14 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **scene_reparent_node gives a clashing node a readable name and says so
+  (#1126).** Moving a node into a parent that already had a child of its name
+  left it named like `@Node3D@20131`, and the answer did not mention the
+  rename. It now gets the readable name the editor's own reparent picks,
+  `Twin2` for `Twin`, the answer carries `node_name`, `requested_name` and
+  `name_substituted: true` as `scene_instantiate_node` does, and undo restores
+  the old name.
+
 - **scene_call_method and signal_emit are exempt for good from the observed
   check (#1020).** Both run project code and claim no state after the call:
   `returned`, `emitted` and `connection_count` describe the call. An exemption
