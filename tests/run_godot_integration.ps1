@@ -172,6 +172,7 @@ if (-not $fixtureRoot.StartsWith($buildRoot + [IO.Path]::DirectorySeparatorChar,
 . (Join-Path $PSScriptRoot 'bounded_reads.ps1')
 . (Join-Path $PSScriptRoot 'refusal_remedies.ps1')
 . (Join-Path $PSScriptRoot 'follow_ups.ps1')
+. (Join-Path $PSScriptRoot 'phase7_success.ps1')
 . (Join-Path $PSScriptRoot 'scene_tab_reload.ps1')
 Remove-TestDirectory -Path $fixtureRoot
 # Only what the fixture tracks. The Python suites run the server against
@@ -329,6 +330,8 @@ function Invoke-Didi {
     Add-RefusalExchanges -Requests $Requests -Lines $lines
     # And every success that names work left undone, or a fact that should (Q6).
     Add-FollowUpExchanges -Requests $Requests -Lines $lines
+    # And every Phase 7 success, for whether it meets its contract (#861).
+    Add-Phase7Exchanges -Requests $Requests -Lines $lines
     $lines
 }
 
@@ -5904,6 +5907,7 @@ text = "Not a key"
     Assert-BoundedAnswersSayWhetherComplete
     Assert-RefusalsNameTheirFix ((& $didiExecutable --dump-tool-manifest) -join "`n")
     Assert-MutationsNameTheirFollowUps ((& $didiExecutable --dump-tool-manifest) -join "`n")
+    Assert-Phase7AnswersMeetTheirContracts (Join-Path $buildRoot "phase7_answers.jsonl")
     $integrationSucceeded = $true
     Write-Output "Godot integration passed: Phases 1-6 editor/runtime workflows, deep diagnostics, project isolation, export, MeshLibrary, live UI hit-testing, and live Control listing."
 }

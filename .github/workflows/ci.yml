@@ -618,6 +618,15 @@ jobs:
             -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
           cmake --build build --parallel
 
+      - name: Install the Phase 7 contract checker's dependency
+        shell: pwsh
+        run: |
+          # The harness ends by checking every Phase 7 answer it got against
+          # the success contract in schemas/phase7, through
+          # tools/phase7_success.py, which needs jsonschema (#861). The version
+          # is the one requirements-dev.txt pins for the build jobs.
+          python -m pip install --quiet --disable-pip-version-check -r requirements-dev.txt
+
       - name: Run Live Godot Integration Harness
         shell: pwsh
         env:
