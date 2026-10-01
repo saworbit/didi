@@ -174,6 +174,7 @@ if (-not $fixtureRoot.StartsWith($buildRoot + [IO.Path]::DirectorySeparatorChar,
 . (Join-Path $PSScriptRoot 'follow_ups.ps1')
 . (Join-Path $PSScriptRoot 'phase7_success.ps1')
 . (Join-Path $PSScriptRoot 'scene_tab_reload.ps1')
+. (Join-Path $PSScriptRoot 'typed_object_layer.ps1')
 Remove-TestDirectory -Path $fixtureRoot
 # Only what the fixture tracks. The Python suites run the server against
 # tests/godot_smoke and leave runtime state in its .didi/, which a whole copy
@@ -5583,6 +5584,10 @@ text = "Not a key"
     $textureAfter = (Get-Item -LiteralPath $probeTexture[0].FullName).LastWriteTimeUtc
     Assert-True ($textureAfter -gt $textureBefore) "asset_reimport answered for res://reimport_probe.svg while a scan ran, and its imported texture was not rewritten: $raceText"
     Assert-True ($raceText -notmatch "Can't find file") "The engine could not find the asset it was reimporting: $raceText"
+
+    # Q7 in docs/BUILD_QUEUE.md. Its fixture scene is its own, and it leaves
+    # main.tscn open as it found it.
+    Invoke-TypedObjectLayerBlock -EditorSession $editorSession -FixtureRoot $fixtureRoot
 
     # Last, while the editor and the game are both still attached, so no block
     # after it depends on what its cases leave behind. Q2 in docs/BUILD_QUEUE.md.

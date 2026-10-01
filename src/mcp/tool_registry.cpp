@@ -1703,8 +1703,8 @@ const std::unordered_map<std::string_view, std::vector<std::string_view>>& edite
     static const std::unordered_map<std::string_view, std::vector<std::string_view>> arguments = {
         {"scene_instantiate_node", {"parent_path"}},
         {"scene_remove_node", {"target_node"}},
-        {"scene_set_property", {"target_node"}},
-        {"scene_get_property", {"target_node"}},
+        {"scene_set_property", {"target_node", "writes[].target_node"}},
+        {"scene_get_property", {"target_node", "reads[].target_node"}},
         {"scene_add_to_group", {"target_node"}},
         {"scene_remove_from_group", {"target_node"}},
         {"scene_duplicate_node", {"target_node"}},
@@ -1735,6 +1735,24 @@ std::optional<Error> refuseUnusableNodePaths(const ResolvedToolBinding& binding,
     if (entry == editedSceneNodePaths().end() || !arguments.is_object()) return std::nullopt;
     for (const auto& name : entry->second) {
         const auto key = std::string(name);
+        // "writes[].target_node" names the same argument in every entry of a
+        // batch, which needs the rule as much as the single form does.
+        const auto marker = key.find("[].");
+        if (marker != std::string::npos) {
+            const auto list = key.substr(0, marker);
+            const auto field = key.substr(marker + 3);
+            if (!arguments.contains(list) || !arguments[list].is_array()) continue;
+            const auto& items = arguments[list];
+            for (size_t index = 0; index < items.size(); ++index) {
+                const auto& item = items[index];
+                if (!item.is_object() || !item.contains(field) || !item[field].is_string()) continue;
+                if (auto refused = paths::refuseParentRelativeNodePath(item[field].get<std::string>())) {
+                    return Error(refused->code, "Argument '" + list + "[" + std::to_string(index) +
+                                                    "]." + field + "': " + refused->message);
+                }
+            }
+            continue;
+        }
         if (!arguments.contains(key) || !arguments[key].is_string()) continue;
         if (auto refused =
                 paths::refuseParentRelativeNodePath(arguments[key].get<std::string>())) {
@@ -1986,11 +2004,76 @@ std::optional<Error> probeAudioBusTarget(const json& arguments,
     return std::nullopt;
 }
 
+// The refusal a preview probe met, or nothing when the probe answered or could
+// not reach the engine.
+//
+// The IPC client hands a bridge refusal back as an error with the bridge's code
+// and data, so this is where a live refusal arrives. A 4xx is the failure the
+// real call would hit: the node is not there, the file cannot hold the edit,
+// the script does not fit. Its data travels with it, because the code under
+// data.code is what a caller branches on. A 5xx means the probe could not reach
+// the engine, which is not evidence the mutation would fail, so the preview
+// goes on unverified rather than refusing a call that might be fine.
+std::optional<Error> probeRefusal(const Result<json>& response) {
+    if (response.isErr()) {
+        if (response.error().code >= 400 && response.error().code < 500) return response.error();
+        return std::nullopt;
+    }
+    const auto& payload = response.value();
+    if (payload.is_object() && payload.contains("error")) {
+        const auto& error = payload["error"];
+        const auto code = error.value("code", 500);
+        if (code >= 400 && code < 500) {
+            return Error(code, error.value("message", std::string("The engine refused this call")),
+                         error.contains("data") ? error["data"] : json());
+        }
+    }
+    return std::nullopt;
+}
+
+// A batch of writes is previewed as a batch of reads, sent with the mutation so
+// the bridge runs every write's own checks first (Q7). The before state is each
+// target's current value, in the order of writes.
+std::optional<Error> probeWriteBatch(const std::string& tool, const json& arguments,
+                                     const std::shared_ptr<ipc::IIpcClient>& client,
+                                     json& before, json& subject) {
+    json reads = json::array();
+    for (const auto& item : arguments["writes"]) {
+        if (!item.is_object() || !item.contains("target_node") || !item["target_node"].is_string() ||
+            !item.contains("property_name") || !item["property_name"].is_string()) {
+            return std::nullopt;
+        }
+        reads.push_back({{"target_node", item["target_node"]}, {"property_name", item["property_name"]}});
+    }
+    subject = {{"writes", reads}};
+    auto response = client->sendRequest(
+        "scene.getProperty", {{"reads", reads}, {"mutation", {{"tool", tool}, {"arguments", arguments}}}},
+        5000);
+    if (auto refused = probeRefusal(response)) return refused;
+    if (response.isErr()) return std::nullopt;
+    const auto& payload = response.value();
+    if (!payload.is_object() || !payload.contains("reads") || !payload["reads"].is_array()) {
+        return std::nullopt;
+    }
+    json writes = json::array();
+    for (const auto& read : payload["reads"]) {
+        if (!read.is_object()) continue;
+        writes.push_back({{"target_node", read.value("target_node", json())},
+                          {"property_name", read.value("property_name", json())},
+                          {"value", read.value("value", json())}});
+    }
+    before = {{"writes", std::move(writes)}};
+    return std::nullopt;
+}
+
 std::optional<Error> probeNodeTarget(const std::string& tool, const std::string& argument,
                                      const json& arguments,
                                      const std::shared_ptr<ipc::IIpcClient>& client,
                                      json& before, json& subject) {
     if (!client || !arguments.is_object()) return std::nullopt;
+    if (tool == "scene_set_property" && arguments.contains("writes") && arguments["writes"].is_array()) {
+        return probeWriteBatch(tool, arguments, client, before, subject);
+    }
     json target;
     if (arguments.contains(argument) && arguments[argument].is_string()) {
         target = arguments[argument];
@@ -2020,34 +2103,10 @@ std::optional<Error> probeNodeTarget(const std::string& tool, const std::string&
         "scene.getProperty",
         {{"target_node", target}, {"property_name", property},
          {"mutation", {{"tool", tool}, {"arguments", arguments}}}}, 5000);
-    if (response.isErr()) {
-        // The IPC client hands a bridge refusal back as an error with the
-        // bridge's code and data, so this is where a live refusal arrives. A
-        // 4xx is the failure the real call would hit: the node is not there,
-        // the file cannot hold the edit, the script does not fit. A 5xx means
-        // the probe could not reach the engine, which is not evidence the
-        // mutation would fail, so the preview goes on unverified rather than
-        // refusing a call that might be fine.
-        if (response.error().code >= 400 && response.error().code < 500) return response.error();
-        return std::nullopt;
-    }
+    if (auto refused = probeRefusal(response)) return refused;
+    if (response.isErr()) return std::nullopt;
     const auto& payload = response.value();
-    if (payload.is_object() && payload.contains("error")) {
-        const auto& error = payload["error"];
-        const auto code = error.value("code", 500);
-        // A refusal is the failure the real call would hit: the node or the
-        // property is not there, the file cannot hold the edit, the script
-        // does not fit. Its data travels with it, because the code under
-        // data.code is what a caller branches on. A 5xx is the engine failing
-        // to answer, which is not evidence the mutation would fail, so the
-        // preview goes on unverified rather than refusing a call that might
-        // be fine.
-        if (code >= 400 && code < 500) {
-            return Error(code, error.value("message", std::string("The engine refused this call")),
-                         error.contains("data") ? error["data"] : json());
-        }
-        return std::nullopt;
-    }
+    if (payload.is_object() && payload.contains("error")) return std::nullopt;
     if (payload.is_object() && payload.contains("value")) {
         if (arguments.contains("property_name") && arguments["property_name"].is_string()) {
             before = {{"target_node", target}, {"property_name", property},
@@ -3333,25 +3392,34 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "scene_set_property";
-        t.description = "Sets an existing scalar node property through UndoRedo with strict JSON/Godot type compatibility. The property is read back after the commit, so value is what it now holds. When applied is false a not_applied block says which of the two happened, the property not moving or the engine storing a value of its own, and carries the range or enum the engine declares for that property when it declares one.";
+        t.description = "Sets an existing scalar node property through UndoRedo with strict JSON/Godot type compatibility. The property is read back after the commit, so value is what it now holds. When applied is false a not_applied block says which of the two happened, the property not moving or the engine storing a value of its own, and carries the range or enum the engine declares for that property when it declares one. writes sets several, on any nodes, as one undo step.";
+        // The value spellings, shared by a single write and each batch item.
+        const json value_types = json::array({"null", "boolean", "integer", "number", "string", "object"});
         t.inputSchema = {
             {"type", "object"},
             {"properties", {
-                {"target_node", {{"type", "string"}, {"description", "Target NodePath"}}},
-                {"property_name", {{"type", "string"}, {"description", "Property name"}}},
+                {"target_node", {{"type", "string"}, {"minLength", 1}, {"maxLength", 1024}, {"description", "Target NodePath"}}},
+                {"property_name", {{"type", "string"}, {"minLength", 1}, {"maxLength", 1024}, {"description", "Property name, or a path into a resource it holds: theme_override_styles/panel:bg_color, material:shader_parameter/tint"}}},
                 // The accepted JSON types are fixed by validateJsonForPropertyType
                 // in the bridge, and the schema is the only place a client can
                 // learn them. Left untyped, a client guesses between 1.0 and
                 // "1.0", guesses differently from one turn to the next, and
                 // reads the rejection as a Didi bug rather than a type error.
-                {"value", {{"type", json::array({"null", "boolean", "integer", "number", "string", "object"})},
+                {"value", {{"type", value_types},
                            {"examples", json::array({1.0, 42, true, "Player", nullptr,
                                                      json{{"x", 480}, {"y", 270}},
                                                      json{{"r", 1}, {"g", 0.5}, {"b", 0}},
                                                      "res://tiles/arena_tileset.tres"})},
-                           {"description", "New property value, as the JSON type matching the Godot property: number for float (1.0, not \"1.0\"), integer for int, boolean for bool, string for String/StringName/NodePath, null for nil, {x,y} or {x,y,z} for Vector2/Vector2i/Vector3/Vector3i (whole numbers for the integer ones), {r,g,b} with optional a or a \"#rrggbb\"/\"#rrggbbaa\" string for Color, and a res:// path for a Resource slot (null clears it). Arrays are rejected, and so is an object with a member the target type does not have."}}}
-            }},
-            {"required", {"target_node", "property_name", "value"}}
+                           {"description", "New property value, as the JSON type matching the Godot property: number for float (1.0, not \"1.0\"), integer for int, boolean for bool, string for String/StringName/NodePath, null for nil, {x,y} or {x,y,z} for Vector2/Vector2i/Vector3/Vector3i (whole numbers for the integer ones), {r,g,b} with optional a or a \"#rrggbb\"/\"#rrggbbaa\" string for Color, and a res:// path for a Resource slot (null clears it). Arrays are rejected, and so is an object with a member the target type does not have."}}},
+                {"writes", {{"type", "array"}, {"minItems", 1}, {"maxItems", 64},
+                            {"items", {{"type", "object"},
+                                       {"properties", {{"target_node", {{"type", "string"}}},
+                                                       {"property_name", {{"type", "string"}}},
+                                                       {"value", {{"type", value_types}}}}},
+                                       {"required", {"target_node", "property_name", "value"}},
+                                       {"additionalProperties", false}}},
+                            {"description", "Instead of the three above: writes of the same shape, all checked first, then committed as one undo step. One that fails refuses the batch."}}}
+            }}
         };
         t.handler = [this](const json& args) { return handleSceneSetProperty(args, m_ipcClient); };
         registerTool(t);
@@ -3380,14 +3448,20 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "scene_get_property";
-        t.description = "Returns one existing scalar node property from the live edited scene.";
+        t.description = "Returns a node property from the live edited scene, with its declared type and any range, enum or resource type the engine declares.";
         t.inputSchema = {
             {"type", "object"},
             {"properties", {
-                {"target_node", {{"type", "string"}, {"description", "Target NodePath"}}},
-                {"property_name", {{"type", "string"}, {"description", "Property name"}}}
-            }},
-            {"required", {"target_node", "property_name"}}
+                {"target_node", {{"type", "string"}, {"minLength", 1}, {"maxLength", 1024}, {"description", "Target NodePath"}}},
+                {"property_name", {{"type", "string"}, {"minLength", 1}, {"maxLength", 1024}, {"description", "Property name, or a path such as theme_override_styles/panel:bg_color"}}},
+                {"reads", {{"type", "array"}, {"minItems", 1}, {"maxItems", 64},
+                           {"items", {{"type", "object"},
+                                      {"properties", {{"target_node", {{"type", "string"}}},
+                                                      {"property_name", {{"type", "string"}}}}},
+                                      {"required", {"target_node", "property_name"}},
+                                      {"additionalProperties", false}}},
+                           {"description", "Instead of the two above: several reads, answered in order."}}}
+            }}
         };
         t.handler = [this](const json& args) { return handleSceneGetProperty(args, m_ipcClient); };
         registerTool(std::move(t));

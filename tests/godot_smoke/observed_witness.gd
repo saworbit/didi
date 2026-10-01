@@ -55,6 +55,13 @@ func property(path: String, property_name: String) -> Variant:
 	return _plain(node.get(property_name)) if node != null else null
 
 
+## A property reached by path, through get_indexed rather than through any
+## code Didi shares (Q7).
+func property_path(path: String, indexed: String) -> Variant:
+	var node := _node(path)
+	return _plain(node.get_indexed(NodePath(indexed))) if node != null else null
+
+
 func shader_parameter(path: String, material_property: String, uniform: String) -> Variant:
 	var node := _node(path)
 	if node == null:

@@ -289,7 +289,8 @@
         "value",
         "applied"
       ],
-      "witness": "Object.get on the node through observed_witness.gd"
+      "batch": "writes",
+      "witness": "Object.get, or get_indexed for a path, on the node through observed_witness.gd"
     },
     "script_attach_to_node": {
       "observed": [

@@ -36,7 +36,7 @@
     "runtime_recovery_status": {"unbounded": "The recovery state and its retained checkpoints, with no cap on the answer."},
     "scene_get_group_members": {"bounded": "the other groups it offers are capped at 128; members is whole"},
     "scene_get_hierarchy": {"bounded": "max_depth, max_nodes, and the live read's node and byte budgets"},
-    "scene_get_property": {"unbounded": "One property of one node; a value nested too deep is refused, not cut."},
+    "scene_get_property": {"unbounded": "One property, or at most 64 named reads; more are refused and a value nested too deep is refused, not cut."},
     "scene_get_selection": {"bounded": "256 selected nodes"},
     "scene_list_groups": {"unbounded": "Every group on one node, with no cap on the list."},
     "script_check_syntax": {"bounded": "the Godot compiler pass is stopped at 5 seconds"},

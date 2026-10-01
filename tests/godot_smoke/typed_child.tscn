@@ -1,0 +1,7 @@
+[gd_scene load_steps=2 format=3]
+
+[sub_resource type="StyleBoxFlat" id="child_box"]
+bg_color = Color(0.2, 0.2, 0.2, 1)
+
+[node name="TypedChild" type="Panel"]
+theme_override_styles/panel = SubResource("child_box")

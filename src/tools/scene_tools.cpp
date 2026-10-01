@@ -8,6 +8,8 @@
 #include <regex>
 #include <filesystem>
 #include <functional>
+#include <initializer_list>
+#include <optional>
 #include <map>
 
 namespace didi {
@@ -493,12 +495,59 @@ CallToolResult handleSceneCallMethod(const json& args, std::shared_ptr<ipc::IIpc
         "process, so it has no offline meaning. Launch Godot and attach.");
 }
 
-CallToolResult handleSceneSetProperty(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
-    std::string target_node = args.value("target_node", "");
-    std::string property_name = args.value("property_name", "");
+namespace {
 
-    if (target_node.empty() || property_name.empty() || !args.contains("value")) {
-        return CallToolResult::errorJson(400, "Parameters 'target_node', 'property_name', and 'value' are required, and the names must not be empty.");
+// One call, or a batch of them in `key` (Q7). A batch and the single form
+// together is refused rather than merged: which one the caller meant is not
+// something to guess. The bridge checks all of this again, because
+// mutate_scene_tree reaches it without passing through here; this refuses a
+// malformed request without waking an engine.
+std::optional<CallToolResult> refuseMalformedBatch(const json& args, const char* key,
+                                                   std::initializer_list<const char*> single,
+                                                   bool needs_value) {
+    for (const auto* name : single) {
+        if (args.contains(name)) {
+            return CallToolResult::errorJson(
+                400, std::string("Send one call as ") +
+                         (needs_value ? "target_node, property_name and value" : "target_node and property_name") +
+                         ", or several as " + key + ", not both.",
+                {{"field", key}});
+        }
+    }
+    const auto& items = args[key];
+    if (!items.is_array() || items.empty() || items.size() > 64) {
+        return CallToolResult::errorJson(
+            400, std::string("Parameter '") + key + "' must be an array of 1 to 64 objects.", {{"field", key}});
+    }
+    for (size_t index = 0; index < items.size(); ++index) {
+        const auto& item = items[index];
+        const bool named = item.is_object() && item.contains("target_node") &&
+                           item["target_node"].is_string() && !item["target_node"].get<std::string>().empty() &&
+                           item.contains("property_name") && item["property_name"].is_string() &&
+                           !item["property_name"].get<std::string>().empty();
+        if (!named || (needs_value && !item.contains("value"))) {
+            return CallToolResult::errorJson(
+                400, std::string(key) + "[" + std::to_string(index) + "] needs a non-empty target_node and property_name" +
+                         (needs_value ? ", and a value." : "."),
+                {{"field", key}, {"index", index}});
+        }
+    }
+    return std::nullopt;
+}
+
+}  // namespace
+
+CallToolResult handleSceneSetProperty(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    if (args.contains("writes")) {
+        if (auto refused = refuseMalformedBatch(args, "writes", {"target_node", "property_name", "value"}, true)) {
+            return *refused;
+        }
+    } else {
+        std::string target_node = args.value("target_node", "");
+        std::string property_name = args.value("property_name", "");
+        if (target_node.empty() || property_name.empty() || !args.contains("value")) {
+            return CallToolResult::errorJson(400, "Parameters 'target_node', 'property_name', and 'value' are required, and the names must not be empty. Several writes go in 'writes' instead.");
+        }
     }
 
     if (ipc && ipc->isConnected()) {
@@ -513,11 +562,16 @@ CallToolResult handleSceneSetProperty(const json& args, std::shared_ptr<ipc::IIp
 }
 
 CallToolResult handleSceneGetProperty(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
-    std::string target_node = args.value("target_node", "");
-    std::string property_name = args.value("property_name", "");
-
-    if (target_node.empty() || property_name.empty()) {
-        return CallToolResult::errorJson(400, "Parameters 'target_node' and 'property_name' are required and must not be empty.");
+    if (args.contains("reads")) {
+        if (auto refused = refuseMalformedBatch(args, "reads", {"target_node", "property_name"}, false)) {
+            return *refused;
+        }
+    } else {
+        std::string target_node = args.value("target_node", "");
+        std::string property_name = args.value("property_name", "");
+        if (target_node.empty() || property_name.empty()) {
+            return CallToolResult::errorJson(400, "Parameters 'target_node' and 'property_name' are required and must not be empty. Several reads go in 'reads' instead.");
+        }
     }
 
     if (ipc && ipc->isConnected()) {

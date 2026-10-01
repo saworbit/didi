@@ -191,6 +191,7 @@ set(CORE_SOURCES
     src/gdextension/engine_diagnostics.cpp
     src/gdextension/runtime_request_router.cpp
     src/gdextension/expression_sandbox.cpp
+    src/gdextension/property_paths.cpp
     src/offline/gdscript_diagnostics.cpp
     src/offline/resource_indexer.cpp
     src/offline/audio_bus_layout.cpp
@@ -427,6 +428,7 @@ set(TEST_SOURCES
     tests/test_tool_profile.cpp
     tests/test_response_economy.cpp
     tests/test_follow_ups.cpp
+    tests/test_property_paths.cpp
     tests/test_refusal_remedies.cpp
     tests/test_repeated_failures.cpp
     tests/test_control_room.cpp

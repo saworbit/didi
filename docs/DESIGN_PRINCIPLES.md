@@ -92,8 +92,11 @@ only place a contract such as P1 can be enforced once instead of tool by tool.
   are compositions of those primitives. They inherit the guarantees instead of
   reimplementing them.
 
-**Enforced by.** Review, today. [Q7](BUILD_QUEUE.md#q7-typed-object-layer)
-builds the typed primitive layer,
+**Enforced by.** Review, and for property writes the path [Q7](BUILD_QUEUE.md#q7-typed-object-layer)
+began: a single write, a path into a sub-resource and a batch all go through one
+prepare-then-commit pipeline that checks, records UndoRedo, honours `dry_run` and
+reads back, and the live harness proves a batch undoes as one step. The rest
+of Q7 widens that layer to every value and to ClassDB methods,
 [Q13](BUILD_QUEUE.md#q13-project-defined-tools) routes project-defined tools
 through it, and [Q15](BUILD_QUEUE.md#q15-change-journal-with-undo) records
 every write it makes.
@@ -194,7 +197,11 @@ by path, and `EditorUndoRedoManager` can record any of it.
   lives in the project, behind the same guards.
 - `eval_gdscript` stays a read-only expression subset.
 
-**Enforced by.** The expression sandbox, today.
+**Enforced by.** The expression sandbox, and for properties the paths and batches
+of [Q7](BUILD_QUEUE.md#q7-typed-object-layer): every step of a path is checked against
+ClassDB's property list, a path steps only into resources, a read reports the
+declared type and constraint, and writes the layer refuses are a written list with
+a reason each.
 [Q7](BUILD_QUEUE.md#q7-typed-object-layer) and
 [Q13](BUILD_QUEUE.md#q13-project-defined-tools).
 

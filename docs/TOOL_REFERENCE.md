@@ -216,7 +216,7 @@ The `node_not_owned` and `node_inherited` refusals of `scene_remove_node` apply 
 
 ### `scene_set_property` — Live
 
-Sets an existing property through UndoRedo. Unknown properties and incompatible types are rejected.
+Sets an existing property through UndoRedo. Unknown properties and incompatible types are rejected. The property is one of the node's own, or one inside a resource the node holds, named by a path; several writes, on any nodes, go in one call as `writes` and undo as one step. See [Paths and batches](#paths-and-batches) below.
 
 A node inside an instanced sub-scene the edited scene has not marked editable is refused with `409` and `data.code: "node_not_owned"`, naming the owning scene and the instance root, on the real call and on the dry run: the packer drops such a node, so the change was applied live, reported as applied, and lost on save. An inherited node is accepted, and the save records the value as an override. `scene_add_to_group`, `scene_remove_from_group`, `script_attach_to_node` and `script_detach_from_node` run the same check.
 
@@ -239,9 +239,10 @@ A Godot `float` property is `real_t`, which is 32 bits in a standard build, and 
 
 Non-finite numbers read back as the strings `"inf"`, `"-inf"` and `"nan"` rather than as JSON `null`. JSON has no spelling for them, and `null` is what a caller reads as unset, so a property holding `inf` and one that could not be read looked identical. Nothing this tool accepts can produce one any more; a scene written by hand still can.
 
-- `target_node` (`string`, required).
-- `property_name` (`string`, required).
-- `value` (required): the JSON form of the property's Godot type, from the table above.
+- `target_node` (`string`): required unless `writes` is given.
+- `property_name` (`string`, at most 1024 characters): required unless `writes` is given. A property of the node, or a path into a resource it holds.
+- `value`: required unless `writes` is given. The JSON form of the property's Godot type, from the table above.
+- `writes` (`array` of 1 to 64): instead of the three above, several writes, each an object with exactly `target_node`, `property_name` and `value`.
 
 The property is read back after the commit, and the result reports what it now holds rather than what was requested. `value` is that observed state, `old_value` is what it held before, `requested_value` is the argument, and `applied` says whether the two now agree. A committed UndoRedo action is not a changed property: Godot discards some writes, such as `anchors_preset` on a Control still in `layout_mode` 0, and those return `applied: false` with `value` unchanged. Numbers are compared by value, so writing an integer to a float property is `applied: true`.
 
@@ -265,12 +266,57 @@ Every live mutation of the edited scene, this one and `scene_instantiate_node`, 
 
 Every live scene answer names the scene it is about. `scene_get_hierarchy` and `scene_get_selection` carry `scene_file_path`, the `res://` path of the scene open in the editor, or `null` with `scene_is_unsaved: true` for one that has never been saved. A scene node 404 says which scene it searched. `scene_create` opens the scene it writes, so from that call on every later `scene_*` call answers about a different file; it now reports `edited_scene_changed` and `previous_scene_file_path` so that switch is visible rather than something a caller has to infer from nodes going missing.
 
+#### Paths and batches
+
+Q7 in the [Build Queue](BUILD_QUEUE.md#q7-typed-object-layer). Before it, a property inside a sub-resource, a StyleBox in a theme override or a parameter of a node's material, could only be changed by editing the scene file, and the open editor writes its own copy over that file at its next save.
+
+`property_name` is a path in Godot's own grammar, the one `get_indexed` and `set_indexed` take: a property of the node, then a colon before each property inside what it holds. A slash belongs to a name, so `theme_override_styles/panel:bg_color` is two steps and `material:shader_parameter/tint` is two. A plain name is a path of one step and behaves exactly as it always did. A path has at most 8 steps and 1024 characters. An empty step, a leading or trailing colon, or a name that starts or ends with a slash or holds two in a row is refused as `400 property_path_invalid` rather than tidied, because each means something different to a NodePath and none of them is a property.
+
+Each step is checked against the property list of the object it is on, because `get_indexed` and `set_indexed` answer null and do nothing for a step that names nothing, on every supported line. A step that names nothing is `404`: on the node it keeps the sentence it always had, `Property not found on target node: …`, and further in it is `property_not_found` with the class it looked on in `holder_class`. Both carry `candidates`, up to 24 names the object shows in the inspector, the likeliest first, which is the way to learn what a StyleBoxFlat or a material has without a second call. A path steps only into a resource: a value such as a `Vector2` is written whole, and a property that holds a node is refused because that node is named by `target_node`, where its own ownership check runs. Both are `400 property_path_not_resource`, and a slot that holds nothing is `404 property_slot_empty`.
+
+A write is kept by whatever file keeps the resource it changes. Measured on 4.5.1, 4.6.2 and 4.7.2 by writing through a node with `set_indexed` and saving the scene:
+
+| The resource the path reaches | What the scene save does | What this tool does |
+| --- | --- | --- |
+| Made in memory, or embedded in the edited scene | Saves it in the scene | Writes it |
+| Kept in its own `.tres` or `.res`, or embedded in one | Rewrites that file, so every scene that uses it sees the change | Writes it, and answers with `resource_file` naming the file |
+| Embedded in a scene this one instances or inherits | Drops the change: it is live, reads back, and is gone after the save | Refuses with `409 subresource_not_saved`, naming the scene in `resource_file`, with a `next_call` to `scene_open` it |
+| Kept in a file the editor does not save from a scene: an imported asset, a `.gdshader`, a script | Keeps nothing | Refuses with `409 subresource_not_saved` |
+
+The editor's inspector writes an external resource the same way, and says so by showing its path. `resource_file` is how this answer says so.
+
+A resource can also be held by more than one node in the scene, and a write inside it changes all of them. `scene_duplicate_node` makes that case without saying so: Godot's duplicate shares the original's sub-resources rather than copying them, so recolouring a copy's StyleBox recolours the original's too. The answer names only the node the call targeted; #1134 tracks saying which others hold it.
+
+Some writes are refused whatever the path, because each changes what the scene file is rather than what one of its values is. They are `400 property_write_excluded`, with the tool that makes the change properly in `use_tool` where there is one:
+
+| Property | On | Why | `use_tool` |
+| --- | --- | --- | --- |
+| `owner` | a node | It decides whether the scene file holds the node at all; clearing or changing it drops the node, and its children, from the next save. | `scene_reparent_node` |
+| `scene_file_path` | a node | It marks the node as an instance of another scene, and the next save writes it as one, without the nodes it holds. | `scene_instantiate_node` |
+| `resource_path` | a resource | It decides which file the resource is saved in, so writing it moves the resource rather than changing a value in it. | |
+
+`writes` commits several writes as one UndoRedo action, so one `editor_undo` reverts all of them and one `editor_redo` restores them, which the live harness proves on every engine line. A path's write is recorded as `set_indexed` on the node, which keeps every write in the edited scene's history whichever file its resource is kept in; a mix of histories in one action is refused by the engine. Every write is checked first, the whole way a single write is, and the first that fails refuses the batch with nothing applied: the error carries `data.index` and `data.field: "writes"`, and its message ends with `(writes[n])`. Two writes to the same property, or one inside a slot another writes, are `400 batch_writes_overlap`: each write is checked against the scene as it stands before the batch, and Godot replays an action's undo steps in the order they were added, so neither would come back as it was. Send the slot first, in a call of its own.
+
+The answer to a batch carries `writes`, one entry per write in order, each with the fields a single write answers with (`target_node`, `property_name`, `value`, `requested_value`, `old_value`, `applied`, and `not_applied` or `resource_file` when they apply). `applied` at the top is true only when every write landed, and `undo_redo_registered`, `scene_saved` and `follow_up` are the batch's.
+
+A dry run checks every write the way the real call would, the type of its value included, and refuses where it would refuse. Its preview reads each target's current value, under `changes[0].before.writes`.
+
 ### `scene_get_property` — Live
 
-Returns one existing property, in the JSON forms the table under `scene_set_property` lists, plus arrays and dictionaries of them nested up to 16 levels. A resource comes back as its `res://` path, which is what a write takes, and an object with no path to give, a Node for instance, as `null`. A type with no JSON form, such as `Transform3D`, is refused. Metadata and export hints are not returned.
+Returns an existing property, in the JSON forms the table under `scene_set_property` lists, plus arrays and dictionaries of them nested up to 16 levels. A resource comes back as its `res://` path, which is what a write takes, and an object with no path to give, a Node for instance, as `null`. A type with no JSON form, such as `Transform3D`, is refused as `400 property_type_unsupported`. `property_name` takes the same paths `scene_set_property` does, and is refused the same ways.
 
-- `target_node` (`string`, required).
-- `property_name` (`string`, required).
+Each answer also says what the class declares about the property:
+
+- `type`: the declared Godot type, which is what a write is checked against. A property that declares none says what it holds, or `Variant` when it holds nothing.
+- `engine_constraint`, when the engine declares one about the values the property takes: `{kind, hint_string}`, the shape `not_applied` uses, with `kind` one of `range`, `enum`, `enum_suggestion` and `resource_type`. A Node2D's `position` carries its `range`, and a theme override slot its `resource_type`, such as `StyleBox`.
+- `holds`: the class of the resource a slot holds, so a slot holding an embedded StyleBoxFlat says so.
+- `resource_file`: when the property is inside a resource kept in another file, that file.
+
+A shader parameter the material does not override reads `null` by path on every supported line; `shader_list_uniforms` reads the shader's declared default for it.
+
+- `target_node` (`string`): required unless `reads` is given.
+- `property_name` (`string`, at most 1024 characters): required unless `reads` is given.
+- `reads` (`array` of 1 to 64): instead of the two above, several reads, each an object with exactly `target_node` and `property_name`. The answer carries `reads`, one entry per read in order, and the first that fails refuses the call, with `data.index` and `data.field: "reads"`.
 
 ### `scene_call_method` — Live
 
@@ -1760,7 +1806,7 @@ The write reaches the loaded material. A material embedded in the scene is saved
 
 ### `shader_list_uniforms` — Live
 
-Reads the shader uniforms of a `ShaderMaterial` held by a node in the edited scene. `resource_inspect` reports file metadata and `scene_get_property` reports which material a node has; neither reaches inside to the parameters.
+Reads the shader uniforms of a `ShaderMaterial` held by a node in the edited scene. `resource_inspect` reports file metadata, and `scene_get_property` reads one parameter by path, `material:shader_parameter/<name>`, but answers `null` for one the material does not override. This tool lists them all, with the shader's own default where there is no override.
 
 - `target_node` (`string`, required).
 - `property_name` (`string`, required): the property the material sits in, such as `material_override` on a MeshInstance3D or `material` on a CanvasItem. Named rather than guessed, because the right property differs by node type and `scene_get_property` will say which a node has.

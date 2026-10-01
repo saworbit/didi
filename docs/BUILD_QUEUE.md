@@ -41,7 +41,7 @@ fails when a phase's status differs between the roadmap and the phase design.
 | [Q4](#q4-shrink-the-tool-list) | Shrink the tool list | 13 | Q3 | #1012 | IN PROGRESS |
 | [Q5](#q5-response-economy) | Response economy | 13 | Q3 | #776 | COMPLETE (#1039) |
 | [Q6](#q6-next-step-in-every-answer) | Next step in every answer | 13 | none | #1040 | IN PROGRESS |
-| [Q7](#q7-typed-object-layer) | Typed object layer | 14 | Q2 | not yet | PLANNED |
+| [Q7](#q7-typed-object-layer) | Typed object layer | 14 | Q2 | #1133 | IN PROGRESS |
 | [Q8](#q8-long-work-as-jobs) | Long work as jobs | 11 | none | not yet | PLANNED |
 | [Q9](#q9-proof-in-one-call) | Proof in one call | 14 | Q8 | not yet | PLANNED |
 | [Q10](#q10-graph-builders-that-round-trip) | Graph builders that round-trip | 9 | Q7 | not yet | PLANNED |

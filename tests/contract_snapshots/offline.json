@@ -417,6 +417,57 @@
       "tool": "scene_get_property"
     },
     {
+      "arguments": {
+        "reads": [
+          {
+            "property_name": "material:shader_parameter/strength",
+            "target_node": "HUD/Tint"
+          },
+          {
+            "property_name": "theme_override_styles/normal:bg_color",
+            "target_node": "HUD/Start"
+          },
+          {
+            "property_name": "shape:size",
+            "target_node": "Player/Body"
+          }
+        ]
+      },
+      "result": {
+        "content": [
+          {
+            "text_json": {
+              "error": {
+                "code": 503,
+                "data": {
+                  "attach_with": "runtime_attach_session",
+                  "blocked_on": "no_live_session",
+                  "canonical_tool": "scene_get_property",
+                  "code": "not_connected",
+                  "discover_with": "runtime_list_sessions",
+                  "needs_live_engine": true,
+                  "next_call": {
+                    "reason": "Attach a session with runtime_attach_session, or start one.",
+                    "tool": "runtime_list_sessions"
+                  },
+                  "offline_fallback": false,
+                  "retryable": true,
+                  "tool": "scene_get_property"
+                },
+                "message": "scene_get_property runs only against a live Godot engine, and none is attached for this project root. Open the project in the Godot editor with the Didi addon enabled, then call runtime_list_sessions to see what is attachable and runtime_attach_session to select it."
+              },
+              "execution_mode": "live",
+              "session": null
+            },
+            "type": "text"
+          }
+        ],
+        "isError": true,
+        "resultType": "complete"
+      },
+      "tool": "scene_get_property"
+    },
+    {
       "arguments": {},
       "result": {
         "content": [
@@ -1978,7 +2029,7 @@
         "listChanged": true
       }
     },
-    "instructions": "Didi: Godot project inspection and controlled editor/game operations.\n\nDISCOVERY AND EXECUTION\nSelect the project with --project or DIDI_PROJECT_ROOT. Before invoking any tool, inspect tools/list: read its inputSchema, required parameters, descriptions, bounds, and _meta.didi availability. Use canonical names below; never invent tool names or parameters. Require implemented=true; live-only calls need currentMode=live or liveAvailable=true. Recheck discovery after session changes. Use runtime_list_sessions, runtime_attach_session, and runtime_get_session to select and verify the intended project and editor/game route. Check execution_mode and session_kind in results; offline_fallback is not observed or unsaved editor state.\nNever brute-force node paths or probe guessed node names. Discover the hierarchy first, reuse returned paths, and refresh the relevant branch after structural changes or a missing-node error. Inspect errors and limitations before changing the request; do not repeat unsupported calls.\nPreview mutations with the exact arguments plus dry_run=true; inspect mutation_preview and the project/route. If confirmation_token is returned, execute the same arguments without dry_run and with that token only after destructive intent is authorized. Do not replay uncertain mutations. Use editor_save_scene when scene persistence is intended.\n\nTOOL ROUTING\n- Files: project_list_resources discovers project paths; project_search_text finds literal text; project_search_symbols finds lexical GDScript/C# declarations.\n- Scene tree: scene_get_hierarchy(root_path, max_depth, max_nodes) returns names, classes, paths, and children. Start bounded or use summary=true; inspect truncation and expand only relevant branches. A .tscn root_path reads the saved file even when attached. Live bulk properties, scripts, and signals are omitted; inspect omitted_fields.\n- Node properties: scene_get_property(target_node, property_name) reads one existing scalar property on a discovered live node; scene_set_property writes it. Do not infer all properties from the hierarchy.\n- Project settings: project_get_setting(setting) reads a value; project_set_setting writes it. Use project_list_autoloads/project_set_autoload for autoloads and the advertised InputMap tools for input/*, not project_set_setting for those namespaces.\n- GDScript: script_get_symbols extracts declarations; script_check_syntax(file_path) attempts Godot compiler diagnostics. source_text alone is lexical checking, not proof of compilation: inspect engine_checked and limitation. project_verify_changes checks proposed files together in an isolated copy. script_reflect_class is a limited offline reference, not full live ClassDB or a language server.\n\nBOUNDARIES AND FALLBACKS\nDidi does not implement a real-time renderer or gameplay loop; Godot owns both. viewport_capture_frame provides snapshots (check is_live_frame); runtime_launch runs Godot and the advertised runtime tools offer bounded session controls, not arbitrary continuous gameplay automation. Didi is not a general shell, unrestricted GDScript executor, or binary asset editor; eval_gdscript is a restricted read-only expression language. resource_inspect reports metadata/dependencies, not arbitrary Resource internals.\nFor source details beyond tool output, inspect the selected project's .tscn/.gd files directly (and project.godot for saved configuration); files cannot reveal unsaved or runtime state. For compiler or execution checks beyond supported tools, use godot --headless with the explicit project path and appropriate check/test options. Headless checks do not validate real-time rendered appearance. Use Godot/import tooling for binary assets. Registered but unimplemented tools are not capabilities: do not call physics_simulate_step, nav_bake_mesh, or runtime_get_call_stack while discovery marks them unimplemented.\n",
+    "instructions": "Didi: Godot project inspection and controlled editor/game operations.\n\nDISCOVERY AND EXECUTION\nSelect the project with --project or DIDI_PROJECT_ROOT. Before invoking any tool, inspect tools/list: read its inputSchema, required parameters, descriptions, bounds, and _meta.didi availability. Use canonical names below; never invent tool names or parameters. Require implemented=true; live-only calls need currentMode=live or liveAvailable=true. Recheck discovery after session changes. Use runtime_list_sessions, runtime_attach_session, and runtime_get_session to select and verify the intended project and editor/game route. Check execution_mode and session_kind in results; offline_fallback is not observed or unsaved editor state.\nNever brute-force node paths or probe guessed node names. Discover the hierarchy first, reuse returned paths, and refresh the relevant branch after structural changes or a missing-node error. Inspect errors and limitations before changing the request; do not repeat unsupported calls.\nPreview mutations with the exact arguments plus dry_run=true; inspect mutation_preview and the project/route. If confirmation_token is returned, execute the same arguments without dry_run and with that token only after destructive intent is authorized. Do not replay uncertain mutations. Use editor_save_scene when scene persistence is intended.\n\nTOOL ROUTING\n- Files: project_list_resources discovers project paths; project_search_text finds literal text; project_search_symbols finds lexical GDScript/C# declarations.\n- Scene tree: scene_get_hierarchy(root_path, max_depth, max_nodes) returns names, classes, paths, and children. Start bounded or use summary=true; inspect truncation and expand only relevant branches. A .tscn root_path reads the saved file even when attached. Live bulk properties, scripts, and signals are omitted; inspect omitted_fields.\n- Node properties: scene_get_property(target_node, property_name) reads an existing property on a discovered live node, with its declared type; scene_set_property writes it. property_name may be a path into a resource the node holds, a colon before each step. A batch of writes is one undo step. Do not infer all properties from the hierarchy.\n- Project settings: project_get_setting(setting) reads a value; project_set_setting writes it. Use project_list_autoloads/project_set_autoload for autoloads and the advertised InputMap tools for input/*, not project_set_setting for those namespaces.\n- GDScript: script_get_symbols extracts declarations; script_check_syntax(file_path) attempts Godot compiler diagnostics. source_text alone is lexical checking, not proof of compilation: inspect engine_checked and limitation. project_verify_changes checks proposed files together in an isolated copy. script_reflect_class is a limited offline reference, not full live ClassDB or a language server.\n\nBOUNDARIES AND FALLBACKS\nDidi does not implement a real-time renderer or gameplay loop; Godot owns both. viewport_capture_frame provides snapshots (check is_live_frame); runtime_launch runs Godot and the advertised runtime tools offer bounded session controls, not arbitrary continuous gameplay automation. Didi is not a general shell, unrestricted GDScript executor, or binary asset editor; eval_gdscript is a restricted read-only expression language. resource_inspect reports metadata/dependencies, not arbitrary Resource internals.\nFor source details beyond tool output, inspect the selected project's .tscn/.gd files directly (and project.godot for saved configuration); files cannot reveal unsaved or runtime state. For compiler or execution checks beyond supported tools, use godot --headless with the explicit project path and appropriate check/test options. Headless checks do not validate real-time rendered appearance. Use Godot/import tooling for binary assets. Registered but unimplemented tools are not capabilities: do not call physics_simulate_step, nav_bake_mesh, or runtime_get_call_stack while discovery marks them unimplemented.\n",
     "protocolVersion": "2024-11-05",
     "resultType": "complete",
     "serverInfo": {
@@ -2177,7 +2228,7 @@
       "resources": {},
       "tools": {}
     },
-    "instructions": "Didi: Godot project inspection and controlled editor/game operations.\n\nDISCOVERY AND EXECUTION\nSelect the project with --project or DIDI_PROJECT_ROOT. Before invoking any tool, inspect tools/list: read its inputSchema, required parameters, descriptions, bounds, and _meta.didi availability. Use canonical names below; never invent tool names or parameters. Require implemented=true; live-only calls need currentMode=live or liveAvailable=true. Recheck discovery after session changes. Use runtime_list_sessions, runtime_attach_session, and runtime_get_session to select and verify the intended project and editor/game route. Check execution_mode and session_kind in results; offline_fallback is not observed or unsaved editor state.\nNever brute-force node paths or probe guessed node names. Discover the hierarchy first, reuse returned paths, and refresh the relevant branch after structural changes or a missing-node error. Inspect errors and limitations before changing the request; do not repeat unsupported calls.\nPreview mutations with the exact arguments plus dry_run=true; inspect mutation_preview and the project/route. If confirmation_token is returned, execute the same arguments without dry_run and with that token only after destructive intent is authorized. Do not replay uncertain mutations. Use editor_save_scene when scene persistence is intended.\n\nTOOL ROUTING\n- Files: project_list_resources discovers project paths; project_search_text finds literal text; project_search_symbols finds lexical GDScript/C# declarations.\n- Scene tree: scene_get_hierarchy(root_path, max_depth, max_nodes) returns names, classes, paths, and children. Start bounded or use summary=true; inspect truncation and expand only relevant branches. A .tscn root_path reads the saved file even when attached. Live bulk properties, scripts, and signals are omitted; inspect omitted_fields.\n- Node properties: scene_get_property(target_node, property_name) reads one existing scalar property on a discovered live node; scene_set_property writes it. Do not infer all properties from the hierarchy.\n- Project settings: project_get_setting(setting) reads a value; project_set_setting writes it. Use project_list_autoloads/project_set_autoload for autoloads and the advertised InputMap tools for input/*, not project_set_setting for those namespaces.\n- GDScript: script_get_symbols extracts declarations; script_check_syntax(file_path) attempts Godot compiler diagnostics. source_text alone is lexical checking, not proof of compilation: inspect engine_checked and limitation. project_verify_changes checks proposed files together in an isolated copy. script_reflect_class is a limited offline reference, not full live ClassDB or a language server.\n\nBOUNDARIES AND FALLBACKS\nDidi does not implement a real-time renderer or gameplay loop; Godot owns both. viewport_capture_frame provides snapshots (check is_live_frame); runtime_launch runs Godot and the advertised runtime tools offer bounded session controls, not arbitrary continuous gameplay automation. Didi is not a general shell, unrestricted GDScript executor, or binary asset editor; eval_gdscript is a restricted read-only expression language. resource_inspect reports metadata/dependencies, not arbitrary Resource internals.\nFor source details beyond tool output, inspect the selected project's .tscn/.gd files directly (and project.godot for saved configuration); files cannot reveal unsaved or runtime state. For compiler or execution checks beyond supported tools, use godot --headless with the explicit project path and appropriate check/test options. Headless checks do not validate real-time rendered appearance. Use Godot/import tooling for binary assets. Registered but unimplemented tools are not capabilities: do not call physics_simulate_step, nav_bake_mesh, or runtime_get_call_stack while discovery marks them unimplemented.\n",
+    "instructions": "Didi: Godot project inspection and controlled editor/game operations.\n\nDISCOVERY AND EXECUTION\nSelect the project with --project or DIDI_PROJECT_ROOT. Before invoking any tool, inspect tools/list: read its inputSchema, required parameters, descriptions, bounds, and _meta.didi availability. Use canonical names below; never invent tool names or parameters. Require implemented=true; live-only calls need currentMode=live or liveAvailable=true. Recheck discovery after session changes. Use runtime_list_sessions, runtime_attach_session, and runtime_get_session to select and verify the intended project and editor/game route. Check execution_mode and session_kind in results; offline_fallback is not observed or unsaved editor state.\nNever brute-force node paths or probe guessed node names. Discover the hierarchy first, reuse returned paths, and refresh the relevant branch after structural changes or a missing-node error. Inspect errors and limitations before changing the request; do not repeat unsupported calls.\nPreview mutations with the exact arguments plus dry_run=true; inspect mutation_preview and the project/route. If confirmation_token is returned, execute the same arguments without dry_run and with that token only after destructive intent is authorized. Do not replay uncertain mutations. Use editor_save_scene when scene persistence is intended.\n\nTOOL ROUTING\n- Files: project_list_resources discovers project paths; project_search_text finds literal text; project_search_symbols finds lexical GDScript/C# declarations.\n- Scene tree: scene_get_hierarchy(root_path, max_depth, max_nodes) returns names, classes, paths, and children. Start bounded or use summary=true; inspect truncation and expand only relevant branches. A .tscn root_path reads the saved file even when attached. Live bulk properties, scripts, and signals are omitted; inspect omitted_fields.\n- Node properties: scene_get_property(target_node, property_name) reads an existing property on a discovered live node, with its declared type; scene_set_property writes it. property_name may be a path into a resource the node holds, a colon before each step. A batch of writes is one undo step. Do not infer all properties from the hierarchy.\n- Project settings: project_get_setting(setting) reads a value; project_set_setting writes it. Use project_list_autoloads/project_set_autoload for autoloads and the advertised InputMap tools for input/*, not project_set_setting for those namespaces.\n- GDScript: script_get_symbols extracts declarations; script_check_syntax(file_path) attempts Godot compiler diagnostics. source_text alone is lexical checking, not proof of compilation: inspect engine_checked and limitation. project_verify_changes checks proposed files together in an isolated copy. script_reflect_class is a limited offline reference, not full live ClassDB or a language server.\n\nBOUNDARIES AND FALLBACKS\nDidi does not implement a real-time renderer or gameplay loop; Godot owns both. viewport_capture_frame provides snapshots (check is_live_frame); runtime_launch runs Godot and the advertised runtime tools offer bounded session controls, not arbitrary continuous gameplay automation. Didi is not a general shell, unrestricted GDScript executor, or binary asset editor; eval_gdscript is a restricted read-only expression language. resource_inspect reports metadata/dependencies, not arbitrary Resource internals.\nFor source details beyond tool output, inspect the selected project's .tscn/.gd files directly (and project.godot for saved configuration); files cannot reveal unsaved or runtime state. For compiler or execution checks beyond supported tools, use godot --headless with the explicit project path and appropriate check/test options. Headless checks do not validate real-time rendered appearance. Use Godot/import tooling for binary assets. Registered but unimplemented tools are not capabilities: do not call physics_simulate_step, nav_bake_mesh, or runtime_get_call_stack while discovery marks them unimplemented.\n",
     "resultType": "complete",
     "supportedVersions": [
       "2026-07-28",
@@ -9434,15 +9485,37 @@
           "openWorldHint": false,
           "readOnlyHint": true
         },
-        "description": "Returns one existing scalar node property from the live edited scene.",
+        "description": "Returns a node property from the live edited scene, with its declared type and any range, enum or resource type the engine declares.",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {
             "property_name": {
-              "description": "Property name",
-              "maxLength": 256,
+              "description": "Property name, or a path such as theme_override_styles/panel:bg_color",
+              "maxLength": 1024,
               "minLength": 1,
               "type": "string"
+            },
+            "reads": {
+              "description": "Instead of the two above: several reads, answered in order.",
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "property_name": {
+                    "type": "string"
+                  },
+                  "target_node": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "target_node",
+                  "property_name"
+                ],
+                "type": "object"
+              },
+              "maxItems": 64,
+              "minItems": 1,
+              "type": "array"
             },
             "target_node": {
               "description": "Target NodePath",
@@ -9451,10 +9524,6 @@
               "type": "string"
             }
           },
-          "required": [
-            "target_node",
-            "property_name"
-          ],
           "type": "object"
         },
         "name": "scene_get_property",
@@ -9876,7 +9945,7 @@
           "openWorldHint": false,
           "readOnlyHint": false
         },
-        "description": "Sets an existing scalar node property through UndoRedo with strict JSON/Godot type compatibility. The property is read back after the commit, so value is what it now holds. When applied is false a not_applied block says which of the two happened, the property not moving or the engine storing a value of its own, and carries the range or enum the engine declares for that property when it declares one.",
+        "description": "Sets an existing scalar node property through UndoRedo with strict JSON/Godot type compatibility. The property is read back after the commit, so value is what it now holds. When applied is false a not_applied block says which of the two happened, the property not moving or the engine storing a value of its own, and carries the range or enum the engine declares for that property when it declares one. writes sets several, on any nodes, as one undo step.",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {
@@ -9886,8 +9955,8 @@
               "type": "boolean"
             },
             "property_name": {
-              "description": "Property name",
-              "maxLength": 256,
+              "description": "Property name, or a path into a resource it holds: theme_override_styles/panel:bg_color, material:shader_parameter/tint",
+              "maxLength": 1024,
               "minLength": 1,
               "type": "string"
             },
@@ -9924,13 +9993,41 @@
                 "string",
                 "object"
               ]
+            },
+            "writes": {
+              "description": "Instead of the three above: writes of the same shape, all checked first, then committed as one undo step. One that fails refuses the batch.",
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "property_name": {
+                    "type": "string"
+                  },
+                  "target_node": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": [
+                      "null",
+                      "boolean",
+                      "integer",
+                      "number",
+                      "string",
+                      "object"
+                    ]
+                  }
+                },
+                "required": [
+                  "target_node",
+                  "property_name",
+                  "value"
+                ],
+                "type": "object"
+              },
+              "maxItems": 64,
+              "minItems": 1,
+              "type": "array"
             }
           },
-          "required": [
-            "target_node",
-            "property_name",
-            "value"
-          ],
           "type": "object"
         },
         "name": "scene_set_property",
