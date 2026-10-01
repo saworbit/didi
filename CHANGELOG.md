@@ -406,6 +406,12 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
   gap open with a small editor plugin, `tools/vibe/editor_scan.py`, that
   starts a scan Didi did not ask for.
 
+- **deferred_scene_uid.py creates scenes during a scan again (#1122).** Since
+  #1114 `editor_reload_project` answers once its scan is applied, and an
+  editor session takes one client, so the probe's scenes all came after the
+  scan. It now has the editor start the scan through `editor_scan.py` and
+  says, for each scene, whether it was sent before the scan was applied.
+
 - **project_list_resources answers in path order on every platform (#1121).**
   The resource index kept the order the directory walk met files in, which
   is name order on NTFS and not on ext4, so the same project was listed in a
