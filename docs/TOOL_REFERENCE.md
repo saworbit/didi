@@ -925,7 +925,7 @@ The result adds `external_references` (path, resource type, id and uid for each 
 }
 ```
 
-Didi does not instantiate the requested Resource class in Godot. It does check the class name against the attached engine's `ClassDB`, or against the pinned class reference when no session is attached, and refuses one that is not there unless `allow_unknown_type: true` says so.
+Didi does not instantiate the requested Resource class in Godot. It does check the class name against the attached engine's `ClassDB`, or against the pinned class reference when no session is attached, then against the project's `class_name` scripts, and refuses one that is in none of them unless `allow_unknown_type: true` says so.
 
 `save_path` must end in `.tres`. The body is Godot text-resource markup and nothing else, so any other target is refused rather than written; use `script_create` for a `.gd` file. A `.res` is refused with the `.tres` spelling in `retry_with`: `.res` is Godot's binary format, the loader reads it as binary whatever it holds, and text written into one does not load. It used to be accepted, and every such file put an "Unrecognized binary resource file" error in the editor's log on every start.
 
@@ -935,7 +935,7 @@ With an editor attached, an overwrite also reloads the editor's copy of the file
 - `save_path` (`string`, required).
 - `properties` (`object` or `array` of `{name, value}`, optional). The array form is written in the order given.
 - `overwrite` (`boolean`, default `false`); an existing target is preserved unless explicitly set to `true`.
-- `allow_unknown_type` (`boolean`, default `false`); write a `resource_type` neither the attached engine nor the pinned class reference lists.
+- `allow_unknown_type` (`boolean`, default `false`); write a `resource_type` that neither the attached engine, the pinned class reference nor a project `class_name` names.
 
 ### `resource_inspect` — Offline
 
