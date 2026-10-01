@@ -394,6 +394,11 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **project_list_resources answers in path order on every platform (#1121).**
+  The resource index kept the order the directory walk met files in, which
+  is name order on NTFS and not on ext4, so the same project was listed in a
+  different order on Linux. The index is sorted by path once it is built.
+
 - **A not_found names where the missing thing is listed (#1117).** Every
   not_found outside the tools with a list of their own named
   `scene_get_hierarchy`, so an evicted `viewport_diff_capture` baseline, a
