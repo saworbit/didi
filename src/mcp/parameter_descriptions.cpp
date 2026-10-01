@@ -201,9 +201,8 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
         {"project_set_input_action.replace",
          "Replace an action already registered under this name. Off by default."},
         {"project_list_input_actions.include_engine_defaults",
-         "Include the engine's own actions, the ui_* map every project inherits. On by "
-         "default. False keeps only what project.godot declares, and says how many it left "
-         "out."},
+         "Include the engine's own actions, the ui_* map every project inherits. Off for a "
+         "listing, which then says how many it left out; on when action names one."},
         {"project_list_input_actions.action",
          "Read one action by its exact name instead of the whole map. A name the project "
          "does not have is 404."},

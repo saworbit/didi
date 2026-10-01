@@ -4998,11 +4998,10 @@ void ToolRegistry::registerAllDefaultTools() {
 
     register_phase_two(
         "project_list_input_actions",
-        "Lists InputMap actions and their events, each marked defined_by_project. "
-        "include_engine_defaults: false leaves out the engine's own ui_* map, and action "
-        "reads one by name.",
+        "Lists the project's InputMap actions and their events, each marked defined_by_project. "
+        "include_engine_defaults: true adds the engine's ui_* map, and action reads one by name.",
         {{"type", "object"}, {"properties", {
-            {"include_engine_defaults", {{"type", "boolean"}, {"default", true}}},
+            {"include_engine_defaults", {{"type", "boolean"}}},
             {"action", {{"type", "string"}, {"minLength", 1}}}}}},
         [this](const json& args) { return handleProjectListInputActions(args, m_ipcClient); });
     register_phase_two(

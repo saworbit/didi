@@ -12012,16 +12012,24 @@ json GodotBridge::execute(const std::string& method, const json& params,
         if (method == "project.listInputActions") {
             // Ninety actions came back on every call, eighty-five of them the
             // engine's ui_* map, and there was no smaller question to ask: not
-            // the project's own, not one by name (#775). The default still lists
-            // every action, and each entry now says which kind it is.
+            // the project's own, not one by name (#775). A listing now keeps to
+            // what the project declares unless asked for the engine's too, as
+            // P4 says (#1108). An action named by the caller is that request,
+            // wherever the action comes from.
             const std::string only_action = params.value("action", "");
-            const bool include_engine_defaults = params.value("include_engine_defaults", true);
+            const bool asked = params.contains("include_engine_defaults");
+            bool include_engine_defaults = params.value("include_engine_defaults", !only_action.empty());
             const auto declared = projectFileInputActions();
             if (declared.failure && !include_engine_defaults) {
-                return errorJson(declared.failure->code,
-                                 declared.failure->message +
-                                     " Which actions are the project's own cannot be told from "
-                                     "the engine's until the file reads.");
+                if (asked) {
+                    return errorJson(declared.failure->code,
+                                     declared.failure->message +
+                                         " Which actions are the project's own cannot be told from "
+                                         "the engine's until the file reads.");
+                }
+                // Nobody asked to leave the engine's out, and they cannot be
+                // told apart, so it lists every action and says why below.
+                include_engine_defaults = true;
             }
             size_t omitted_engine_defaults = 0;
             bool named_action_omitted = false;

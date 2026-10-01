@@ -1176,6 +1176,13 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Changed
 
+- **project_list_input_actions lists the project's own actions by default
+  (#1108).** A call with no arguments returned the engine's whole `ui_*` map,
+  about 85 of 90 actions, against P4's rule of the project's own data with
+  built-ins on request. It now lists what `project.godot` declares and says
+  how many it left out. `include_engine_defaults: true` gives the old listing,
+  and an action named with `action` is found either way.
+
 - **The argument validation paragraphs sit with the schema rules (#1037).** In
   `docs/API_SPECIFICATION.md` they moved beside the `inputSchema` paragraph, and
   the mutation safety section now starts at `dry_run`.
