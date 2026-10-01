@@ -433,7 +433,9 @@ Route the method from `EditorHook::executeOnMainThread` into a bounded implement
   `tests/observed_post_state.json`. Either list the answer fields it reads back
   after the write and add a case to `tests/observed_post_state.ps1` that reads
   the same state through `tests/godot_smoke/observed_witness.gd`, or exempt it
-  with the reason and the issue that tracks the gap. A field copied from the
+  with the reason and the issue that tracks the gap. Only a tool that claims no
+  state after its call is exempt for good, with `"permanent": true` and the
+  reason in place of an issue. A field copied from the
   request or read before the write is not observed, whatever its name.
   `tests/test_observed_post_state.py` fails the build until the entry exists,
   and the live harness fails when an answer disagrees with the engine.

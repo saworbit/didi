@@ -221,8 +221,8 @@
       "witness": "Node.is_in_group through observed_witness.gd"
     },
     "scene_call_method": {
-      "exempt": "Runs a project method whose effects only the project knows. returned is the method's own value, and there may be no state to read back; the issue decides whether this stays exempt.",
-      "issue": 1020
+      "exempt": "Runs a project method whose effects only the project knows, and claims no state after it. returned is the method's own return value, taken from the call, so there is no post-state to read back and nothing an echo could copy. Decided in #1020.",
+      "permanent": true
     },
     "scene_close": {
       "observed": [
@@ -333,8 +333,8 @@
       "witness": "Object.get_signal_connection_list through observed_witness.gd"
     },
     "signal_emit": {
-      "exempt": "Runs the project's connected methods. emitted and connection_count describe the emit, not a state to read back; the issue decides whether this stays exempt.",
-      "issue": 1020
+      "exempt": "Runs the project's connected methods, whose effects only the project knows, and claims no state after the emit. emitted and connection_count describe the emit itself, not a state to read back. Decided in #1020.",
+      "permanent": true
     },
     "tilemap_set_cells": {
       "observed": [

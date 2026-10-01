@@ -394,6 +394,12 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **scene_call_method and signal_emit are exempt for good from the observed
+  check (#1020).** Both run project code and claim no state after the call:
+  `returned`, `emitted` and `connection_count` describe the call. An exemption
+  can now be `"permanent": true` with its reason in place of an issue, and
+  `tests/test_observed_post_state.py` holds every other exemption to an issue.
+
 - **The observed post-state check sends inputs the engine stores differently
   (#1022).** A tool that answered with its request would still have agreed
   with the engine wherever the engine stores what it was sent, which was all

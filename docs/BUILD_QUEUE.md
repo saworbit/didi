@@ -103,7 +103,8 @@ model. Put the test in `tests/run_godot_integration.ps1` so it runs on all three
 engine lines. A tool that writes files is checked by loading its output in the
 editor with `CACHE_MODE_IGNORE`. An exemption list names any tool that cannot be
 checked yet and why, and every exemption is a finding to fix, not a place to
-stay.
+stay. The one exception is a tool that claims no state after its call, which is
+exempt for good and says why (#1020).
 
 **Done when:** Every implemented mutating tool is either checked or exempted
 with a reason, and a new mutating tool with neither fails CI.
