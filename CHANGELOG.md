@@ -51,6 +51,13 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Added
 
+- **A research report on what Didi costs an agent in tokens (#1107).**
+  [docs/research/TOKEN_EFFICIENCY_EXPLORATION.md](docs/research/TOKEN_EFFICIENCY_EXPLORATION.md)
+  compares the tool list and answers with other ways of building a Godot
+  bridge. Its first section records which claims hold against the code and
+  which recommendations are tracked: R1 is already #1012's plan, R2 is #1108,
+  and R4 to R6 are not taken, with the reason for each.
+
 - **resource_create can name which number it writes (#1003).**
   `{"type": "float", "value": 0}` is written `0.0` and `{"type": "int",
   "value": 3}` is written `3`, so a JavaScript client that cannot send `0.0`

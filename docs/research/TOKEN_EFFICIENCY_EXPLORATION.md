@@ -4,6 +4,23 @@
 **Deliverable Path:** [`docs/research/TOKEN_EFFICIENCY_EXPLORATION.md`](TOKEN_EFFICIENCY_EXPLORATION.md)  
 **Date:** September 2026  
 
+## Checked against the code, 2026-10-01
+
+The figures below were measured on `main` at `c814af1`, with the same `tools/list` call `tests/test_tool_profiles.py` makes, and the source was read at that commit. Where the rest of this report disagrees, this section holds. The figures for other servers in section 2.3 and the per-scenario token counts in section 3 are estimates and were not re-checked.
+
+| Claim | What the code shows |
+| :--- | :--- |
+| `tools/list` is 204,600 bytes (`full`) and 95,900 (`core`) | Those are the budgets in `tests/tool_list_budgets.json`. The measured response lines are 204,582 and 95,727 bytes, uncompressed, for 130 and 60 tools. |
+| Legacy names are 12% of the `full` listing | 11.7%, about 23.9 KB for the ten legacy names. |
+| `script_reflect_class` reflects live ClassDB | It reads Didi's offline reference. The size is right: `Control` with no `fields` answers in 44,962 bytes. |
+| Every mutation needs a `dry_run`, then a confirmed call | Only the always-confirmed tools do, and an overwrite of a target that exists. With a client that supports form elicitation, the server runs the preview itself and asks a person through the client, so the agent sends the call once. Trial 06 made 16 previews and spent 13 tokens in 222 calls. |
+| R1: make `core` the default | Already the plan in #1012: `full` stays the default until a trial on `core` shows no loss. |
+| R2: default `include_engine_defaults` to `false` | Valid, and P4 says the same. Tracked in #1108. No other listing tool has the argument. |
+| R3: default `script_reflect_class` to fewer sections | `tests/bounded_reads.json` records the whole entry as deliberate, with `fields` to narrow it and `omitted_fields` to say what it left out. A design question, not a defect. |
+| R4: a `confirm: true` flag on the first call | Not taken. The token exists so a person approves a destructive change, and an agent confirming to itself is what elicitation replaced. `--yolo` stays the operator's opt-out. |
+| R5: stable key ordering | Already true. Every object in the `full` listing has its keys in order, two listings are byte-identical, and the Q3 contract snapshots fail CI when the listing moves. |
+| R6: drop `"type"` beside an `enum` | Not taken. 15 properties carry an `enum`, so this saves about 240 bytes, not 12 to 15 KB. P2 has every top-level argument declare its type, because some clients send an untyped one as a string (#1000). |
+
 ---
 
 ## 1. Executive Summary
@@ -49,14 +66,14 @@ Didi implements two distinct tool profiles, governed by [Q4 in `docs/BUILD_QUEUE
 | Metric | Didi Full Profile (`--tools full`) | Didi Core Profile (`--tools core`) | Absolute Reduction | Relative Savings |
 | :--- | :--- | :--- | :--- | :--- |
 | **Tool Count** | 130 (120 canonical + 10 legacy aliases) | 60 tools | 70 tools removed | **53.8%** |
-| **`tools/list` Payload (compressed JSON)** | 204,600 bytes | 95,900 bytes | 108,700 bytes | **53.1%** |
+| **`tools/list` budget (bytes of the response line)** | 204,600 bytes | 95,900 bytes | 108,700 bytes | **53.1%** |
 | **Estimated Token Footprint** *(~3.8 bytes/token)* | ~53,800 tokens | ~25,200 tokens | ~28,600 tokens | **53.1%** |
 | **Field Trial Coverage Justification** | Contains unreached domain tools (e.g., deep audio buses, advanced shaders, C# build tools) | Derived from the exact union of tools reached across 6 field trials + handshake guide | — | Matches 100% of empirical agent needs |
 
 #### How the Core Profile Shrinks the Wire Without Semantic Loss
 From our inspection of [`src/mcp/mcp_server.cpp`](../../src/mcp/mcp_server.cpp) and [`tests/contract_snapshots/offline-core.json`](../../tests/contract_snapshots/offline-core.json):
-1. **Lifting Repetitive Per-Tool Metadata:** In the `full` profile, every tool repeats `_meta.didi.confirmationsSkipped`, `_meta.didi.editorConnected`, and `_meta.didi.sessionKind`. In the `core` profile, Didi lifts these shared server-level facts into top-level `listing._meta.didi`, stripping ~30–40 bytes of duplicate JSON boilerplate from every single tool entry.
-2. **Elimination of Legacy Aliases:** Legacy tool names (e.g., `runtime_execute_gdscript`, `project_update_file`) accounted for 12% of the initial byte budget. In `core`, legacy aliases are omitted entirely.
+1. **Lifting Repetitive Per-Tool Metadata:** In the `full` profile, every tool repeats `_meta.didi.confirmationsSkipped` and `_meta.didi.editorConnected`. In the `core` profile, Didi lifts these shared server-level facts into top-level `listing._meta.didi`, stripping ~30–40 bytes of duplicate JSON boilerplate from every single tool entry.
+2. **Elimination of Legacy Aliases:** Legacy tool names (e.g., `get_scene_hierarchy`, `mutate_scene_tree`) accounted for 12% of the initial byte budget. In `core`, legacy aliases are omitted entirely.
 3. **Pruned Descriptions:** Prose descriptions are strictly constrained to operational contracts, omitting redundant parameter restatements.
 
 ### 2.3 Competitive Landscape: Didi vs Alternative Godot MCPs
@@ -330,10 +347,10 @@ Despite its architectural strengths, our analysis identified four distinct areas
 
 1. **Engine Default Leakage in Listing Tools (Issue #775):**  
    In Field Trial 05, calling `project_list_input_actions` without `include_engine_defaults: false` dumped **85 built-in engine actions (`ui_up`, `ui_down`, etc.)**, consuming roughly **9,000 tokens** to display only 5 user-defined actions. While Didi introduced `include_engine_defaults: false`, if an agent omits this parameter, the full engine default list is returned.
-2. **Unrestricted ClassDB Reflection (`script_reflect_class`):**  
+2. **Whole Class Reference Entries (`script_reflect_class`):**  
    Godot classes like `Control` or `Node` have hundreds of inherited methods, properties, and signals. Calling `script_reflect_class({"class_name": "Control"})` without section filtering dumps 30–50 KB of API documentation. Didi added the `fields` argument ([Q5 part 2](../BUILD_QUEUE.md#q5-response-economy)), but calling it unparameterized still emits the full reference.
 3. **Two-Phase Confirmation Round-Trip Overhead:**  
-   To prevent accidental destructive operations, Didi requires mutations to run as `dry_run` first, returning a `confirmation_token`, which is then sent in a second call to execute. In Trial 06, the agent noted the cost of doubling ~90 mutations into 180 tool calls. Each preview turn consumes ~300–400 tokens of conversational context. (Operators can bypass this via `--yolo`, but this drops safety guarantees).
+   To prevent accidental destructive operations, Didi asks for a `confirmation_token` on its always-confirmed tools and on an overwrite of a target that exists. Without form elicitation, the agent gets the token from a `dry_run` and sends it in a second call. In Trial 06 the tester previewed only the first mutation of each kind, citing the cost of doubling roughly ninety mutations. Each preview turn consumes ~300–400 tokens of conversational context. (Operators can bypass this via `--yolo`, but this drops safety guarantees).
 4. **Verbose Refusal Payloads:**  
    When a call fails, Didi returns structured JSON containing `error`, `remedy`, `retry_with`, `allowed_values`, and failure context. While this enables single-turn recovery (serving Principle [P5: Guidance belongs where the agent is already looking](../DESIGN_PRINCIPLES.md#p5-guidance-belongs-where-the-agent-is-already-looking)), a single malformed call can emit 400–600 tokens of diagnostic text.
 
@@ -349,7 +366,7 @@ Based on our findings, we propose six prioritized recommendations to further opt
 
 ### R2. Invert Engine Defaults on Project Query Tools
 - **Impact:** **~8,500 tokens saved** per `project_list_input_actions` invocation.
-- **Implementation:** Change the default value of `include_engine_defaults` from `true` to `false` across all listing tools (`project_list_input_actions`, `project_get_setting`). An agent rarely needs to inspect Godot's built-in `ui_*` keys when configuring gameplay input.
+- **Implementation:** Change the default value of `include_engine_defaults` on `project_list_input_actions` from `true` to `false`. An agent rarely needs to inspect Godot's built-in `ui_*` keys when configuring gameplay input.
 
 ### R3. Default Section Projection on High-Volume Inspection Tools
 - **Impact:** **~6,000 – 10,000 tokens saved** on class reflection.
