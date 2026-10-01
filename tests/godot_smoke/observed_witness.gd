@@ -157,6 +157,8 @@ func load_fresh(path: String, properties: Array) -> Dictionary:
 	var uid := ResourceLoader.get_resource_uid(path)
 	answer["uid"] = ResourceUID.id_to_text(uid) if uid != ResourceUID.INVALID_ID else ""
 	answer["uid_registered"] = uid != ResourceUID.INVALID_ID and ResourceUID.has_id(uid)
+	if resource is MeshLibrary:
+		answer["item_count"] = resource.get_item_list().size()
 	if resource is Script:
 		# Populated only when the file compiled, so an empty list is a script
 		# the engine could not make sense of.

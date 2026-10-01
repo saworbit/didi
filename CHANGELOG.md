@@ -394,6 +394,14 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **project_export and gridmap_export_mesh_library are checked against the
+  engine (#1020).** Each starts a Godot of its own and answers with what it
+  read back from the file it wrote: `size_bytes` and `item_count`. The
+  observed check now runs each one and reads the same file through the
+  witness, so an answer that drifted from the file fails the harness. Three
+  exemptions said nothing in the live harness drives the tool, which had
+  stopped being true; they now say what is still missing.
+
 - **resource_create writes a class_name type the way Godot does (#1125).** A
   type a project script declares with `class_name` was written into the header
   under its own name, which Godot loads as a `MissingResource` and a game

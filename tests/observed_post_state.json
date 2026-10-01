@@ -103,8 +103,10 @@
       "witness": "The property the undone action set, through observed_witness.gd"
     },
     "gridmap_export_mesh_library": {
-      "exempt": "Runs a separate Godot process, and no case loads the library it wrote.",
-      "issue": 1020
+      "observed": [
+        "item_count"
+      ],
+      "witness": "The library loaded with CACHE_MODE_IGNORE through observed_witness.gd"
     },
     "gridmap_set_cells": {
       "observed": [
@@ -120,12 +122,14 @@
       "witness": "export_presets.cfg parsed by Godot's ConfigFile through observed_witness.gd"
     },
     "project_apply_changes": {
-      "exempt": "Runs in a git sandbox the conformance block does not set up, and no case compares its answer with the files it wrote.",
+      "exempt": "The editor copy block drives it in the fixture's own git work tree, and no case compares its answer with the files it wrote.",
       "issue": 1020
     },
     "project_export": {
-      "exempt": "Needs an export preset and a separate Godot process, and no case compares size_bytes with the file on disk.",
-      "issue": 1020
+      "observed": [
+        "size_bytes"
+      ],
+      "witness": "FileAccess length of the exported file through observed_witness.gd"
     },
     "project_remove_autoload": {
       "observed": [
@@ -140,7 +144,7 @@
       "witness": "ConfigFile reads the input section of project.godot through observed_witness.gd"
     },
     "project_rename_references": {
-      "exempt": "Nothing in the live harness drives it.",
+      "exempt": "The editor copy block drives it and checks the editor's copy of a scene it rewrote, and no case compares its updated_files with the files on disk.",
       "issue": 1020
     },
     "project_set_autoload": {
@@ -343,7 +347,7 @@
       "witness": "TileMapLayer.get_cell_source_id, get_cell_atlas_coords and get_cell_alternative_tile through observed_witness.gd"
     },
     "viewport_create_test_lab": {
-      "exempt": "Nothing in the live harness drives it.",
+      "exempt": "The editor copy block drives it and checks the editor's copy of the lab it rewrote, and no case compares its answer with an independent read of the file.",
       "issue": 1020
     },
     "viewport_set_camera_transform": {
