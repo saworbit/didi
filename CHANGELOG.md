@@ -384,6 +384,16 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **A not_found names where the missing thing is listed (#1117).** Every
+  not_found outside the tools with a list of their own named
+  `scene_get_hierarchy`, so an evicted `viewport_diff_capture` baseline, a
+  missing script or scene file, an unknown autoload, animation or shader
+  uniform were all sent to read the open scene's node paths. Each now names
+  the call that helps: `viewport_capture_frame`, `project_list_resources`,
+  `project_list_autoloads`, `anim_list_tracks` or `shader_list_uniforms`.
+  `csharp_check_build` with no project file at the root names `project_file`,
+  and clearing a ghost preview that is gone says nothing will help.
+
 - **editor_reload_project answers once the editor has applied a full scan
   (#1114).** It asked for `scan_sources` and answered at once. `scan_sources`
   compares folder times in whole seconds, so a folder made moments after the
