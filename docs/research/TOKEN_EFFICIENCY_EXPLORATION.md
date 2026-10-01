@@ -15,7 +15,7 @@ The figures below were measured on `main` at `c814af1`, with the same `tools/lis
 | `script_reflect_class` reflects live ClassDB | It reads Didi's offline reference. The size is right: `Control` with no `fields` answers in 44,962 bytes. |
 | Every mutation needs a `dry_run`, then a confirmed call | Only the always-confirmed tools do, and an overwrite of a target that exists. With a client that supports form elicitation, the server runs the preview itself and asks a person through the client, so the agent sends the call once. Trial 06 made 16 previews and spent 13 tokens in 222 calls. |
 | R1: make `core` the default | Already the plan in #1012: `full` stays the default until a trial on `core` shows no loss. |
-| R2: default `include_engine_defaults` to `false` | Valid, and P4 says the same. Tracked in #1108. No other listing tool has the argument. |
+| R2: default `include_engine_defaults` to `false` | Valid, and P4 says the same. Done in #1112: a listing keeps to the project's own actions, and a named action is found either way. No other listing tool has the argument. |
 | R3: default `script_reflect_class` to fewer sections | `tests/bounded_reads.json` records the whole entry as deliberate, with `fields` to narrow it and `omitted_fields` to say what it left out. A design question, not a defect. |
 | R4: a `confirm: true` flag on the first call | Not taken. The token exists so a person approves a destructive change, and an agent confirming to itself is what elicitation replaced. `--yolo` stays the operator's opt-out. |
 | R5: stable key ordering | Already true. Every object in the `full` listing has its keys in order, two listings are byte-identical, and the Q3 contract snapshots fail CI when the listing moves. |
