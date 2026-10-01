@@ -125,8 +125,19 @@ function Get-ObservedNewChild($Before, $After) {
 # which is the tool under test; the rest set up or read. Agree gets every
 # step's payload by name, and scene_call_method's payload carries the
 # witness's answer in returned.
+#
+# A tool that answered with its request instead of what it read would still
+# agree with the witness whenever the engine stores what it was sent. So where
+# an input exists that the engine stores differently, a case sends it, and the
+# comment above each case names that input or says why there is none (#1022).
+# A float that rounds to float32 crosses nothing here: Test-ObservedAgreement
+# allows float32 precision on purpose, so no case relies on one. A field with
+# no counterpart in the request, such as a uid the engine mints or a file's
+# length, cannot be echoed; a case for it guards against a constant instead.
 function Get-ObservedPostStateCases {
     return @(
+        # Paths are checked as normalized res:// .tscn paths before the editor
+        # sees them, so no spelling reaches it that it would store differently.
         @{ Tool = "scene_open"; Session = "editor"; Steps = @(
             (Step "call" "scene_open" @{ scene_path = $observedScenePath }),
             (Witness "witness" "edited_scene_path" @()))
@@ -154,6 +165,19 @@ function Get-ObservedPostStateCases {
             (Step "call" "scene_instantiate_node" @{ node_type = "Node3D"; parent_path = $observedRoot; name = "Spawned" }),
             (Witness "after" "children" @(".")))
            Agree = { param($s) Agree "node_path" $s.call.node_path (Get-ObservedNewChild $s.before.returned $s.after.returned) } },
+        # The same name again, which the engine makes unique: Spawned2.
+        @{ Tool = "scene_instantiate_node"; Session = "editor"; Steps = @(
+            (Witness "before" "children" @(".")),
+            (Step "call" "scene_instantiate_node" @{ node_type = "Node3D"; parent_path = $observedRoot; name = "Spawned" }),
+            (Witness "after" "children" @(".")))
+           Agree = { param($s) Agree "node_path" $s.call.node_path (Get-ObservedNewChild $s.before.returned $s.after.returned) } },
+        # The request names no copy, so the engine always picks the name. The
+        # second copy of one node cannot have the first copy's name.
+        @{ Tool = "scene_duplicate_node"; Session = "editor"; Steps = @(
+            (Witness "before" "children" @(".")),
+            (Step "call" "scene_duplicate_node" @{ target_node = "$observedRoot/Spawned" }),
+            (Witness "after" "children" @(".")))
+           Agree = { param($s) Agree "duplicated_node" $s.call.duplicated_node (Get-ObservedNewChild $s.before.returned $s.after.returned) } },
         @{ Tool = "scene_duplicate_node"; Session = "editor"; Steps = @(
             (Witness "before" "children" @(".")),
             (Step "call" "scene_duplicate_node" @{ target_node = "$observedRoot/Spawned" }),
@@ -165,18 +189,34 @@ function Get-ObservedPostStateCases {
             (Step "call" "scene_reparent_node" @{ target_node = "$observedRoot/SpawnedCopy"; new_parent_path = "$observedRoot/Subject" }),
             (Witness "witness" "node_info" @("Subject/SpawnedCopy")))
            Agree = { param($s) Agree "node_path" $s.call.node_path $s.witness.returned.path } },
+        # Into a parent that already has a child of the same name, so the
+        # engine renames the node it moves (#1126).
+        @{ Tool = "scene_reparent_node"; Session = "editor"; Steps = @(
+            (Step "nest" "scene_instantiate_node" @{ node_type = "Node3D"; parent_path = $observedRoot; name = "Nest" }),
+            (Step "namesake" "scene_instantiate_node" @{ node_type = "Node3D"; parent_path = "$observedRoot/Nest"; name = "Spawned2" }),
+            (Witness "before" "children" @("Nest")),
+            (Step "call" "scene_reparent_node" @{ target_node = "$observedRoot/Spawned2"; new_parent_path = "$observedRoot/Nest" }),
+            (Witness "after" "children" @("Nest")))
+           Agree = { param($s) Agree "node_path" $s.call.node_path (Get-ObservedNewChild $s.before.returned $s.after.returned) } },
+        # A removal that succeeded cannot leave the node, and one that cannot
+        # is refused, so no input makes exists differ from false.
         @{ Tool = "scene_remove_node"; Session = "editor"; Steps = @(
             (Step "call" "scene_remove_node" @{ target_node = "$observedRoot/Subject/SpawnedCopy" }),
             (Witness "witness" "node_info" @("Subject/SpawnedCopy")))
            Agree = { param($s) Agree "exists" $s.call.exists $s.witness.returned.exists } },
+        # script_path has to be a normalized res:// path ending in .gd or .cs,
+        # so a uid or a loose spelling is refused before the engine sees it.
         @{ Tool = "script_attach_to_node"; Session = "editor"; Steps = @(
             (Step "call" "script_attach_to_node" @{ target_node = "$observedRoot/Spawned"; script_path = "res://subject.gd" }),
             (Witness "witness" "node_info" @("Spawned")))
            Agree = { param($s) Agree "script_path" $s.call.script_path $s.witness.returned.script_path } },
+        # The request names no script; the answer is the empty path read back.
         @{ Tool = "script_detach_from_node"; Session = "editor"; Steps = @(
             (Step "call" "script_detach_from_node" @{ target_node = "$observedRoot/Spawned" }),
             (Witness "witness" "node_info" @("Spawned")))
            Agree = { param($s) Agree "script_path" $s.call.script_path $s.witness.returned.script_path } },
+        # connected and disconnected have no counterpart in the request, and
+        # the flags the engine adds are not among the observed fields.
         @{ Tool = "signal_connect"; Session = "editor"; Steps = @(
             (Step "call" "signal_connect" @{ emitter_node = "$observedRoot/Subject"; signal_name = "visibility_changed"; target_node = "$observedRoot/Spawned"; target_method = "notify_property_list_changed" }),
             (Witness "witness" "connection_flags" @("Subject", "visibility_changed", "Spawned", "notify_property_list_changed")))
@@ -185,16 +225,21 @@ function Get-ObservedPostStateCases {
             (Step "call" "signal_disconnect" @{ emitter_node = "$observedRoot/Subject"; signal_name = "visibility_changed"; target_node = "$observedRoot/Spawned"; target_method = "notify_property_list_changed" }),
             (Witness "witness" "connection_flags" @("Subject", "visibility_changed", "Spawned", "notify_property_list_changed")))
            Agree = { param($s) Agree "disconnected" $s.call.disconnected ($s.witness.returned -eq -1) } },
+        # The material keeps the Variant it is given, and an int sent to a
+        # float uniform reads back as the same number, so nothing crosses.
         @{ Tool = "shader_set_uniform"; Session = "editor"; Steps = @(
             (Step "call" "shader_set_uniform" @{ target_node = "$observedRoot/Shaded"; property_name = "material_override"; uniform_name = "strength"; value = 0.25 }),
             (Witness "witness" "shader_parameter" @("Shaded", "material_override", "strength")))
            Agree = { param($s)
                Agree "value" $s.call.value $s.witness.returned
                Agree "applied" $s.call.applied ($s.witness.returned -eq 0.25) } },
+        # A Node3D keeps its Euler angles as given, past a full turn too, and
+        # fov outside 1 to 179 is refused by the schema.
         @{ Tool = "viewport_set_camera_transform"; Session = "editor"; Steps = @(
             (Step "call" "viewport_set_camera_transform" @{ camera_path = "$observedRoot/Camera"; position = @{ x = 1.25; y = -2.5; z = 3.75 }; rotation_degrees = @{ x = 10; y = 20; z = 30 }; fov = 73 }),
             (Witness "witness" "camera" @("Camera")))
            Agree = { param($s) Agree "new" $s.call.new $s.witness.returned } },
+        # The editor's tree takes both hints as sent.
         @{ Tool = "viewport_toggle_debug_draw"; Session = "editor"; Steps = @(
             (Witness "before" "debug_hints" @()),
             (Step "call" "viewport_toggle_debug_draw" @{ collision_shapes = $true; navigation_mesh = $true }),
@@ -202,6 +247,7 @@ function Get-ObservedPostStateCases {
             # Put back what the editor had, so a game run later draws as before.
             (Step "restore" "viewport_toggle_debug_draw" @{ collision_shapes = $false; navigation_mesh = $false }))
            Agree = { param($s) Agree "observed" $s.call.observed $s.witness.returned } },
+        # history has no counterpart in the request.
         @{ Tool = "editor_undo"; Session = "editor"; Steps = @(
             (Step "setup" "scene_set_property" @{ target_node = "$observedRoot/Subject"; property_name = "process_priority"; value = 21 }),
             (Step "call" "editor_undo" @{}),
@@ -217,6 +263,14 @@ function Get-ObservedPostStateCases {
             (Step "call" "anim_add_library" @{ animation_player_path = "$observedRoot/Player"; library_path = "res://observed_library.tres"; library_name = "observed" }),
             (Witness "witness" "animation_libraries" @("Player")))
            Agree = { param($s) Agree "library_names" @($s.call.library_names | Sort-Object) $s.witness.returned.library_names } },
+        # A second library on the same player, from its own file because Godot
+        # refuses one library twice. The answer lists every library the player
+        # holds, which the request names only one of.
+        @{ Tool = "anim_add_library"; Session = "editor"; Steps = @(
+            (Step "library" "resource_create" @{ save_path = "res://observed_library_again.tres"; resource_type = "AnimationLibrary"; properties = @{ _data = @{ walk = @{ type = "ExtResource"; path = "res://observed_anim.tres" } } } }),
+            (Step "call" "anim_add_library" @{ animation_player_path = "$observedRoot/Player"; library_path = "res://observed_library_again.tres"; library_name = "observed_again" }),
+            (Witness "witness" "animation_libraries" @("Player")))
+           Agree = { param($s) Agree "library_names" @($s.call.library_names | Sort-Object) $s.witness.returned.library_names } },
         # The project writers, each answered with project.godot read back after
         # the save (#1019). The witness reads the file with ConfigFile, which
         # shares nothing with Didi's reader, and each pair leaves the file as
@@ -229,10 +283,27 @@ function Get-ObservedPostStateCases {
             (Step "call" "project_set_setting" @{ setting = "didi_observed/answer"; remove = $true }),
             (Witness "witness" "project_setting_text" @("didi_observed/answer")))
            Agree = { param($s) Agree "value_written" $s.call.value_written $s.witness.returned } },
+        # A built-in set to its default, which Godot does not write: the file
+        # has no line for it while the request carried a value.
+        @{ Tool = "project_set_setting"; Session = "editor"; Steps = @(
+            (Step "call" "project_set_setting" @{ setting = "application/run/max_fps"; value = 0 }),
+            (Witness "witness" "project_setting_text" @("application/run/max_fps")),
+            (Step "restore" "project_set_setting" @{ setting = "application/run/max_fps"; remove = $true }))
+           Agree = { param($s) Agree "value_written" $s.call.value_written $s.witness.returned } },
         @{ Tool = "project_set_autoload"; Session = "editor"; Steps = @(
             (Step "call" "project_set_autoload" @{ name = "ObservedLoad"; path = "res://subject.gd"; singleton = $false }),
             (Witness "witness" "autoload_entry" @("ObservedLoad")))
            Agree = { param($s) Agree "autoload" $s.call.autoload $s.witness.returned } },
+        # A singleton, which the file keeps as a * before the path. An answer
+        # that repeated the request would still agree, since the witness reads
+        # the * back as singleton: true; this crosses the reader instead.
+        @{ Tool = "project_set_autoload"; Session = "editor"; Steps = @(
+            (Step "call" "project_set_autoload" @{ name = "ObservedSingle"; path = "res://subject.gd"; singleton = $true }),
+            (Witness "witness" "autoload_entry" @("ObservedSingle")),
+            (Step "restore" "project_remove_autoload" @{ name = "ObservedSingle" }))
+           Agree = { param($s) Agree "autoload" $s.call.autoload $s.witness.returned } },
+        # The removals and the input action writers answer with what the file
+        # declares afterwards, which no request field names.
         @{ Tool = "project_remove_autoload"; Session = "editor"; Steps = @(
             (Step "call" "project_remove_autoload" @{ name = "ObservedLoad" }),
             (Witness "witness" "autoload_entry" @("ObservedLoad")))
@@ -247,7 +318,10 @@ function Get-ObservedPostStateCases {
            Agree = { param($s) Agree "defined_by_project" $s.call.defined_by_project $s.witness.returned } },
         # The file read back after the write, not the request (#1019). The
         # witness loads it past the editor's cache and reports the class the
-        # engine made from it.
+        # engine made from it. A type the engine cannot make is the input that
+        # crosses resource_type, and today it disagrees: the answer gives the
+        # header and the engine loads a MissingResource (#1125). It gets its
+        # case with that fix.
         @{ Tool = "resource_create"; Session = "editor"; Steps = @(
             (Step "call" "resource_create" @{ save_path = "res://observed_shape.tres"; resource_type = "CircleShape2D"; properties = @{ radius = 3 }; overwrite = $true }),
             (Witness "witness" "load_fresh" @("res://observed_shape.tres", @("radius"))),
@@ -255,6 +329,7 @@ function Get-ObservedPostStateCases {
            Agree = { param($s)
                Agree "resource_type" $s.call.resource_type $s.witness.returned.class
                Agree "file_bytes" $s.call.file_bytes $s.length.returned } },
+        # uid and uid_registered are the engine's; the request names neither.
         @{ Tool = "scene_pack_branch"; Session = "editor"; Steps = @(
             (Step "call" "scene_pack_branch" @{ target_node = "$observedRoot/Subject"; scene_path = "res://observed_packed.tscn" }),
             (Witness "witness" "load_fresh" @("res://observed_packed.tscn", @())))
@@ -264,6 +339,11 @@ function Get-ObservedPostStateCases {
         @{ Tool = "script_create"; Session = "editor"; Steps = @(
             (Step "call" "script_create" @{ script_path = "res://observed_created.gd"; source_text = "extends Node`n`n`nfunc answer() -> int:`n`treturn 1`n" }),
             (Witness "witness" "load_fresh" @("res://observed_created.gd", @())))
+           Agree = { param($s) Agree "has_errors" $s.call.has_errors (@($s.witness.returned.methods) -notcontains "answer") } },
+        # A script that does not compile, so has_errors cannot be a constant.
+        @{ Tool = "script_create"; Session = "editor"; Steps = @(
+            (Step "call" "script_create" @{ script_path = "res://observed_broken.gd"; source_text = "extends Node`n`n`nfunc answer() -> int:`n`treturn undeclared_name`n" }),
+            (Witness "witness" "load_fresh" @("res://observed_broken.gd", @())))
            Agree = { param($s) Agree "has_errors" $s.call.has_errors (@($s.witness.returned.methods) -notcontains "answer") } },
         @{ Tool = "script_patch_method"; Session = "editor"; Steps = @(
             (Step "call" "script_patch_method" @{ file_path = "res://observed_created.gd"; method_name = "answer"; new_definition = "func answer() -> int:`n`treturn 2`n" }),
@@ -275,18 +355,32 @@ function Get-ObservedPostStateCases {
            Agree = { param($s)
                Agree "preset" $s.call.preset $s.witness.returned.preset
                Agree "preset_count" $s.call.preset_count $s.witness.returned.preset_count } },
+        # An export path spelled loosely, which the file keeps normalized.
+        @{ Tool = "project_add_export_preset"; Session = "editor"; Steps = @(
+            (Step "call" "project_add_export_preset" @{ name = "Observed Loose Path"; platform = "Linux"; export_path = "./builds//observed.x86_64" }),
+            (Witness "witness" "export_preset" @("Observed Loose Path")))
+           Agree = { param($s)
+               Agree "preset" $s.call.preset $s.witness.returned.preset
+               Agree "preset_count" $s.call.preset_count $s.witness.returned.preset_count } },
+        # A name already taken is refused rather than renamed, though
+        # AudioServer would call the new bus "Observed 2", so no input crosses.
         @{ Tool = "audio_add_bus"; Session = "editor"; Steps = @(
             (Step "call" "audio_add_bus" @{ name = "Observed" }),
             (Witness "witness" "audio_bus" @("Observed")))
            Agree = { param($s)
                Agree "after" $s.call.after $s.witness.returned.after
                Agree "bus_count" $s.call.bus_count $s.witness.returned.bus_count } },
+        # AudioServer keeps any volume inside the schema's -80 to 24 as sent.
         @{ Tool = "audio_configure_bus"; Session = "editor"; Steps = @(
             (Step "call" "audio_configure_bus" @{ bus = "Observed"; volume_db = -6.5; mute = $true }),
             (Witness "witness" "audio_bus" @("Observed")))
            Agree = { param($s) Agree "after" $s.call.after $s.witness.returned.after } },
-        # The OGG the loop block wrote and imported earlier in the run.
-        @{ Tool = "asset_configure_import"; Session = "editor"; Steps = @(
+        # The OGG the loop block wrote and imported earlier in the run; Needs
+        # says so when it is missing. The importer keeps loop and loop_offset as
+        # sent, the offset to float32.
+        @{ Tool = "asset_configure_import"; Session = "editor"
+           Needs = @{ File = "loop_track.ogg.import"; From = "the loop block (#958) in run_godot_integration.ps1, which writes and imports res://loop_track.ogg" }
+           Steps = @(
             (Step "call" "asset_configure_import" @{ asset_path = "res://loop_track.ogg"; options = @{ loop = $false; loop_offset = 0.2 } }),
             (Witness "witness" "load_fresh" @("res://loop_track.ogg", @("loop", "loop_offset"))))
            Agree = { param($s)
@@ -294,7 +388,7 @@ function Get-ObservedPostStateCases {
                Agree "stream.properties" $s.call.stream.properties $s.witness.returned.properties } },
         # Last among the editor cases: creating a scene makes it the edited one,
         # and the witness lives in observed_post_state.tscn, so the case opens
-        # that again before reading.
+        # that again before reading. uid and uid_registered are the engine's.
         @{ Tool = "scene_create"; Session = "editor"; Steps = @(
             (Step "call" "scene_create" @{ scene_path = "res://observed_created.tscn"; root_type = "Node2D"; root_name = "Created" }),
             (Step "return" "scene_open" @{ scene_path = $observedScenePath }),
@@ -304,7 +398,10 @@ function Get-ObservedPostStateCases {
                Agree "uid_registered" $s.call.uid_registered $s.witness.returned.uid_registered } },
         # The tabs read after the close, not a constant (#1019). The scene the
         # case above created is still open in a tab; it is brought to the front,
-        # closed, and the observed scene brought back for the witness.
+        # closed, and the observed scene brought back for the witness. No input
+        # makes a close that succeeded leave its tab open, so an answer that
+        # always said still_open: false would pass; only a source read of the
+        # tool rules that out.
         @{ Tool = "scene_close"; Session = "editor"; Steps = @(
             (Step "open" "scene_open" @{ scene_path = "res://observed_created.tscn" }),
             (Step "call" "scene_close" @{ discard_unsaved = $true }),
@@ -312,7 +409,7 @@ function Get-ObservedPostStateCases {
             (Witness "witness" "scene_open" @("res://observed_created.tscn")))
            Agree = { param($s) Agree "still_open" $s.call.still_open $s.witness.returned } },
         # Membership read back after the commit, not the constant the answer
-        # used to carry (#1019).
+        # used to carry (#1019). in_group has no counterpart in the request.
         @{ Tool = "scene_add_to_group"; Session = "editor"; Steps = @(
             (Step "call" "scene_add_to_group" @{ target_node = "$observedRoot/Subject"; group = "observed_group" }),
             (Witness "witness" "in_group" @("Subject", "observed_group")))
@@ -323,7 +420,9 @@ function Get-ObservedPostStateCases {
            Agree = { param($s) Agree "in_group" $s.call.in_group $s.witness.returned } },
         # Didi's own file, read back after the save and compared with the file
         # as Godot parses it (#1019). One board, in order: a write, a patch,
-        # a task through its life, then the clear that leaves it empty.
+        # a task through its life, then the clear that leaves it empty. The
+        # board is JSON that Didi writes and reads, so it keeps every value as
+        # sent, and the revisions and task records are Didi's own.
         @{ Tool = "blackboard_write"; Session = "editor"; Steps = @(
             (Step "call" "blackboard_write" @{ board = "observed_probe"; path = "probe.alpha"; value = 7; author = "observed" }),
             (Witness "witness" "board_file" @("observed_probe")))
@@ -355,7 +454,9 @@ function Get-ObservedPostStateCases {
             (Step "call" "blackboard_clear" @{ board = "observed_probe"; path = "probe" }),
             (Witness "witness" "board_file" @("observed_probe")))
            Agree = { param($s) Agree "revision" $s.call.revision $s.witness.returned.revision } },
-        # The cells each writer read back after its commit (#1019).
+        # The cells each writer read back after its commit (#1019). The one
+        # input either grid would store differently, an erase that names an
+        # atlas tile or an orientation, is refused before the engine sees it.
         @{ Tool = "tilemap_set_cells"; Session = "editor"; Steps = @(
             (Step "call" "tilemap_set_cells" @{ tilemap_path = "$observedRoot/Tiles"; cells = @(@{ coords = @(2, 3); source_id = 0; atlas_coords = @(0, 0) }) }),
             (Witness "witness" "tilemap_cell" @("Tiles", 2, 3)))
@@ -375,24 +476,29 @@ function Get-ObservedPostStateCases {
                Agree "cells.orientation" $cell.orientation $s.witness.returned.orientation } },
         # The save reads the file it wrote, since save_scene answers OK whether
         # or not the editor wrote it (#1019). Last of the editor cases, so the
-        # observed scene goes to disk with every edit above.
+        # observed scene goes to disk with every edit above. file_bytes has no
+        # counterpart in the request.
         @{ Tool = "editor_save_scene"; Session = "editor"; Steps = @(
             (Step "call" "editor_save_scene" @{}),
             (Witness "witness" "file_length" @($observedScenePath)))
            Agree = { param($s) Agree "file_bytes" $s.call.file_bytes $s.witness.returned } },
+        # The game's own tree is the witness. A pause the tree takes as sent;
+        # runtime_step leaves it paused whatever it was asked.
         @{ Tool = "runtime_set_paused"; Session = "game"; Steps = @(
             (Step "call" "runtime_set_paused" @{ paused = $false }),
             (Step "witness" "runtime_get_tree" @{ root_path = "/root/RuntimeRoot"; max_depth = 1 }))
            Agree = { param($s) Agree "paused" $s.call.paused $s.witness.paused } },
         # Slow on purpose: the probe animation is a second long, and a software
-        # rendered runner can take that long to reach the read.
+        # rendered runner can take that long to reach the read. playing has no
+        # counterpart in the request; a missing animation is refused.
         @{ Tool = "anim_play_track"; Session = "game"; Steps = @(
             (Step "call" "anim_play_track" @{ animation_player_path = "/root/RuntimeRoot/Spatial/Player"; animation_name = "probe"; custom_speed = 0.01 }),
             (Step "witness" "eval_gdscript" @{ expression = "node.get('current_animation')"; context_node = "/root/RuntimeRoot/Spatial/Player" }))
            Agree = { param($s) Agree "playing" $s.call.playing ($s.witness.value -eq "probe") } },
         # parse_input_event only buffers, so the tool flushes and then reads
         # what Input holds (#1019). The fixture's _input reads the same state
-        # the way a game would. The release puts ui_accept back.
+        # the way a game would. The release puts ui_accept back. Input keeps an
+        # action event's strength as sent, and the schema bounds it to 0 to 1.
         @{ Tool = "runtime_inject_input"; Session = "game"; Steps = @(
             (Step "call" "runtime_inject_input" @{ events = @(@{ type = "action"; action_name = "ui_accept"; pressed = $true; strength = 0.75 }) }),
             (Step "witness" "eval_gdscript" @{ expression = "node.get('position')"; context_node = "/root/RuntimeRoot/Spatial/AnimTarget/InputStateProbe" }),
@@ -451,6 +557,12 @@ function Invoke-ObservedPostStateBatch([string]$SessionId, [object[]]$Steps, [st
 # reached through scene_call_method, which is always confirmed otherwise.
 function Invoke-ObservedPostStateCases([string]$FixtureRoot, [string]$EditorSessionId, [string]$GameSessionId) {
     $cases = @(Get-ObservedPostStateCases)
+    # A case that uses a file another block made names that block, so moving
+    # or dropping the block fails here and says why, not on a missing asset
+    # several steps in (#1022).
+    foreach ($case in @($cases | Where-Object { $_.ContainsKey("Needs") })) {
+        Assert-True (Test-Path -LiteralPath (Join-Path $FixtureRoot $case.Needs.File)) "The observed post-state case for $($case.Tool) needs $($case.Needs.File), which $($case.Needs.From). That block did not run, or did not make it."
+    }
     # The scene the editor had in front, so it is in front again afterwards and
     # the harness's last scene_close still closes the scene it expects.
     # The same for the game's pause state, which the cases change.
