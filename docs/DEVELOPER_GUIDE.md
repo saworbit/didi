@@ -312,6 +312,11 @@ The Windows live integration harness copies the tracked fixture into `build/` an
   -GodotExecutable C:\Godot\Godot_v4.5.1-stable_win64_console.exe
 ```
 
+The harness ends by checking every successful Phase 7 answer against its
+`$defs.success` contract with `python tools/phase7_success.py` (#861), so the
+`python` on the `PATH` needs `requirements-dev.txt` installed, as the Python
+suite does.
+
 The harness runs to completion on Windows PowerShell 5.1, including the persistence-rollback case that denies write rights through `icacls`. That case previously aborted the run: it selects its platform branch with `$IsWindows`, an automatic variable introduced in PowerShell 6, which is undefined on 5.1 and so took the POSIX branch and called `chmod`.
 
 The Phase 1 substrate has also been run against Godot 4.6.2 and 4.7.2. The compatibility floor remains Godot 4.5.1; the live CI matrix runs the complete integration harness on 4.5.1, 4.6.2 and 4.7.2, which is every line the supported range covers, and bridge method hashes must remain valid on all three versions.

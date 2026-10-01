@@ -45,6 +45,7 @@ ENVELOPE = frozenset({
 
 
 def contract_names() -> list[str]:
+    """Every Phase 7 name with a schema file, the three blocked ones included."""
     return sorted(path.name.removesuffix(".schema.json") for path in SCHEMA_DIR.glob("*.schema.json"))
 
 
@@ -83,6 +84,7 @@ def problems(answers: Iterable[tuple[str, dict]]) -> tuple[list[str], set[str]]:
 
 
 def read_answers(path: Path) -> list[tuple[str, dict]]:
+    """The successful answers in a JSON-lines file, as (tool, structuredContent)."""
     answers = []
     for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         if not line.strip():
