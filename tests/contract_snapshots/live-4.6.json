@@ -14,7 +14,7 @@
         "isError": false,
         "resultType": "complete",
         "structuredContent": {
-          "descriptor_directory": "<work>\\sessions",
+          "descriptor_directory": "<sessions>",
           "diagnostics": [],
           "execution_mode": "local_session_management",
           "sessions": [
@@ -2749,6 +2749,149 @@
         }
       },
       "tool": "blackboard_task_list"
+    },
+    {
+      "arguments": {
+        "max_depth": 3,
+        "root_path": "/root"
+      },
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "execution_mode": "live",
+          "is_live_engine": true,
+          "max_depth": 3,
+          "max_nodes": 10000,
+          "max_response_bytes": 262144,
+          "node_count": 14,
+          "paused": false,
+          "root_path": "/root",
+          "scene_tree": {
+            "child_count": 2,
+            "children": [
+              {
+                "child_count": 0,
+                "children": [],
+                "name": "GameState",
+                "path": "/root/GameState",
+                "type": "Node"
+              },
+              {
+                "child_count": 6,
+                "children": [
+                  {
+                    "child_count": 1,
+                    "children": [
+                      {
+                        "child_count": 0,
+                        "children": [],
+                        "name": "Body",
+                        "path": "/root/Main/Player/Body",
+                        "type": "CollisionShape2D"
+                      }
+                    ],
+                    "name": "Player",
+                    "path": "/root/Main/Player",
+                    "type": "CharacterBody2D"
+                  },
+                  {
+                    "child_count": 0,
+                    "children": [],
+                    "name": "Enemy1",
+                    "path": "/root/Main/Enemy1",
+                    "type": "Node2D"
+                  },
+                  {
+                    "child_count": 0,
+                    "children": [],
+                    "name": "Enemy2",
+                    "path": "/root/Main/Enemy2",
+                    "type": "Node2D"
+                  },
+                  {
+                    "child_count": 4,
+                    "children": [
+                      {
+                        "child_count": 0,
+                        "children": [],
+                        "name": "Title",
+                        "path": "/root/Main/HUD/Title",
+                        "type": "Label"
+                      },
+                      {
+                        "child_count": 0,
+                        "children": [],
+                        "name": "Start",
+                        "path": "/root/Main/HUD/Start",
+                        "type": "Button"
+                      },
+                      {
+                        "child_count": 0,
+                        "children": [],
+                        "name": "Tint",
+                        "path": "/root/Main/HUD/Tint",
+                        "type": "ColorRect"
+                      },
+                      {
+                        "child_count": 0,
+                        "children": [],
+                        "name": "Graph",
+                        "path": "/root/Main/HUD/Graph",
+                        "type": "ColorRect"
+                      }
+                    ],
+                    "name": "HUD",
+                    "path": "/root/Main/HUD",
+                    "type": "Control"
+                  },
+                  {
+                    "child_count": 0,
+                    "children": [],
+                    "name": "Tiles",
+                    "path": "/root/Main/Tiles",
+                    "type": "TileMapLayer"
+                  },
+                  {
+                    "child_count": 0,
+                    "children": [],
+                    "name": "AnimationPlayer",
+                    "path": "/root/Main/AnimationPlayer",
+                    "type": "AnimationPlayer"
+                  }
+                ],
+                "name": "Main",
+                "path": "/root/Main",
+                "type": "Node2D"
+              }
+            ],
+            "name": "root",
+            "path": "/root",
+            "type": "Window"
+          },
+          "session": {
+            "build_id": "<build_id>",
+            "endpoint": "<game_endpoint>",
+            "engine_version": "Godot Engine v4.6.2.stable.official",
+            "kind": "game",
+            "pid": "<pid>",
+            "project_path": "<project>",
+            "protocol_version": "1.3",
+            "schema_version": 1,
+            "session_id": "<game_session_id>",
+            "started_at_ms": "<started_at_ms>"
+          },
+          "session_kind": "game",
+          "truncated": false
+        }
+      },
+      "tool": "runtime_get_tree"
     }
   ],
   "engine": "4.6.2.stable.official.71f334935",

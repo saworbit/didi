@@ -1,4 +1,1950 @@
 {
+  "calls": [
+    {
+      "arguments": {
+        "project_path": "<project>"
+      },
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "descriptor_directory": "<sessions>",
+          "diagnostics": [],
+          "execution_mode": "local_session_management",
+          "sessions": []
+        }
+      },
+      "tool": "runtime_list_sessions"
+    },
+    {
+      "arguments": {},
+      "result": {
+        "content": [
+          {
+            "text_json": {
+              "error": {
+                "code": 503,
+                "data": {
+                  "available_without_engine": [
+                    "analyze_script_diagnostics",
+                    "audio_list_buses",
+                    "blackboard_clear",
+                    "blackboard_list_keys",
+                    "blackboard_patch",
+                    "blackboard_read",
+                    "blackboard_task_claim",
+                    "blackboard_task_complete",
+                    "blackboard_task_create",
+                    "blackboard_task_list",
+                    "blackboard_task_update",
+                    "blackboard_write",
+                    "capture_viewport",
+                    "create_visual_test_lab",
+                    "csharp_check_build",
+                    "didi_control_room",
+                    "execute_test_session",
+                    "get_scene_hierarchy",
+                    "gridmap_export_mesh_library",
+                    "patch_script_symbols",
+                    "project_add_export_preset",
+                    "project_analyze_impact",
+                    "project_apply_changes",
+                    "project_audit_assets",
+                    "project_export",
+                    "project_get_setting",
+                    "project_get_uid_map",
+                    "project_list_autoloads",
+                    "project_list_export_presets",
+                    "project_list_resources",
+                    "project_rename_references",
+                    "project_search_symbols",
+                    "project_search_text",
+                    "project_set_setting",
+                    "project_verify_changes",
+                    "query_project_resources",
+                    "resource_create",
+                    "resource_inspect",
+                    "runtime_attach_session",
+                    "runtime_checkpoint",
+                    "runtime_detach_session",
+                    "runtime_get_session",
+                    "runtime_launch",
+                    "runtime_list_sessions",
+                    "runtime_recover_editor",
+                    "runtime_recovery_status",
+                    "runtime_restore_checkpoint",
+                    "scene_get_hierarchy",
+                    "script_check_syntax",
+                    "script_create",
+                    "script_get_symbols",
+                    "script_patch_method",
+                    "script_reflect_class",
+                    "shader_check_compile",
+                    "viewport_capture_frame",
+                    "viewport_capture_passes",
+                    "viewport_create_test_lab"
+                  ],
+                  "canonical_tool": "runtime_get_session",
+                  "code": "not_connected",
+                  "next_call": {
+                    "reason": "Attach a session with runtime_attach_session, or start one.",
+                    "tool": "runtime_list_sessions"
+                  },
+                  "retryable": true,
+                  "tool": "runtime_get_session"
+                },
+                "message": "No runtime session is attached"
+              },
+              "execution_mode": "local_session_management",
+              "session": null
+            },
+            "type": "text"
+          }
+        ],
+        "isError": true,
+        "resultType": "complete"
+      },
+      "tool": "runtime_get_session"
+    },
+    {
+      "arguments": {},
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "execution_mode": "offline_fallback",
+          "file_path": "res://main.tscn",
+          "node_count": 12,
+          "requested_root_path": "",
+          "scene_tree": {
+            "children": [
+              {
+                "children": [
+                  {
+                    "children": [],
+                    "name": "Body",
+                    "path": "/root/Main/Player/Body",
+                    "properties": {
+                      "shape": "SubResource(\"RectangleShape2D_body\")"
+                    },
+                    "type": "CollisionShape2D"
+                  }
+                ],
+                "name": "Player",
+                "path": "/root/Main/Player",
+                "properties": {
+                  "position": "Vector2(64, 32)",
+                  "script": "ExtResource(\"2_player\")"
+                },
+                "type": "CharacterBody2D"
+              },
+              {
+                "children": [],
+                "name": "Enemy1",
+                "path": "/root/Main/Enemy1",
+                "properties": {
+                  "position": "Vector2(160, 32)"
+                },
+                "type": "Node2D"
+              },
+              {
+                "children": [],
+                "name": "Enemy2",
+                "path": "/root/Main/Enemy2",
+                "properties": {
+                  "position": "Vector2(224, 32)"
+                },
+                "type": "Node2D"
+              },
+              {
+                "children": [
+                  {
+                    "children": [],
+                    "name": "Title",
+                    "path": "/root/Main/HUD/Title",
+                    "properties": {
+                      "layout_mode": "0",
+                      "offset_bottom": "24.0",
+                      "offset_right": "160.0",
+                      "text": "\"Contract fixture\""
+                    },
+                    "type": "Label"
+                  },
+                  {
+                    "children": [],
+                    "name": "Start",
+                    "path": "/root/Main/HUD/Start",
+                    "properties": {
+                      "layout_mode": "0",
+                      "offset_bottom": "72.0",
+                      "offset_right": "96.0",
+                      "offset_top": "40.0",
+                      "text": "\"Start\"",
+                      "theme_override_styles/normal": "ExtResource(\"4_style\")"
+                    },
+                    "type": "Button"
+                  },
+                  {
+                    "children": [],
+                    "name": "Tint",
+                    "path": "/root/Main/HUD/Tint",
+                    "properties": {
+                      "layout_mode": "0",
+                      "material": "SubResource(\"ShaderMaterial_tint\")",
+                      "offset_bottom": "164.0",
+                      "offset_right": "64.0",
+                      "offset_top": "100.0"
+                    },
+                    "type": "ColorRect"
+                  },
+                  {
+                    "children": [],
+                    "name": "Graph",
+                    "path": "/root/Main/HUD/Graph",
+                    "properties": {
+                      "layout_mode": "0",
+                      "material": "SubResource(\"ShaderMaterial_graph\")",
+                      "offset_bottom": "164.0",
+                      "offset_left": "80.0",
+                      "offset_right": "144.0",
+                      "offset_top": "100.0"
+                    },
+                    "type": "ColorRect"
+                  }
+                ],
+                "name": "HUD",
+                "path": "/root/Main/HUD",
+                "properties": {
+                  "anchors_preset": "0",
+                  "layout_mode": "3",
+                  "offset_bottom": "180.0",
+                  "offset_right": "320.0"
+                },
+                "type": "Control"
+              },
+              {
+                "children": [],
+                "name": "Tiles",
+                "path": "/root/Main/Tiles",
+                "properties": {
+                  "tile_map_data": "PackedByteArray(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0)",
+                  "tile_set": "ExtResource(\"6_tiles\")"
+                },
+                "type": "TileMapLayer"
+              },
+              {
+                "children": [],
+                "name": "AnimationPlayer",
+                "path": "/root/Main/AnimationPlayer",
+                "properties": {
+                  "libraries": "{\n&\"\": SubResource(\"AnimationLibrary_main\")\n}"
+                },
+                "type": "AnimationPlayer"
+              }
+            ],
+            "name": "Main",
+            "path": "/root/Main",
+            "properties": {
+              "script": "ExtResource(\"1_main\")"
+            },
+            "type": "Node2D"
+          },
+          "source": "parsed_tscn_file",
+          "substituted_main_scene": true,
+          "truncated": false
+        }
+      },
+      "tool": "scene_get_hierarchy"
+    },
+    {
+      "arguments": {
+        "include_properties": true,
+        "root_path": "HUD"
+      },
+      "result": {
+        "content": [
+          {
+            "text_json": {
+              "error": {
+                "code": 503,
+                "data": {
+                  "blocked_on": "no_live_session",
+                  "canonical_tool": "scene_get_hierarchy",
+                  "code": "not_connected",
+                  "field": "root_path",
+                  "needs_live_engine": true,
+                  "retryable": true,
+                  "tool": "scene_get_hierarchy"
+                },
+                "message": "With no editor attached this reads a .tscn file, and 'HUD' is not one. Pass a res:// path to a .tscn, or omit root_path for the project's main scene. A node path can only be scoped to with an editor attached."
+              }
+            },
+            "type": "text"
+          }
+        ],
+        "isError": true,
+        "resultType": "complete"
+      },
+      "tool": "scene_get_hierarchy"
+    },
+    {
+      "arguments": {
+        "property_name": "position",
+        "target_node": "Player"
+      },
+      "result": {
+        "content": [
+          {
+            "text_json": {
+              "error": {
+                "code": 503,
+                "data": {
+                  "attach_with": "runtime_attach_session",
+                  "blocked_on": "no_live_session",
+                  "canonical_tool": "scene_get_property",
+                  "code": "not_connected",
+                  "discover_with": "runtime_list_sessions",
+                  "needs_live_engine": true,
+                  "next_call": {
+                    "reason": "Attach a session with runtime_attach_session, or start one.",
+                    "tool": "runtime_list_sessions"
+                  },
+                  "offline_fallback": false,
+                  "retryable": true,
+                  "tool": "scene_get_property"
+                },
+                "message": "scene_get_property runs only against a live Godot engine, and none is attached for this project root. Open the project in the Godot editor with the Didi addon enabled, then call runtime_list_sessions to see what is attachable and runtime_attach_session to select it."
+              },
+              "execution_mode": "live",
+              "session": null
+            },
+            "type": "text"
+          }
+        ],
+        "isError": true,
+        "resultType": "complete"
+      },
+      "tool": "scene_get_property"
+    },
+    {
+      "arguments": {
+        "property_name": "text",
+        "target_node": "HUD/Title"
+      },
+      "result": {
+        "content": [
+          {
+            "text_json": {
+              "error": {
+                "code": 503,
+                "data": {
+                  "attach_with": "runtime_attach_session",
+                  "blocked_on": "no_live_session",
+                  "canonical_tool": "scene_get_property",
+                  "code": "not_connected",
+                  "discover_with": "runtime_list_sessions",
+                  "needs_live_engine": true,
+                  "next_call": {
+                    "reason": "Attach a session with runtime_attach_session, or start one.",
+                    "tool": "runtime_list_sessions"
+                  },
+                  "offline_fallback": false,
+                  "retryable": true,
+                  "tool": "scene_get_property"
+                },
+                "message": "scene_get_property runs only against a live Godot engine, and none is attached for this project root. Open the project in the Godot editor with the Didi addon enabled, then call runtime_list_sessions to see what is attachable and runtime_attach_session to select it."
+              },
+              "execution_mode": "live",
+              "session": null
+            },
+            "type": "text"
+          }
+        ],
+        "isError": true,
+        "resultType": "complete"
+      },
+      "tool": "scene_get_property"
+    },
+    {
+      "arguments": {
+        "property_name": "speed",
+        "target_node": "Player"
+      },
+      "result": {
+        "content": [
+          {
+            "text_json": {
+              "error": {
+                "code": 503,
+                "data": {
+                  "attach_with": "runtime_attach_session",
+                  "blocked_on": "no_live_session",
+                  "canonical_tool": "scene_get_property",
+                  "code": "not_connected",
+                  "discover_with": "runtime_list_sessions",
+                  "needs_live_engine": true,
+                  "next_call": {
+                    "reason": "Attach a session with runtime_attach_session, or start one.",
+                    "tool": "runtime_list_sessions"
+                  },
+                  "offline_fallback": false,
+                  "retryable": true,
+                  "tool": "scene_get_property"
+                },
+                "message": "scene_get_property runs only against a live Godot engine, and none is attached for this project root. Open the project in the Godot editor with the Didi addon enabled, then call runtime_list_sessions to see what is attachable and runtime_attach_session to select it."
+              },
+              "execution_mode": "live",
+              "session": null
+            },
+            "type": "text"
+          }
+        ],
+        "isError": true,
+        "resultType": "complete"
+      },
+      "tool": "scene_get_property"
+    },
+    {
+      "arguments": {},
+      "result": {
+        "content": [
+          {
+            "text_json": {
+              "error": {
+                "code": 503,
+                "data": {
+                  "attach_with": "runtime_attach_session",
+                  "blocked_on": "no_live_session",
+                  "canonical_tool": "scene_get_selection",
+                  "code": "not_connected",
+                  "discover_with": "runtime_list_sessions",
+                  "needs_live_engine": true,
+                  "next_call": {
+                    "reason": "Attach a session with runtime_attach_session, or start one.",
+                    "tool": "runtime_list_sessions"
+                  },
+                  "offline_fallback": false,
+                  "retryable": true,
+                  "tool": "scene_get_selection"
+                },
+                "message": "scene_get_selection runs only against a live Godot engine, and none is attached for this project root. Open the project in the Godot editor with the Didi addon enabled, then call runtime_list_sessions to see what is attachable and runtime_attach_session to select it."
+              },
+              "execution_mode": "live",
+              "session": null
+            },
+            "type": "text"
+          }
+        ],
+        "isError": true,
+        "resultType": "complete"
+      },
+      "tool": "scene_get_selection"
+    },
+    {
+      "arguments": {
+        "target_node": "Player"
+      },
+      "result": {
+        "content": [
+          {
+            "text_json": {
+              "error": {
+                "code": 503,
+                "data": {
+                  "attach_with": "runtime_attach_session",
+                  "blocked_on": "no_live_session",
+                  "canonical_tool": "scene_list_groups",
+                  "code": "not_connected",
+                  "discover_with": "runtime_list_sessions",
+                  "needs_live_engine": true,
+                  "next_call": {
+                    "reason": "Attach a session with runtime_attach_session, or start one.",
+                    "tool": "runtime_list_sessions"
+                  },
+                  "offline_fallback": false,
+                  "retryable": true,
+                  "tool": "scene_list_groups"
+                },
+                "message": "scene_list_groups runs only against a live Godot engine, and none is attached for this project root. Open the project in the Godot editor with the Didi addon enabled, then call runtime_list_sessions to see what is attachable and runtime_attach_session to select it."
+              },
+              "execution_mode": "live",
+              "session": null
+            },
+            "type": "text"
+          }
+        ],
+        "isError": true,
+        "resultType": "complete"
+      },
+      "tool": "scene_list_groups"
+    },
+    {
+      "arguments": {
+        "group": "enemies"
+      },
+      "result": {
+        "content": [
+          {
+            "text_json": {
+              "error": {
+                "code": 503,
+                "data": {
+                  "attach_with": "runtime_attach_session",
+                  "blocked_on": "no_live_session",
+                  "canonical_tool": "scene_get_group_members",
+                  "code": "not_connected",
+                  "discover_with": "runtime_list_sessions",
+                  "needs_live_engine": true,
+                  "next_call": {
+                    "reason": "Attach a session with runtime_attach_session, or start one.",
+                    "tool": "runtime_list_sessions"
+                  },
+                  "offline_fallback": false,
+                  "retryable": true,
+                  "tool": "scene_get_group_members"
+                },
+                "message": "scene_get_group_members runs only against a live Godot engine, and none is attached for this project root. Open the project in the Godot editor with the Didi addon enabled, then call runtime_list_sessions to see what is attachable and runtime_attach_session to select it."
+              },
+              "execution_mode": "live",
+              "session": null
+            },
+            "type": "text"
+          }
+        ],
+        "isError": true,
+        "resultType": "complete"
+      },
+      "tool": "scene_get_group_members"
+    },
+    {
+      "arguments": {
+        "emitter_node": "HUD/Start"
+      },
+      "result": {
+        "content": [
+          {
+            "text_json": {
+              "error": {
+                "code": 503,
+                "data": {
+                  "attach_with": "runtime_attach_session",
+                  "blocked_on": "no_live_session",
+                  "canonical_tool": "signal_list_connections",
+                  "code": "not_connected",
+                  "discover_with": "runtime_list_sessions",
+                  "needs_live_engine": true,
+                  "next_call": {
+                    "reason": "Attach a session with runtime_attach_session, or start one.",
+                    "tool": "runtime_list_sessions"
+                  },
+                  "offline_fallback": false,
+                  "retryable": true,
+                  "tool": "signal_list_connections"
+                },
+                "message": "signal_list_connections runs only against a live Godot engine, and none is attached for this project root. Open the project in the Godot editor with the Didi addon enabled, then call runtime_list_sessions to see what is attachable and runtime_attach_session to select it."
+              },
+              "execution_mode": "live",
+              "session": null
+            },
+            "type": "text"
+          }
+        ],
+        "isError": true,
+        "resultType": "complete"
+      },
+      "tool": "signal_list_connections"
+    },
+    {
+      "arguments": {},
+      "result": {
+        "content": [
+          {
+            "text_json": {
+              "error": {
+                "code": 503,
+                "data": {
+                  "attach_with": "runtime_attach_session",
+                  "blocked_on": "no_live_session",
+                  "canonical_tool": "ui_list_controls",
+                  "code": "not_connected",
+                  "discover_with": "runtime_list_sessions",
+                  "needs_live_engine": true,
+                  "next_call": {
+                    "reason": "Attach a session with runtime_attach_session, or start one.",
+                    "tool": "runtime_list_sessions"
+                  },
+                  "offline_fallback": false,
+                  "retryable": true,
+                  "tool": "ui_list_controls"
+                },
+                "message": "ui_list_controls runs only against a live Godot engine, and none is attached for this project root. Open the project in the Godot editor with the Didi addon enabled, then call runtime_list_sessions to see what is attachable and runtime_attach_session to select it."
+              },
+              "execution_mode": "live",
+              "session": null
+            },
+            "type": "text"
+          }
+        ],
+        "isError": true,
+        "resultType": "complete"
+      },
+      "tool": "ui_list_controls"
+    },
+    {
+      "arguments": {
+        "point": {
+          "x": 20,
+          "y": 50
+        }
+      },
+      "result": {
+        "content": [
+          {
+            "text_json": {
+              "error": {
+                "code": 503,
+                "data": {
+                  "attach_with": "runtime_attach_session",
+                  "blocked_on": "no_live_session",
+                  "canonical_tool": "ui_hit_test",
+                  "code": "not_connected",
+                  "discover_with": "runtime_list_sessions",
+                  "needs_live_engine": true,
+                  "next_call": {
+                    "reason": "Attach a session with runtime_attach_session, or start one.",
+                    "tool": "runtime_list_sessions"
+                  },
+                  "offline_fallback": false,
+                  "retryable": true,
+                  "tool": "ui_hit_test"
+                },
+                "message": "ui_hit_test runs only against a live Godot engine, and none is attached for this project root. Open the project in the Godot editor with the Didi addon enabled, then call runtime_list_sessions to see what is attachable and runtime_attach_session to select it."
+              },
+              "execution_mode": "live",
+              "session": null
+            },
+            "type": "text"
+          }
+        ],
+        "isError": true,
+        "resultType": "complete"
+      },
+      "tool": "ui_hit_test"
+    },
+    {
+      "arguments": {
+        "animation_player_path": "AnimationPlayer"
+      },
+      "result": {
+        "content": [
+          {
+            "text_json": {
+              "error": {
+                "code": 503,
+                "data": {
+                  "attach_with": "runtime_attach_session",
+                  "blocked_on": "no_live_session",
+                  "canonical_tool": "anim_list_tracks",
+                  "code": "not_connected",
+                  "discover_with": "runtime_list_sessions",
+                  "needs_live_engine": true,
+                  "next_call": {
+                    "reason": "Attach a session with runtime_attach_session, or start one.",
+                    "tool": "runtime_list_sessions"
+                  },
+                  "offline_fallback": false,
+                  "retryable": true,
+                  "tool": "anim_list_tracks"
+                },
+                "message": "anim_list_tracks runs only against a live Godot engine, and none is attached for this project root. Open the project in the Godot editor with the Didi addon enabled, then call runtime_list_sessions to see what is attachable and runtime_attach_session to select it."
+              },
+              "execution_mode": "live",
+              "session": null
+            },
+            "type": "text"
+          }
+        ],
+        "isError": true,
+        "resultType": "complete"
+      },
+      "tool": "anim_list_tracks"
+    },
+    {
+      "arguments": {},
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "bus_count": 1,
+          "buses": [
+            {
+              "bypass_effects": false,
+              "index": 0,
+              "mute": false,
+              "name": "Master",
+              "send": "",
+              "solo": false,
+              "volume_db": 0.0
+            }
+          ],
+          "execution_mode": "offline_fallback",
+          "is_live_engine": false,
+          "layout_loads": false,
+          "layout_path": "res://default_bus_layout.tres",
+          "layout_present": false,
+          "note": "No bus layout file is at layout_path, so this is the default Godot runs the project with: one Master bus at 0 dB. Nothing here was chosen by the project.",
+          "truncated": false
+        }
+      },
+      "tool": "audio_list_buses"
+    },
+    {
+      "arguments": {
+        "property_name": "material",
+        "target_node": "HUD/Tint"
+      },
+      "result": {
+        "content": [
+          {
+            "text_json": {
+              "error": {
+                "code": 503,
+                "data": {
+                  "attach_with": "runtime_attach_session",
+                  "blocked_on": "no_live_session",
+                  "canonical_tool": "shader_list_uniforms",
+                  "code": "not_connected",
+                  "discover_with": "runtime_list_sessions",
+                  "needs_live_engine": true,
+                  "next_call": {
+                    "reason": "Attach a session with runtime_attach_session, or start one.",
+                    "tool": "runtime_list_sessions"
+                  },
+                  "offline_fallback": false,
+                  "retryable": true,
+                  "tool": "shader_list_uniforms"
+                },
+                "message": "shader_list_uniforms runs only against a live Godot engine, and none is attached for this project root. Open the project in the Godot editor with the Didi addon enabled, then call runtime_list_sessions to see what is attachable and runtime_attach_session to select it."
+              },
+              "execution_mode": "live",
+              "session": null
+            },
+            "type": "text"
+          }
+        ],
+        "isError": true,
+        "resultType": "complete"
+      },
+      "tool": "shader_list_uniforms"
+    },
+    {
+      "arguments": {
+        "property_name": "material",
+        "target_node": "HUD/Graph"
+      },
+      "result": {
+        "content": [
+          {
+            "text_json": {
+              "error": {
+                "code": 503,
+                "data": {
+                  "attach_with": "runtime_attach_session",
+                  "blocked_on": "no_live_session",
+                  "canonical_tool": "shader_get_visual_graph",
+                  "code": "not_connected",
+                  "discover_with": "runtime_list_sessions",
+                  "needs_live_engine": true,
+                  "next_call": {
+                    "reason": "Attach a session with runtime_attach_session, or start one.",
+                    "tool": "runtime_list_sessions"
+                  },
+                  "offline_fallback": false,
+                  "retryable": true,
+                  "tool": "shader_get_visual_graph"
+                },
+                "message": "shader_get_visual_graph runs only against a live Godot engine, and none is attached for this project root. Open the project in the Godot editor with the Didi addon enabled, then call runtime_list_sessions to see what is attachable and runtime_attach_session to select it."
+              },
+              "execution_mode": "live",
+              "session": null
+            },
+            "type": "text"
+          }
+        ],
+        "isError": true,
+        "resultType": "complete"
+      },
+      "tool": "shader_get_visual_graph"
+    },
+    {
+      "arguments": {
+        "tilemap_path": "Tiles"
+      },
+      "result": {
+        "content": [
+          {
+            "text_json": {
+              "error": {
+                "code": 503,
+                "data": {
+                  "attach_with": "runtime_attach_session",
+                  "blocked_on": "no_live_session",
+                  "canonical_tool": "tilemap_get_used_rect",
+                  "code": "not_connected",
+                  "discover_with": "runtime_list_sessions",
+                  "needs_live_engine": true,
+                  "next_call": {
+                    "reason": "Attach a session with runtime_attach_session, or start one.",
+                    "tool": "runtime_list_sessions"
+                  },
+                  "offline_fallback": false,
+                  "retryable": true,
+                  "tool": "tilemap_get_used_rect"
+                },
+                "message": "tilemap_get_used_rect runs only against a live Godot engine, and none is attached for this project root. Open the project in the Godot editor with the Didi addon enabled, then call runtime_list_sessions to see what is attachable and runtime_attach_session to select it."
+              },
+              "execution_mode": "live",
+              "session": null
+            },
+            "type": "text"
+          }
+        ],
+        "isError": true,
+        "resultType": "complete"
+      },
+      "tool": "tilemap_get_used_rect"
+    },
+    {
+      "arguments": {
+        "expression": "1 + 2"
+      },
+      "result": {
+        "content": [
+          {
+            "text_json": {
+              "error": {
+                "code": 503,
+                "data": {
+                  "attach_with": "runtime_attach_session",
+                  "blocked_on": "no_live_session",
+                  "canonical_tool": "eval_gdscript",
+                  "code": "not_connected",
+                  "discover_with": "runtime_list_sessions",
+                  "needs_live_engine": true,
+                  "next_call": {
+                    "reason": "Attach a session with runtime_attach_session, or start one.",
+                    "tool": "runtime_list_sessions"
+                  },
+                  "offline_fallback": false,
+                  "retryable": true,
+                  "tool": "eval_gdscript"
+                },
+                "message": "eval_gdscript runs only against a live Godot engine, and none is attached for this project root. Open the project in the Godot editor with the Didi addon enabled, then call runtime_list_sessions to see what is attachable and runtime_attach_session to select it."
+              },
+              "execution_mode": "live",
+              "session": null
+            },
+            "type": "text"
+          }
+        ],
+        "isError": true,
+        "resultType": "complete"
+      },
+      "tool": "eval_gdscript"
+    },
+    {
+      "arguments": {
+        "from": {
+          "x": 0,
+          "y": 32
+        },
+        "to": {
+          "x": 200,
+          "y": 32
+        }
+      },
+      "result": {
+        "content": [
+          {
+            "text_json": {
+              "error": {
+                "code": 503,
+                "data": {
+                  "attach_with": "runtime_attach_session",
+                  "blocked_on": "no_live_session",
+                  "canonical_tool": "physics_raycast_query",
+                  "code": "not_connected",
+                  "discover_with": "runtime_list_sessions",
+                  "needs_live_engine": true,
+                  "next_call": {
+                    "reason": "Attach a session with runtime_attach_session, or start one.",
+                    "tool": "runtime_list_sessions"
+                  },
+                  "offline_fallback": false,
+                  "retryable": true,
+                  "tool": "physics_raycast_query"
+                },
+                "message": "physics_raycast_query runs only against a live Godot engine, and none is attached for this project root. Open the project in the Godot editor with the Didi addon enabled, then call runtime_list_sessions to see what is attachable and runtime_attach_session to select it."
+              },
+              "execution_mode": "live",
+              "session": null
+            },
+            "type": "text"
+          }
+        ],
+        "isError": true,
+        "resultType": "complete"
+      },
+      "tool": "physics_raycast_query"
+    },
+    {
+      "arguments": {
+        "rays": [
+          {
+            "from": {
+              "x": 0,
+              "y": 32
+            },
+            "to": {
+              "x": 200,
+              "y": 32
+            }
+          },
+          {
+            "from": {
+              "x": 0,
+              "y": 120
+            },
+            "to": {
+              "x": 200,
+              "y": 120
+            }
+          }
+        ]
+      },
+      "result": {
+        "content": [
+          {
+            "text_json": {
+              "error": {
+                "code": 503,
+                "data": {
+                  "attach_with": "runtime_attach_session",
+                  "blocked_on": "no_live_session",
+                  "canonical_tool": "spatial_query_raycast_batch",
+                  "code": "not_connected",
+                  "discover_with": "runtime_list_sessions",
+                  "needs_live_engine": true,
+                  "next_call": {
+                    "reason": "Attach a session with runtime_attach_session, or start one.",
+                    "tool": "runtime_list_sessions"
+                  },
+                  "offline_fallback": false,
+                  "retryable": true,
+                  "tool": "spatial_query_raycast_batch"
+                },
+                "message": "spatial_query_raycast_batch runs only against a live Godot engine, and none is attached for this project root. Open the project in the Godot editor with the Didi addon enabled, then call runtime_list_sessions to see what is attachable and runtime_attach_session to select it."
+              },
+              "execution_mode": "live",
+              "session": null
+            },
+            "type": "text"
+          }
+        ],
+        "isError": true,
+        "resultType": "complete"
+      },
+      "tool": "spatial_query_raycast_batch"
+    },
+    {
+      "arguments": {
+        "from": {
+          "x": 0,
+          "y": 32
+        },
+        "shape": {
+          "kind": "sphere",
+          "radius": 4
+        },
+        "to": {
+          "x": 200,
+          "y": 32
+        }
+      },
+      "result": {
+        "content": [
+          {
+            "text_json": {
+              "error": {
+                "code": 503,
+                "data": {
+                  "attach_with": "runtime_attach_session",
+                  "blocked_on": "no_live_session",
+                  "canonical_tool": "spatial_query_clearance",
+                  "code": "not_connected",
+                  "discover_with": "runtime_list_sessions",
+                  "needs_live_engine": true,
+                  "next_call": {
+                    "reason": "Attach a session with runtime_attach_session, or start one.",
+                    "tool": "runtime_list_sessions"
+                  },
+                  "offline_fallback": false,
+                  "retryable": true,
+                  "tool": "spatial_query_clearance"
+                },
+                "message": "spatial_query_clearance runs only against a live Godot engine, and none is attached for this project root. Open the project in the Godot editor with the Didi addon enabled, then call runtime_list_sessions to see what is attachable and runtime_attach_session to select it."
+              },
+              "execution_mode": "live",
+              "session": null
+            },
+            "type": "text"
+          }
+        ],
+        "isError": true,
+        "resultType": "complete"
+      },
+      "tool": "spatial_query_clearance"
+    },
+    {
+      "arguments": {
+        "previews": [
+          {
+            "label": "probe",
+            "position": {
+              "x": 32,
+              "y": 32
+            },
+            "size": {
+              "x": 16,
+              "y": 16
+            }
+          }
+        ]
+      },
+      "result": {
+        "content": [
+          {
+            "text_json": {
+              "error": {
+                "code": 503,
+                "data": {
+                  "attach_with": "runtime_attach_session",
+                  "blocked_on": "no_live_session",
+                  "canonical_tool": "editor_render_ghost_preview",
+                  "code": "not_connected",
+                  "discover_with": "runtime_list_sessions",
+                  "needs_live_engine": true,
+                  "next_call": {
+                    "reason": "Attach a session with runtime_attach_session, or start one.",
+                    "tool": "runtime_list_sessions"
+                  },
+                  "offline_fallback": false,
+                  "retryable": true,
+                  "tool": "editor_render_ghost_preview"
+                },
+                "message": "editor_render_ghost_preview runs only against a live Godot engine, and none is attached for this project root. Open the project in the Godot editor with the Didi addon enabled, then call runtime_list_sessions to see what is attachable and runtime_attach_session to select it."
+              },
+              "execution_mode": "live",
+              "session": null
+            },
+            "type": "text"
+          }
+        ],
+        "isError": true,
+        "resultType": "complete"
+      },
+      "tool": "editor_render_ghost_preview"
+    },
+    {
+      "arguments": {},
+      "result": {
+        "content": [
+          {
+            "text_json": {
+              "error": {
+                "code": 503,
+                "data": {
+                  "attach_with": "runtime_attach_session",
+                  "blocked_on": "no_live_session",
+                  "canonical_tool": "editor_clear_ghost_previews",
+                  "code": "not_connected",
+                  "discover_with": "runtime_list_sessions",
+                  "needs_live_engine": true,
+                  "next_call": {
+                    "reason": "Attach a session with runtime_attach_session, or start one.",
+                    "tool": "runtime_list_sessions"
+                  },
+                  "offline_fallback": false,
+                  "retryable": true,
+                  "tool": "editor_clear_ghost_previews"
+                },
+                "message": "editor_clear_ghost_previews runs only against a live Godot engine, and none is attached for this project root. Open the project in the Godot editor with the Didi addon enabled, then call runtime_list_sessions to see what is attachable and runtime_attach_session to select it."
+              },
+              "execution_mode": "live",
+              "session": null
+            },
+            "type": "text"
+          }
+        ],
+        "isError": true,
+        "resultType": "complete"
+      },
+      "tool": "editor_clear_ghost_previews"
+    },
+    {
+      "arguments": {},
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          },
+          {
+            "data": "iVBORw0KGgoAAAANSUhEUgAAAQAAAADACAYAAADr7b1mAAAIgUlEQVR4XmP0CEr6zzAKRkNgNARGZAiwgHx97eKpAfO8lr4Zw6j9o+E/UAlwpKc/ptGCfzQERkNg5IbAaAEwmvpHQ4BhtAAYTQSjITAaAiMwBEZbAKPJfjQERlsAo2lgNARGQ4BhtAUwmghGQ2A0BEZSCIx2AUbT+2gIjOAQGC0ARpP/aAiMFgCjaWA0BEZDYCSGwGgLYDTdj4bAaAtgNA2MhsBoCIy2AEbTwGgIjIbAiAqB0S7AaIIfDYHRLsBoGhgNgdEQGO0CjKaB0RAYDYHRLsBoGhgNgdEQGBkhMDoGMJrSR0NgBIfAaAEwmvxHQ2C0ABhNA6MhMBoCIzEERlsAo+l+NARGWwCjaWA0BEZDYLQFMJoGRkNgNARGVAiMdgFGE/xoCIx2AUbTwGgIjIbAaBdgNA2MhsBoCIx2AUbTwGgIjIbAyAiB0TGA0ZQ+GgIjOARGC4DR5D8aAqMFwGgaGA2B0RAYiSEw2gIYTfejITCCQ4DRIyjp/2gKGA2B0RAYmSHAAvL26P38o/fzD1TyH+n38w+0/0e7AKNV32gIjOAQGC0ARpP/aAiMFgCjaWA0BEZDYCSGwGgLYDTdj4bAaAtgNA2MhsBoCIy2AEbTwGgIjIbAiAqB0S7AaIIfDYERHAKjBcBo8h8NgdECYDQNjIbAaAiMxBAYbQGMpvvREBhtAYymgdEQGA2B0RbAaBoYDYHREBhRITDaBRhN8KMhMNoFGE0DoyEwGgKjXYDRNDAaAqMhMNoFGE0DoyEwGgIjIwRGxwBGU/poCIzgEBgtAEaT/2gIjBYAo2lgNARGQ2AkhsBoC2A03Y+GwGgLYDQNjIbAaAiMtgBG08BoCIyGwIgKgdEuwGiCHw2B0S7AaBoYDYHREBjtAoymgdEQGA2B0S7AaBoYDYHREBgZITA6BjCa0kdDYASHwGgBMJr8R0NgtAAYTQOjITAaAiMxBEZbAKPpfjQERnAIMHoEJf0fTQGjITAaAiMzBFhA3r52cfR+/IGK/tH78c0YRtPfwOW/0S7AaNU3GgIjOARGC4DR5D8aAqMFwGgaGA2B0RAYiSEw2gIYTfejITDaAhhNA6MhMBoCoy2A0TQwGgKjITCiQmC0CzCa4EdDYASHwGgBMJr8R0NgtAAYTQOjITAaAiMxBEZbAKPpfjQERlsAo2lgNARGQ2C0BTCaBkZDYDQERlQIjHYBRhP8aAiMdgFG08BoCIyGwGgXYDQNjIbAaAiMdgFG08BoCIyGwMgIgdExgNGUPhoCIzgERguA0eQ/GgKjBcBoGhgNgdEQGIkhMNoCGE33oyEw2gIYTQOjITAaAqMtgNE0MBoCoyEwokJgtAswmuBHQ2C0CzCaBkZDYDQERrsAo2lgNARGQ2C0CzCaBkZDYDQERkYIjI4BjKb00RAYwSEwWgCMJv/REBgtAEbTwGgIjIbASAyB0RbAaLofDYERHAKMHkFJ/0dTwGgIjIbAyAwBFpC3R+9nH7j72bX0R+/HH01/A5f+RrsAo1XfaAiM4BAYLQBGk/9oCIwWAKNpYDQERkNgJIbAaAtgNN2PhsBoC2A0DYyGwGgIjLYARtPAaAiMhsCICoHRLsBogh8NgREcAqMFwGjyHw2B0QJgNA2MhsBoCIyOAYymgdEQGA2BERUCo12A0QQ/GgKjXYDRNDAaAqMhMNoFGE0DoyEwGgKjXYDRNDAaAqMhMDJCYHQMYDSlj4bACA6B0QJgNPmPhsBoATCaBkZDYDQERmIIjLYARtP9aAiMtgBG08BoCIyGwGgLYDQNjIbAaAiMqBAY7QKMJvjREBjtAoymgdEQGA2B0S7AaBoYDYHREBjtAoymgdEQGA2BkRECo2MAoyl9NARGcAiMFgCjyX80BEYLgNE0MBoCoyEwEkNgtAUwmu5HQ2C0BTCaBkZDYDQERlsAo2lgNARGQ2BEhQCjR1DS/9E4Hw2B0RAYmSHAAvL26P3sA3c/u5a+GcNo+I+G/0AVP6ODgKNV32gIjOAQGC0ARpP/aAiMFgCjaWA0BEZDYCSGwGgLYDTdj4bAaAtgNA2MhsBoCIy2AEbTwGgIjIbAiAqB0S7AaIIfDYERHAKjBcBo8h8NgdECYDQNjIbAaAiMxBAYbQGMpvvREBhtAYymgdEQGA2B0RbAaBoYDYHREBhRITDaBRhN8KMhMNoFGE0DoyEwGgKjXYDRNDAaAqMhMNoFGE0DoyEwGgIjIwRGxwBGU/poCIzgEBgtAEaT/2gIjBYAo2lgNARGQ2AkhsBoC2A03Y+GwGgLYDQNjIbAaAiMtgBG08BoCIyGwIgKgdEuwGiCHw2B0S7AaBoYDYHREBjtAoymgdEQGA2B0S7AaBoYDYHREBgZITA6BjCa0kdDYASHwGgBMJr8R0NgtAAYTQOjITAaAiMxBEZbAKPpfjQERnAIMHoEJf0fTQGjITAaAiMzBFhA3h69n370fvqBSv5a+mYMo+lv4NLfaBdgtOobDYERHAKjBcBo8h8NgdECYDQNjIbAaAiMxBAYbQGMpvvREBhtAYymgdEQGA2B0RbAaBoYDYHREBhRITDaBRhN8KMhMIJDYLQAGE3+oyEwWgCMpoHREBgNgZEYAqMtgNF0PxoCoy2A0TQwGgKjITDaAhhNA6MhMBoCIyoERrsAowl+NARGuwCjaWA0BEZDYLQLMJoGRkNgNARGuwCjaWA0BEZDYGSEwOgYwGhKHw2BERwCowXAaPIfDYHRAmA0DYyGwGgIjMQQGG0BjKb70RAYbQGMpoHREBgNgdEWwGgaGA2B0RAYUSEw2gUYTfCjITDaBRhNA6MhMBoCo12A0TQwGgKjITDaBRhNA6MhMBoCIyMERscARlP6aAiM4BAYLQBGk/9oCIwWAKNpYDQERkNgJIbAaAtgNN2PhsAIDgEABGeaD8m5B8sAAAAASUVORK5CYII=",
+            "mimeType": "image/png",
+            "type": "image"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "camera_identifier": "active_editor_view",
+          "execution_mode": "offline_fallback",
+          "is_live_frame": false,
+          "message": "Synthesized preview only; launch Godot Editor for a live viewport frame.",
+          "resolution": {
+            "height": 192,
+            "width": 256
+          },
+          "source": "synthesized_grid_preview",
+          "status": "offline_preview"
+        }
+      },
+      "tool": "viewport_capture_frame"
+    },
+    {
+      "arguments": {
+        "setting": "application/config/name"
+      },
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "execution_mode": "offline_fallback",
+          "is_live_engine": false,
+          "limitation": "project.godot was read directly because no editor session is attached, so this is the literal text the file holds rather than the value an engine would load it as, and it is published as value_literal rather than value for that reason. A running editor holding an unsaved change would answer differently.",
+          "read_from": "res://project.godot",
+          "setting": "application/config/name",
+          "status": "success",
+          "value_literal": "\"Didi Contract Fixture\""
+        }
+      },
+      "tool": "project_get_setting"
+    },
+    {
+      "arguments": {},
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "autoloads": [
+            {
+              "name": "GameState",
+              "path": "res://content/game_state.gd",
+              "singleton": true
+            }
+          ],
+          "execution_mode": "offline_fallback",
+          "is_live_engine": false,
+          "limitation": "project.godot was read directly because no editor session is attached. An editor with unsaved changes to the autoload list would answer differently, and nothing here has loaded any of these scripts, so a path that no longer exists is reported exactly as a working one is. Attach an editor to have the engine answer.",
+          "read_from": "res://project.godot",
+          "status": "success"
+        }
+      },
+      "tool": "project_list_autoloads"
+    },
+    {
+      "arguments": {
+        "include_engine_defaults": false
+      },
+      "result": {
+        "content": [
+          {
+            "text_json": {
+              "error": {
+                "code": 503,
+                "data": {
+                  "attach_with": "runtime_attach_session",
+                  "blocked_on": "no_live_session",
+                  "canonical_tool": "project_list_input_actions",
+                  "code": "not_connected",
+                  "discover_with": "runtime_list_sessions",
+                  "needs_live_engine": true,
+                  "next_call": {
+                    "reason": "Attach a session with runtime_attach_session, or start one.",
+                    "tool": "runtime_list_sessions"
+                  },
+                  "offline_fallback": false,
+                  "retryable": true,
+                  "tool": "project_list_input_actions"
+                },
+                "message": "project_list_input_actions runs only against a live Godot engine, and none is attached for this project root. Open the project in the Godot editor with the Didi addon enabled, then call runtime_list_sessions to see what is attachable and runtime_attach_session to select it."
+              },
+              "execution_mode": "live",
+              "session": null
+            },
+            "type": "text"
+          }
+        ],
+        "isError": true,
+        "resultType": "complete"
+      },
+      "tool": "project_list_input_actions"
+    },
+    {
+      "arguments": {},
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "detected_count": 1,
+          "execution_mode": "local",
+          "preset_count": 1,
+          "presets": [
+            {
+              "detected": true,
+              "export_filter": "all_resources",
+              "export_path": "build/fixture.exe",
+              "index": 0,
+              "name": "Fixture Windows",
+              "platform": "Windows Desktop",
+              "runnable": true
+            }
+          ],
+          "presets_file_exists": true,
+          "sensitive_options_omitted": true
+        }
+      },
+      "tool": "project_list_export_presets"
+    },
+    {
+      "arguments": {
+        "search_path": "res://content"
+      },
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "execution_mode": "local",
+          "resources": [
+            {
+              "dependencies": [],
+              "file_size": 90,
+              "filename": "game_state.gd",
+              "path": "res://content/game_state.gd",
+              "type": "GDScript",
+              "uid": "uid://csv2fxsu2o4uf"
+            },
+            {
+              "dependencies": [],
+              "file_size": 20,
+              "filename": "game_state.gd.uid",
+              "path": "res://content/game_state.gd.uid",
+              "type": "GenericResource",
+              "uid": ""
+            },
+            {
+              "dependencies": [],
+              "file_size": 650,
+              "filename": "graph.tres",
+              "path": "res://content/graph.tres",
+              "resource_type": "VisualShader",
+              "type": "Resource",
+              "uid": "uid://bnvmtsy4rphe2"
+            },
+            {
+              "dependencies": [],
+              "file_size": 139,
+              "filename": "main.gd",
+              "path": "res://content/main.gd",
+              "type": "GDScript",
+              "uid": "uid://busv4yqs2vgys"
+            },
+            {
+              "dependencies": [],
+              "file_size": 20,
+              "filename": "main.gd.uid",
+              "path": "res://content/main.gd.uid",
+              "type": "GenericResource",
+              "uid": ""
+            },
+            {
+              "dependencies": [],
+              "file_size": 231,
+              "filename": "panel_style.tres",
+              "path": "res://content/panel_style.tres",
+              "resource_type": "StyleBoxFlat",
+              "type": "Resource",
+              "uid": "uid://77tcofdi24bg"
+            },
+            {
+              "dependencies": [],
+              "file_size": 290,
+              "filename": "player.gd",
+              "path": "res://content/player.gd",
+              "type": "GDScript",
+              "uid": "uid://cq44b66ykuxvc"
+            },
+            {
+              "dependencies": [],
+              "file_size": 20,
+              "filename": "player.gd.uid",
+              "path": "res://content/player.gd.uid",
+              "type": "GenericResource",
+              "uid": ""
+            },
+            {
+              "dependencies": [],
+              "file_size": 457,
+              "filename": "tiles.tres",
+              "path": "res://content/tiles.tres",
+              "resource_type": "TileSet",
+              "type": "Resource",
+              "uid": "uid://5xe0oksmy78j"
+            },
+            {
+              "dependencies": [],
+              "file_size": 211,
+              "filename": "tint.gdshader",
+              "path": "res://content/tint.gdshader",
+              "type": "Shader",
+              "uid": "uid://bluq76lcs6ipa"
+            },
+            {
+              "dependencies": [],
+              "file_size": 20,
+              "filename": "tint.gdshader.uid",
+              "path": "res://content/tint.gdshader.uid",
+              "type": "GenericResource",
+              "uid": ""
+            }
+          ],
+          "total_found": 11,
+          "truncated": false
+        }
+      },
+      "tool": "project_list_resources"
+    },
+    {
+      "arguments": {
+        "query": "jump",
+        "search_path": "res://content"
+      },
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "diagnostics": [],
+          "execution_mode": "local",
+          "lexical": false,
+          "matches": [
+            {
+              "column": 8,
+              "line": 5,
+              "path": "res://content/player.gd",
+              "preview": "signal jumped(height: float)"
+            },
+            {
+              "column": 5,
+              "line": 11,
+              "path": "res://content/player.gd",
+              "preview": "var jumps_taken := 0"
+            },
+            {
+              "column": 6,
+              "line": 14,
+              "path": "res://content/player.gd",
+              "preview": "func jump() -> void:"
+            },
+            {
+              "column": 2,
+              "line": 15,
+              "path": "res://content/player.gd",
+              "preview": "\tjumps_taken += 1"
+            },
+            {
+              "column": 2,
+              "line": 16,
+              "path": "res://content/player.gd",
+              "preview": "\tjumped.emit(JUMP_HEIGHT)"
+            }
+          ],
+          "project_root": "<project>",
+          "scanned_bytes": 2068,
+          "scanned_files": 7,
+          "search_kind": "text",
+          "skipped_files": 0,
+          "truncated": false,
+          "unsearchable_extensions": [
+            ".uid"
+          ],
+          "unsearchable_files": 4
+        }
+      },
+      "tool": "project_search_text"
+    },
+    {
+      "arguments": {
+        "query": "jump",
+        "search_path": "res://content"
+      },
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "diagnostics": [],
+          "execution_mode": "local",
+          "lexical": true,
+          "matches": [
+            {
+              "column": 8,
+              "kind": "signal",
+              "language": "gdscript",
+              "line": 5,
+              "name": "jumped",
+              "path": "res://content/player.gd",
+              "preview": "signal jumped(height: float)"
+            },
+            {
+              "column": 5,
+              "kind": "variable",
+              "language": "gdscript",
+              "line": 11,
+              "name": "jumps_taken",
+              "path": "res://content/player.gd",
+              "preview": "var jumps_taken := 0"
+            },
+            {
+              "column": 6,
+              "kind": "function",
+              "language": "gdscript",
+              "line": 14,
+              "name": "jump",
+              "path": "res://content/player.gd",
+              "preview": "func jump() -> void:"
+            }
+          ],
+          "project_root": "<project>",
+          "scanned_bytes": 519,
+          "scanned_files": 3,
+          "search_kind": "symbols",
+          "skipped_files": 0,
+          "truncated": false,
+          "unsearchable_extensions": [
+            ".gdshader",
+            ".tres",
+            ".uid"
+          ],
+          "unsearchable_files": 8
+        }
+      },
+      "tool": "project_search_symbols"
+    },
+    {
+      "arguments": {
+        "target": "res://content/player.gd"
+      },
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "counts_by_kind": {
+            "ext_resource": 1
+          },
+          "execution_mode": "local",
+          "impact_count": 1,
+          "impacts": [
+            {
+              "detail": "[ext_resource type=\"Script\" uid=\"uid://cq44b66ykuxvc\" path=\"res://content/player.gd\" id=\"2_player\"]",
+              "kind": "ext_resource",
+              "line": 4,
+              "path": "res://main.tscn"
+            }
+          ],
+          "limitations": [
+            "A name built at runtime cannot be followed, so an empty impact list is not proof that nothing depends on the target.",
+            "A name match is lexical and whole-word. A local variable that happens to share the name is reported as a code_reference.",
+            "A node path built dynamically or stored in a variable cannot be followed; node-path results cover only static serialized paths and direct code literals."
+          ],
+          "resolved_kind": "file",
+          "scanned_files": 8,
+          "target": "res://content/player.gd",
+          "target_exists": true,
+          "truncated": false
+        }
+      },
+      "tool": "project_analyze_impact"
+    },
+    {
+      "arguments": {},
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "addon_orphans_included": false,
+          "broken_connections": [],
+          "broken_references": [],
+          "dead_signals": [],
+          "excluded_addon_orphans": 0,
+          "execution_mode": "local",
+          "import_issue_count": 0,
+          "import_issues": [],
+          "limitations": [
+            "A path a script builds at runtime cannot be followed, so an asset in use may still be listed as an orphan.",
+            "Files under res://addons/ are third-party and are not counted as orphans by default. excluded_addon_orphans says how many were left out; pass include_addon_orphans to see them.",
+            "A signal is reported as dead only when no file emits it, connects to it, or wires it in a scene. A connection made through a variable name cannot be seen, and neither can a member call written with the name and the .connect on different lines.",
+            "broken_connections reports only what it can prove. A connection whose receiving node sits inside an instanced or inherited scene, has a built-in or non-GDScript script, or extends something outside the project or the class reference is not judged, so an empty list is not a promise that every connection resolves.",
+            "source_changed_since_import and output_changed_since_import compare the source and the outputs against the source_md5 and dest_md5 Godot recorded in the .md5 it wrote beside the output. Those are two of the three questions the engine asks; it also checks the importer's version, which is not checked here, so no finding is not a promise that Godot will leave the asset alone. import_freshness_unchecked says a record is there and a half of it was not compared, and its detail says which half and why. source_newer_than_output is the fallback where there is no record at all: it compares modification times, which a clone, a checkout or a worktree does not preserve, so it is evidence rather than a verdict, and the remedy is to open the project in the editor once so a record exists.",
+            "project_settings_issues reports the three states of project.godot that a reader can see without the engine: a file that ends part-way through a value, a value the parser cannot start, and a setting registered under a name the join built. It is not a full parse, so a constructor with the wrong arity, one the engine does not know, and a Resource() whose file is missing are all ERR_PARSE_ERROR and none of them is reported. An empty list is not a promise that Godot will load the file; a finding is a promise that it will not."
+          ],
+          "max_findings": 500,
+          "orphan_bytes": 0,
+          "orphans": [],
+          "project_settings_issue_count": 0,
+          "project_settings_issues": [],
+          "reference_verification": {
+            "checked": 0,
+            "mode": "not_needed",
+            "truncated": false
+          },
+          "scan_source": "project_files",
+          "scanned_import_metadata": 0,
+          "scanned_resources": 14,
+          "scanned_text_files": 9,
+          "skipped_text_files": 0,
+          "truncated": false
+        }
+      },
+      "tool": "project_audit_assets"
+    },
+    {
+      "arguments": {
+        "resource_path": "res://content/panel_style.tres"
+      },
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "dependencies": [],
+          "execution_mode": "local",
+          "file_size": 231,
+          "filename": "panel_style.tres",
+          "path": "res://content/panel_style.tres",
+          "resource_type": "StyleBoxFlat",
+          "type": "Resource",
+          "uid": "uid://77tcofdi24bg"
+        }
+      },
+      "tool": "resource_inspect"
+    },
+    {
+      "arguments": {
+        "file_path": "res://content/player.gd"
+      },
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "classes": [
+            {
+              "line": 1,
+              "name": "FixturePlayer"
+            }
+          ],
+          "constants": [
+            {
+              "line": 7,
+              "name": "JUMP_HEIGHT",
+              "type": "Variant",
+              "value": "48.0"
+            }
+          ],
+          "enums": [],
+          "execution_mode": "local",
+          "file_path": "res://content/player.gd",
+          "functions": [
+            {
+              "line": 14,
+              "name": "jump",
+              "parameters": "",
+              "return_type": "void"
+            }
+          ],
+          "max_response_bytes": 8388608,
+          "max_symbols": 2000,
+          "returned_count": 6,
+          "signals": [
+            {
+              "arguments": "height: float",
+              "line": 5,
+              "name": "jumped"
+            }
+          ],
+          "symbol_count_total": 6,
+          "truncated": false,
+          "variables": [
+            {
+              "exported": true,
+              "line": 9,
+              "name": "speed",
+              "type": "float"
+            },
+            {
+              "exported": false,
+              "line": 11,
+              "name": "jumps_taken",
+              "type": "Variant"
+            }
+          ]
+        }
+      },
+      "tool": "script_get_symbols"
+    },
+    {
+      "arguments": {
+        "class_name": "Timer"
+      },
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "api_version": "Godot Engine v4.7.stable.official",
+          "api_version_matches_project_features": false,
+          "class_name": "Timer",
+          "description": "Godot engine class Timer read from the class reference pinned to Godot Engine v4.7.stable.official. This is a shipped dump of the engine API, not the running engine, so it cannot see script classes or anything a different engine version changed.",
+          "enums": {
+            "TimerProcessCallback": {
+              "TIMER_PROCESS_IDLE": 1,
+              "TIMER_PROCESS_PHYSICS": 0
+            }
+          },
+          "execution_mode": "local",
+          "inherits": "Node",
+          "is_instantiable": true,
+          "is_known_class": true,
+          "methods": {
+            "get_time_left": {
+              "args": [],
+              "const": true,
+              "returns": "float"
+            },
+            "get_timer_process_callback": {
+              "args": [],
+              "const": true,
+              "returns": "enum::Timer.TimerProcessCallback"
+            },
+            "get_wait_time": {
+              "args": [],
+              "const": true,
+              "returns": "float"
+            },
+            "has_autostart": {
+              "args": [],
+              "const": true,
+              "returns": "bool"
+            },
+            "is_ignoring_time_scale": {
+              "args": [],
+              "returns": "bool"
+            },
+            "is_one_shot": {
+              "args": [],
+              "const": true,
+              "returns": "bool"
+            },
+            "is_paused": {
+              "args": [],
+              "const": true,
+              "returns": "bool"
+            },
+            "is_stopped": {
+              "args": [],
+              "const": true,
+              "returns": "bool"
+            },
+            "set_autostart": {
+              "args": [
+                "enable: bool"
+              ],
+              "returns": "void"
+            },
+            "set_ignore_time_scale": {
+              "args": [
+                "ignore: bool"
+              ],
+              "returns": "void"
+            },
+            "set_one_shot": {
+              "args": [
+                "enable: bool"
+              ],
+              "returns": "void"
+            },
+            "set_paused": {
+              "args": [
+                "paused: bool"
+              ],
+              "returns": "void"
+            },
+            "set_timer_process_callback": {
+              "args": [
+                "callback: enum::Timer.TimerProcessCallback"
+              ],
+              "returns": "void"
+            },
+            "set_wait_time": {
+              "args": [
+                "time_sec: float"
+              ],
+              "returns": "void"
+            },
+            "start": {
+              "args": [
+                "time_sec: float = -1"
+              ],
+              "returns": "void"
+            },
+            "stop": {
+              "args": [],
+              "returns": "void"
+            }
+          },
+          "project_features_version": "4.5",
+          "properties": {
+            "autostart": {
+              "type": "bool"
+            },
+            "ignore_time_scale": {
+              "type": "bool"
+            },
+            "one_shot": {
+              "type": "bool"
+            },
+            "paused": {
+              "type": "bool"
+            },
+            "process_callback": {
+              "type": "int"
+            },
+            "time_left": {
+              "read_only": true,
+              "type": "float"
+            },
+            "wait_time": {
+              "type": "float"
+            }
+          },
+          "signals": [
+            "timeout"
+          ],
+          "source": "extension_api"
+        }
+      },
+      "tool": "script_reflect_class"
+    },
+    {
+      "arguments": {},
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "board": "default",
+          "execution_mode": "local",
+          "keys": [],
+          "prefix": "",
+          "returned": 0,
+          "total": 0,
+          "truncated": false
+        }
+      },
+      "tool": "blackboard_list_keys"
+    },
+    {
+      "arguments": {},
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "board": "default",
+          "deep": true,
+          "execution_mode": "local",
+          "found": true,
+          "path": "",
+          "revision": 0,
+          "truncated": false,
+          "value": {}
+        }
+      },
+      "tool": "blackboard_read"
+    },
+    {
+      "arguments": {},
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "board": "default",
+          "execution_mode": "local",
+          "returned": 0,
+          "tasks": [],
+          "total": 0,
+          "truncated": false
+        }
+      },
+      "tool": "blackboard_task_list"
+    },
+    {
+      "arguments": {
+        "max_depth": 3,
+        "root_path": "/root"
+      },
+      "result": {
+        "content": [
+          {
+            "text_json": {
+              "error": {
+                "code": 503,
+                "data": {
+                  "attach_with": "runtime_attach_session",
+                  "blocked_on": "no_live_session",
+                  "canonical_tool": "runtime_get_tree",
+                  "code": "not_connected",
+                  "discover_with": "runtime_list_sessions",
+                  "needs_live_engine": true,
+                  "next_call": {
+                    "reason": "Attach a session with runtime_attach_session, or start one.",
+                    "tool": "runtime_list_sessions"
+                  },
+                  "offline_fallback": false,
+                  "retryable": true,
+                  "tool": "runtime_get_tree"
+                },
+                "message": "runtime_get_tree runs only against a live Godot engine, and none is attached for this project root. Open the project in the Godot editor with the Didi addon enabled, then call runtime_list_sessions to see what is attachable and runtime_attach_session to select it."
+              },
+              "execution_mode": "live",
+              "session": null
+            },
+            "type": "text"
+          }
+        ],
+        "isError": true,
+        "resultType": "complete"
+      },
+      "tool": "runtime_get_tree"
+    }
+  ],
   "initialize": {
     "_meta": {
       "didi": {
@@ -200,6 +2146,48 @@
     "ttlMs": 3600000
   },
   "schema": 1,
+  "server/discover": {
+    "_meta": {
+      "didi": {
+        "confirmationsSkipped": false,
+        "sessionDescriptor": "every",
+        "toolProfile": "full"
+      },
+      "io.modelcontextprotocol/serverInfo": {
+        "name": "didi",
+        "version": "<version>"
+      }
+    },
+    "cacheScope": "public",
+    "capabilities": {
+      "extensions": {
+        "didi/responseEconomy": {
+          "omit": [
+            "textCopy",
+            "sessionDescriptor"
+          ]
+        },
+        "io.modelcontextprotocol/ui": {
+          "mimeTypes": [
+            "text/html;profile=mcp-app"
+          ]
+        }
+      },
+      "prompts": {},
+      "resources": {},
+      "tools": {}
+    },
+    "instructions": "Didi: Godot project inspection and controlled editor/game operations.\n\nDISCOVERY AND EXECUTION\nSelect the project with --project or DIDI_PROJECT_ROOT. Before invoking any tool, inspect tools/list: read its inputSchema, required parameters, descriptions, bounds, and _meta.didi availability. Use canonical names below; never invent tool names or parameters. Require implemented=true; live-only calls need currentMode=live or liveAvailable=true. Recheck discovery after session changes. Use runtime_list_sessions, runtime_attach_session, and runtime_get_session to select and verify the intended project and editor/game route. Check execution_mode and session_kind in results; offline_fallback is not observed or unsaved editor state.\nNever brute-force node paths or probe guessed node names. Discover the hierarchy first, reuse returned paths, and refresh the relevant branch after structural changes or a missing-node error. Inspect errors and limitations before changing the request; do not repeat unsupported calls.\nPreview mutations with the exact arguments plus dry_run=true; inspect mutation_preview and the project/route. If confirmation_token is returned, execute the same arguments without dry_run and with that token only after destructive intent is authorized. Do not replay uncertain mutations. Use editor_save_scene when scene persistence is intended.\n\nTOOL ROUTING\n- Files: project_list_resources discovers project paths; project_search_text finds literal text; project_search_symbols finds lexical GDScript/C# declarations.\n- Scene tree: scene_get_hierarchy(root_path, max_depth, max_nodes) returns names, classes, paths, and children. Start bounded or use summary=true; inspect truncation and expand only relevant branches. A .tscn root_path reads the saved file even when attached. Live bulk properties, scripts, and signals are omitted; inspect omitted_fields.\n- Node properties: scene_get_property(target_node, property_name) reads one existing scalar property on a discovered live node; scene_set_property writes it. Do not infer all properties from the hierarchy.\n- Project settings: project_get_setting(setting) reads a value; project_set_setting writes it. Use project_list_autoloads/project_set_autoload for autoloads and the advertised InputMap tools for input/*, not project_set_setting for those namespaces.\n- GDScript: script_get_symbols extracts declarations; script_check_syntax(file_path) attempts Godot compiler diagnostics. source_text alone is lexical checking, not proof of compilation: inspect engine_checked and limitation. project_verify_changes checks proposed files together in an isolated copy. script_reflect_class is a limited offline reference, not full live ClassDB or a language server.\n\nBOUNDARIES AND FALLBACKS\nDidi does not implement a real-time renderer or gameplay loop; Godot owns both. viewport_capture_frame provides snapshots (check is_live_frame); runtime_launch runs Godot and the advertised runtime tools offer bounded session controls, not arbitrary continuous gameplay automation. Didi is not a general shell, unrestricted GDScript executor, or binary asset editor; eval_gdscript is a restricted read-only expression language. resource_inspect reports metadata/dependencies, not arbitrary Resource internals.\nFor source details beyond tool output, inspect the selected project's .tscn/.gd files directly (and project.godot for saved configuration); files cannot reveal unsaved or runtime state. For compiler or execution checks beyond supported tools, use godot --headless with the explicit project path and appropriate check/test options. Headless checks do not validate real-time rendered appearance. Use Godot/import tooling for binary assets. Registered but unimplemented tools are not capabilities: do not call physics_simulate_step, nav_bake_mesh, or runtime_get_call_stack while discovery marks them unimplemented.\n",
+    "resultType": "complete",
+    "supportedVersions": [
+      "2026-07-28",
+      "2024-11-05"
+    ],
+    "ttlMs": 3600000
+  },
+  "stateless": {
+    "tools/list": null
+  },
   "tools/list": {
     "cacheScope": "private",
     "resultType": "complete",
