@@ -43,8 +43,9 @@ autoload, and a check that cries wolf teaches the agent to stop reading it.
 the answer fields that carry what it read back, which the live harness compares
 with the engine on all three engine lines, or is exempted with the issue that
 tracks the gap. `tests/test_observed_post_state.py` fails the build when a
-mutating tool has neither. The exemptions are findings: #1019 lists the tools
-that answer with the request, and #1020 the ones no case drives yet.
+mutating tool has neither. The exemptions are findings: #1020 lists the ones
+no case drives yet. The tools #1019 found answering with the request all read
+back now.
 
 ## P2. Reject what cannot be interpreted
 

@@ -384,6 +384,15 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **runtime_inject_input answers with what Input holds (#1019).** It used to
+  count `parse_input_event` calls, which return nothing and only buffer the
+  event. It now flushes the batch with `Input.flush_buffered_events`, so the
+  game has handled every event before the answer, and `input_state` reads
+  back each control the batch named: an action's `pressed` and `strength`, a
+  key or button's `pressed`, a joypad axis's value. A held batch on a paused
+  game reads back unchanged. A live case compares it with what the game's own
+  `_input` reads. It was the last tool exempted under #1019.
+
 - **A new scene's uid is indexed before scene_create answers (#1004, #995).**
   A scene written into a folder the editor did not list yet, or while it
   scanned, answered `uid_registration_deferred: true`, and a game launched
