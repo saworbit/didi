@@ -384,6 +384,16 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **A new scene's uid is indexed before scene_create answers (#1004, #995).**
+  A scene written into a folder the editor did not list yet, or while it
+  scanned, answered `uid_registration_deferred: true`, and a game launched
+  next warned "invalid UID" for every reference to it. Godot cannot index a
+  file in a new folder without a scan, so Didi now asks for one, and both
+  `scene_create` and `scene_pack_branch` wait for a running scan to be applied
+  and then for the index before they answer. The re-index that runs after a
+  deferral no longer gives up after one try, and no longer runs inside the
+  work that applies a scan.
+
 - **scene_close answers with the tabs it left (#1019).** It reads the editor's
   open scenes after the close and answers `still_open`, `null` for a scene
   that was never saved. A live case compares it with the editor's own list.

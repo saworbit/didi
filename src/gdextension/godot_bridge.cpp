@@ -4482,72 +4482,119 @@ namespace {
 // Paths written while the editor filesystem was scanning, waiting for it to be
 // idle so they can be indexed. Bounded: a caller that writes thousands of
 // scenes during one scan does not get an unbounded queue out of it.
+struct DeferredReindex {
+    std::string path;
+    int attempts{0};
+};
 std::mutex g_deferred_reindex_mutex;
-std::vector<std::string> g_deferred_reindex;
+std::vector<DeferredReindex> g_deferred_reindex;
+// sources_changed as counted when a retry last failed. The editor applies a
+// scan on a later frame than the one that clears its scanning flag, and a scan
+// can start and finish between two frames, so an attempt can still land
+// before the results it needs. The next one waits for the editor to apply them.
+std::optional<int64_t> g_deferred_reindex_after;
 constexpr size_t kMaxDeferredReindex = 256;
+constexpr int kMaxReindexAttempts = 3;
 
 } // namespace
 
 // Runs EditorFileSystem.update_file and reports whether the engine now resolves
-// the uid the file carries.
+// the uid the file carries, or nothing when the editor could not be asked.
 //
 // update_file is the call Godot documents for a file "saved by an external
 // program", it is synchronous and it starts no scan. It is also a no-op while a
-// scan is in progress, which is exactly when the save callback failed too, so
-// the path is queued and tried again from the frame loop.
-GodotBridge::WrittenResourceUid GodotBridge::registerWrittenResourceUid(
+// scan is in progress, which is exactly when the save callback failed too.
+std::optional<GodotBridge::WrittenResourceUid> GodotBridge::indexWrittenResource(
     const std::string& resource_path) {
     WrittenResourceUid state;
     auto editor = editorInterface();
-    if (editor.isErr()) return state;
+    if (editor.isErr()) return std::nullopt;
     auto filesystem = callObject(editor.value(), "EditorInterface", "get_resource_filesystem", 780151678LL);
-    if (filesystem.isErr()) return state;
+    if (filesystem.isErr()) return std::nullopt;
     auto object = objectFromVariant(filesystem.value());
-    if (object.isErr() || !object.value()) return state;
+    if (object.isErr() || !object.value()) return std::nullopt;
+    // A retry waits for sources_changed, which only the watch counts.
+    ensureImportWatch(filesystem.value());
 
     auto godot_path = makeString(resource_path);
-    if (godot_path.isErr()) return state;
+    if (godot_path.isErr()) return std::nullopt;
     // The bind carries hash 83702148 on Godot 4.5.1, 4.6.2 and 4.7.2.
     auto updated = callObject(object.value(), "EditorFileSystem", "update_file", 83702148LL,
                               {&godot_path.value()});
-    if (updated.isErr()) return state;
+    if (updated.isErr()) return std::nullopt;
 
     auto uid_table = singleton("ResourceUID");
-    if (uid_table.isErr()) return state;
+    if (uid_table.isErr()) return std::nullopt;
     auto uid_value = callObject(uid_table.value(), "ResourceUID", "path_to_uid", 1703090593LL,
                                 {&godot_path.value()});
-    if (uid_value.isErr()) return state;
+    if (uid_value.isErr()) return std::nullopt;
     auto uid_text = stringFromVariant(uid_value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
-    if (uid_text.isErr() || uid_text.value().rfind("uid://", 0) != 0) return state;
+    if (uid_text.isErr() || uid_text.value().rfind("uid://", 0) != 0) return std::nullopt;
     state.uid = uid_text.value();
 
     auto id_text = makeString(state.uid);
-    if (id_text.isErr()) return state;
+    if (id_text.isErr()) return std::nullopt;
     auto id_value = callObject(uid_table.value(), "ResourceUID", "text_to_id", 1321353865LL,
                                {&id_text.value()});
-    if (id_value.isErr()) return state;
+    if (id_value.isErr()) return std::nullopt;
     auto id = scalarFromVariant<int64_t>(id_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
-    if (id.isErr()) return state;
+    if (id.isErr()) return std::nullopt;
     auto id_argument = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, id.value());
-    if (id_argument.isErr()) return state;
+    if (id_argument.isErr()) return std::nullopt;
     auto known = callObject(uid_table.value(), "ResourceUID", "has_id", 1116898809LL,
                             {&id_argument.value()});
-    if (known.isErr()) return state;
+    if (known.isErr()) return std::nullopt;
     auto registered = scalarFromVariant<GDExtensionBool>(known.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
-    if (registered.isErr()) return state;
+    if (registered.isErr()) return std::nullopt;
     state.registered = registered.value() != 0;
+    return state;
+}
+
+GodotBridge::WrittenResourceUid GodotBridge::registerWrittenResourceUid(
+    const std::string& resource_path) {
+    auto indexed = indexWrittenResource(resource_path);
+    if (!indexed.has_value()) return WrittenResourceUid{};
+    auto state = *indexed;
     if (state.registered) return state;
 
-    // Not registered means a scan is running. Adding the id here does not
-    // survive it: the scan replaces the table with what it found, and it did
-    // not find this file. So the work waits for idle instead.
-    std::lock_guard<std::mutex> lock(g_deferred_reindex_mutex);
-    if (std::find(g_deferred_reindex.begin(), g_deferred_reindex.end(), resource_path) ==
-            g_deferred_reindex.end() &&
-        g_deferred_reindex.size() < kMaxDeferredReindex) {
-        g_deferred_reindex.push_back(resource_path);
+    // Not registered means a scan is running, or its results are not applied
+    // yet, or the file is in a folder the editor does not list. Adding the id
+    // here does not survive a scan: it replaces the table with what it found,
+    // and it did not find this file. So the work waits for idle instead, and
+    // the frame loop tries again.
+    {
+        std::lock_guard<std::mutex> lock(g_deferred_reindex_mutex);
+        const bool queued = std::any_of(g_deferred_reindex.begin(), g_deferred_reindex.end(),
+                                        [&](const DeferredReindex& entry) { return entry.path == resource_path; });
+        if (!queued && g_deferred_reindex.size() < kMaxDeferredReindex) {
+            g_deferred_reindex.push_back(DeferredReindex{resource_path, 0});
+        }
     }
     state.deferred = true;
+    // update_file never indexes a file in a folder the editor does not list,
+    // however often it is called, and a scene written into a new folder is
+    // exactly that. scan_sources lists the folder and indexes the file within
+    // a few frames (tools/vibe/probes/new_folder_uid_engine.py, on 4.5.1,
+    // 4.6.2 and 4.7.2). A scan already running finds the file itself.
+    const auto ask_for_scan = [&]() -> Result<void> {
+        auto editor = editorInterface();
+        if (editor.isErr()) return editor.error();
+        auto filesystem = callObject(editor.value(), "EditorInterface", "get_resource_filesystem", 780151678LL);
+        if (filesystem.isErr()) return filesystem.error();
+        auto object = objectFromVariant(filesystem.value());
+        if (object.isErr()) return object.error();
+        if (!object.value()) return Error::notConnected("EditorFileSystem is unavailable");
+        auto scan = callObject(object.value(), "EditorFileSystem", "scan_sources", 3218959716LL);
+        if (scan.isErr()) return scan.error();
+        return Result<void>::ok();
+    };
+    auto scanning = isEditorFilesystemScanning();
+    if (scanning.isOk() && !scanning.value()) {
+        if (auto asked = ask_for_scan(); asked.isErr()) {
+            DIDI_LOG_WARN("GODOT_BRIDGE", "Could not ask the editor to scan for ", resource_path, ": ",
+                          asked.error().message);
+        }
+    }
     return state;
 }
 
@@ -4558,29 +4605,43 @@ void GodotBridge::processDeferredReindexFrame() {
     }
     auto scanning = isEditorFilesystemScanning();
     if (scanning.isErr() || scanning.value()) return;
+    const auto settled = importWatchCount("settled");
 
-    std::vector<std::string> pending;
+    std::vector<DeferredReindex> pending;
     {
         std::lock_guard<std::mutex> lock(g_deferred_reindex_mutex);
+        if (g_deferred_reindex_after.has_value() && settled.has_value() &&
+            *settled <= *g_deferred_reindex_after) {
+            return;
+        }
         pending.swap(g_deferred_reindex);
+        g_deferred_reindex_after.reset();
     }
-    auto editor = editorInterface();
-    if (editor.isErr()) return;
-    auto filesystem = callObject(editor.value(), "EditorInterface", "get_resource_filesystem", 780151678LL);
-    if (filesystem.isErr()) return;
-    auto object = objectFromVariant(filesystem.value());
-    if (object.isErr() || !object.value()) return;
-    for (const auto& path : pending) {
-        auto godot_path = makeString(path);
-        if (godot_path.isErr()) continue;
-        auto updated = callObject(object.value(), "EditorFileSystem", "update_file", 83702148LL,
-                                  {&godot_path.value()});
-        if (updated.isErr()) {
-            DIDI_LOG_WARN("GODOT_BRIDGE", "Deferred re-index failed for ", path);
+    // A single attempt used to be taken as done. One that ran before the
+    // editor applied its scan indexed nothing, and the scene's uid then stayed
+    // unknown until some later scan happened to find the file.
+    std::vector<DeferredReindex> again;
+    for (auto& entry : pending) {
+        const auto indexed = indexWrittenResource(entry.path);
+        if (indexed.has_value() && indexed->registered) {
+            DIDI_LOG_INFO("GODOT_BRIDGE", "Indexed ", entry.path, " after the editor filesystem settled");
             continue;
         }
-        DIDI_LOG_INFO("GODOT_BRIDGE", "Indexed ", path, " after the editor filesystem settled");
+        DIDI_LOG_INFO("GODOT_BRIDGE", "Not indexed yet: ", entry.path, " (attempt ", entry.attempts + 1,
+                      ", sources_changed ", settled.value_or(-1), ")");
+        if (++entry.attempts >= kMaxReindexAttempts) {
+            DIDI_LOG_WARN("GODOT_BRIDGE", "Could not index ", entry.path, " in ", entry.attempts,
+                          " attempts; the editor's next scan of it will");
+            continue;
+        }
+        again.push_back(std::move(entry));
     }
+    if (again.empty()) return;
+    std::lock_guard<std::mutex> lock(g_deferred_reindex_mutex);
+    for (auto& entry : again) {
+        if (g_deferred_reindex.size() < kMaxDeferredReindex) g_deferred_reindex.push_back(std::move(entry));
+    }
+    g_deferred_reindex_after = settled;
 }
 
 namespace {
@@ -13120,10 +13181,11 @@ json GodotBridge::execute(const std::string& method, const json& params,
             if (uid_state.deferred) {
                 result["uid_registration_deferred"] = true;
                 result["limitation"] =
-                    "The scene is saved and carries its uid, but the editor filesystem was "
-                    "scanning, so the engine has not indexed it yet. Anything loading a scene "
-                    "that references this one warns and falls back to the text path until it "
-                    "has. Didi re-indexes it as soon as the scan finishes.";
+                    "The scene is saved and carries its uid, but the editor had not indexed "
+                    "it when this answered: it was still scanning, or still listing a folder "
+                    "new to it. Anything loading a scene that references this one warns and "
+                    "falls back to the text path until it has. Didi indexes it once the "
+                    "editor has applied the scan.";
             }
             return result;
         };

@@ -1910,6 +1910,7 @@ try {
         (Tool-Request 5571 "runtime_read_logs" @{ minimum_level = "error"; limit = 200 }),
         (Tool-Request 117 "scene_close" @{}),
         (Tool-Request 91 "scene_close" @{ discard_unsaved = $true }),
+        (Tool-Request 6004 "scene_create" @{ scene_path = "res://fresh_folder_1004/fresh.tscn"; root_type = "Node2D"; root_name = "Fresh" }),
         (Tool-Request 92 "scene_create" @{ scene_path = "res://created_phase2.tscn"; root_type = "Node2D"; root_name = "Created" }),
         (Tool-Request 93 "scene_get_hierarchy" @{ root_path = "/root"; max_depth = 1 }),
         # Instancing a packed scene is close to the most common single
@@ -4377,6 +4378,13 @@ try {
             Assert-True (-not [string]::IsNullOrWhiteSpace($written.limitation)) "$($sceneWrite.What) deferred uid registration without stating the limitation."
         }
     }
+    # A scene in a folder the editor does not list yet. update_file cannot
+    # index it there however often it is called, so it always answered
+    # deferred and a game launched next warned for every reference to it
+    # (#1004). The answer now waits for the scan Didi asks for.
+    $freshFolder = Tool-Payload $byId[6004]
+    Assert-True ($freshFolder.uid_registered -eq $true) "A scene created in a new folder answered before the engine indexed its uid: $($freshFolder | ConvertTo-Json -Compress)"
+    Assert-True ($null -eq $freshFolder.uid_registration_deferred) "A scene created in a new folder still said its uid was deferred."
     Assert-True $byId[88].result.isError "Packed branch overwrote an existing scene without overwrite: true."
     Assert-True ((Tool-Payload $byId[89]).opened -eq $true) "Packed branch could not be opened."
     $packedHierarchy = Tool-Payload $byId[90]
@@ -5881,7 +5889,7 @@ text = "Not a key"
 
     $unexpectedSourceArtifacts = @(Get-ChildItem -LiteralPath $sourceFixtureRoot -Force -Recurse | Where-Object {
         $_.Name -like "*.didi-retired-*" -or
-        $_.Name -in @("packed_branch.tscn", "created_phase2.tscn", "transient_probe.tscn", "instance_host.tscn", "anim_library_host.tscn")
+        $_.Name -in @("packed_branch.tscn", "created_phase2.tscn", "transient_probe.tscn", "instance_host.tscn", "anim_library_host.tscn", "fresh_folder_1004")
     })
     Assert-True ($unexpectedSourceArtifacts.Count -eq 0) "Integration generated artifacts in the checked-in source fixture."
     Assert-ObservedAnswersRecorded

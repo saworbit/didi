@@ -7,6 +7,7 @@
 #include "didi/gdextension/expression_sandbox.hpp"
 #include "didi/common/logger.hpp"
 #include "didi/common/types.hpp"
+#include <set>
 #include <unordered_set>
 
 namespace didi {
@@ -178,7 +179,6 @@ void EditorHook::processQueue() {
         processProfilerFrame();
         processInvariantWatchFrame();
         processSceneExplorationFrame();
-        GodotBridge::instance().processDeferredReindexFrame();
         processMainScreenCaptureFrame();
         processScriptCallFrame();
         return;
@@ -194,8 +194,9 @@ void EditorHook::processQueue() {
         std::optional<json> session_rejection;
     };
     std::vector<QueuedCommand> commands;
-    // Asked before the queue is locked, because it asks the engine.
+    // Asked before the queue is locked, because they ask the engine.
     const bool starting = editorStarting();
+    const bool settling = editorFilesystemSettling();
     {
         std::lock_guard<std::mutex> lock(m_queueMutex);
         constexpr size_t kMaxCommandsPerFrame = 64;
@@ -210,6 +211,15 @@ void EditorHook::processQueue() {
             // never started says so.
             if (starting && (m_commandQueue.front().method == "scene.open" ||
                              m_commandQueue.front().method == "scene.create")) {
+                break;
+            }
+            // A scene written while the editor scans, or before it applies
+            // the scan, is saved with a uid the engine cannot index yet, so a
+            // game launched next warned once for every reference to it
+            // (#1004). Both scene writers wait the same way, until the scan
+            // is applied.
+            if (settling && (m_commandQueue.front().method == "scene.create" ||
+                             m_commandQueue.front().method == "scene.packBranch")) {
                 break;
             }
             auto session_rejection = validateSessionKindForMethod(
@@ -302,6 +312,21 @@ void EditorHook::processQueue() {
                 continue;
             }
             json result = executeOnMainThread(cmd.method, cmd.params);
+            if ((cmd.method == "scene.create" || cmd.method == "scene.packBranch") && result.is_object() &&
+                result.value("uid_registration_deferred", false) && result.contains("scene_path")) {
+                // Saved, with a uid the engine cannot index yet. The answer
+                // waits for the index rather than leaving the caller to find
+                // out from a game's warnings (#1004). It answers well inside
+                // the server's wait, counted from when the call was queued, so
+                // a long scan ends in this answer and not in a timeout.
+                constexpr auto kSceneCreateAnswerBy = std::chrono::seconds(12);
+                const auto scene_path = result["scene_path"].get<std::string>();
+                std::lock_guard<std::mutex> lock(m_parkedSceneCreateMutex);
+                m_parkedSceneCreates.push_back(ParkedSceneCreate{
+                    std::move(result), scene_path, cmd.queued_at + kSceneCreateAnswerBy,
+                    cmd.response_promise, cmd.control});
+                continue;
+            }
             cmd.control->markCompleted();
             fulfillCommand(cmd.response_promise, cmd.control, std::move(result));
         } catch (const std::exception& e) {
@@ -319,7 +344,12 @@ void EditorHook::processQueue() {
     processProfilerFrame();
     processInvariantWatchFrame();
     processSceneExplorationFrame();
-    GodotBridge::instance().processDeferredReindexFrame();
+    // Not from a nested frame, and not until the scan is applied: update_file
+    // there ran inside the work that applies it (#995), or against the index
+    // it was about to replace, and the uid was never indexed.
+    const bool filesystem_settled = !editorFilesystemSettling();
+    if (filesystem_settled) GodotBridge::instance().processDeferredReindexFrame();
+    processParkedSceneCreates(filesystem_settled);
     processMainScreenCaptureFrame();
     processScriptCallFrame();
     processPendingQuitFrame();
@@ -1244,6 +1274,69 @@ bool EditorHook::editorStarting() {
     return !GodotBridge::instance().editorFirstScanApplied();
 }
 
+bool EditorHook::editorFilesystemSettling() {
+    if (m_filesystemSettlingOverride.has_value()) return *m_filesystemSettlingOverride;
+    // A game has no EditorFileSystem.
+    if (m_sessionKind != runtime::SessionKind::editor) return false;
+    auto& bridge = GodotBridge::instance();
+    auto scanning = bridge.isEditorFilesystemScanning();
+    // Not known is not a reason to hold anything.
+    if (scanning.isErr()) return false;
+    // The scanning flag clears on the scan's own thread, and a later frame
+    // applies what it found and then emits sources_changed. So the scan is
+    // over at that emission, not when the flag clears.
+    if (scanning.value()) {
+        if (!m_filesystemSettle.has_value()) m_filesystemSettle = bridge.beginScanSettle();
+        return true;
+    }
+    if (m_filesystemSettle.has_value() && !bridge.scanSettled(*m_filesystemSettle)) return true;
+    m_filesystemSettle.reset();
+    return false;
+}
+
+void EditorHook::processParkedSceneCreates(bool filesystem_settled) {
+    // Indexing calls update_file, which can run frames of its own, so the
+    // engine is asked with the lock released.
+    std::vector<std::string> paths;
+    {
+        std::lock_guard<std::mutex> lock(m_parkedSceneCreateMutex);
+        if (m_parkedSceneCreates.empty()) return;
+        if (filesystem_settled) {
+            for (const auto& parked : m_parkedSceneCreates) paths.push_back(parked.scene_path);
+        }
+    }
+    std::set<std::string> indexed;
+    for (const auto& path : paths) {
+        const auto state = GodotBridge::instance().indexWrittenResource(path);
+        if (state.has_value() && state->registered) indexed.insert(path);
+    }
+    std::vector<ParkedSceneCreate> answered;
+    {
+        std::lock_guard<std::mutex> lock(m_parkedSceneCreateMutex);
+        const auto now = std::chrono::steady_clock::now();
+        for (auto it = m_parkedSceneCreates.begin(); it != m_parkedSceneCreates.end();) {
+            const bool is_indexed = indexed.count(it->scene_path) != 0;
+            if (is_indexed) {
+                it->response["uid_registered"] = true;
+                it->response.erase("uid_registration_deferred");
+                it->response.erase("limitation");
+            }
+            // Past the deadline it answers as it stands: saved, not indexed
+            // yet, and the deferred re-index carries on without it.
+            if (is_indexed || now >= it->deadline) {
+                answered.push_back(std::move(*it));
+                it = m_parkedSceneCreates.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
+    for (auto& parked : answered) {
+        parked.control->markCompleted();
+        fulfillCommand(parked.response_promise, parked.control, std::move(parked.response));
+    }
+}
+
 void EditorHook::processAssetReimportFrame() {
     std::optional<PendingAssetReimport> completed;
     json response;
@@ -1629,6 +1722,16 @@ void EditorHook::cancelPendingCommands(const std::string& reason) {
                                         {"data", {{"code", "live_session_ended"},
                                                   {"retryable", false}}}}}});
     }
+    // The scene was saved before it was parked, so its answer is still true.
+    std::vector<ParkedSceneCreate> parked;
+    {
+        std::lock_guard<std::mutex> lock(m_parkedSceneCreateMutex);
+        parked.swap(m_parkedSceneCreates);
+    }
+    for (auto& create : parked) {
+        create.control->markCompleted();
+        fulfillCommand(create.response_promise, create.control, std::move(create.response));
+    }
     std::optional<PendingAssetReimport> active_reimport;
     {
         std::lock_guard<std::recursive_mutex> lock(m_reimportMutex);
@@ -1995,6 +2098,24 @@ void EditorHookTestAccess::setProgressTaskOpen(EditorHook& hook, std::optional<b
 
 void EditorHookTestAccess::setEditorStarting(EditorHook& hook, std::optional<bool> starting) {
     hook.m_editorStartingOverride = starting;
+}
+
+void EditorHookTestAccess::setFilesystemSettling(EditorHook& hook, std::optional<bool> settling) {
+    hook.m_filesystemSettlingOverride = settling;
+}
+
+CommandTicket EditorHookTestAccess::parkSceneCreate(EditorHook& hook, const json& response,
+                                                    std::chrono::steady_clock::time_point deadline) {
+    auto promise = std::make_shared<std::promise<json>>();
+    auto future = promise->get_future();
+    auto control = std::make_shared<CommandControl>();
+    control->tryStart();
+    {
+        std::lock_guard<std::mutex> lock(hook.m_parkedSceneCreateMutex);
+        hook.m_parkedSceneCreates.push_back(EditorHook::ParkedSceneCreate{
+            response, response.value("scene_path", ""), deadline, promise, control});
+    }
+    return {std::move(future), std::move(promise), std::move(control)};
 }
 
 bool EditorHookTestAccess::hasPendingQuit(const EditorHook& hook) {
