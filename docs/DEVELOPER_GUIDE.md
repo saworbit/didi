@@ -140,7 +140,13 @@ diff a reviewer reads rather than a surprise a client finds
 - `offline.json`: `initialize`, `tools/list`, `resources/list`,
   `resources/templates/list` and `prompts/list` from a server with no engine.
   Entries are keyed by name, because the wire order is a hash map's and differs
-  between standard libraries.
+  between standard libraries. It also holds `server/discover`, what a stateless
+  `2026-07-28` `tools/list` changes about that listing (`null` when nothing
+  does), and the answers to the calls in `calls.json` with no engine, which is
+  where a first session often starts. A call whose offline answer depends on
+  the recording machine is listed under `offline_excluded` with the reason:
+  `script_check_syntax` and `shader_check_compile` run whichever Godot binary
+  the machine has.
 - `offline-core.json`: what `--tools core` changes about those listings. A tool
   the profile leaves out is one `<absent>` line.
 - `live-<line>.json`, one for each engine line in CI's matrix: what attaching an
@@ -149,7 +155,10 @@ diff a reviewer reads rather than a surprise a client finds
   in a headless editor with its own session directory and editor settings.
 - `calls.json`: the read-only calls, and every implemented read-only tool that
   is not called, with the reason. A call that should be refused carries
-  `"expect_error": true`; any other error fails the recording.
+  `"expect_error": true`; any other error fails the recording. A call marked
+  `"session": "game"` is answered by the fixture's main scene, run headless
+  after the editor's calls, so a game-session read such as `runtime_get_tree`
+  is recorded from a game rather than from the editor's own interface.
 
 Session ids, pids, the pipe endpoint, the build id, the server version,
 temporary paths, durations and timestamps become placeholders. The session id,
@@ -185,6 +194,16 @@ platforms, and each `live-<line>.json` in the Godot job for that line. A failed
 live check uploads what it recorded with the job's logs, so a contributor
 without Godot can read it or adopt it. A change to the fixture changes every
 live snapshot, so regenerate all three lines.
+
+The live snapshots are recorded on Windows only, and that is a decision rather
+than a gap (#1025). What an answer carries that differs by platform is paths
+and line endings: the recorder replaces every path it knows with a
+placeholder, the fixture is checked out with LF endings everywhere, and the
+offline answers, which go through the same server code, are checked on Linux
+and macOS as well. A Linux or macOS live job would add an editor per engine
+line per platform to every pull request to guard the engine's side of that.
+The macOS and Linux vibe workflow probes that side when someone runs it.
+Revisit this when an answer that differs by platform reaches a client.
 
 ### Tool list budgets and the core profile
 

@@ -51,6 +51,16 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Added
 
+- **The contract snapshots record four more shapes a client meets (#1025).**
+  `offline.json` now holds the answers to the call set with no engine, which
+  is where a first session often starts, `server/discover`, and what a
+  stateless `2026-07-28` `tools/list` changes about the listing. CI checks
+  them on all three build platforms. `runtime_get_tree` is recorded from the
+  fixture's main scene run headless, so a game-session read is in each live
+  snapshot. `script_check_syntax` and `shader_check_compile` stay out of the
+  offline answers, because they run whichever Godot the machine has. Live
+  snapshots stay Windows only; the Developer Guide says why.
+
 - **A research report on what Didi costs an agent in tokens (#1107).**
   [docs/research/TOKEN_EFFICIENCY_EXPLORATION.md](docs/research/TOKEN_EFFICIENCY_EXPLORATION.md)
   compares the tool list and answers with other ways of building a Godot

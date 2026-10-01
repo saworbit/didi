@@ -75,10 +75,17 @@ def call_set_problems(calls, read_only):
     for name, reason in sorted(excluded.items()):
         if not isinstance(reason, str) or len(reason.split()) < 6:
             problems.append(f"{name} is excluded without a reason")
+    for name, reason in sorted(calls.get("offline_excluded", {}).items()):
+        if name not in called:
+            problems.append(f"{name} is left out of the offline answers but is not called")
+        if not isinstance(reason, str) or len(reason.split()) < 6:
+            problems.append(f"{name} is left out of the offline answers without a reason")
     for call in calls.get("calls", []):
-        extra = set(call) - {"tool", "arguments", "expect_error"}
+        extra = set(call) - {"tool", "arguments", "expect_error", "session"}
         if extra:
             problems.append(f"a call to {call.get('tool')} has unknown keys: {', '.join(sorted(extra))}")
+        if call.get("session", "editor") not in contract.SESSIONS:
+            problems.append(f"a call to {call.get('tool')} names a session that is neither editor nor game")
     return problems
 
 
@@ -100,14 +107,19 @@ class CallSet(unittest.TestCase):
             {"tool": "reads", "arguments": {}},
             {"tool": "writes", "arguments": {}},
             {"tool": "both", "arguments": {}, "note": "?"},
-        ], "excluded": {"both": "a reason that is long enough to count", "terse": "no", "gone": "a reason that is long enough to count"}}
+            {"tool": "reads", "arguments": {}, "session": "server"},
+        ], "excluded": {"both": "a reason that is long enough to count", "terse": "no", "gone": "a reason that is long enough to count"},
+            "offline_excluded": {"absent": "a reason that is long enough to count", "reads": "no"}}
         self.assertEqual(call_set_problems(calls, {"reads", "both", "terse", "missing"}), [
             "missing is a read-only tool with neither a call nor an exclusion",
             "both is both called and excluded",
             "writes is called but is not an implemented read-only tool",
             "gone is excluded but is not an implemented read-only tool",
             "terse is excluded without a reason",
+            "absent is left out of the offline answers but is not called",
+            "reads is left out of the offline answers without a reason",
             "a call to both has unknown keys: note",
+            "a call to reads names a session that is neither editor nor game",
         ])
 
     def test_no_called_tool_mutates(self):
@@ -144,6 +156,15 @@ class LiveSnapshots(unittest.TestCase):
                 self.assertEqual(snapshot["schema"], contract.SCHEMA)
                 self.assertEqual([(c["tool"], c["arguments"]) for c in snapshot["calls"]], expected)
                 self.assertTrue(snapshot["engine"].startswith(line + "."))
+
+    def test_the_offline_snapshot_answers_the_call_set(self):
+        # The same calls with no engine, which is where a first session often
+        # starts (#1025).
+        expected = [(c["tool"], c.get("arguments", {})) for c in contract.offline_calls()]
+        snapshot = committed("offline.json")
+        self.assertEqual([(c["tool"], c["arguments"]) for c in snapshot["calls"]], expected)
+        self.assertIn("instructions", snapshot["server/discover"])
+        self.assertIn("tools/list", snapshot["stateless"])
 
     def test_live_snapshots_hold_no_identity(self):
         # A pid, a session id or a path that escaped the normaliser would fail

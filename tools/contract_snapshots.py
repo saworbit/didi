@@ -9,11 +9,15 @@ committed under ``tests/contract_snapshots``:
 * ``offline.json``: ``initialize``, ``tools/list``, ``resources/list``,
   ``resources/templates/list`` and ``prompts/list`` from a server with no
   engine. Every tool's schema, description, annotations and ``_meta`` is here.
+  So are ``server/discover``, what a stateless ``2026-07-28`` ``tools/list``
+  changes about the listing (``null`` when nothing), and the answers to the
+  calls in ``calls.json`` with no engine, but for ``offline_excluded``.
 * ``offline-core.json``: what ``--tools core`` changes about those listings.
 * ``live-<line>.json``, one per Godot line CI drives: the same listings once an
   editor is attached, stored as what differs from the offline ones, and the
   answers to the read-only calls in ``calls.json`` against
-  ``tests/contract_fixture``.
+  ``tests/contract_fixture``. A call marked ``"session": "game"`` is answered
+  by the fixture's main scene run headless, after the editor's calls.
 
 Values that change from run to run without the contract changing are replaced
 by placeholders. The session id, pipe endpoint, build id, server version and
@@ -68,6 +72,14 @@ SCHEMA = 1
 PROTOCOL_VERSION = "2025-06-18"
 CLIENT_INFO = {"name": "didi-contract-snapshots", "version": "1"}
 LISTINGS = ("tools/list", "resources/list", "resources/templates/list", "prompts/list")
+# A 2026-07-28 client sends no initialize and declares its era on every
+# request, and is served statelessly.
+MODERN_META = {
+    "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+    "io.modelcontextprotocol/clientCapabilities": {},
+}
+# The sessions a call in calls.json can run against.
+SESSIONS = ("editor", "game")
 
 # The marker left where a text block repeats structuredContent exactly. Storing
 # the copy would double every answer and every diff; when the two differ, the
@@ -258,11 +270,16 @@ class Identities:
         """A field whose value is an identity wherever it appears."""
         self.keyed[key] = placeholder
 
-    def session(self, descriptor: dict) -> None:
-        """The attached session's identities: its strings by value, its numbers by key."""
+    def session(self, descriptor: dict, prefix: str = "") -> None:
+        """An attached session's identities: its strings by value, its numbers by key.
+
+        `prefix` tells a second session's placeholders from the first's. The
+        build id is the same in both, so it keeps one placeholder.
+        """
         for key in ("session_id", "endpoint", "build_id"):
             if descriptor.get(key):
-                self.value(descriptor[key], f"<{key}>")
+                name = key if key == "build_id" else prefix + key
+                self.value(descriptor[key], f"<{name}>")
         for key in ("pid", "started_at_ms"):
             self.key(key, f"<{key}>")
 
@@ -378,6 +395,7 @@ class Workspace:
         self.appdata.mkdir()
         self.env = dict(os.environ, DIDI_SESSION_DIR=str(self.sessions))
         self.identities = Identities()
+        self.identities.path(self.sessions, "<sessions>")
         self.identities.path(self.project, "<project>")
         self.identities.path(self.root, "<work>")
         self.identities.path(binary.parent, "<build>")
@@ -410,22 +428,68 @@ def record_listings(binary: Path, workspace: Workspace, prefix: list[dict],
     return listings
 
 
-def record_offline(binary: Path, keep: bool = False, server_args: tuple[str, ...] = ()) -> dict:
-    """offline.json: what a server with no engine lists, normalised."""
+def record_offline(binary: Path, keep: bool = False, server_args: tuple[str, ...] = (),
+                   answers: bool = True) -> dict:
+    """offline.json: what a server with no engine lists, normalised.
+
+    With `answers`, also what it answers: server/discover, a stateless
+    2026-07-28 tools/list as what it changes about the listing above, and the
+    calls in calls.json, which a first session often makes before any editor
+    is running.
+    """
     workspace = Workspace(binary, keep)
     try:
         listings = record_listings(binary, workspace, [], server_args)
+        snapshot = {"schema": SCHEMA, **listings}
+        if answers:
+            first = 100
+            calls = offline_calls()
+            modern = {"_meta": MODERN_META}
+            replies = exchange(binary, workspace.project, workspace.env, [
+                request(1, "server/discover"),
+                request(2, "tools/list", modern),
+            ] + handshake() + [
+                tool_call(first + i, call["tool"], substitute(call.get("arguments", {}), workspace))
+                for i, call in enumerate(calls)
+            ], server_args)
+            snapshot["server/discover"] = result_of(replies[1], "server/discover")
+            snapshot["stateless"] = {
+                "tools/list": keyed_listing("tools/list", result_of(replies[2], "stateless tools/list")),
+            }
+            snapshot["calls"] = [answer(call, replies[first + i]) for i, call in enumerate(calls)]
         version = listings["initialize"].get("serverInfo", {}).get("version")
         if version:
             workspace.identities.value(version, "<version>")
-        return {"schema": SCHEMA, **workspace.identities.normalise(listings)}
+        snapshot = workspace.identities.normalise(snapshot)
+        if answers:
+            # Stored the way the live listings are: what the era changes.
+            snapshot["stateless"]["tools/list"] = overlay(
+                snapshot["tools/list"], snapshot["stateless"]["tools/list"])
+        return snapshot
     finally:
         workspace.close()
 
 
+def offline_calls(calls: dict | None = None) -> list[dict]:
+    """The calls answered with no engine: all of them but offline_excluded's."""
+    calls = calls if calls is not None else load_calls()
+    skipped = calls.get("offline_excluded", {})
+    return [call for call in calls["calls"] if call["tool"] not in skipped]
+
+
+def answer(call: dict, reply: dict) -> dict:
+    """One call and what it answered, as a snapshot stores it."""
+    recorded = {"tool": call["tool"], "arguments": call.get("arguments", {})}
+    if "error" in reply:
+        recorded["error"] = reply["error"]
+    else:
+        recorded["result"] = fold_text_copy(reply["result"])
+    return recorded
+
+
 def record_offline_core(binary: Path, offline: dict, keep: bool = False) -> dict:
     """offline-core.json: what --tools core changes about the offline listings."""
-    core = record_offline(binary, keep, ("--tools", "core"))
+    core = record_offline(binary, keep, ("--tools", "core"), answers=False)
     changes = {}
     for key in ("initialize", *LISTINGS):
         changed = overlay(offline[key], core[key])
@@ -434,24 +498,28 @@ def record_offline_core(binary: Path, offline: dict, keep: bool = False) -> dict
     return {"schema": SCHEMA, "compared_with": OFFLINE.name, "changes": changes}
 
 
-def wait_for_editor(binary: Path, workspace: Workspace, editor: subprocess.Popen) -> dict:
-    """The attached editor's session descriptor, once its scene is open."""
+def wait_for_session(binary: Path, workspace: Workspace, process: subprocess.Popen, kind: str) -> dict:
+    """The descriptor of the first live session of `kind` the process publishes."""
     deadline = time.monotonic() + READY_TIMEOUT_SECONDS
-    descriptor = None
-    while descriptor is None:
-        if editor.poll() is not None:
-            raise SnapshotError(f"The editor exited with {editor.returncode} before publishing a session.")
+    while True:
+        if process.poll() is not None:
+            raise SnapshotError(f"The {kind} exited with {process.returncode} before publishing a session.")
         if time.monotonic() > deadline:
-            raise SnapshotError(f"No editor session within {READY_TIMEOUT_SECONDS} s.")
+            raise SnapshotError(f"No {kind} session within {READY_TIMEOUT_SECONDS} s.")
         replies = exchange(binary, workspace.project, workspace.env, handshake() + [
             tool_call(1, "runtime_list_sessions", {"project_path": str(workspace.project)}),
         ])
         sessions = structured(replies[1], "runtime_list_sessions").get("sessions", [])
-        live = [s for s in sessions if s.get("kind") == "editor" and s.get("alive")]
+        live = [s for s in sessions if s.get("kind") == kind and s.get("alive")]
         if live:
-            descriptor = live[0]
-        else:
-            time.sleep(0.5)
+            return live[0]
+        time.sleep(0.5)
+
+
+def wait_for_editor(binary: Path, workspace: Workspace, editor: subprocess.Popen) -> dict:
+    """The attached editor's session descriptor, once its scene is open."""
+    deadline = time.monotonic() + READY_TIMEOUT_SECONDS
+    descriptor = wait_for_session(binary, workspace, editor, "editor")
     # A cold editor can answer before it can open a scene; the harness waits
     # the same way, through the authenticated bridge rather than a log line.
     scene = load_calls()["scene"]
@@ -544,19 +612,39 @@ def record_live(binary: Path, godot: Path, offline: dict, keep: bool = False) ->
         stdout=log, stderr=subprocess.STDOUT, env=env,
     )
     descriptor: dict = {}
+    game_descriptor: dict = {}
+    game = None
     first = 100
     try:
         try:
             descriptor = wait_for_editor(binary, workspace, editor)
             attach = tool_call(1, "runtime_attach_session", {"session_id": descriptor["session_id"]})
             listings = record_listings(binary, workspace, [attach])
-            messages = handshake() + [attach] + [
-                tool_call(first + i, call["tool"], substitute(call.get("arguments", {}), workspace))
-                for i, call in enumerate(calls["calls"])
-            ]
-            replies = exchange(binary, workspace.project, env, messages)
+
+            def calls_for(session: str) -> list[dict]:
+                return [
+                    tool_call(first + i, call["tool"], substitute(call.get("arguments", {}), workspace))
+                    for i, call in enumerate(calls["calls"]) if call.get("session", "editor") == session
+                ]
+
+            replies = exchange(binary, workspace.project, env, handshake() + [attach] + calls_for("editor"))
             structured(replies[1], "runtime_attach_session")
+            game_calls = calls_for("game")
+            if game_calls:
+                # The project's main scene, run headless from the copy the
+                # editor has just imported, which is what a game needs to
+                # publish a session.
+                game = subprocess.Popen(
+                    [str(godot), "--headless", "--path", str(workspace.project)],
+                    stdout=log, stderr=subprocess.STDOUT, env=env,
+                )
+                game_descriptor = wait_for_session(binary, workspace, game, "game")
+                attach_game = tool_call(2, "runtime_attach_session", {"session_id": game_descriptor["session_id"]})
+                replies.update(exchange(binary, workspace.project, env, handshake() + [attach_game] + game_calls))
+                structured(replies[2], "runtime_attach_session")
         finally:
+            if game is not None:
+                stop(game, game_descriptor.get("pid"))
             stop(editor, descriptor.get("pid"))
             log.close()
     except SnapshotError as error:
@@ -570,6 +658,8 @@ def record_live(binary: Path, godot: Path, offline: dict, keep: bool = False) ->
         ) from error
     identities = workspace.identities
     identities.session(descriptor)
+    if game_descriptor:
+        identities.session(game_descriptor, "game_")
     identities.path(godot, "<godot>")
     identities.path(godot.parent, "<godot_dir>")
     version_string = listings["initialize"].get("serverInfo", {}).get("version")
@@ -580,20 +670,15 @@ def record_live(binary: Path, godot: Path, offline: dict, keep: bool = False) ->
     answers = []
     for i, call in enumerate(calls["calls"]):
         reply = replies[first + i]
+        answers.append(answer(call, reply))
         if "error" in reply:
             problems.append(f"{call['tool']} failed at the protocol level: {json.dumps(reply['error'])}")
-            answers.append({"tool": call["tool"], "arguments": call.get("arguments", {}), "error": reply["error"]})
             continue
         result = reply["result"]
         if bool(result.get("isError")) != bool(call.get("expect_error")):
             text = result.get("content", [{}])[0].get("text", "")
             said = "answered with an error" if result.get("isError") else "succeeded, and calls.json expects an error"
             problems.append(f"{call['tool']} {json.dumps(call.get('arguments', {}))} {said}: {text[:400]}")
-        answers.append({
-            "tool": call["tool"],
-            "arguments": call.get("arguments", {}),
-            "result": fold_text_copy(result),
-        })
     if problems:
         # The editor's log is the first thing to read about an answer nobody expected.
         workspace.keep = True
