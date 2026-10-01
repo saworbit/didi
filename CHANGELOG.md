@@ -384,6 +384,16 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **editor_reload_project answers once the editor has applied a full scan
+  (#1114).** It asked for `scan_sources` and answered at once. `scan_sources`
+  compares folder times in whole seconds, so a folder made moments after the
+  last scan was missed in most rounds on every line, and the caller had no way
+  to tell its files were still unknown to the editor. It now runs `scan`,
+  which walks every folder, waits out a scan already running first, and
+  answers with `scan_applied: true` once the editor has applied its own. A scan
+  not applied within 12 seconds answers `504 editor_scanning` with
+  `scan_applied: false`; the scan carries on.
+
 - **A field trial's brief names the checkout and Godot it was given (#1105).**
   `TRIAL_BRIEF.md` said the repository was at `D:\didi` and Godot was 4.7.2,
   whatever `trial.py` handed the tester, so a run from another checkout or

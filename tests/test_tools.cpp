@@ -6544,6 +6544,50 @@ static void test_a_scan_is_settled_once_its_results_are_applied() {
     ASSERT_TRUE(scanSettled(own_scan, ScanSettleObservation{5, std::nullopt}));
 }
 
+static void test_a_project_reload_answers_once_its_own_scan_is_applied() {
+    // Break caught: editor_reload_project answered as soon as it had asked for
+    // scan_sources, which missed a folder made moments after the last scan in
+    // most rounds on every line, so the caller's files stayed unknown to the
+    // editor with nothing to say so (#1114). It asks for a full scan, and
+    // answers once the editor has applied one it started after the call came.
+    using didi::godot::ProjectScanStep;
+    using didi::godot::ProjectScanWait;
+    using didi::godot::ScanSettle;
+    using didi::godot::ScanSettleObservation;
+    using didi::godot::projectScanStep;
+
+    // An idle editor: scan at once, then wait for an emission naming another
+    // index than the one the scan replaces.
+    ProjectScanWait idle;
+    ASSERT_TRUE(projectScanStep(idle, false, false, ScanSettleObservation{4, 70}) == ProjectScanStep::Scan);
+    idle.own = ScanSettle{4, 70};
+    ASSERT_TRUE(projectScanStep(idle, true, false, ScanSettleObservation{4, 70}) == ProjectScanStep::Wait);
+    // Flag clear, results not applied yet.
+    ASSERT_TRUE(projectScanStep(idle, false, false, ScanSettleObservation{4, 70}) == ProjectScanStep::Wait);
+    // The work that applies them runs under a progress task, and its frames
+    // are not the place to answer from.
+    ASSERT_TRUE(projectScanStep(idle, false, true, ScanSettleObservation{5, 91}) == ProjectScanStep::Wait);
+    // An earlier scan's emission, made in the frames that apply it.
+    ASSERT_TRUE(projectScanStep(idle, false, false, ScanSettleObservation{5, 70}) == ProjectScanStep::Wait);
+    ASSERT_TRUE(projectScanStep(idle, false, false, ScanSettleObservation{6, 91}) == ProjectScanStep::Applied);
+
+    // The editor's own scan was running when the call came. It may have
+    // walked past the caller's folder already, so it is waited out and then
+    // the call asks for a scan of its own rather than answering on that one.
+    ProjectScanWait busy;
+    busy.prior = ScanSettle{4, std::nullopt};
+    ASSERT_TRUE(projectScanStep(busy, true, false, ScanSettleObservation{4, 70}) == ProjectScanStep::Wait);
+    ASSERT_TRUE(projectScanStep(busy, false, false, ScanSettleObservation{4, 70}) == ProjectScanStep::Wait);
+    ASSERT_TRUE(projectScanStep(busy, false, false, ScanSettleObservation{5, 91}) == ProjectScanStep::Scan);
+
+    // A project whose copy of the addon cannot count sources_changed leaves
+    // only the scanning flag to go by, as before the watch counted.
+    ProjectScanWait unwatched;
+    unwatched.own = ScanSettle{0, std::nullopt};
+    ASSERT_TRUE(projectScanStep(unwatched, true, false, ScanSettleObservation{}) == ProjectScanStep::Wait);
+    ASSERT_TRUE(projectScanStep(unwatched, false, false, ScanSettleObservation{}) == ProjectScanStep::Applied);
+}
+
 static void test_nothing_is_dequeued_inside_an_import_pass() {
     // Break caught: the editor's own import pass re-enters the main-loop
     // callback, and a command queued for Didi runs inside it (#914).
@@ -10038,6 +10082,8 @@ struct RegisterToolTests {
                      test_an_import_pass_is_open_from_one_signal_to_the_other);
         registerTest("EditorHook.ScanIsSettledOnceItsResultsAreApplied",
                      test_a_scan_is_settled_once_its_results_are_applied);
+        registerTest("EditorHook.ProjectReloadAnswersOnceItsOwnScanIsApplied",
+                     test_a_project_reload_answers_once_its_own_scan_is_applied);
         registerTest("EditorHook.NothingIsDequeuedInsideAnImportPass",
                      test_nothing_is_dequeued_inside_an_import_pass);
         registerTest("EditorHook.NothingIsDequeuedInsideAProgressTask",

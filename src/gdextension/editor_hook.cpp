@@ -254,6 +254,27 @@ void EditorHook::processQueue() {
                 scheduleAssetReimport(cmd.params, cmd.response_promise, cmd.control);
                 continue;
             }
+            if (cmd.method == "editor.reloadProject") {
+                // It answered as soon as it had asked for scan_sources, which
+                // missed a folder made moments after the last scan, so the
+                // caller could not tell its files were still unknown (#1114).
+                // It answers once the editor has applied a full scan, well
+                // inside the server's wait, counted from when it was queued.
+                constexpr auto kProjectScanAnswerBy = std::chrono::seconds(12);
+                auto wait = GodotBridge::instance().beginProjectScan();
+                if (wait.isErr()) {
+                    cmd.control->markCompleted();
+                    fulfillCommand(cmd.response_promise, cmd.control,
+                                   {{"error", {{"code", wait.error().code},
+                                                {"message", wait.error().message}}}});
+                    continue;
+                }
+                std::lock_guard<std::mutex> lock(m_projectScanMutex);
+                m_pendingProjectScans.push_back(PendingProjectScan{
+                    wait.value(), cmd.queued_at + kProjectScanAnswerBy, cmd.response_promise,
+                    cmd.control});
+                continue;
+            }
             if (cmd.method == "runtime.readProfiler") {
                 scheduleProfilerRead(cmd.params, cmd.response_promise, cmd.control);
                 continue;
@@ -350,6 +371,7 @@ void EditorHook::processQueue() {
     const bool filesystem_settled = !editorFilesystemSettling();
     if (filesystem_settled) GodotBridge::instance().processDeferredReindexFrame();
     processParkedSceneCreates(filesystem_settled);
+    processProjectScanFrame();
     processMainScreenCaptureFrame();
     processScriptCallFrame();
     processPendingQuitFrame();
@@ -1337,6 +1359,63 @@ void EditorHook::processParkedSceneCreates(bool filesystem_settled) {
     }
 }
 
+void EditorHook::processProjectScanFrame() {
+    // Asking for a scan can apply one inside the call, which runs frames, so
+    // the engine is asked with the lock released and the work held here.
+    std::vector<PendingProjectScan> pending;
+    {
+        std::lock_guard<std::mutex> lock(m_projectScanMutex);
+        if (m_pendingProjectScans.empty()) return;
+        pending.swap(m_pendingProjectScans);
+    }
+    auto& bridge = GodotBridge::instance();
+    const auto now = std::chrono::steady_clock::now();
+    std::vector<PendingProjectScan> waiting;
+    for (auto& scan : pending) {
+        json answer;
+        auto step = bridge.projectScanStepNow(scan.wait);
+        if (step.isOk() && step.value() == ProjectScanStep::Scan) {
+            auto started = bridge.startProjectScan(scan.wait);
+            step = started.isErr() ? Result<ProjectScanStep>(started.error())
+                                   : bridge.projectScanStepNow(scan.wait);
+        }
+        if (step.isErr()) {
+            answer = {{"error", {{"code", step.error().code}, {"message", step.error().message}}}};
+        } else if (step.value() == ProjectScanStep::Applied) {
+            answer = {{"status", "reloaded"},
+                      {"scan_applied", true},
+                      {"message", "The editor scanned every project folder and applied what it "
+                                  "found, so a file written behind it is listed now."},
+                      {"execution_mode", "live"},
+                      {"is_live_engine", true}};
+        } else if (now >= scan.deadline) {
+            // Nothing is lost: the scan carries on and the editor applies it
+            // later. outcome keeps the route open, since the engine answered.
+            auto scanning = bridge.isEditorFilesystemScanning();
+            answer = {{"error", {{"code", 504},
+                                  {"message", "The editor had not applied a scan of the project "
+                                              "when the answer was due, so a file written behind "
+                                              "it may still be unknown to it. The scan carries on; "
+                                              "call editor_reload_project again to wait for it."},
+                                  {"data", {{"code", "editor_scanning"},
+                                            {"outcome", "pending"},
+                                            {"scan_applied", false},
+                                            {"editor_scanning", scanning.isOk() && scanning.value()},
+                                            {"retryable", true},
+                                            {"retry_after_ms", 2000},
+                                            {"route_quarantine", false}}}}}};
+        } else {
+            waiting.push_back(std::move(scan));
+            continue;
+        }
+        scan.control->markCompleted();
+        fulfillCommand(scan.response_promise, scan.control, std::move(answer));
+    }
+    if (waiting.empty()) return;
+    std::lock_guard<std::mutex> lock(m_projectScanMutex);
+    for (auto& scan : waiting) m_pendingProjectScans.push_back(std::move(scan));
+}
+
 void EditorHook::processAssetReimportFrame() {
     std::optional<PendingAssetReimport> completed;
     json response;
@@ -1722,6 +1801,20 @@ void EditorHook::cancelPendingCommands(const std::string& reason) {
                                         {"data", {{"code", "live_session_ended"},
                                                   {"retryable", false}}}}}});
     }
+    std::vector<PendingProjectScan> project_scans;
+    {
+        std::lock_guard<std::mutex> lock(m_projectScanMutex);
+        project_scans.swap(m_pendingProjectScans);
+    }
+    for (auto& scan : project_scans) {
+        if (scan.control && scan.control->tryCancelRunning()) {
+            fulfillCommand(scan.response_promise, scan.control,
+                           {{"error", {{"code", 503},
+                                        {"message", reason},
+                                        {"data", {{"code", "live_session_ended"},
+                                                  {"retryable", false}}}}}});
+        }
+    }
     // The scene was saved before it was parked, so its answer is still true.
     std::vector<ParkedSceneCreate> parked;
     {
@@ -1840,7 +1933,7 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
         "editor.getState", "editor.getRecoveryState", "editor.getSelection", "scene.getHierarchy", "scene.instantiateNode",
         "scene.removeNode", "scene.reparentNode", "scene.setProperty",
         "scene.getProperty", "scene.duplicateNode", "editor.undo", "editor.redo",
-        "editor.saveScene", "editor.reloadProject", "script.attachToNode",
+        "editor.saveScene", "script.attachToNode",
         "script.detachFromNode", "project.listAutoloads", "project.setAutoload",
         "project.removeAutoload", "project.listInputActions", "project.setInputAction",
         "project.removeInputAction", "project.getSetting", "project.setSetting",

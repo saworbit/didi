@@ -225,6 +225,11 @@ private:
     // Answers each parked scene_create whose uid is now indexed, or whose
     // deadline has passed. Indexing is tried only once the scan is applied.
     void processParkedSceneCreates(bool filesystem_settled);
+    // Asks for each pending editor_reload_project's scan once the editor is
+    // free to start one, and answers it once the scan is applied or its
+    // deadline has passed. Only from a frame that is not nested, because the
+    // work that applies a scan runs frames of its own.
+    void processProjectScanFrame();
     // Runs a scene_call_method, and parks it when the method is a coroutine.
     // Returns false when the request is not one of these, so the caller runs
     // the ordinary synchronous path.
@@ -324,6 +329,15 @@ private:
         std::optional<ScanSettle> settle;
     };
 
+    // An editor_reload_project waiting for the editor to apply a scan it
+    // started after the call arrived (#1114).
+    struct PendingProjectScan {
+        ProjectScanWait wait;
+        std::chrono::steady_clock::time_point deadline;
+        std::shared_ptr<std::promise<json>> response_promise;
+        std::shared_ptr<CommandControl> control;
+    };
+
     // A scene_create whose uid the engine could not index yet. Its answer
     // waits for the index, up to a deadline, so a caller can create a scene
     // and then launch something that references it (#1004).
@@ -400,6 +414,8 @@ private:
     std::optional<ScanSettle> m_filesystemSettle;
     std::mutex m_parkedSceneCreateMutex;
     std::vector<ParkedSceneCreate> m_parkedSceneCreates;
+    std::mutex m_projectScanMutex;
+    std::vector<PendingProjectScan> m_pendingProjectScans;
     // Test seam for editorFilesystemSettling, which otherwise asks the engine.
     std::optional<bool> m_filesystemSettlingOverride;
     std::optional<int64_t> m_pendingQuitExitCode;

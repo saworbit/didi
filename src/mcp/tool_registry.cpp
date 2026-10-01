@@ -4958,7 +4958,7 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "editor_reload_project";
-        t.description = "Requests EditorFileSystem.scan_sources for the connected editor; this is not a full project restart, and it does not reload a resource the editor has already loaded.";
+        t.description = "Runs a full EditorFileSystem.scan in the connected editor and answers once the editor has applied it; this is not a project restart, and it does not reload a resource the editor has already loaded.";
         t.inputSchema = {{"type", "object"}};
         t.handler = [this](const json& args) { return handleEditorReloadProject(args, m_ipcClient); };
         registerTool(std::move(t));

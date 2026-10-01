@@ -125,6 +125,35 @@ struct ScanSettleObservation {
     return *seen.settled_index != *wait.replaced_index;
 }
 
+// What an editor_reload_project waits for (#1114). It asks for a full scan,
+// which walks every folder: scan_sources compares folder times in whole
+// seconds, and missed a folder made moments after the last scan in most
+// rounds on every line. A scan already running may have walked past a folder
+// written since, so the call waits that one out and then asks for its own.
+struct ProjectScanWait {
+    // Didi's own scan, once scan() has started one.
+    std::optional<ScanSettle> own;
+    // Work the editor had under way first: a running scan, or a finished one
+    // whose results are not applied yet, which makes scan() start nothing.
+    std::optional<ScanSettle> prior;
+};
+
+enum class ProjectScanStep { Wait, Scan, Applied };
+
+// What the frame loop does next for a pending editor_reload_project. Nothing
+// is asked or answered while the editor scans or has a progress task open,
+// since the work that applies a scan runs frames of its own.
+[[nodiscard]] inline ProjectScanStep projectScanStep(const ProjectScanWait& wait, bool scanning,
+                                                     bool progress_open,
+                                                     const ScanSettleObservation& seen) {
+    if (scanning || progress_open) return ProjectScanStep::Wait;
+    if (wait.own.has_value()) {
+        return scanSettled(*wait.own, seen) ? ProjectScanStep::Applied : ProjectScanStep::Wait;
+    }
+    if (wait.prior.has_value() && !scanSettled(*wait.prior, seen)) return ProjectScanStep::Wait;
+    return ProjectScanStep::Scan;
+}
+
 // What startAssetReimport did.
 struct ReimportStart {
     // reimport_files was not called, and the frame loop calls it once the
@@ -220,8 +249,8 @@ struct ReimportBatch {
     // unusable (#731).
     std::vector<std::string> refreshed;
     // Whether a full EditorFileSystem.scan is needed to find them. Set when any
-    // path has no sidecar: scan_sources looks at files the editor already knows
-    // about, and a file it has never seen is not one of those.
+    // path has no sidecar: update_file does not import a file the editor has
+    // never seen, and scan_sources can miss a folder made since the last scan.
     bool needs_scan{false};
 };
 
@@ -340,6 +369,15 @@ public:
     std::optional<ScanSettle> beginScanSettle();
     // Whether the scan work a wait began for is over.
     bool scanSettled(const ScanSettle& wait);
+    // An editor_reload_project's wait, begun now: for the scan already
+    // running first, when there is one.
+    Result<ProjectScanWait> beginProjectScan();
+    // projectScanStep, read off the engine.
+    Result<ProjectScanStep> projectScanStepNow(const ProjectScanWait& wait);
+    // Asks for a full scan and records in the wait what it started: a scan to
+    // wait for, or nothing because a finished scan is waiting to be applied,
+    // in which case the wait is for that apply and then another scan.
+    Result<void> startProjectScan(ProjectScanWait& wait);
     Result<bool> isEditorFilesystemScanning();
     // The editor's own import pass as this session can see it. Makes the
     // addon's watch the first time an editor session asks.

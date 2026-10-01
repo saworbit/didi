@@ -9,7 +9,7 @@ scanning flag cleared, which is before the editor applies what the scan found.
 
 A sandbox gets `--fillers` scripts and is imported, then a windowed editor opens
 it. Each round writes `--fresh` new scripts behind the editor, asks
-`editor_reload_project` for a scan (it returns at once), and creates three
+`editor_reload_project` for a scan (it returned at once before #1114), and creates three
 scenes straight away. For each scene it prints what scene_create answered,
 whether the scene's path was in `uid_cache.bin` when the answer arrived, which
 is what a game launched then would read, and how long it took to get there,
