@@ -87,7 +87,7 @@
       "witness": "The property the redone action set, through observed_witness.gd"
     },
     "editor_reload_project": {
-      "exempt": "Reloads the editor's project, which the live harness cannot continue past, so nothing drives it.",
+      "exempt": "Nothing in the live harness drives it: a scan in the middle of the run meets the files earlier blocks wrote behind the editor, and the engine prints errors about them on 4.5 and 4.6 (#1002). tools/vibe/probes/reload_project_new_folder.py compares scan_applied with the editor's index instead.",
       "issue": 1020
     },
     "editor_save_scene": {

@@ -557,7 +557,7 @@ out:
 
 | What happened before the editor's save | The added preset afterwards |
 | :--- | :--- |
-| A preset appended behind the editor's back, then `EditorFileSystem.scan_sources()`, which is what `editor_reload_project` runs | Gone. |
+| A preset appended behind the editor's back, then `EditorFileSystem.scan_sources()`, which is what `editor_reload_project` ran then | Gone. |
 | A preset appended, then an export platform registered | Kept. Registering or removing a platform is the one public event that makes the editor read the file again. |
 | A preset appended, then a bare `EditorExportPlatformExtension`, with no subclass and no name, added and removed in one frame through an `EditorPlugin` that is never in the tree | Kept, with no ERROR or WARNING line. |
 

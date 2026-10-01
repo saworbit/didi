@@ -2089,7 +2089,7 @@
           "openWorldHint": false,
           "readOnlyHint": false
         },
-        "description": "Requests EditorFileSystem.scan_sources for the connected editor; this is not a full project restart, and it does not reload a resource the editor has already loaded.",
+        "description": "Runs a full EditorFileSystem.scan in the connected editor and answers once the editor has applied it; this is not a project restart, and it does not reload a resource the editor has already loaded.",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {

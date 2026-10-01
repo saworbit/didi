@@ -4351,6 +4351,54 @@ bool GodotBridge::scanSettled(const ScanSettle& wait) {
         wait, ScanSettleObservation{importWatchCount("settled"), importWatchCount("settled_index")});
 }
 
+Result<ProjectScanWait> GodotBridge::beginProjectScan() {
+    auto scanning = isEditorFilesystemScanning();
+    if (scanning.isErr()) return scanning.error();
+    ProjectScanWait wait;
+    if (scanning.value()) wait.prior = beginScanSettle();
+    return wait;
+}
+
+Result<ProjectScanStep> GodotBridge::projectScanStepNow(const ProjectScanWait& wait) {
+    auto scanning = isEditorFilesystemScanning();
+    if (scanning.isErr()) return scanning.error();
+    return ::didi::godot::projectScanStep(
+        wait, scanning.value(), editorProgressOpen(),
+        ScanSettleObservation{importWatchCount("settled"), importWatchCount("settled_index")});
+}
+
+Result<void> GodotBridge::startProjectScan(ProjectScanWait& wait) {
+    auto editor = editorInterface();
+    if (editor.isErr()) return editor.error();
+    auto filesystem = callObject(editor.value(), "EditorInterface", "get_resource_filesystem", 780151678LL);
+    if (filesystem.isErr()) return filesystem.error();
+    auto object = objectFromVariant(filesystem.value());
+    if (object.isErr()) return object.error();
+    if (!object.value()) return Error::notConnected("EditorFileSystem is unavailable");
+    ensureImportWatch(filesystem.value());
+    // Read before the call: without threads the editor applies a scan inside
+    // it, and a scan builds a new index, so the emission that ends the wait is
+    // one made with another index.
+    const auto settled_before = importWatchCount("settled");
+    const auto index_before = importWatchCount("index_id");
+    auto scanned = callObject(object.value(), "EditorFileSystem", "scan", 3218959716LL);
+    if (scanned.isErr()) return scanned.error();
+    auto scanning = isEditorFilesystemScanning();
+    if (scanning.isErr()) return scanning.error();
+    const auto settled_after = importWatchCount("settled");
+    if (scanning.value() || !settled_before.has_value() ||
+        (settled_after.has_value() && *settled_after > *settled_before)) {
+        wait.own = ScanSettle{settled_before.value_or(0), index_before};
+        wait.prior.reset();
+        return Result<void>::ok();
+    }
+    // scan() started nothing and applied nothing. A finished scan still holds
+    // the thread a new one would run on until a later frame applies it, so the
+    // wait is for that, and then for a scan of Didi's own.
+    wait.prior = ScanSettle{settled_after.value_or(*settled_before), std::nullopt};
+    return Result<void>::ok();
+}
+
 Result<ReimportStart> GodotBridge::startAssetReimport(const ReimportBatch& batch) {
     auto editor = editorInterface();
     if (editor.isErr()) return editor.error();
@@ -4387,10 +4435,10 @@ Result<ReimportStart> GodotBridge::startAssetReimport(const ReimportBatch& batch
     // update_file does not import one: no .import is written, nothing appears
     // under .godot/imported, and the asset stays unusable while the call
     // reports it refreshed and idle (#731). scan() is the walk that finds new
-    // files and runs the importer over them; scan_sources, which
-    // editor_reload_project uses, only re-examines files already indexed. It is
-    // asynchronous and sets the scanning flag, which is the window the frame
-    // loop already waits on.
+    // files and runs the importer over them; scan_sources compares folder
+    // times in whole seconds and can miss a folder made since the last scan
+    // (#1114). It is asynchronous and sets the scanning flag, which is the
+    // window the frame loop already waits on.
     ReimportStart start;
     if (scan_needed) {
         // The index the scan will replace, read before it starts: without
@@ -14898,16 +14946,6 @@ json GodotBridge::execute(const std::string& method, const json& params,
                       "thumbnail, not about the scene.";
         }
         return liveResult(result);
-    }
-
-    if (method == "editor.reloadProject") {
-        auto filesystem = callObject(editor, "EditorInterface", "get_resource_filesystem", 780151678LL);
-        if (filesystem.isErr()) return errorJson(filesystem.error().code, filesystem.error().message);
-        auto object = objectFromVariant(filesystem.value());
-        if (object.isErr() || !object.value()) return errorJson(503, "EditorFileSystem is unavailable");
-        auto scan = callObject(object.value(), "EditorFileSystem", "scan_sources", 3218959716LL);
-        if (scan.isErr()) return errorJson(scan.error().code, scan.error().message);
-        return liveResult({{"status", "reloaded"}, {"message", "EditorFileSystem source scan requested"}});
     }
 
     return errorJson(501, "No trustworthy live implementation for method: " + method);
