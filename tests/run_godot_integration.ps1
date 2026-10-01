@@ -5862,6 +5862,7 @@ text = "Not a key"
         @{ Pattern = "Cannot save file 'res://main\.tscn'"; Cause = "request 207 saves a scene into a root that will not take a file" },
         @{ Pattern = 'Identifier "SignalProbeState" not declared|Failed to load script "res://signal_uses_autoload\.gd"|Failed parse script res://signal_uses_autoload\.gd'; Cause = "signal_uses_autoload.gd does not compile, on purpose, for target_script_not_compiled; a GDScript language server client re-parses it on connect" },
         @{ Pattern = "corrupt_asset\.png|IHDR: CRC error|ERR_FILE_CORRUPT"; Cause = "request 2700 imports a PNG with a wrong CRC on every chunk" },
+        @{ Pattern = 'Identifier "undeclared_name" not declared|Failed to load script "res://observed_broken\.gd"'; Cause = "the observed post-state block writes observed_broken.gd, which does not compile, on purpose, so script_create's has_errors cannot be a constant" },
         @{ Pattern = "didi_output_canary_warning"; Cause = "the runtime fixture prints a warning canary for runtime_read_output" },
         # Seen only on the software-rendered 4.5.1 runner, and there for any
         # scan the harness causes (#1002): a scene in a folder the editor does

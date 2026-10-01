@@ -4,7 +4,8 @@ Q2 in docs/BUILD_QUEUE.md. tests/observed_post_state.json has one entry for
 each tool the built server classifies as a mutation: either the answer fields
 that carry the state the tool read back after its write, which the live harness
 then compares with the engine, or an exemption with its reason and the issue
-that tracks it. The live harness makes the same coverage check on every engine
+that tracks it. An exemption marked permanent names no issue: its reason says
+why the tool claims no state to read back (#1020). The live harness makes the same coverage check on every engine
 line; this one runs on every build, so a new mutating tool with neither fails
 before any engine starts.
 """
@@ -55,11 +56,16 @@ def registry_problems(registry, mutating, cased_tools, witness_calls, witness_fu
             reason = entry["exempt"]
             if not isinstance(reason, str) or len(reason.split()) < 6:
                 problems.append(f"{name} is exempt without a reason")
-            if not isinstance(entry.get("issue"), int) or entry["issue"] <= 0:
+            permanent = entry.get("permanent") is True
+            if "permanent" in entry and not permanent:
+                problems.append(f"{name} has a permanent that is not true")
+            if permanent and "issue" in entry:
+                problems.append(f"{name} is exempt for good and still names an issue")
+            if not permanent and (not isinstance(entry.get("issue"), int) or entry["issue"] <= 0):
                 problems.append(f"{name} is exempt without the issue that tracks it")
             if name in cased_tools:
                 problems.append(f"{name} is exempt and has a case")
-            extra = set(entry) - {"exempt", "issue"}
+            extra = set(entry) - {"exempt", "issue", "permanent"}
         if extra:
             problems.append(f"{name} has unknown keys: {', '.join(sorted(extra))}")
     for tool in sorted(set(cased_tools) - set(tools)):
@@ -120,6 +126,9 @@ class ObservedPostStateRegistry(unittest.TestCase):
             "no_issue": {"exempt": "a reason that is long enough to count"},
             "no_reason": {"exempt": "", "issue": 5},
             "extra": {"exempt": "a reason that is long enough to count", "issue": 5, "note": "?"},
+            "for_good": {"exempt": "a reason that is long enough to count", "permanent": True},
+            "for_good_tracked": {"exempt": "a reason that is long enough to count", "permanent": True, "issue": 5},
+            "half_permanent": {"exempt": "a reason that is long enough to count", "permanent": False},
         }}
         problems = registry_problems(
             registry, list(registry["tools"]),
@@ -128,6 +137,9 @@ class ObservedPostStateRegistry(unittest.TestCase):
         self.assertEqual(problems, [
             "both must have exactly one of observed and exempt",
             "extra has unknown keys: note",
+            "for_good_tracked is exempt for good and still names an issue",
+            "half_permanent has a permanent that is not true",
+            "half_permanent is exempt without the issue that tracks it",
             "no_fields names no observed field",
             "no_issue is exempt without the issue that tracks it",
             "no_issue is exempt and has a case",

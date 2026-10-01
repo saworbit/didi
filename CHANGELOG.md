@@ -394,6 +394,24 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **scene_call_method and signal_emit are exempt for good from the observed
+  check (#1020).** Both run project code and claim no state after the call:
+  `returned`, `emitted` and `connection_count` describe the call. An exemption
+  can now be `"permanent": true` with its reason in place of an issue, and
+  `tests/test_observed_post_state.py` holds every other exemption to an issue.
+
+- **The observed post-state check sends inputs the engine stores differently
+  (#1022).** A tool that answered with its request would still have agreed
+  with the engine wherever the engine stores what it was sent, which was all
+  but one case. Seven new cases cross that: a node name already taken, a
+  second copy of one node, a move into a parent holding the same name, a
+  second animation library, a built-in setting at its default, a script that
+  does not compile and a loosely spelled export path. Making each of those
+  tools echo its request fails the harness on that case. Every other case
+  says why no such input exists. The `asset_configure_import` case names the
+  loop block it needs the OGG from, and fails there if that block did not
+  make it. Looking for inputs found #1125 and #1126.
+
 - **asset_reimport waits for a scan the editor started to be applied (#995).**
   A scan clears its scanning flag before the editor applies what it found,
   and an asset the editor already listed, named alone, was reimported in that
