@@ -326,10 +326,7 @@ function Get-ObservedPostStateCases {
            Agree = { param($s) Agree "defined_by_project" $s.call.defined_by_project $s.witness.returned } },
         # The file read back after the write, not the request (#1019). The
         # witness loads it past the editor's cache and reports the class the
-        # engine made from it. A type the engine cannot make is the input that
-        # crosses resource_type, and today it disagrees: the answer gives the
-        # header and the engine loads a MissingResource (#1125). It gets its
-        # case with that fix.
+        # engine made from it, or the class_name of the script it carries.
         @{ Tool = "resource_create"; Session = "editor"; Steps = @(
             (Step "call" "resource_create" @{ save_path = "res://observed_shape.tres"; resource_type = "CircleShape2D"; properties = @{ radius = 3 }; overwrite = $true }),
             (Witness "witness" "load_fresh" @("res://observed_shape.tres", @("radius"))),
@@ -337,6 +334,19 @@ function Get-ObservedPostStateCases {
            Agree = { param($s)
                Agree "resource_type" $s.call.resource_type $s.witness.returned.class
                Agree "file_bytes" $s.call.file_bytes $s.length.returned } },
+        # A class_name type, which the header cannot name: the engine makes a
+        # Resource carrying the script, and named in the header it loaded as a
+        # MissingResource while the answer named the class (#1125).
+        @{ Tool = "resource_create"; Session = "editor"; Steps = @(
+            (Step "script" "script_create" @{ script_path = "res://observed_item.gd"; source_text = "class_name ObservedItem`nextends Resource`n`n@export var power := 1`n" }),
+            (Step "call" "resource_create" @{ save_path = "res://observed_item.tres"; resource_type = "ObservedItem"; properties = @{ power = 5 } }),
+            (Witness "witness" "load_fresh" @("res://observed_item.tres", @("power"))),
+            (Witness "length" "file_length" @("res://observed_item.tres")))
+           Agree = { param($s)
+               Agree "resource_type" $s.call.resource_type $(if ($s.witness.returned.script_class) { $s.witness.returned.script_class } else { $s.witness.returned.class })
+               Agree "engine_type" $s.call.engine_type $s.witness.returned.class
+               Agree "file_bytes" $s.call.file_bytes $s.length.returned
+               Agree "properties.power" 5 $s.witness.returned.properties.power } },
         # uid and uid_registered are the engine's; the request names neither.
         @{ Tool = "scene_pack_branch"; Session = "editor"; Steps = @(
             (Step "call" "scene_pack_branch" @{ target_node = "$observedRoot/Subject"; scene_path = "res://observed_packed.tscn" }),

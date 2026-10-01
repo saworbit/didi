@@ -5223,6 +5223,9 @@ static void test_resource_create_allow_unknown_type_records_the_engine_gap() {
     const auto report = didi::json::parse(written.content[0].text);
     ASSERT_EQ(report["property_check"]["checked"], true);
     ASSERT_EQ(report["property_check"]["type_unknown_to_attached_engine"], true);
+    // The type the header names is one the engine cannot make, so the answer
+    // says what it will load instead of naming the type alone (#1125).
+    ASSERT_TRUE(report["limitation"].get<std::string>().find("MissingResource") != std::string::npos);
 }
 
 static void test_resource_create_asks_the_engine_about_sub_resource_types_too() {

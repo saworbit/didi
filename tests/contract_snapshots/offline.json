@@ -7406,7 +7406,7 @@
           "properties": {
             "allow_unknown_type": {
               "default": false,
-              "description": "Write a resource_type neither the attached engine nor the shipped class reference lists. Off by default, because Godot cannot load a resource whose type it does not know and a misspelling is the common case. Turn it on for a type that comes from a class_name script, which neither list can see. A GDExtension type is in the attached engine's ClassDB and needs no flag while a session is attached. The result then reports property_check as unchecked, because there is nothing to check against, or type_unknown_to_attached_engine when the engine answered and does not have the type.",
+              "description": "Write a resource_type that no engine list and no project class_name names. Off by default, because Godot cannot load a resource whose type it does not know and a misspelling is the common case. Turn it on for a GDExtension type with no session attached; an attached engine's ClassDB already lists one. The result then reports property_check as unchecked, or type_unknown_to_attached_engine and a limitation when the engine answered and does not have the type.",
               "type": "boolean"
             },
             "confirmation_token": {
@@ -7457,7 +7457,7 @@
             },
             "resource_type": {
               "default": "StandardMaterial3D",
-              "description": "The Godot class to write into the [gd_resource] header, such as CanvasItemMaterial. A name the engine does not have is refused, because Godot cannot load a resource whose type it does not know. With a session attached that is the attached engine's own ClassDB, which is not the pinned reference: the reference is 4.7 and a 4.5.1 engine has 65 fewer classes. Pass allow_unknown_type for a class_name script or a GDExtension type.",
+              "description": "The Godot class to write into the [gd_resource] header, such as CanvasItemMaterial, or a project script's class_name, written as its engine base with the script set. A name neither the engine nor a script has is refused, because Godot cannot load a resource whose type it does not know. With a session attached that is the attached engine's own ClassDB, not the pinned 4.7 reference, which has 65 classes 4.5.1 lacks. Pass allow_unknown_type for a GDExtension type.",
               "type": "string"
             },
             "save_path": {
