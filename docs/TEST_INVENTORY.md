@@ -10,14 +10,14 @@ Every number here is derived from the suites themselves rather than written down
 
 | Measure | Count |
 | --- | ---: |
-| Automated tests | **1521** |
-| Live-harness assertions | 1424 |
+| Automated tests | **1534** |
+| Live-harness assertions | 1449 |
 
 The badge in the [README](../README.md) shows the automated test total. Harness assertions are counted separately because they are assertions inside one live scenario, not independently runnable cases; adding them together would flatter the number.
 
 ## Native C++ suite (`didi_tests`)
 
-**968 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
+**981 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
 
 | Suite | Tests |
 | --- | ---: |
@@ -60,6 +60,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `ProcessRunner` | 2 |
 | `ProjectSearch` | 17 |
 | `Prompts` | 1 |
+| `PropertyPaths` | 13 |
 | `RefusalRemedies` | 9 |
 | `RepeatedFailures` | 5 |
 | `ResourceIndexer` | 13 |
@@ -143,7 +144,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 
 ## Live Godot harness (`tests/*.ps1`)
 
-**1424 assertions.** Derived from `Assert-True` call sites. The harness is one long live scenario rather than a set of named cases, so this counts assertions and says so.
+**1449 assertions.** Derived from `Assert-True` call sites. The harness is one long live scenario rather than a set of named cases, so this counts assertions and says so.
 
 | File | Assertions |
 | --- | ---: |
@@ -154,6 +155,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `refusal_remedies.ps1` | 3 |
 | `run_godot_integration.ps1` | 1374 |
 | `scene_tab_reload.ps1` | 26 |
+| `typed_object_layer.ps1` | 25 |
 
 ## What is not counted here
 

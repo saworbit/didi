@@ -9170,22 +9170,24 @@ static void test_a_wrong_required_name_reports_both_halves() {
     auto& registry = didi::mcp::ToolRegistry::instance();
     registry.registerAllDefaultTools();
 
+    // scene_call_method, because it requires two names. scene_get_property was
+    // the example until a batch made its single form optional (Q7).
     const auto both = registry.callTool(
-        "scene_get_property", didi::json{{"node_path", "/root"}, {"property", "name"}});
+        "scene_call_method", didi::json{{"node_path", "/root"}, {"method", "name"}});
     ASSERT_TRUE(both.isError);
     const auto message =
         didi::json::parse(both.content[0].text)["error"]["message"].get<std::string>();
     // The mistake, the fix, and the whole parameter set, in one round trip.
     ASSERT_TRUE(message.find("'target_node'") != std::string::npos);
-    ASSERT_TRUE(message.find("'property_name'") != std::string::npos);
+    ASSERT_TRUE(message.find("'method_name'") != std::string::npos);
     ASSERT_TRUE(message.find("'node_path'") != std::string::npos);
-    ASSERT_TRUE(message.find("'property'") != std::string::npos);
+    ASSERT_TRUE(message.find("'method'") != std::string::npos);
     ASSERT_TRUE(message.find("This tool accepts:") != std::string::npos);
 
     // Each half alone still reads as it did, rather than naming an empty set.
     const auto only_unknown = registry.callTool(
-        "scene_get_property",
-        didi::json{{"target_node", "/root"}, {"property_name", "name"}, {"bogus", 1}});
+        "scene_call_method",
+        didi::json{{"target_node", "/root"}, {"method_name", "name"}, {"bogus", 1}});
     ASSERT_TRUE(only_unknown.isError);
     const auto unknown_message =
         didi::json::parse(only_unknown.content[0].text)["error"]["message"].get<std::string>();
@@ -9193,11 +9195,11 @@ static void test_a_wrong_required_name_reports_both_halves() {
     ASSERT_TRUE(unknown_message.find("Missing") == std::string::npos);
 
     const auto only_missing = registry.callTool(
-        "scene_get_property", didi::json{{"target_node", "/root"}});
+        "scene_call_method", didi::json{{"target_node", "/root"}});
     ASSERT_TRUE(only_missing.isError);
     const auto missing_message =
         didi::json::parse(only_missing.content[0].text)["error"]["message"].get<std::string>();
-    ASSERT_TRUE(missing_message.find("Missing required argument 'property_name'.") !=
+    ASSERT_TRUE(missing_message.find("Missing required argument 'method_name'.") !=
                 std::string::npos);
     ASSERT_TRUE(missing_message.find("Unknown") == std::string::npos);
 

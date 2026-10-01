@@ -303,7 +303,7 @@ coordination as the thing that blocked it. See
 
 **Exit gate:** The argument-type check, the post-state conformance test, the snapshots and both budgets run in required CI jobs. A field trial on the reduced tool list loses no capability its task needed. The live harness undoes a journaled mutation and confirms the engine state.
 
-## Phase 14: Reach and Proof (`PLANNED`)
+## Phase 14: Reach and Proof (`IN PROGRESS`)
 
 **Objective:** Let an agent reach any property or method the Inspector can, and prove a behaviour in one call, without arbitrary code execution: a typed, undoable object layer, a scenario runner and test runner, and performance verdicts. Build Queue items Q7, Q9 and Q16.
 

@@ -2,6 +2,7 @@
 #include "didi/gdextension/gdextension_api.hpp"
 #include "didi/gdextension/editor_hook.hpp"
 #include "didi/gdextension/expression_sandbox.hpp"
+#include "didi/gdextension/property_paths.hpp"
 #include "didi/gdextension/runtime_bridge.hpp"
 #include "didi/gdextension/viewport_renderer.hpp"
 #include "didi/common/logger.hpp"
@@ -94,6 +95,23 @@ const std::map<std::string, std::string>& bridgeErrorSentences() {
      "The editor's copy of this library is not what the file now holds."},
     {"animation_library_slot",
      "An AnimationPlayer's libraries are not set as a property."},
+    {"property_path_invalid",
+     "The property path is not one Godot can resolve."},
+    {"property_not_found",
+     "No property by that name is on the object the path reached."},
+    {"property_slot_empty",
+     "The path steps into a property that holds nothing."},
+    {"property_path_not_resource",
+     "The path steps into something that is not a resource."},
+    {"property_type_unsupported",
+     "The property holds a type this tool cannot spell in JSON."},
+    {"property_write_excluded",
+     "A property write does not make this change."},
+    {"subresource_not_saved",
+     "The write would change a resource the edited scene's save does not keep, so it would "
+     "read back as applied and then be lost."},
+    {"batch_writes_overlap",
+     "Two writes in the batch overlap, so one undo step could not restore both."},
     {"animation_library_postcondition_mismatch",
      "The player did not hold the library after the change was committed."},
     {"animation_library_reload_failed",
@@ -2818,16 +2836,12 @@ std::optional<json> previewMutationPreconditions(GDExtensionObjectPtr root, GDEx
         }
         return std::nullopt;
     }
-    if (tool == "scene_set_property" || tool == "scene_add_to_group" ||
-        tool == "scene_remove_from_group" || tool == "script_attach_to_node" ||
-        tool == "script_detach_from_node") {
+    // scene_set_property is not here: a dry run of it runs the write's whole
+    // check, in getSceneProperties.
+    if (tool == "scene_add_to_group" || tool == "scene_remove_from_group" ||
+        tool == "script_attach_to_node" || tool == "script_detach_from_node") {
         if (auto refused = refuseUnsavableEdit(root, node, described_path, SceneEdit::Property)) {
             return refused;
-        }
-        if (tool == "scene_set_property") {
-            if (auto property = string_argument("property_name")) {
-                if (auto refused = refuseAnimationLibrarySlot(node, *property)) return refused;
-            }
         }
         if (tool == "script_attach_to_node") {
             if (auto script_path = string_argument("script_path")) {
@@ -3626,6 +3640,569 @@ json liveSceneMutation(json fields) {
         "This change is in the editor's open scene and its undo history, not on disk. Call "
         "editor_save_scene to persist it; closing the editor without saving discards it.";
     return liveResult(fields);
+}
+
+// --- The typed object layer (Q7) --------------------------------------------
+//
+// scene_get_property and scene_set_property reach a property by path, in the
+// grammar Godot's own get_indexed and set_indexed take, and take a batch. What
+// can be decided from strings is in property_paths.cpp; this is the half that
+// asks the engine.
+
+// A bridgeError, carried as an Error so it can travel through a Result.
+Error bridgeRefusal(int code, const std::string& identifier, json data, const std::string& detail) {
+    auto composed = bridgeError(code, identifier, std::move(data), detail);
+    return Error(code, composed["error"]["message"].get<std::string>(), composed["error"]["data"]);
+}
+
+// The other direction, for the refusal helpers that answer with a response.
+Error errorOfResponse(const json& response) {
+    const auto& error = response["error"];
+    return Error(error.value("code", 500), error.value("message", std::string()),
+                 error.contains("data") ? error["data"] : json());
+}
+
+json responseOfError(const Error& error) {
+    return error.data.is_object() ? errorJson(error.code, error.message, error.data)
+                                  : errorJson(error.code, error.message);
+}
+
+// The names an object shows in the inspector, which are the ones worth
+// offering a caller whose step named nothing. Groups and categories are rows
+// in the same list and are not properties.
+std::vector<std::string> inspectorPropertyNames(GDExtensionObjectPtr object) {
+    std::vector<std::string> names;
+    auto properties = callObject(object, "Object", "get_property_list", 3995934104LL);
+    if (properties.isErr()) return names;
+    auto size_value = callVariant(properties.value(), "size");
+    if (size_value.isErr()) return names;
+    auto size = scalarFromVariant<int64_t>(size_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+    auto name_key = makeString("name");
+    auto usage_key = makeString("usage");
+    if (size.isErr() || name_key.isErr() || usage_key.isErr()) return names;
+    // PROPERTY_USAGE_EDITOR, and GROUP, CATEGORY and SUBGROUP, the same on
+    // every supported line.
+    constexpr int64_t kEditor = 4;
+    constexpr int64_t kHeadings = 64 | 128 | 256;
+    for (int64_t i = 0; i < size.value(); ++i) {
+        auto index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, i);
+        if (index.isErr()) break;
+        auto entry = callVariant(properties.value(), "get", {&index.value()});
+        if (entry.isErr()) continue;
+        auto usage_value = callVariant(entry.value(), "get", {&usage_key.value()});
+        if (usage_value.isErr()) continue;
+        auto usage = scalarFromVariant<int64_t>(usage_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+        if (usage.isErr() || (usage.value() & kEditor) == 0 || (usage.value() & kHeadings) != 0) {
+            continue;
+        }
+        auto name_value = callVariant(entry.value(), "get", {&name_key.value()});
+        if (name_value.isErr()) continue;
+        const auto type = GodotApi::instance().variant_get_type(name_value.value().ptr());
+        if (type != GDEXTENSION_VARIANT_TYPE_STRING && type != GDEXTENSION_VARIANT_TYPE_STRING_NAME) {
+            continue;
+        }
+        auto name = stringFromVariant(name_value.value(), type);
+        if (name.isOk() && !name.value().empty()) names.push_back(name.value());
+    }
+    return names;
+}
+
+std::string resourcePathOf(GDExtensionObjectPtr resource) {
+    auto name = makeStringName("resource_path");
+    if (name.isErr()) return {};
+    auto value = callObject(resource, "Object", "get", 2760726917LL, {&name.value()});
+    if (value.isErr()) return {};
+    auto text = stringFromVariant(value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+    return text.isOk() ? text.value() : std::string();
+}
+
+std::string joinSteps(const std::vector<std::string>& steps, size_t count) {
+    std::string joined;
+    for (size_t index = 0; index < count && index < steps.size(); ++index) {
+        if (index > 0) joined += ':';
+        joined += steps[index];
+    }
+    return joined;
+}
+
+// A property reached by path: the object that owns its last step, and what
+// that object's class declares about it.
+struct ResolvedProperty {
+    GDExtensionObjectPtr holder{nullptr};
+    std::string leaf;
+    std::vector<std::string> steps;
+    PropertyDescriptor descriptor;
+    // Where a change to the holder is kept when the scene is saved. Always
+    // the edited scene for a property of the node itself.
+    ResourceHomeVerdict home;
+};
+
+// Walks a path one step at a time, each step checked against the object it is
+// on. get_indexed and set_indexed answer null and do nothing for a step that
+// names nothing, on every supported line, so the engine is never handed a path
+// this has not resolved.
+//
+// A path steps only into resources. A property that holds a node would hand a
+// write to a different node than target_node names, past the ownership check
+// that node would get, and a value such as a Vector2 has members ClassDB does
+// not describe.
+Result<ResolvedProperty> resolvePropertyPath(GDExtensionObjectPtr node, const std::string& path,
+                                             const std::string& edited_scene) {
+    const auto parsed = parsePropertyPath(path);
+    if (!parsed.problem.empty()) {
+        return bridgeRefusal(400, "property_path_invalid", {{"property_name", path}}, parsed.problem);
+    }
+    ResolvedProperty resolved;
+    resolved.steps = parsed.steps;
+    GDExtensionObjectPtr holder = node;
+    for (size_t index = 0; index < resolved.steps.size(); ++index) {
+        const auto& step = resolved.steps[index];
+        auto descriptor = findPropertyDescriptor(holder, step);
+        if (descriptor.isErr()) return descriptor.error();
+        if (!descriptor.value().has_value()) {
+            json data = {{"property_name", path},
+                         {"candidates", propertyNameCandidates(step, inspectorPropertyNames(holder), 24)}};
+            // The first step keeps the sentence a missing property always had.
+            if (index == 0) {
+                data["code"] = "property_not_found";
+                data["retryable"] = false;
+                return Error(404, "Property not found on target node: " + step, std::move(data));
+            }
+            const auto holder_class = nodeClassName(holder);
+            data["holder_class"] = holder_class;
+            return bridgeRefusal(404, "property_not_found", std::move(data),
+                                 "The " + (holder_class.empty() ? std::string("resource") : holder_class) +
+                                     " at " + joinSteps(resolved.steps, index) + " has no property " +
+                                     step + "; candidates lists the ones it does have.");
+        }
+        if (index + 1 == resolved.steps.size()) {
+            resolved.holder = holder;
+            resolved.leaf = step;
+            resolved.descriptor = *descriptor.value();
+            break;
+        }
+        const auto prefix = joinSteps(resolved.steps, index + 1);
+        auto name = makeStringName(step);
+        if (name.isErr()) return name.error();
+        auto value = callObject(holder, "Object", "get", 2760726917LL, {&name.value()});
+        if (value.isErr()) return value.error();
+        const auto type = GodotApi::instance().variant_get_type(value.value().ptr());
+        if (type == GDEXTENSION_VARIANT_TYPE_NIL) {
+            return bridgeRefusal(404, "property_slot_empty", {{"property_name", path}, {"step", prefix}},
+                                 prefix + " holds nothing, so there is nothing inside it to reach. "
+                                 "Set it to a resource first.");
+        }
+        if (type != GDEXTENSION_VARIANT_TYPE_OBJECT) {
+            return bridgeRefusal(400, "property_path_not_resource",
+                                 {{"property_name", path}, {"step", prefix}},
+                                 prefix + " holds a " + godotVariantTypeName(static_cast<int>(type)) +
+                                     ", and a path steps only into a resource. Write the whole value "
+                                     "with property_name " + prefix + ".");
+        }
+        auto object = objectFromVariant(value.value());
+        if (object.isErr()) return object.error();
+        if (!object.value()) {
+            return bridgeRefusal(404, "property_slot_empty", {{"property_name", path}, {"step", prefix}},
+                                 prefix + " holds nothing, so there is nothing inside it to reach. "
+                                 "Set it to a resource first.");
+        }
+        auto is_resource = objectIsClass(object.value(), "Resource");
+        if (is_resource.isErr()) return is_resource.error();
+        if (!is_resource.value()) {
+            return bridgeRefusal(400, "property_path_not_resource",
+                                 {{"property_name", path}, {"step", prefix}},
+                                 prefix + " holds a " + nodeClassName(object.value()) +
+                                     ", and a path steps only into a resource. A node is named by "
+                                     "target_node.");
+        }
+        holder = object.value();
+        // The last resource the path enters is the one the write changes, so
+        // its file is the one the save has to keep.
+        resolved.home = resourceHome(resourcePathOf(holder), edited_scene);
+    }
+    return std::move(resolved);
+}
+
+// One property's answer to a read: its value, and what its class declares
+// about it. `type` is the declared type, which is what a write is checked
+// against; a Variant-typed property says what it holds instead.
+Result<json> describeProperty(const ResolvedProperty& resolved, const std::string& path,
+                              VariantValue& value) {
+    const auto held = GodotApi::instance().variant_get_type(value.ptr());
+    int type = resolved.descriptor.declared_type;
+    if (type == GDEXTENSION_VARIANT_TYPE_NIL) type = held;
+    auto encoded = variantToJson(value);
+    if (encoded.isErr()) {
+        return bridgeRefusal(400, "property_type_unsupported",
+                             {{"property_name", path}, {"type", godotVariantTypeName(type)}},
+                             path + " is a " + godotVariantTypeName(type) +
+                                 ", which this tool has no JSON form for yet.");
+    }
+    json entry = {{"value", std::move(encoded.value())},
+                  {"type", type == GDEXTENSION_VARIANT_TYPE_NIL ? std::string("Variant")
+                                                                 : godotVariantTypeName(type)}};
+    if (auto constraint = declaredConstraint(resolved.descriptor.hint, resolved.descriptor.hint_string)) {
+        entry["engine_constraint"] = std::move(*constraint);
+    }
+    if (held == GDEXTENSION_VARIANT_TYPE_OBJECT) {
+        auto object = objectFromVariant(value);
+        if (object.isOk() && object.value()) {
+            const auto held_class = nodeClassName(object.value());
+            if (!held_class.empty()) entry["holds"] = held_class;
+        }
+    }
+    if (resolved.home.home != ResourceHome::EditedScene) entry["resource_file"] = resolved.home.file;
+    return std::move(entry);
+}
+
+// Everything a write needs, checked and built before anything is applied.
+struct PreparedWrite {
+    std::string target_path;
+    std::string property;
+    GDExtensionObjectPtr node{nullptr};
+    ResolvedProperty resolved;
+    json requested;
+    VariantValue old_value;
+    VariantValue new_value;
+};
+
+// Every check the write makes, short of making it. A dry run runs this too,
+// so a preview fails where the write would.
+Result<PreparedWrite> prepareWrite(GDExtensionObjectPtr root, const std::string& edited_scene,
+                                   const json& item) {
+    PreparedWrite write;
+    write.target_path = item.value("target_node", "");
+    write.property = item.value("property_name", "");
+    if (write.property.empty()) return Error::invalidArgument("property_name is required");
+    if (!item.contains("value")) return Error::invalidArgument("value is required");
+    auto node = resolveNode(root, write.target_path);
+    if (node.isErr()) return node.error();
+    write.node = node.value();
+    if (auto refused = refuseUnsavableEdit(root, write.node, write.target_path, SceneEdit::Property)) {
+        return errorOfResponse(*refused);
+    }
+    // Before the path is resolved, as it always was: on 4.7 a player lists no
+    // `libraries` property, so the lookup would answer 404 and hide the
+    // refusal that names the tool to use.
+    if (auto refused = refuseAnimationLibrarySlot(write.node,
+                                                  write.property.substr(0, write.property.find(':')))) {
+        return errorOfResponse(*refused);
+    }
+    const auto excluded = [&](const std::string& property, bool on_node) -> std::optional<Error> {
+        auto reason = excludedPropertyWrite(property, on_node);
+        if (!reason) return std::nullopt;
+        json data = {{"property_name", write.property}};
+        const auto tool = toolForExcludedWrite(property);
+        if (!tool.empty()) data["use_tool"] = tool;
+        return bridgeRefusal(400, "property_write_excluded", std::move(data), *reason);
+    };
+    // A property of the node is refused by name before it is looked up, so the
+    // refusal never depends on what the lookup finds. Godot lists owner and
+    // scene_file_path with no usage flags at all (0 on 4.5.1 and 4.7.2), which
+    // is why the inspector never shows them and no candidate list offers them.
+    if (write.property.find(':') == std::string::npos) {
+        if (auto refused = excluded(write.property, true)) return *refused;
+    }
+    auto resolved = resolvePropertyPath(write.node, write.property, edited_scene);
+    if (resolved.isErr()) return resolved.error();
+    write.resolved = std::move(resolved.value());
+    if (write.resolved.steps.size() > 1) {
+        if (auto refused = excluded(write.resolved.leaf, false)) return *refused;
+    }
+    const auto& home = write.resolved.home;
+    if (home.home == ResourceHome::OtherScene || home.home == ResourceHome::NotSaved) {
+        const auto holder = joinSteps(write.resolved.steps, write.resolved.steps.size() - 1);
+        std::string detail = holder + " on " + write.target_path + " is kept in " + home.file;
+        detail += home.home == ResourceHome::OtherScene
+            ? ", a scene this one instances or inherits, and a save of the edited scene keeps no "
+              "change to it. Open " + home.file + " and make the change there."
+            : ", which the editor does not save from a scene, so the change would last only until "
+              "the editor next loads that file.";
+        return bridgeRefusal(409, "subresource_not_saved",
+                             {{"property_name", write.property}, {"resource_file", home.file}}, detail);
+    }
+    auto leaf = makeStringName(write.resolved.leaf);
+    if (leaf.isErr()) return leaf.error();
+    auto old_value = callObject(write.resolved.holder, "Object", "get", 2760726917LL, {&leaf.value()});
+    if (old_value.isErr()) return old_value.error();
+    // An empty resource slot holds nil, so the current value cannot say what
+    // the slot is for. The class's own declaration can.
+    auto property_type = GodotApi::instance().variant_get_type(old_value.value().ptr());
+    if (property_type == GDEXTENSION_VARIANT_TYPE_NIL &&
+        write.resolved.descriptor.declared_type != GDEXTENSION_VARIANT_TYPE_NIL) {
+        property_type = static_cast<GDExtensionVariantType>(write.resolved.descriptor.declared_type);
+    }
+    const auto& value = item["value"];
+    auto compatible = validateJsonForPropertyType(write.property, value, property_type);
+    if (compatible.isErr()) return compatible.error();
+    auto new_value = property_type == GDEXTENSION_VARIANT_TYPE_OBJECT
+        ? makeResourceForProperty(write.property, value, write.resolved.descriptor.class_name)
+        : makeJsonVariantForProperty(value, property_type);
+    if (new_value.isErr()) return new_value.error();
+    write.requested = value;
+    write.old_value = std::move(old_value.value());
+    write.new_value = std::move(new_value.value());
+    return std::move(write);
+}
+
+// The writes one call asks for, prepared, or the first refusal. A batch names
+// the item at fault, in the message and in data.index, and points at writes,
+// because that is the argument the caller changes.
+constexpr size_t kMaxBatchItems = 64;
+
+Error inBatch(Error error, const char* key, size_t index) {
+    error.message += " (" + std::string(key) + "[" + std::to_string(index) + "])";
+    if (!error.data.is_object()) error.data = json::object();
+    error.data["index"] = index;
+    error.data["field"] = key;
+    return error;
+}
+
+Result<std::vector<PreparedWrite>> prepareWrites(GDExtensionObjectPtr root,
+                                                 const std::string& edited_scene,
+                                                 const json& arguments, bool& batch) {
+    std::vector<PreparedWrite> writes;
+    batch = arguments.is_object() && arguments.contains("writes");
+    if (!batch) {
+        auto write = prepareWrite(root, edited_scene, arguments);
+        if (write.isErr()) return write.error();
+        writes.push_back(std::move(write.value()));
+        return std::move(writes);
+    }
+    const auto& items = arguments["writes"];
+    if (arguments.contains("target_node") || arguments.contains("property_name") ||
+        arguments.contains("value")) {
+        return Error(400, "Send one write as target_node, property_name and value, or several as "
+                          "writes, not both.", {{"field", "writes"}});
+    }
+    if (!items.is_array() || items.empty() || items.size() > kMaxBatchItems) {
+        return Error(400, "writes must be an array of 1 to " + std::to_string(kMaxBatchItems) +
+                          " objects, each with target_node, property_name and value.",
+                     {{"field", "writes"}});
+    }
+    std::vector<BatchTarget> targets;
+    for (size_t index = 0; index < items.size(); ++index) {
+        const auto& item = items[index];
+        if (!item.is_object() || !hasOnlyKeys(item, {"target_node", "property_name", "value"}) ||
+            !item.contains("target_node") || !item["target_node"].is_string() ||
+            !item.contains("property_name") || !item["property_name"].is_string()) {
+            return inBatch(Error(400, "Each write is an object with exactly target_node, "
+                                      "property_name and value."),
+                           "writes", index);
+        }
+        auto write = prepareWrite(root, edited_scene, item);
+        if (write.isErr()) return inBatch(write.error(), "writes", index);
+        targets.push_back({std::to_string(reinterpret_cast<uintptr_t>(write.value().node)),
+                           write.value().resolved.steps});
+        writes.push_back(std::move(write.value()));
+    }
+    if (const auto overlap = overlappingWrites(targets)) {
+        const auto first = std::to_string(overlap->first);
+        const auto second = std::to_string(overlap->second);
+        return bridgeRefusal(400, "batch_writes_overlap",
+                             {{"index", overlap->second}, {"overlaps", overlap->first}, {"field", "writes"}},
+                             "writes[" + first + "] and writes[" + second + "] change the same "
+                             "property, or one inside the other. Send them as two calls, outer "
+                             "property first.");
+    }
+    return std::move(writes);
+}
+
+// Adds one prepared write to the open action. A property of the node itself is
+// recorded the way it always was. A path goes through set_indexed on the node:
+// measured on 4.5.1, 4.6.2 and 4.7.2, an action holding several of those, on
+// more than one node, undoes and redoes as a single step, and every operation
+// stays in the edited scene's history whichever file the resource it reaches
+// is kept in.
+Result<void> recordWrite(GDExtensionObjectPtr manager, PreparedWrite& write) {
+    if (write.resolved.steps.size() == 1) {
+        auto object_value = makeObject(write.node);
+        if (object_value.isErr()) return object_value.error();
+        auto name = makeStringName(write.resolved.leaf);
+        if (name.isErr()) return name.error();
+        auto done = callObject(manager, "EditorUndoRedoManager", "add_do_property", 1017172818LL,
+                               {&object_value.value(), &name.value(), &write.new_value});
+        if (done.isErr()) return done.error();
+        auto undone = callObject(manager, "EditorUndoRedoManager", "add_undo_property", 1017172818LL,
+                                 {&object_value.value(), &name.value(), &write.old_value});
+        if (undone.isErr()) return undone.error();
+        return Result<void>::ok();
+    }
+    auto path = makeNodePath(write.property);
+    if (path.isErr()) return path.error();
+    auto done = managerMethod(manager, "add_do_method", write.node, "set_indexed",
+                              {&path.value(), &write.new_value});
+    if (done.isErr()) return done.error();
+    return managerMethod(manager, "add_undo_method", write.node, "set_indexed",
+                         {&path.value(), &write.old_value});
+}
+
+// What a write left behind, read back from the object it changed.
+//
+// Report what the property now holds, not what was asked for. A commit that
+// succeeds is not a property that changed: Godot discards some writes
+// outright, `anchors_preset` on a Control still in layout_mode 0 being the case
+// that found this, and echoing the request back reported success for a scene
+// that had not moved. Same shape as vision.setCameraTransform, which returns
+// observed state rather than the values it was handed.
+Result<json> observeWrite(PreparedWrite& write) {
+    auto leaf = makeStringName(write.resolved.leaf);
+    if (leaf.isErr()) return leaf.error();
+    auto observed = callObject(write.resolved.holder, "Object", "get", 2760726917LL, {&leaf.value()});
+    if (observed.isErr()) return observed.error();
+    auto observed_json = variantToJson(observed.value());
+    if (observed_json.isErr()) return observed_json.error();
+    auto old_json = variantToJson(write.old_value);
+    if (old_json.isErr()) return old_json.error();
+    // Against the Variant that was actually sent, not the JSON it was built
+    // from. A Color written as {r,g,b} -- the spelling the instructions
+    // document -- comes back with four keys, and comparing four observed
+    // against three requested reported a write that landed perfectly as one
+    // that did not. #638 fixed exactly this for shader_set_uniform.
+    auto requested_json = variantToJson(write.new_value, 0, true);
+    const json& requested_payload = requested_json.isOk() ? requested_json.value() : write.requested;
+    const bool applied = jsonValuesEquivalent(observed_json.value(), requested_payload);
+    json result = {{"target_node", write.target_path}, {"property_name", write.property},
+                   {"value", observed_json.value()}, {"requested_value", write.requested},
+                   {"old_value", old_json.value()}, {"applied", applied}};
+    // Only on the path that needs it. A write that landed says so in one key
+    // and costs nothing extra, which is the whole reason this is a block
+    // rather than three more keys on every response (#776).
+    if (!applied) {
+        result["not_applied"] = notAppliedReport(observed_json.value(), old_json.value(),
+                                                 write.resolved.descriptor.hint,
+                                                 write.resolved.descriptor.hint_string);
+    }
+    // A resource kept in its own file is rewritten when the scene is saved,
+    // and every scene that uses it sees the change. Measured on all three
+    // lines; the inspector does the same, and says so by showing the path.
+    if (write.resolved.home.home == ResourceHome::ResourceFile) {
+        result["resource_file"] = write.resolved.home.file;
+    }
+    return std::move(result);
+}
+
+// scene.setProperty: one write, or a batch committed as one UndoRedo action.
+json setSceneProperties(GDExtensionObjectPtr editor, GDExtensionObjectPtr root, const json& params) {
+    bool batch = false;
+    auto prepared = prepareWrites(root, editedScenePath(root), params, batch);
+    if (prepared.isErr()) return responseOfError(prepared.error());
+    auto& writes = prepared.value();
+    auto manager = undoManager(editor);
+    if (manager.isErr()) return errorJson(manager.error().code, manager.error().message);
+    auto preflight = preflightUndoManagerBindings();
+    if (preflight.isErr()) return errorJson(preflight.error().code, preflight.error().message);
+    // A batch is recorded against the scene root, which puts the action in the
+    // edited scene's history whichever node comes first.
+    auto action = batch
+        ? createAction(manager.value(), "Didi: set " + std::to_string(writes.size()) + " properties",
+                       root)
+        : createAction(manager.value(), "Didi: set " + writes.front().property, writes.front().node);
+    if (action.isErr()) return errorJson(action.error().code, action.error().message);
+    for (auto& write : writes) {
+        auto recorded = recordWrite(manager.value(), write);
+        if (recorded.isErr()) {
+            abandonAction(manager.value());
+            return errorJson(recorded.error().code, recorded.error().message);
+        }
+    }
+    auto committed = commitAction(manager.value());
+    if (committed.isErr()) return errorJson(committed.error().code, committed.error().message);
+
+    json results = json::array();
+    bool all_applied = true;
+    for (auto& write : writes) {
+        auto observed = observeWrite(write);
+        if (observed.isErr()) return errorJson(observed.error().code, observed.error().message);
+        all_applied = all_applied && observed.value().value("applied", false);
+        results.push_back(std::move(observed.value()));
+    }
+    json result = {{"status", "success"}};
+    if (batch) {
+        result["writes"] = std::move(results);
+        result["applied"] = all_applied;
+    } else {
+        for (auto& [key, field] : results.front().items()) result[key] = std::move(field);
+    }
+    result["undo_redo_registered"] = true;
+    return liveSceneMutation(std::move(result));
+}
+
+// scene.getProperty: one read, or a batch. A dry run of scene_set_property
+// reads its targets through here and names itself in `mutation`, so the
+// write's own checks run first: everything the real call refuses on, short of
+// applying it (#571).
+json getSceneProperties(GDExtensionObjectPtr root, const json& params) {
+    const auto edited_scene = editedScenePath(root);
+    const bool batch = params.contains("reads");
+    if (params.contains("mutation")) {
+        const auto& mutation = params["mutation"];
+        if (mutation.is_object() && mutation.value("tool", "") == "scene_set_property") {
+            bool write_batch = false;
+            auto prepared = prepareWrites(root, edited_scene, mutation.value("arguments", json::object()),
+                                          write_batch);
+            if (prepared.isErr()) return responseOfError(prepared.error());
+        } else if (!batch) {
+            auto node = resolveNode(root, params.value("target_node", ""));
+            if (node.isErr()) return errorJson(node.error().code, node.error().message);
+            if (auto refused = previewMutationPreconditions(root, node.value(),
+                                                            params.value("target_node", ""), mutation)) {
+                return *refused;
+            }
+        }
+    }
+    json items = json::array();
+    if (batch) {
+        if (params.contains("target_node") || params.contains("property_name")) {
+            return errorJson(400, "Send one read as target_node and property_name, or several as "
+                                  "reads, not both.", {{"field", "reads"}});
+        }
+        const auto& reads = params["reads"];
+        if (!reads.is_array() || reads.empty() || reads.size() > kMaxBatchItems) {
+            return errorJson(400, "reads must be an array of 1 to " + std::to_string(kMaxBatchItems) +
+                                  " objects, each with target_node and property_name.",
+                             {{"field", "reads"}});
+        }
+        items = reads;
+    } else {
+        items.push_back({{"target_node", params.value("target_node", "")},
+                         {"property_name", params.value("property_name", "")}});
+    }
+    json answers = json::array();
+    for (size_t index = 0; index < items.size(); ++index) {
+        const auto& item = items[index];
+        const auto fail = [&](Error error) {
+            return responseOfError(batch ? inBatch(std::move(error), "reads", index) : std::move(error));
+        };
+        if (!item.is_object() || !hasOnlyKeys(item, {"target_node", "property_name"}) ||
+            !item.contains("target_node") || !item["target_node"].is_string() ||
+            !item.contains("property_name") || !item["property_name"].is_string()) {
+            return fail(Error(400, "Each read is an object with exactly target_node and property_name."));
+        }
+        const auto target = item["target_node"].get<std::string>();
+        const auto property = item["property_name"].get<std::string>();
+        if (property.empty()) return fail(Error::invalidArgument("property_name is required"));
+        auto node = resolveNode(root, target);
+        if (node.isErr()) return fail(node.error());
+        auto resolved = resolvePropertyPath(node.value(), property, edited_scene);
+        if (resolved.isErr()) return fail(resolved.error());
+        auto leaf = makeStringName(resolved.value().leaf);
+        if (leaf.isErr()) return fail(leaf.error());
+        auto value = callObject(resolved.value().holder, "Object", "get", 2760726917LL, {&leaf.value()});
+        if (value.isErr()) return fail(value.error());
+        auto described = describeProperty(resolved.value(), property, value.value());
+        if (described.isErr()) return fail(described.error());
+        json answer = {{"target_node", target}, {"property_name", property}};
+        for (auto& [key, field] : described.value().items()) answer[key] = std::move(field);
+        answers.push_back(std::move(answer));
+    }
+    json result = {{"status", "success"}};
+    if (batch) {
+        result["reads"] = std::move(answers);
+    } else {
+        for (auto& [key, field] : answers.front().items()) result[key] = std::move(field);
+    }
+    return liveResult(result);
 }
 
 // Whether EditorInterface.get_unsaved_scenes exists on this engine, asked once.
@@ -14141,116 +14718,8 @@ json GodotBridge::execute(const std::string& method, const json& params,
     if (method == "scene.getProperty" || method == "scene.setProperty") {
         auto root = editedSceneRoot(editor);
         if (root.isErr()) return errorJson(root.error().code, root.error().message);
-        auto node = resolveNode(root.value(), params.value("target_node", ""));
-        if (node.isErr()) return errorJson(node.error().code, node.error().message);
-        if (method == "scene.setProperty") {
-            if (auto refused = refuseUnsavableEdit(root.value(), node.value(),
-                                                   params.value("target_node", ""),
-                                                   SceneEdit::Property)) {
-                return *refused;
-            }
-            if (auto refused = refuseAnimationLibrarySlot(node.value(),
-                                                          params.value("property_name", ""))) {
-                return *refused;
-            }
-        } else if (params.contains("mutation")) {
-            // The preview probe reads its target through this method, and
-            // names the mutation it is previewing so that call's own
-            // preconditions run here before the read.
-            if (auto refused = previewMutationPreconditions(root.value(), node.value(),
-                                                            params.value("target_node", ""),
-                                                            params["mutation"])) {
-                return *refused;
-            }
-        }
-        std::string property = params.value("property_name", "");
-        if (property.empty()) return errorJson(400, "property_name is required");
-        auto descriptor = findPropertyDescriptor(node.value(), property);
-        if (descriptor.isErr()) return errorJson(descriptor.error().code, descriptor.error().message);
-        if (!descriptor.value().has_value()) {
-            return errorJson(404, "Property not found on target node: " + property);
-        }
-        auto property_name = makeStringName(property);
-        if (property_name.isErr()) return errorJson(property_name.error().code, property_name.error().message);
-        auto old_value = callObject(node.value(), "Object", "get", 2760726917LL, {&property_name.value()});
-        if (old_value.isErr()) return errorJson(old_value.error().code, old_value.error().message);
-        if (method == "scene.getProperty") {
-            auto value = variantToJson(old_value.value());
-            if (value.isErr()) return errorJson(value.error().code, value.error().message);
-            return liveResult({{"status", "success"}, {"target_node", params.value("target_node", "")},
-                               {"property_name", property}, {"value", value.value()}});
-        }
-        if (!params.contains("value")) return errorJson(400, "value is required");
-        // An empty resource slot holds nil, so the current value cannot say what
-        // the slot is for. The class's own declaration can, and it is the same
-        // answer for a slot that is full.
-        auto property_type = GodotApi::instance().variant_get_type(old_value.value().ptr());
-        if (property_type == GDEXTENSION_VARIANT_TYPE_NIL &&
-            descriptor.value()->declared_type != GDEXTENSION_VARIANT_TYPE_NIL) {
-            property_type = static_cast<GDExtensionVariantType>(descriptor.value()->declared_type);
-        }
-        auto compatible = validateJsonForPropertyType(property, params["value"], property_type);
-        if (compatible.isErr()) return errorJson(compatible.error().code, compatible.error().message);
-        auto new_value = property_type == GDEXTENSION_VARIANT_TYPE_OBJECT
-            ? makeResourceForProperty(property, params["value"], descriptor.value()->class_name)
-            : makeJsonVariantForProperty(params["value"], property_type);
-        if (new_value.isErr()) return errorJson(new_value.error().code, new_value.error().message);
-        auto manager = undoManager(editor);
-        if (manager.isErr()) return errorJson(manager.error().code, manager.error().message);
-        auto object_value = makeObject(node.value());
-        if (object_value.isErr()) return errorJson(object_value.error().code, object_value.error().message);
-        auto preflight = preflightUndoManagerBindings();
-        if (preflight.isErr()) return errorJson(preflight.error().code, preflight.error().message);
-        auto action = createAction(manager.value(), "Didi: set " + property, node.value());
-        if (action.isErr()) return errorJson(action.error().code, action.error().message);
-        auto do_property = callObject(manager.value(), "EditorUndoRedoManager", "add_do_property", 1017172818LL,
-                                      {&object_value.value(), &property_name.value(), &new_value.value()});
-        auto undo_property = callObject(manager.value(), "EditorUndoRedoManager", "add_undo_property", 1017172818LL,
-                                        {&object_value.value(), &property_name.value(), &old_value.value()});
-        if (do_property.isErr()) return errorJson(do_property.error().code, do_property.error().message);
-        if (undo_property.isErr()) return errorJson(undo_property.error().code, undo_property.error().message);
-        auto committed = commitAction(manager.value());
-        if (committed.isErr()) return errorJson(committed.error().code, committed.error().message);
-
-        // Report what the property now holds, not what was asked for. A commit
-        // that succeeds is not a property that changed: Godot discards some
-        // writes outright, `anchors_preset` on a Control still in layout_mode 0
-        // being the case that found this, and echoing the request back reported
-        // success for a scene that had not moved. The caller has no other way
-        // to see the difference. Same shape as vision.setCameraTransform, which
-        // returns observed state rather than the values it was handed.
-        auto observed = callObject(node.value(), "Object", "get", 2760726917LL, {&property_name.value()});
-        if (observed.isErr()) return errorJson(observed.error().code, observed.error().message);
-        auto requested_json = variantToJson(new_value.value(), 0, true);
-        const json& requested_payload =
-            requested_json.isOk() ? requested_json.value() : params["value"];
-        auto observed_json = variantToJson(observed.value());
-        if (observed_json.isErr()) return errorJson(observed_json.error().code, observed_json.error().message);
-        auto old_json = variantToJson(old_value.value());
-        if (old_json.isErr()) return errorJson(old_json.error().code, old_json.error().message);
-        const bool applied = jsonValuesEquivalent(observed_json.value(), requested_payload);
-        json result = {{"status", "success"}, {"target_node", params.value("target_node", "")},
-                       {"property_name", property}, {"value", observed_json.value()},
-                       {"requested_value", params["value"]}, {"old_value", old_json.value()},
-                       // Against the Variant that was actually sent, not the
-                       // JSON it was built from. A Color written as {r,g,b} --
-                       // the spelling the instructions document -- comes back
-                       // with four keys, and comparing four observed against
-                       // three requested reported a write that landed
-                       // perfectly as one that did not. #638 fixed exactly
-                       // this for shader_set_uniform and this call site kept
-                       // the raw argument.
-                       {"applied", applied},
-                       {"undo_redo_registered", true}};
-        // Only on the path that needs it. A write that landed says so in one
-        // key and costs nothing extra, which is the whole reason this is a
-        // block rather than three more keys on every response (#776).
-        if (!applied) {
-            result["not_applied"] = notAppliedReport(observed_json.value(), old_json.value(),
-                                                     descriptor.value()->hint,
-                                                     descriptor.value()->hint_string);
-        }
-        return liveSceneMutation(std::move(result));
+        return method == "scene.setProperty" ? setSceneProperties(editor, root.value(), params)
+                                             : getSceneProperties(root.value(), params);
     }
 
     if (method == "scene.instantiateNode") {

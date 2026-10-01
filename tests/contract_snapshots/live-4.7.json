@@ -325,6 +325,10 @@
         "isError": false,
         "resultType": "complete",
         "structuredContent": {
+          "engine_constraint": {
+            "hint_string": "-99999,99999,or_less,or_greater,hide_control,suffix:px",
+            "kind": "range"
+          },
           "execution_mode": "live",
           "is_live_engine": true,
           "property_name": "position",
@@ -342,6 +346,7 @@
           },
           "status": "success",
           "target_node": "Player",
+          "type": "Vector2",
           "value": {
             "x": 64.0,
             "y": 32.0
@@ -382,6 +387,7 @@
           },
           "status": "success",
           "target_node": "HUD/Title",
+          "type": "String",
           "value": "Contract fixture"
         }
       },
@@ -419,7 +425,87 @@
           },
           "status": "success",
           "target_node": "Player",
+          "type": "float",
           "value": 120.0
+        }
+      },
+      "tool": "scene_get_property"
+    },
+    {
+      "arguments": {
+        "reads": [
+          {
+            "property_name": "material:shader_parameter/strength",
+            "target_node": "HUD/Tint"
+          },
+          {
+            "property_name": "theme_override_styles/normal:bg_color",
+            "target_node": "HUD/Start"
+          },
+          {
+            "property_name": "shape:size",
+            "target_node": "Player/Body"
+          }
+        ]
+      },
+      "result": {
+        "content": [
+          {
+            "text": "<the text of structuredContent>",
+            "type": "text"
+          }
+        ],
+        "isError": false,
+        "resultType": "complete",
+        "structuredContent": {
+          "execution_mode": "live",
+          "is_live_engine": true,
+          "reads": [
+            {
+              "engine_constraint": {
+                "hint_string": "0.0,1.0,0.0010000000475",
+                "kind": "range"
+              },
+              "property_name": "material:shader_parameter/strength",
+              "target_node": "HUD/Tint",
+              "type": "float",
+              "value": 0.25
+            },
+            {
+              "property_name": "theme_override_styles/normal:bg_color",
+              "resource_file": "res://content/panel_style.tres",
+              "target_node": "HUD/Start",
+              "type": "Color",
+              "value": {
+                "a": 1.0,
+                "b": 0.4000000059604645,
+                "g": 0.30000001192092896,
+                "r": 0.20000000298023224
+              }
+            },
+            {
+              "property_name": "shape:size",
+              "target_node": "Player/Body",
+              "type": "Vector2",
+              "value": {
+                "x": 16.0,
+                "y": 24.0
+              }
+            }
+          ],
+          "session": {
+            "build_id": "<build_id>",
+            "endpoint": "<endpoint>",
+            "engine_version": "Godot Engine v4.7.2.stable.official",
+            "kind": "editor",
+            "pid": "<pid>",
+            "project_path": "<project>",
+            "protocol_version": "1.3",
+            "schema_version": 1,
+            "session_id": "<session_id>",
+            "started_at_ms": "<started_at_ms>"
+          },
+          "status": "success"
         }
       },
       "tool": "scene_get_property"

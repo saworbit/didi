@@ -9,6 +9,7 @@
     {"tool": "scene_get_property", "arguments": {"target_node": "Player", "property_name": "position"}},
     {"tool": "scene_get_property", "arguments": {"target_node": "HUD/Title", "property_name": "text"}},
     {"tool": "scene_get_property", "arguments": {"target_node": "Player", "property_name": "speed"}},
+    {"tool": "scene_get_property", "arguments": {"reads": [{"target_node": "HUD/Tint", "property_name": "material:shader_parameter/strength"}, {"target_node": "HUD/Start", "property_name": "theme_override_styles/normal:bg_color"}, {"target_node": "Player/Body", "property_name": "shape:size"}]}},
     {"tool": "scene_get_selection", "arguments": {}},
     {"tool": "scene_list_groups", "arguments": {"target_node": "Player"}},
     {"tool": "scene_get_group_members", "arguments": {"group": "enemies"}},

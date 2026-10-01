@@ -572,6 +572,36 @@ const std::map<std::string, Rule>& rules() {
             return nextCall("anim_add_library", json::object(),
                             "Libraries are added to a player, not set as a property.");
         }},
+        // The typed object layer (Q7). A batch refusal carries field: writes
+        // or reads from the site, so these only answer for a single call.
+        {"property_path_invalid", [](const Refusal&) { return field("property_name"); }},
+        {"property_not_found", [](const Refusal&) { return field("property_name"); }},
+        {"property_path_not_resource", [](const Refusal&) { return field("property_name"); }},
+        {"property_slot_empty", [](const Refusal&) {
+            return nextCall("scene_set_property", json::object(),
+                            "Put a resource in the empty slot first, then write inside it.");
+        }},
+        {"property_type_unsupported", [](const Refusal&) {
+            return noRemedy("Values of this type have no JSON form on this surface yet.");
+        }},
+        {"property_write_excluded", [](const Refusal& r) {
+            const auto tool = text(r.data, "use_tool");
+            if (!tool.empty()) {
+                return nextCall(tool, json::object(), "This tool makes that change properly.");
+            }
+            return noRemedy("No property write makes this change; it is a file operation.");
+        }},
+        {"subresource_not_saved", [](const Refusal& r) {
+            const auto file = text(r.data, "resource_file");
+            if (file.size() > 5 && (file.substr(file.size() - 5) == ".tscn" ||
+                                    file.substr(file.size() - 4) == ".scn")) {
+                return nextCall("scene_open", {{"scene_path", file}},
+                                "The resource is kept in that scene, so change it there.");
+            }
+            return noRemedy("The editor does not save that file from a scene; change the asset "
+                            "itself, or give the node a resource of its own.");
+        }},
+        {"batch_writes_overlap", [](const Refusal&) { return field("writes"); }},
         {"animation_library_unloadable", [](const Refusal&) { return field("library_path"); }},
         {"not_an_animation_library", [](const Refusal&) { return field("library_path"); }},
         {"library_path_case_mismatch", [](const Refusal&) { return field("library_path"); }},

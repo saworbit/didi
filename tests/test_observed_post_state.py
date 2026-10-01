@@ -51,7 +51,11 @@ def registry_problems(registry, mutating, cased_tools, witness_calls, witness_fu
                 problems.append(f"{name} does not say what the engine is read through")
             if name not in cased_tools:
                 problems.append(f"{name} has observed fields and no case compares them with the engine")
-            extra = set(entry) - {"observed", "witness"}
+            # A tool that also answers a batch names the list its per-item
+            # answers are in, and each item carries the observed fields (Q7).
+            if "batch" in entry and (not isinstance(entry["batch"], str) or not entry["batch"]):
+                problems.append(f"{name} names its batch with something that is not a field name")
+            extra = set(entry) - {"observed", "witness", "batch"}
         else:
             reason = entry["exempt"]
             if not isinstance(reason, str) or len(reason.split()) < 6:

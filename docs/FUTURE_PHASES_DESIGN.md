@@ -398,7 +398,7 @@ above, two were delivered by later work and one remains open; see the note there
 
 ## Phase 14: Reach and Proof
 
-**Status:** `PLANNED`
+**Status:** `IN PROGRESS`
 
 **Goal:** Let an agent reach any property or method the Inspector can, and prove a behaviour in one call, without arbitrary code execution. See [Design Principles](DESIGN_PRINCIPLES.md) P6 and P7.
 

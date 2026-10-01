@@ -51,6 +51,26 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Added
 
+- **A property inside a node's sub-resource can be read and written, several at
+  a time, as one undo step (#1133, Q7 part 1).** `property_name` on
+  `scene_get_property` and `scene_set_property` takes Godot's own property
+  paths, `theme_override_styles/panel:bg_color` or
+  `material:shader_parameter/tint`, so a theme override's StyleBox or a
+  node's material no longer has to be edited in scene text, which the open
+  editor writes over at its next save. Each step is checked against the
+  object's property list, because `get_indexed` and `set_indexed` do nothing
+  and say nothing about a step that names nothing; a miss answers with
+  `candidates`. `writes` commits up to 64 writes, on any nodes, as one
+  UndoRedo action, checked whole first, and `reads` answers up to 64 reads,
+  each with its declared `type` and `engine_constraint`. Measured on all
+  three engine lines, a save drops a change to a resource built into an
+  instanced or inherited scene after it read back as applied, so that write
+  is refused as `subresource_not_saved` with the scene to open; a write into
+  a resource kept in its own `.tres` names it in `resource_file`, because the
+  save rewrites that file for every scene using it. `owner`,
+  `scene_file_path` and `resource_path` are refused by name with a reason
+  each. A dry run now runs the write's whole check, value type included.
+
 - **The contract snapshots record four more shapes a client meets (#1025).**
   `offline.json` now holds the answers to the call set with no engine, which
   is where a first session often starts, `server/discover`, and what a

@@ -1,0 +1,29 @@
+[gd_scene load_steps=7 format=3]
+
+[ext_resource type="StyleBox" path="res://typed_shared_box.tres" id="1_shared"]
+[ext_resource type="PackedScene" path="res://typed_child.tscn" id="2_child"]
+[ext_resource type="Shader" path="res://probe_uniforms.gdshader" id="3_shader"]
+
+[sub_resource type="StyleBoxFlat" id="embedded_box"]
+bg_color = Color(1, 0, 0, 1)
+
+[sub_resource type="ShaderMaterial" id="tinted_material"]
+shader = ExtResource("3_shader")
+
+[sub_resource type="BoxMesh" id="tinted_mesh"]
+
+[node name="TypedRoot" type="Node"]
+
+[node name="Embedded" type="Panel" parent="."]
+theme_override_styles/panel = SubResource("embedded_box")
+
+[node name="Shared" type="Panel" parent="."]
+theme_override_styles/panel = ExtResource("1_shared")
+
+[node name="Mesh" type="MeshInstance3D" parent="."]
+mesh = SubResource("tinted_mesh")
+material_override = SubResource("tinted_material")
+
+[node name="Mover" type="Node2D" parent="."]
+
+[node name="Child" parent="." instance=ExtResource("2_child")]

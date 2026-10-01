@@ -27,9 +27,13 @@
 
 $observedRegistry = Get-Content -LiteralPath (Join-Path $PSScriptRoot "observed_post_state.json") -Raw | ConvertFrom-Json
 $observedFields = @{}
+$observedBatchFields = @{}
 foreach ($entry in $observedRegistry.tools.PSObject.Properties) {
     if ($null -ne $entry.Value.PSObject.Properties["observed"]) {
         $observedFields[$entry.Name] = @($entry.Value.observed)
+    }
+    if ($null -ne $entry.Value.PSObject.Properties["batch"]) {
+        $observedBatchFields[$entry.Name] = [string]$entry.Value.batch
     }
 }
 $observedExchanges = New-Object System.Collections.ArrayList
@@ -61,6 +65,28 @@ function Get-ObservedPayload($Response) {
     if ($null -eq $Response -or $null -eq $Response.result -or $Response.result.isError) { return $null }
     if ($null -ne $Response.result.PSObject.Properties["structuredContent"]) { return $Response.result.structuredContent }
     return $Response.result.content[0].text | ConvertFrom-Json
+}
+
+# The observed fields an answer leaves out. A tool that also answers a batch
+# keeps each write's fields in its own entry of the list the registry names,
+# so a batch answer is read entry by entry (Q7).
+function Get-ObservedFieldGaps([string]$Tool, $Payload) {
+    $gaps = @()
+    $batchField = $observedBatchFields[$Tool]
+    if ($batchField -and $null -ne $Payload.PSObject.Properties[$batchField]) {
+        $items = @($Payload.$batchField)
+        if ($items.Count -eq 0) { return @("$batchField (empty)") }
+        for ($index = 0; $index -lt $items.Count; $index++) {
+            foreach ($field in $observedFields[$Tool]) {
+                if ($null -eq $items[$index].PSObject.Properties[$field]) { $gaps += "$batchField[$index].$field" }
+            }
+        }
+        return $gaps
+    }
+    foreach ($field in $observedFields[$Tool]) {
+        if ($null -eq $Payload.PSObject.Properties[$field]) { $gaps += $field }
+    }
+    return $gaps
 }
 
 function Test-ObservedNumber($Value) {
@@ -160,6 +186,29 @@ function Get-ObservedPostStateCases {
            Agree = { param($s)
                Agree "value" $s.call.value $s.witness.returned
                Agree "applied" $s.call.applied ($s.witness.returned -eq 15) } },
+        # A path into the material Shaded holds (Q7). The colour is sent as
+        # #rrggbb and the engine stores a Color, so an answer that echoed the
+        # request would be a string where the witness reads an object.
+        @{ Tool = "scene_set_property"; Session = "editor"; Steps = @(
+            (Step "call" "scene_set_property" @{ target_node = "$observedRoot/Shaded"; property_name = "material_override:shader_parameter/tint"; value = "#336699" }),
+            (Witness "witness" "property_path" @("Shaded", "material_override:shader_parameter/tint")))
+           Agree = { param($s)
+               Agree "value" $s.call.value $s.witness.returned
+               Agree "applied" $s.call.applied ([Math]::Abs([double]$s.witness.returned.b - 0.6) -lt 0.002) } },
+        # The same through a batch, with a plain property beside it, so each
+        # entry of writes is compared with what the engine holds. Not
+        # process_priority: the editor_undo case below reads that one to tell
+        # which history it undid.
+        @{ Tool = "scene_set_property"; Session = "editor"; Steps = @(
+            (Step "call" "scene_set_property" @{ writes = @(
+                @{ target_node = "$observedRoot/Shaded"; property_name = "material_override:shader_parameter/tint"; value = "#ccddee" },
+                @{ target_node = "$observedRoot/Subject"; property_name = "process_physics_priority"; value = 13 }) }),
+            (Witness "tint" "property_path" @("Shaded", "material_override:shader_parameter/tint")),
+            (Witness "priority" "property" @("Subject", "process_physics_priority")))
+           Agree = { param($s)
+               Agree "writes[0].value" $s.call.writes[0].value $s.tint.returned
+               Agree "writes[1].value" $s.call.writes[1].value $s.priority.returned
+               Agree "applied" $s.call.applied (([Math]::Abs([double]$s.tint.returned.r - 0.8) -lt 0.002) -and $s.priority.returned -eq 13) } },
         @{ Tool = "scene_instantiate_node"; Session = "editor"; Steps = @(
             (Witness "before" "children" @(".")),
             (Step "call" "scene_instantiate_node" @{ node_type = "Node3D"; parent_path = $observedRoot; name = "Spawned" }),
@@ -634,9 +683,8 @@ function Invoke-ObservedPostStateCases([string]$FixtureRoot, [string]$EditorSess
             Assert-True ($null -ne $payload) "$($entry.Case.Tool): step '$($step.Name)' ($($step.Tool)) failed: $($response | ConvertTo-Json -Compress -Depth 20)"
             $payloads[$step.Name] = $payload
         }
-        foreach ($field in $observedFields[$entry.Case.Tool]) {
-            Assert-True ($null -ne $payloads.call.PSObject.Properties[$field]) "$($entry.Case.Tool) answered without its observed field '$field': $($payloads.call | ConvertTo-Json -Compress -Depth 20)"
-        }
+        $gaps = @(Get-ObservedFieldGaps $entry.Case.Tool $payloads.call)
+        Assert-True ($gaps.Count -eq 0) "$($entry.Case.Tool) answered without its observed field '$($gaps -join "', '")': $($payloads.call | ConvertTo-Json -Compress -Depth 20)"
         foreach ($pair in @(& $entry.Case.Agree $payloads)) {
             if (-not (Test-ObservedAgreement $pair.Observed $pair.Witnessed)) {
                 $disagreements += "$($entry.Case.Tool).$($pair.Field) answered $($pair.Observed | ConvertTo-Json -Compress -Depth 20) but the engine reports $($pair.Witnessed | ConvertTo-Json -Compress -Depth 20)"
@@ -659,9 +707,8 @@ function Assert-ObservedAnswersRecorded {
             continue
         }
         foreach ($exchange in $answered) {
-            $payload = Get-ObservedPayload $exchange.Response
-            foreach ($field in $observedFields[$tool]) {
-                if ($null -eq $payload.PSObject.Properties[$field]) { $missing += "$tool answered request $($exchange.Response.id) without '$field'" }
+            foreach ($gap in @(Get-ObservedFieldGaps $tool (Get-ObservedPayload $exchange.Response))) {
+                $missing += "$tool answered request $($exchange.Response.id) without '$gap'"
             }
         }
     }
