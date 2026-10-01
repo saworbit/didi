@@ -161,6 +161,8 @@ All string paths are UTF-8, 1..1024 bytes, project-contained, and resolved benea
 
 These payload schemas are authoritative because no separate Phase 7 canonical design document exists. Each code block is one mechanically valid Draft 2020-12 root schema: the root `$ref` selects `$defs/request`, `$defs/success` is the literal success payload, every nested definition is under that root `$defs`, and every `$ref` resolves inside the same file. Store the 18 blocks verbatim as `schemas/phase7/<canonical-name>.schema.json`; `inject_input_event` reuses `runtime_inject_input.schema.json` and does not create a nineteenth contract. Registry input schemas must be generated from `$defs/request`, not independently copied. Success schemas describe the tool payload before the existing runtime router adds authenticated provenance. Every mutation success includes `outcome:"completed"` and exact `rollback`. JSON object member order is not semantic; every ordering rule below governs emitted array order and deterministic serialization. Byte caps use compact UTF-8 JSON; stop before a complete record rather than emitting partial JSON.
 
+The blocks below are the contracts as first approved. Only the three blocked names still match their files byte for byte, and `tests/test_phase7_schema_contract.py` pins those three. The other files have moved on: every top-level argument declares a JSON type (Q1, #1015), the signal flags admit `CONNECT_INHERITED` (#852), the collision and navigation masks take all 32 bits, and four success contracts were corrected to what their tools answer once real answers were checked against them (#861). `schemas/phase7` is the contract; these blocks are its history.
+
 ### `signal_list_connections`
 
 ```json
