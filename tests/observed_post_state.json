@@ -223,8 +223,10 @@
       "issue": 1020
     },
     "scene_close": {
-      "exempt": "closed is a constant, and scene_path and dirty_state are read before the scene closes; nothing is read afterwards.",
-      "issue": 1019
+      "observed": [
+        "still_open"
+      ],
+      "witness": "EditorInterface.get_open_scenes through observed_witness.gd"
     },
     "scene_create": {
       "observed": [

@@ -12839,7 +12839,21 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 return errorJson(500, "Godot close_scene failed with " +
                                           ::didi::godot::describeGodotError(code.value()));
             }
+            // Whether a tab still holds the scene, read after the close rather
+            // than taken from close_scene's return code (#1019). A scene that
+            // was never saved has no path to look for, so it is null.
+            json still_open = nullptr;
+            if (!path.value().empty()) {
+                auto open = openScenePaths(editor);
+                if (open.isErr()) {
+                    return errorJson(500, "Godot closed the scene, and the open tabs could not be "
+                                          "read back to confirm it: " + open.error().message);
+                }
+                still_open = std::find(open.value().begin(), open.value().end(), path.value()) !=
+                             open.value().end();
+            }
             return liveResult({{"status", "success"}, {"closed", true}, {"scene_path", path.value()},
+                               {"still_open", still_open},
                                {"discarded_unsaved", discard_unsaved},
                                {"dirty_state_readable", dirty_state_readable},
                                {"dirty_state", verified_clean ? "clean" : "unchecked"}});

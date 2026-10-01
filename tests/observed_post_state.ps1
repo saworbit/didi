@@ -302,6 +302,15 @@ function Get-ObservedPostStateCases {
            Agree = { param($s)
                Agree "uid" $s.call.uid $s.witness.returned.uid
                Agree "uid_registered" $s.call.uid_registered $s.witness.returned.uid_registered } },
+        # The tabs read after the close, not a constant (#1019). The scene the
+        # case above created is still open in a tab; it is brought to the front,
+        # closed, and the observed scene brought back for the witness.
+        @{ Tool = "scene_close"; Session = "editor"; Steps = @(
+            (Step "open" "scene_open" @{ scene_path = "res://observed_created.tscn" }),
+            (Step "call" "scene_close" @{ discard_unsaved = $true }),
+            (Step "return" "scene_open" @{ scene_path = $observedScenePath }),
+            (Witness "witness" "scene_open" @("res://observed_created.tscn")))
+           Agree = { param($s) Agree "still_open" $s.call.still_open $s.witness.returned } },
         # Membership read back after the commit, not the constant the answer
         # used to carry (#1019).
         @{ Tool = "scene_add_to_group"; Session = "editor"; Steps = @(
