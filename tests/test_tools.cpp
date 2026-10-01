@@ -9825,18 +9825,25 @@ static void test_input_action_listing_can_ask_for_less() {
     auto& registry = didi::mcp::ToolRegistry::instance();
     registry.registerAllDefaultTools();
     const auto& schema = registry.getTool("project_list_input_actions")->inputSchema;
-    ASSERT_TRUE(schema["properties"]["include_engine_defaults"]["default"] == true);
+    // No single default: a listing leaves the engine's actions out and a
+    // named action is found either way, so the bridge decides (#1108).
+    ASSERT_TRUE(schema["properties"]["include_engine_defaults"]["type"] == "boolean");
+    ASSERT_TRUE(!schema["properties"]["include_engine_defaults"].contains("default"));
     ASSERT_TRUE(schema["properties"]["action"]["type"] == "string");
 
     auto client = std::make_shared<InputActionListingClient>();
     registry.setIpcClient(client);
+    const auto bare = registry.callTool("project_list_input_actions", didi::json::object());
+    const bool bare_left_it_to_the_bridge =
+        !bare.isError && !client->last_params.contains("include_engine_defaults");
     const didi::json asked = {{"include_engine_defaults", false}, {"action", "move_left"}};
     const auto result = registry.callTool("project_list_input_actions", asked);
     const auto wrong = registry.callTool("project_list_input_actions",
                                          didi::json{{"prefix", "move"}});
     registry.setIpcClient(nullptr);
+    ASSERT_TRUE(bare_left_it_to_the_bridge);
     ASSERT_TRUE(!result.isError);
-    ASSERT_TRUE(client->requests == 1);
+    ASSERT_TRUE(client->requests == 2);
     ASSERT_TRUE(client->last_method == "project.listInputActions");
     ASSERT_TRUE(client->last_params["include_engine_defaults"] == false);
     ASSERT_TRUE(client->last_params["action"] == "move_left");

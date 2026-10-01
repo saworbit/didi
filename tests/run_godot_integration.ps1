@@ -1885,7 +1885,7 @@ try {
         (Tool-Request 84 "project_set_input_action" @{ action = "bad_deadzone"; deadzone = 1.5; events = @() }),
         (Tool-Request 85 "project_set_input_action" @{ action = "empty_key"; events = @(@{ type = "key" }) }),
         (Tool-Request 474 "project_remove_input_action" @{ action = "ui_accept" }),
-        (Tool-Request 475 "project_list_input_actions" @{}),
+        (Tool-Request 475 "project_list_input_actions" @{ include_engine_defaults = $true }),
         (Tool-Request 86 "scene_close" @{}),
         (Tool-Request 87 "scene_pack_branch" @{ target_node = "/root/SmokeRoot/Container"; scene_path = "res://packed_branch.tscn" }),
         (Tool-Request 88 "scene_pack_branch" @{ target_node = "/root/SmokeRoot/Container"; scene_path = "res://packed_branch.tscn" }),
@@ -4307,6 +4307,10 @@ try {
     Assert-True ($inputAction.events[0].type -eq "key" -and $inputAction.events[0].shift -eq $true) "Key event was not normalized correctly."
     Assert-True ($inputAction.events[3].type -eq "joypad_motion" -and $inputAction.events[3].axis_value -eq -0.75) "Joypad motion event was not normalized correctly."
     Assert-True ($inputAction.defined_by_project -eq $true) "The project's own action was not marked defined_by_project."
+    # A listing with no arguments keeps to the project's own actions, as P4
+    # says; the engine's ui_* map comes on request (#1108).
+    $defaultListing = Tool-Payload $byId[77]
+    Assert-True (-not (@($defaultListing.actions.action) -contains "ui_accept") -and $defaultListing.omitted_engine_default_count -gt 0) "A listing with no arguments still carried the engine's ui_* map: $(@($defaultListing.actions.action) -join ',') omitted $($defaultListing.omitted_engine_default_count)"
     $ownActions = Tool-Payload $byId[5627]
     Assert-True (@($ownActions.actions.action) -contains "phase_two_jump") "include_engine_defaults: false dropped the project's own action."
     Assert-True (-not (@($ownActions.actions.action) -contains "ui_accept")) "include_engine_defaults: false still listed ui_accept."

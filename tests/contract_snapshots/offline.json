@@ -4270,7 +4270,7 @@
           "openWorldHint": false,
           "readOnlyHint": true
         },
-        "description": "Lists InputMap actions and their events, each marked defined_by_project. include_engine_defaults: false leaves out the engine's own ui_* map, and action reads one by name.",
+        "description": "Lists the project's InputMap actions and their events, each marked defined_by_project. include_engine_defaults: true adds the engine's ui_* map, and action reads one by name.",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {
@@ -4280,8 +4280,7 @@
               "type": "string"
             },
             "include_engine_defaults": {
-              "default": true,
-              "description": "Include the engine's own actions, the ui_* map every project inherits. On by default. False keeps only what project.godot declares, and says how many it left out.",
+              "description": "Include the engine's own actions, the ui_* map every project inherits. Off for a listing, which then says how many it left out; on when action names one.",
               "type": "boolean"
             }
           },
