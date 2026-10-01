@@ -4573,9 +4573,12 @@ GodotBridge::WrittenResourceUid GodotBridge::registerWrittenResourceUid(
     state.deferred = true;
     // update_file never indexes a file in a folder the editor does not list,
     // however often it is called, and a scene written into a new folder is
-    // exactly that. scan_sources lists the folder and indexes the file within
-    // a few frames (tools/vibe/probes/new_folder_uid_engine.py, on 4.5.1,
-    // 4.6.2 and 4.7.2). A scan already running finds the file itself.
+    // exactly that. scan and scan_sources both list the folder and index the
+    // file within a few frames (tools/vibe/probes/new_folder_uid_engine.py, on
+    // 4.5.1, 4.6.2 and 4.7.2). Through scene_create on 4.5.1, scan_sources
+    // missed a folder made moments after the last scan in two rounds of three
+    // (tools/vibe/probes/deferred_scene_uid.py), so this asks for a full scan,
+    // which walks every folder. A scan already running finds the file itself.
     const auto ask_for_scan = [&]() -> Result<void> {
         auto editor = editorInterface();
         if (editor.isErr()) return editor.error();
@@ -4584,7 +4587,7 @@ GodotBridge::WrittenResourceUid GodotBridge::registerWrittenResourceUid(
         auto object = objectFromVariant(filesystem.value());
         if (object.isErr()) return object.error();
         if (!object.value()) return Error::notConnected("EditorFileSystem is unavailable");
-        auto scan = callObject(object.value(), "EditorFileSystem", "scan_sources", 3218959716LL);
+        auto scan = callObject(object.value(), "EditorFileSystem", "scan", 3218959716LL);
         if (scan.isErr()) return scan.error();
         return Result<void>::ok();
     };
