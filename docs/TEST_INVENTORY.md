@@ -10,8 +10,8 @@ Every number here is derived from the suites themselves rather than written down
 
 | Measure | Count |
 | --- | ---: |
-| Automated tests | **1516** |
-| Live-harness assertions | 1421 |
+| Automated tests | **1518** |
+| Live-harness assertions | 1423 |
 
 The badge in the [README](../README.md) shows the automated test total. Harness assertions are counted separately because they are assertions inside one live scenario, not independently runnable cases; adding them together would flatter the number.
 
@@ -101,7 +101,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 
 ## Python contract suites (`tests/test_*.py`)
 
-**551 tests.** Derived from `test_*` methods on every `unittest.TestCase` subclass, read with `ast`.
+**553 tests.** Derived from `test_*` methods on every `unittest.TestCase` subclass, read with `ast`.
 
 | File | Tests |
 | --- | ---: |
@@ -130,7 +130,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `test_mcp_wire_contract.py` | 15 |
 | `test_observed_post_state.py` | 4 |
 | `test_phase7_plan_ownership.py` | 10 |
-| `test_phase7_schema_contract.py` | 4 |
+| `test_phase7_schema_contract.py` | 6 |
 | `test_phase7_signal_admission.py` | 3 |
 | `test_refusal_codes.py` | 10 |
 | `test_refusal_remedies.py` | 5 |
@@ -143,13 +143,14 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 
 ## Live Godot harness (`tests/*.ps1`)
 
-**1421 assertions.** Derived from `Assert-True` call sites. The harness is one long live scenario rather than a set of named cases, so this counts assertions and says so.
+**1423 assertions.** Derived from `Assert-True` call sites. The harness is one long live scenario rather than a set of named cases, so this counts assertions and says so.
 
 | File | Assertions |
 | --- | ---: |
 | `bounded_reads.ps1` | 4 |
 | `follow_ups.ps1` | 2 |
 | `observed_post_state.ps1` | 12 |
+| `phase7_success.ps1` | 2 |
 | `refusal_remedies.ps1` | 3 |
 | `run_godot_integration.ps1` | 1374 |
 | `scene_tab_reload.ps1` | 26 |

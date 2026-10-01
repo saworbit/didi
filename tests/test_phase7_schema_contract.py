@@ -72,6 +72,15 @@ def load_generator():
     return module
 
 
+def load_success_checker():
+    path = ROOT / "tools" / "phase7_success.py"
+    spec = importlib.util.spec_from_file_location("phase7_success", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
 def original_schema(name: str) -> str:
     heading = (f"### `{name}` and `inject_input_event`" if name == "runtime_inject_input"
                else f"### `{name}`")
@@ -213,6 +222,38 @@ class Phase7SchemaContractTests(unittest.TestCase):
         self.assertIn("vector2i", generated["tilemap_set_cells"]["$defs"])
         self.assertIn("vector2", generated["physics_raycast_query"]["$defs"])
         self.assertIn("vector3", generated["nav_query_path"]["$defs"])
+
+
+    def test_recorded_answers_meet_their_success_contract(self):
+        # $defs.success used to be compared with no answer, and
+        # signal_list_connections' went on forbidding three fields the tool had
+        # answered with since they were added (#861). The contract snapshots
+        # hold real answers from every engine line, so the reads among them
+        # are checked here with no engine; the live harness checks every
+        # Phase 7 answer it gets the same way.
+        checker = load_success_checker()
+        answers = []
+        for path in sorted((ROOT / "tests" / "contract_snapshots").glob("live-*.json")):
+            snapshot = json.loads(path.read_text(encoding="utf-8"))
+            for call in snapshot["calls"]:
+                payload = checker.payload_of(call) if "result" in call else None
+                if payload is not None:
+                    answers.append((call["tool"], payload))
+        problems, answered = checker.problems(answers)
+        self.assertEqual(problems, [])
+        self.assertEqual(answered, {"anim_list_tracks", "physics_raycast_query",
+                                    "signal_list_connections", "tilemap_get_used_rect"})
+
+    def test_a_drifted_answer_is_named(self):
+        checker = load_success_checker()
+        problems, _ = checker.problems([("tilemap_get_used_rect", {
+            "tilemap_path": "/root/Tiles", "position": {"x": 0, "y": 0}, "size": {"x": 1, "y": 1},
+            "end": {"x": 1, "y": 1}, "execution_mode": "live", "tool": "tilemap_get_used_rect",
+            "cells": 3,
+        })])
+        self.assertEqual(len(problems), 1)
+        self.assertIn("tilemap_get_used_rect at (top level)", problems[0])
+        self.assertIn("cells", problems[0])
 
 
 if __name__ == "__main__":

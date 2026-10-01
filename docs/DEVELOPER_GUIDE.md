@@ -553,6 +553,15 @@ Feasibility is design evidence; a production trial is production behavior. All 1
 
 Governance authorized partial delivery, and all 15 feasible tools are now shipped, and the surface stands at 117/120 canonical implementations. Further work on `physics_simulate_step`, `nav_bake_mesh`, or `runtime_get_call_stack` requires new feasibility evidence on Godot 4.5.1 and 4.7.2 or an explicit contract amendment; do not weaken their contracts implicitly. Use [PHASE_7_API_FEASIBILITY.md](PHASE_7_API_FEASIBILITY.md) for reproducible evidence and [PHASE_7_IMPLEMENTATION_PLAN.md](PHASE_7_IMPLEMENTATION_PLAN.md) for the approved executable plan.
 
+Each `schemas/phase7` file's `$defs.success` is held to real answers (#861). The
+live harness checks every successful Phase 7 answer it gets with
+`tools/phase7_success.py`, on every engine line, and
+`tests/test_phase7_schema_contract.py` checks the reads the contract snapshots
+recorded on every build. Fields that are not one tool's own, such as
+`execution_mode`, `session` or `scene_saved`, are listed once in that script
+rather than in each contract. A change to what a Phase 7 tool answers changes
+its contract in the same pull request.
+
 ## Phase 5 and Phase 6 implementation map
 
 - `src/tools/deep_domain_tools.cpp` and `src/offline/deep_domain_support.cpp`: bounded C#/shader diagnostics, public export-preset parsing, guarded export, deterministic MeshLibrary generation, and live UI hit-test registration/dispatch.

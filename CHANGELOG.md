@@ -394,6 +394,17 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **The Phase 7 success contracts are checked against real answers (#861).**
+  `$defs.success` in each `schemas/phase7` file was compared with no answer,
+  and four had drifted from what their tools say: `signal_list_connections`
+  forbade `editor_connections`, `engine_connections` and each connection's
+  `origin`, and capped `flags` below `CONNECT_INHERITED`; `tilemap_set_cells`
+  and `gridmap_set_cells` forbade the `cells` they read back; `signal_emit`
+  allowed only `emitted: true` and forbade `connection_count` and `note`. Each
+  now says what the tool answers. The live harness checks every successful
+  Phase 7 answer it gets with `tools/phase7_success.py`, and the Python suite
+  checks the reads the contract snapshots recorded.
+
 - **A not_found names where the missing thing is listed (#1117).** Every
   not_found outside the tools with a list of their own named
   `scene_get_hierarchy`, so an evicted `viewport_diff_capture` baseline, a
