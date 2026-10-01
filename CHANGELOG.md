@@ -384,6 +384,14 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **A field trial's brief names the checkout and Godot it was given (#1105).**
+  `TRIAL_BRIEF.md` said the repository was at `D:\didi` and Godot was 4.7.2,
+  whatever `trial.py` handed the tester, so a run from another checkout or
+  engine was told to read and launch something it did not have. The brief now
+  carries `{repository}` and `{godot_exe}`, `trial.py` fills them from its own
+  checkout and `--godot-exe`, and a brief that lost one or grew another is
+  refused before the run, dry runs included.
+
 - **runtime_inject_input answers with what Input holds (#1019).** It used to
   count `parse_input_event` calls, which return nothing and only buffer the
   event. It now flushes the batch with `Input.flush_buffered_events`, so the

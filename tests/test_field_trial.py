@@ -1139,6 +1139,42 @@ class TrialSummaryTests(unittest.TestCase):
             )
 
 
+class BriefPathTests(unittest.TestCase):
+    """The brief names the checkout and the Godot this run was given (#1105).
+
+    It said D:\\didi and Godot 4.7.2 whatever the run was handed, so trial 06,
+    run from another checkout, had its brief edited by hand, and a run seeded
+    with 4.5.1 would have told the tester it had 4.7.2.
+    """
+
+    BRIEF = (REPOSITORY_ROOT / "tools" / "field-trial" / "TRIAL_BRIEF.md").read_text(encoding="utf-8")
+    CHECKOUT = Path("E:/elsewhere/didi-checkout")
+    GODOT = Path("C:/Godot/Godot_v4.5.1-stable_win64_console.exe")
+
+    def test_the_brief_names_the_checkout_and_godot_it_was_given(self):
+        filled = TRIAL.filled_brief(self.BRIEF, self.CHECKOUT, self.GODOT)
+        self.assertIn(f"`{self.CHECKOUT}`", filled)
+        self.assertIn(f"`{self.CHECKOUT}\\docs`", filled)
+        self.assertIn(f"`{self.GODOT}`", filled)
+        self.assertNotIn("D:\\didi", filled)
+        self.assertNotIn("4.7.2", filled)
+        self.assertNotIn("{", filled)
+
+    def test_a_drafts_run_fills_the_paths_too(self):
+        drafts = TRIAL.drafts_brief(TRIAL.filled_brief(self.BRIEF, self.CHECKOUT, self.GODOT))
+        self.assertIn(f"`{self.GODOT}`", drafts)
+        self.assertNotIn("{", drafts)
+
+    def test_a_brief_that_lost_a_placeholder_or_grew_one_is_refused(self):
+        with self.assertRaises(ValueError):
+            TRIAL.filled_brief(self.BRIEF.replace("{godot_exe}", "C:\\Godot\\Godot.exe"),
+                               self.CHECKOUT, self.GODOT)
+        with self.assertRaises(ValueError):
+            TRIAL.filled_brief(self.BRIEF.replace("{repository}", "D:\\didi"), self.CHECKOUT, self.GODOT)
+        with self.assertRaises(ValueError):
+            TRIAL.filled_brief(self.BRIEF + "\nThe build is {build_id}.\n", self.CHECKOUT, self.GODOT)
+
+
 class DraftsModeTests(unittest.TestCase):
     """A trial that holds its findings for review instead of filing them (#1008)."""
 

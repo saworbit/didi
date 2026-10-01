@@ -6,8 +6,8 @@ Read all of this before you start.
 
 - Your working directory is the Godot project you are building in. Everything you make goes there.
 - An MCP server named `didi` is connected to this session. It is the tool you are here to use.
-- Didi's source repository is at `D:\didi`. Read anything in it you like. Do not write to it, and do not run any git command inside it.
-- Godot 4.7.2 is at `C:\Godot\Godot_v4.7.2-stable_win64.exe`, and `C:\Godot\Godot_v4.7.2-stable_win64_console.exe` when you need to capture output.
+- Didi's source repository is at `{repository}`. Read anything in it you like. Do not write to it, and do not run any git command inside it.
+- Godot is at `{godot_exe}`. It is the console build, so what it prints reaches you.
 - You have never used Didi before. Work out what it can do.
 
 ## This run is unattended
@@ -51,7 +51,7 @@ Also record architectural decisions and node paths on Didi's blackboard, as its 
 
 Issues go to the `saworbit/didi` repository with `gh`. Filing is deliberately expensive. Before you open one:
 
-1. Re-read the relevant part of `D:\didi\docs`. Behaviour that is documented and wrong is still worth reporting, under a different label.
+1. Re-read the relevant part of `{repository}\docs`. Behaviour that is documented and wrong is still worth reporting, under a different label.
 2. Search open and closed issues for a duplicate.
 3. Reduce it to a minimal reproduction: exact tool name, exact arguments, exact response.
 4. Choose a label. `bug` when behaviour contradicts the documentation. `documentation` when the documentation is wrong or missing. `enhancement` when the capability is simply absent.

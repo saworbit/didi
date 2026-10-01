@@ -22,6 +22,7 @@ import argparse
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -142,6 +143,30 @@ DRAFTS_REWORDINGS = (
 DRAFTS_TOKEN_VARIABLES = ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN")
 
 GH_STUB_MESSAGE = "gh is disabled for this field trial. Write the finding to ISSUE_DRAFTS.md instead."
+
+
+# What the brief names that only a run knows. A run from another checkout, or
+# seeded with another Godot, was told to read D:\didi and launch 4.7.2, which
+# it had not been given (#1105).
+BRIEF_PLACEHOLDERS = ("{repository}", "{godot_exe}")
+
+
+def filled_brief(brief: str, repository: Path, godot_exe: Path) -> str:
+    """The brief naming the checkout the tester is handed and the Godot it was seeded with.
+
+    Refuses rather than handing over a path the tester was not given: a brief
+    that no longer names one of them, or one left with a placeholder this does
+    not fill.
+    """
+    for placeholder in BRIEF_PLACEHOLDERS:
+        if placeholder not in brief:
+            raise ValueError(f"TRIAL_BRIEF.md no longer says {placeholder}, "
+                             "so the tester would not be told where it is")
+    filled = brief.replace("{repository}", str(repository)).replace("{godot_exe}", str(godot_exe))
+    leftover = sorted(set(re.findall(r"\{[a-z_]+\}", filled)))
+    if leftover:
+        raise ValueError(f"TRIAL_BRIEF.md has placeholders nothing fills: {', '.join(leftover)}")
+    return filled
 
 
 def drafts_brief(brief: str) -> str:
@@ -470,15 +495,16 @@ def main(argv: list[str] | None = None) -> int:
                          f"build {baseline.get('server_build_id') or 'unreported'}, "
                          f"manifest {baseline['manifest_source']}")
 
-    # Swapped before a dry run returns, so a dry run proves the swap still
-    # applies to the brief as it stands.
+    # Filled and swapped before a dry run returns, so a dry run proves both
+    # still apply to the brief as it stands.
     brief = (HERE / "TRIAL_BRIEF.md").read_text(encoding="utf-8")
-    if args.drafts:
-        try:
+    try:
+        brief = filled_brief(brief, REPOSITORY, args.godot_exe)
+        if args.drafts:
             brief = drafts_brief(brief)
-        except ValueError as error:
-            record("brief", "failed", str(error))
-            return finish("brief_failed")
+    except ValueError as error:
+        record("brief", "failed", str(error))
+        return finish("brief_failed")
 
     if args.dry_run:
         for name in ("run", "score", "bridge", "report"):
