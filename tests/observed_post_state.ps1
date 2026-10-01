@@ -380,6 +380,19 @@ function Get-ObservedPostStateCases {
            Agree = { param($s)
                Agree "preset" $s.call.preset $s.witness.returned.preset
                Agree "preset_count" $s.call.preset_count $s.witness.returned.preset_count } },
+        # The two exporters each start a Godot of their own and answer with
+        # what they read back from the file it wrote (#1020). Neither field has
+        # a counterpart in the request, so the cases guard against a constant.
+        # The pack uses the preset the case above added, and needs no export
+        # templates.
+        @{ Tool = "project_export"; Session = "editor"; Steps = @(
+            (Step "call" "project_export" @{ preset = "Observed Preset"; output_path = "res://observed_export.pck"; mode = "pack"; timeout_seconds = 120 }),
+            (Witness "witness" "file_length" @("res://observed_export.pck")))
+           Agree = { param($s) Agree "size_bytes" $s.call.size_bytes $s.witness.returned } },
+        @{ Tool = "gridmap_export_mesh_library"; Session = "editor"; Steps = @(
+            (Step "call" "gridmap_export_mesh_library" @{ source_scene = "res://phase5_mesh_source.tscn"; output_path = "res://observed_items.meshlib"; generate_collisions = $false; overwrite = $true; timeout_seconds = 60 }),
+            (Witness "witness" "load_fresh" @("res://observed_items.meshlib", @())))
+           Agree = { param($s) Agree "item_count" $s.call.item_count $s.witness.returned.item_count } },
         # A name already taken is refused rather than renamed, though
         # AudioServer would call the new bus "Observed 2", so no input crosses.
         @{ Tool = "audio_add_bus"; Session = "editor"; Steps = @(
