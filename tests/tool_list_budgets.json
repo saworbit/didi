@@ -6,8 +6,8 @@
     "note": "main before Q4 (15c8458), 2026-09-28"
   },
   "budgets": {
-    "full": 204600,
-    "core": 95900
+    "full": 205800,
+    "core": 96900
   },
   "raises": [
     {
@@ -21,6 +21,18 @@
         95900
       ],
       "why": "Q5 part 2 (#776): a fields argument on didi_control_room and script_reflect_class, so a caller can ask for one section of the two largest reads instead of all of them, and truncated, omitted_fields and import_error declared in the output schemas of the reads that return them. Measured 204,333 full and 95,617 core with that change; core stays under half of the 203,634 Q4 measured."
+    },
+    {
+      "date": "2026-10-02",
+      "full": [
+        204600,
+        205800
+      ],
+      "core": [
+        95900,
+        96900
+      ],
+      "why": "Q7 part 1 (#1133): scene_set_property takes writes and scene_get_property takes reads, each a closed, typed item schema, and property_name names a path into a resource the node holds. Both tools are in core, so the same 962 bytes land in both profiles. Measured 205,471 full and 96,616 core with that change; core stays under half of the 203,634 Q4 measured."
     }
   ]
 }
