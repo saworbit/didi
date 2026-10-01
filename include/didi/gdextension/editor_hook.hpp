@@ -117,6 +117,9 @@ struct EngineCommand {
     json params;
     std::shared_ptr<std::promise<json>> response_promise;
     std::shared_ptr<CommandControl> control;
+    // When it was queued. The server stops waiting kMaxPublicLiveRequestMs
+    // after it sent the request, so work that waits counts from here.
+    std::chrono::steady_clock::time_point queued_at{std::chrono::steady_clock::now()};
 };
 
 struct CommandTicket {
@@ -214,6 +217,14 @@ private:
     // once its first scan is applied and makes one current, so a scene opened
     // before then is not the edited scene for long (#1069).
     bool editorStarting();
+    // Whether the editor filesystem is scanning, or has yet to apply a scan
+    // this hook saw running. A file written then is not indexed: update_file
+    // does nothing during a scan, and applying one replaces the index the file
+    // was added to (#1004).
+    bool editorFilesystemSettling();
+    // Answers each parked scene_create whose uid is now indexed, or whose
+    // deadline has passed. Indexing is tried only once the scan is applied.
+    void processParkedSceneCreates(bool filesystem_settled);
     // Runs a scene_call_method, and parks it when the method is a coroutine.
     // Returns false when the request is not one of these, so the caller runs
     // the ordinary synchronous path.
@@ -313,6 +324,17 @@ private:
         std::optional<ScanSettle> settle;
     };
 
+    // A scene_create whose uid the engine could not index yet. Its answer
+    // waits for the index, up to a deadline, so a caller can create a scene
+    // and then launch something that references it (#1004).
+    struct ParkedSceneCreate {
+        json response;
+        std::string scene_path;
+        std::chrono::steady_clock::time_point deadline;
+        std::shared_ptr<std::promise<json>> response_promise;
+        std::shared_ptr<CommandControl> control;
+    };
+
     struct PendingProfilerRead {
         runtime::ProfilerCollector collector;
         std::chrono::steady_clock::time_point started_at;
@@ -374,6 +396,12 @@ private:
     std::optional<bool> m_progressTaskOverride;
     // Test seam for editorStarting, which otherwise asks the engine.
     std::optional<bool> m_editorStartingOverride;
+    // The scan editorFilesystemSettling saw running, until it is applied.
+    std::optional<ScanSettle> m_filesystemSettle;
+    std::mutex m_parkedSceneCreateMutex;
+    std::vector<ParkedSceneCreate> m_parkedSceneCreates;
+    // Test seam for editorFilesystemSettling, which otherwise asks the engine.
+    std::optional<bool> m_filesystemSettlingOverride;
     std::optional<int64_t> m_pendingQuitExitCode;
     int m_pendingQuitFrames{0};
 
@@ -400,6 +428,9 @@ public:
     static void setImportPassOpen(EditorHook& hook, std::optional<bool> open);
     static void setProgressTaskOpen(EditorHook& hook, std::optional<bool> open);
     static void setEditorStarting(EditorHook& hook, std::optional<bool> starting);
+    static void setFilesystemSettling(EditorHook& hook, std::optional<bool> settling);
+    static CommandTicket parkSceneCreate(EditorHook& hook, const json& response,
+                                         std::chrono::steady_clock::time_point deadline);
     static bool hasPendingQuit(const EditorHook& hook);
 };
 

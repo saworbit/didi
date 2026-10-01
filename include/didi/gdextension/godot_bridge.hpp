@@ -390,9 +390,14 @@ public:
     // outside the editor then warns on every load (#379).
     WrittenResourceUid registerWrittenResourceUid(const std::string& resource_path);
 
-    // Re-indexes anything registerWrittenResourceUid could not, once the
-    // editor filesystem is idle. Called once per frame by the editor hook.
+    // Re-indexes anything registerWrittenResourceUid could not, until the
+    // engine knows the uid. The editor hook calls it once per frame, and only
+    // once a scan it saw running is applied.
     void processDeferredReindexFrame();
+
+    // update_file on one path, then whether ResourceUID knows its uid. Nothing
+    // when the editor could not be asked.
+    std::optional<WrittenResourceUid> indexWrittenResource(const std::string& resource_path);
 
     // The editor main screen: the 2D/3D/Script/Game/AssetLib tab bar, plus any
     // main screen an addon adds.

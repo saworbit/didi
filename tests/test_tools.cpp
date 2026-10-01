@@ -6602,6 +6602,97 @@ static void test_nothing_is_dequeued_inside_an_editor_progress_task() {
     ASSERT_EQ(answer["error"]["data"]["code"], "session_kind_rejected");
 }
 
+static void test_a_scene_create_waits_for_the_editor_to_apply_its_scan() {
+    // Break caught: a scene created while the editor scanned, or before it
+    // applied the scan, was saved with a uid the engine could not index yet,
+    // so it answered uid_registration_deferred and a game launched next warned
+    // "invalid UID" once for every reference to it (#1004). Creating a scene
+    // waits at the front of the queue until the scan is applied, nothing
+    // queued behind it overtakes it, and any other command is not held.
+    using didi::godot::EditorHookTestAccess;
+    auto& hook = didi::godot::EditorHook::instance();
+    const auto ready = [](auto& ticket) {
+        return ticket.response.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
+    };
+    hook.cancelPendingCommands("test reset");
+    EditorHookTestAccess::setSessionKind(hook, didi::runtime::SessionKind::editor);
+    EditorHookTestAccess::setImportPassOpen(hook, false);
+    EditorHookTestAccess::setProgressTaskOpen(hook, false);
+    EditorHookTestAccess::setEditorStarting(hook, false);
+    EditorHookTestAccess::setFilesystemSettling(hook, true);
+    // Game-only, so on an editor session it answers from the session policy
+    // and touches no engine.
+    auto other = EditorHookTestAccess::enqueue(hook, "runtime.injectInput");
+    hook.processQueue();
+    const bool other_answered = ready(other);
+    auto create = EditorHookTestAccess::enqueue(hook, "scene.create");
+    auto behind = EditorHookTestAccess::enqueue(hook, "runtime.injectInput");
+    hook.processQueue();
+    hook.processQueue();
+    const bool held = EditorHookTestAccess::queueDepth(hook) == 2u &&
+                      !create.control->hasEverStarted() && !ready(create) && !ready(behind);
+    // The route deadline passing while it waited, so that releasing it runs
+    // nothing in the engine.
+    create.control->tryCancelPending();
+    EditorHookTestAccess::setFilesystemSettling(hook, false);
+    hook.processQueue();
+    const bool both = ready(create) && ready(behind);
+    auto cancelled = both ? create.response.get() : didi::json::object();
+    auto rejected = both ? behind.response.get() : didi::json::object();
+    const bool released = both && EditorHookTestAccess::queueDepth(hook) == 0u &&
+                          cancelled["error"]["data"]["code"] == "command_cancelled" &&
+                          rejected["error"]["data"]["code"] == "session_kind_rejected";
+    EditorHookTestAccess::setFilesystemSettling(hook, std::nullopt);
+    EditorHookTestAccess::setEditorStarting(hook, std::nullopt);
+    EditorHookTestAccess::setProgressTaskOpen(hook, std::nullopt);
+    EditorHookTestAccess::setImportPassOpen(hook, std::nullopt);
+    EditorHookTestAccess::setSessionKind(hook, std::nullopt);
+    hook.cancelPendingCommands("test reset");
+    ASSERT_TRUE(other_answered);
+    ASSERT_TRUE(held);
+    ASSERT_TRUE(released);
+}
+
+static void test_a_deferred_scene_create_still_answers_by_its_deadline() {
+    // A scene_create whose uid the engine cannot index yet waits for the index
+    // before it answers (#1004). With nothing indexing it, it answers by its
+    // deadline as it stands, and a session that ends answers it the same way,
+    // because the scene was saved either way.
+    using didi::godot::EditorHookTestAccess;
+    auto& hook = didi::godot::EditorHook::instance();
+    const auto ready = [](auto& ticket) {
+        return ticket.response.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
+    };
+    hook.cancelPendingCommands("test reset");
+    EditorHookTestAccess::setSessionKind(hook, didi::runtime::SessionKind::editor);
+    EditorHookTestAccess::setImportPassOpen(hook, false);
+    EditorHookTestAccess::setProgressTaskOpen(hook, false);
+    EditorHookTestAccess::setEditorStarting(hook, false);
+    // Indexing is tried only once a scan is applied, so the engine is not asked.
+    EditorHookTestAccess::setFilesystemSettling(hook, true);
+    const didi::json deferred = {{"status", "success"},
+                                 {"scene_path", "res://fresh/created.tscn"},
+                                 {"uid_registered", false},
+                                 {"uid_registration_deferred", true},
+                                 {"limitation", "not indexed yet"}};
+    const auto now = std::chrono::steady_clock::now();
+    auto waiting = EditorHookTestAccess::parkSceneCreate(hook, deferred, now + std::chrono::hours(1));
+    auto due = EditorHookTestAccess::parkSceneCreate(hook, deferred, now - std::chrono::milliseconds(1));
+    hook.processQueue();
+    const bool still_waiting = !ready(waiting);
+    const bool answered_when_due = ready(due) && due.response.get() == deferred;
+    hook.cancelPendingCommands("session ended");
+    const bool answered_when_ended = ready(waiting) && waiting.response.get() == deferred;
+    EditorHookTestAccess::setFilesystemSettling(hook, std::nullopt);
+    EditorHookTestAccess::setEditorStarting(hook, std::nullopt);
+    EditorHookTestAccess::setProgressTaskOpen(hook, std::nullopt);
+    EditorHookTestAccess::setImportPassOpen(hook, std::nullopt);
+    EditorHookTestAccess::setSessionKind(hook, std::nullopt);
+    ASSERT_TRUE(still_waiting);
+    ASSERT_TRUE(answered_when_due);
+    ASSERT_TRUE(answered_when_ended);
+}
+
 static void test_a_scene_open_waits_for_the_editor_to_open_its_startup_scenes() {
     // Break caught: the editor opens the scenes it restores, or the project's
     // main scene, once its first scan is applied and makes one of them
@@ -9946,6 +10037,10 @@ struct RegisterToolTests {
                      test_nothing_is_dequeued_inside_an_editor_progress_task);
         registerTest("EditorHook.SceneOpenWaitsForTheStartupScenes",
                      test_a_scene_open_waits_for_the_editor_to_open_its_startup_scenes);
+        registerTest("EditorHook.SceneCreateWaitsForTheScanToBeApplied",
+                     test_a_scene_create_waits_for_the_editor_to_apply_its_scan);
+        registerTest("EditorHook.DeferredSceneCreateAnswersByItsDeadline",
+                     test_a_deferred_scene_create_still_answers_by_its_deadline);
         registerTest("Tools.ShaderWriteAppliedComparesMembers",
                      test_a_write_is_applied_when_every_member_landed);
         registerTest("Tools.WriteThatDidNotLandSaysWhichOfTheTwo",
