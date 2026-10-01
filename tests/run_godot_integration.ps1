@@ -5856,6 +5856,10 @@ text = "Not a key"
         @{ Pattern = 'Identifier "SignalProbeState" not declared|Failed to load script "res://signal_uses_autoload\.gd"|Failed parse script res://signal_uses_autoload\.gd'; Cause = "signal_uses_autoload.gd does not compile, on purpose, for target_script_not_compiled; a GDScript language server client re-parses it on connect" },
         @{ Pattern = "corrupt_asset\.png|IHDR: CRC error|ERR_FILE_CORRUPT"; Cause = "request 2700 imports a PNG with a wrong CRC on every chunk" },
         @{ Pattern = "didi_output_canary_warning"; Cause = "the runtime fixture prints a warning canary for runtime_read_output" },
+        # Seen only on the software-rendered 4.5.1 runner, and there for any
+        # scan the harness causes (#1002): a scene in a folder the editor does
+        # not list can be indexed by nothing but a scan (#1004).
+        @{ Pattern = "Signal 'frame_pre_draw' is already connected to given callable 'RS::viewport_set_update_mode'"; Where = "core/object/object\.cpp"; Cause = "request 6004 creates a scene in a new folder, so Didi asks the editor to scan; a software-rendered 4.5.1 editor prints this during that scan" },
         # The host, not a request. A CI runner has no GPU and no audio device,
         # and the engine says so while its drivers start, before any request is
         # sent. Matched on where in the engine the line comes from as well as
