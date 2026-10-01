@@ -343,8 +343,10 @@ public:
     // it. It is held back while any scan runs, Didi's or the editor's own,
     // until that scan's results are applied, and while the editor does not
     // list one of the assets, and started by reimportIndexedAssets once that
-    // is over.
-    Result<ReimportStart> startAssetReimport(const ReimportBatch& batch);
+    // is over. seen_scan is a scan the caller saw running that may be over and
+    // not yet applied.
+    Result<ReimportStart> startAssetReimport(const ReimportBatch& batch,
+                                             const std::optional<ScanSettle>& seen_scan = std::nullopt);
     // The reimport_files half, for assets the editor lists, while it is not
     // scanning. A 409 editor_import_busy when the editor's own pass refused it.
     Result<void> reimportIndexedAssets(const std::vector<std::string>& reimported);
