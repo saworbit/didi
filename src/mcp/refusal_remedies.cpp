@@ -162,6 +162,44 @@ json discoverWhatIsThere(const std::string& tool) {
                     "Read the open scene's paths before naming a node.");
 }
 
+bool mentions(const std::string& text, const char* needle) {
+    return text.find(needle) != std::string::npos;
+}
+
+// What fixes a not_found. A few are not fixed by finding a name: a capture the
+// cache let go, a build with no project file at the root, a preview already
+// cleared. The rest are found where their kind is listed, and a tool that can
+// miss a file as well as a node says which in its message. Those used to be
+// sent to read the open scene's node paths (#1117).
+json notFoundRemedy(const Refusal& r) {
+    if (r.tool == "viewport_diff_capture") {
+        return nextCall("viewport_capture_frame", json::object(),
+                        "Captures are held in memory and the oldest go first, so take a new baseline.");
+    }
+    if (r.tool == "csharp_check_build") return field("project_file");
+    if (r.tool == "editor_clear_ghost_previews") {
+        return noRemedy("That preview is not held: it was cleared already, or never rendered in this editor.");
+    }
+    if (mentions(r.message, "has no animation named")) {
+        return nextCall("anim_list_tracks", json::object(),
+                        "List the player's animations before naming one.");
+    }
+    if (mentions(r.message, "declares no uniform named")) {
+        return nextCall("shader_list_uniforms", json::object(),
+                        "List the shader's uniforms before naming one.");
+    }
+    if (mentions(r.message, "Autoload not found")) {
+        return nextCall("project_list_autoloads", json::object(),
+                        "List the project's autoloads before naming one.");
+    }
+    if (mentions(r.message, "Script resource not found") || mentions(r.message, "PackedScene not found") ||
+        mentions(r.message, "Autoload resource not found") || mentions(r.message, "No resource at")) {
+        return nextCall("project_list_resources", json::object(),
+                        "Find the file's res:// path before naming it.");
+    }
+    return discoverWhatIsThere(r.tool);
+}
+
 json attachAgain(const json& data, const std::string& reason) {
     const auto session = data.find("session");
     if (session != data.end() && session->is_object() && session->contains("session_id")) {
@@ -508,7 +546,7 @@ const std::map<std::string, Rule>& rules() {
         {"gone", [](const Refusal&) { return retryWith({{"dry_run", true}}); }},
 
         // --- Not found -----------------------------------------------------
-        {"not_found", [](const Refusal& r) { return discoverWhatIsThere(r.tool); }},
+        {"not_found", notFoundRemedy},
 
         // --- The extension's own identifiers (godot_bridge.cpp) ------------
         {"node_not_owned", [](const Refusal& r) {

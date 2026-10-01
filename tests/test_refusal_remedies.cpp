@@ -106,6 +106,44 @@ static void test_the_remedy_follows_the_tool() {
               "runtime_launch");
 }
 
+// A missing thing that is not a node is found where that kind of thing is
+// listed. Every not_found outside the tools with a list of their own used to
+// name scene_get_hierarchy, so an evicted capture or a missing script file was
+// sent to read the open scene's node paths (#1117).
+static void test_a_not_found_names_the_list_that_holds_what_was_missing() {
+    const auto next = [](const std::string& message, const std::string& tool) {
+        const auto data = floored(404, message, nullptr, tool);
+        return data.contains("next_call") ? data["next_call"]["tool"].get<std::string>() : std::string();
+    };
+    ASSERT_EQ(next("Baseline capture ID is missing or has been evicted", "viewport_diff_capture"),
+              "viewport_capture_frame");
+    ASSERT_EQ(next("Script resource not found: res://missing.gd", "script_attach_to_node"),
+              "project_list_resources");
+    ASSERT_EQ(next("PackedScene not found: res://missing.tscn", "scene_instantiate_node"),
+              "project_list_resources");
+    ASSERT_EQ(next("No resource at res://missing.tres. Write the library first.", "anim_add_library"),
+              "project_list_resources");
+    ASSERT_EQ(next("Autoload resource not found: res://missing.gd", "project_set_autoload"),
+              "project_list_resources");
+    ASSERT_EQ(next("Autoload not found: Missing", "project_remove_autoload"), "project_list_autoloads");
+    ASSERT_EQ(next("AnimationPlayer has no animation named walk", "anim_play_track"), "anim_list_tracks");
+    ASSERT_EQ(next("The shader declares no uniform named tint", "shader_set_uniform"),
+              "shader_list_uniforms");
+    // The project_file argument is the fix, and nothing to call first.
+    const auto build = floored(404, "No .sln or .csproj exists at the project root", nullptr,
+                               "csharp_check_build");
+    ASSERT_EQ(build["field"], "project_file");
+    ASSERT_FALSE(build.contains("next_call"));
+    // A preview that is gone is gone, and clearing it again cannot help.
+    const auto preview = floored(404, "No preview with id abc", nullptr, "editor_clear_ghost_previews");
+    ASSERT_TRUE(preview["no_remedy"].is_string());
+    ASSERT_FALSE(preview.contains("next_call"));
+    // A node the same tools could not find is still read off the open scene.
+    ASSERT_EQ(next("Target node not found: /root/Main/Missing", "script_attach_to_node"),
+              "scene_get_hierarchy");
+    ASSERT_EQ(next("Parent node not found: Missing", "scene_instantiate_node"), "scene_get_hierarchy");
+}
+
 // A site that already said what fixes it is left exactly as it said it.
 static void test_a_site_remedy_is_left_alone() {
     const json own = {{"code", "already_exists"}, {"retry_with", {{"replace", true}}}};
@@ -243,6 +281,8 @@ struct RegisterRefusalRemedyTests {
         registerTest("RefusalRemedies.CodeCarriesItsRemedy",
                      test_a_refusal_with_no_remedy_gets_the_one_its_code_carries);
         registerTest("RefusalRemedies.RemedyFollowsTheTool", test_the_remedy_follows_the_tool);
+        registerTest("RefusalRemedies.NotFoundNamesWhereItIsListed",
+                     test_a_not_found_names_the_list_that_holds_what_was_missing);
         registerTest("RefusalRemedies.SiteRemedyLeftAlone", test_a_site_remedy_is_left_alone);
         registerTest("RefusalRemedies.FaultNamesNoFix",
                      test_a_fault_names_no_fix_and_a_dead_end_says_so);

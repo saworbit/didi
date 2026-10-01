@@ -95,9 +95,11 @@ A refusal names what fixes it, in `error.data`:
 
 A call site that knows the remedy says it, and the error floor leaves it
 alone. Where a site said none, the floor fills the remedy its `code` carries,
-chosen by the tool where one code means different things in different tools:
-a `not_found` from a scene tool names `scene_get_hierarchy`, from a blackboard
-tool `blackboard_list_keys`. A failure with status 500 or above other than 503
+chosen by the tool where one code means different things in different tools,
+and by what the message names where one tool can miss more than one kind of
+thing: a `not_found` about a node names `scene_get_hierarchy`, about a file
+`project_list_resources`, about a blackboard key `blackboard_list_keys`, and
+about an evicted capture `viewport_capture_frame`. A failure with status 500 or above other than 503
 and 504 is a fault in the server or what it read, and carries none.
 
 `didi --dump-tool-manifest` publishes the table as `refusals.remedied`, and
