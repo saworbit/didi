@@ -190,14 +190,22 @@ function Get-ObservedPostStateCases {
             (Witness "witness" "node_info" @("Subject/SpawnedCopy")))
            Agree = { param($s) Agree "node_path" $s.call.node_path $s.witness.returned.path } },
         # Into a parent that already has a child of the same name, so the
-        # engine renames the node it moves (#1126).
+        # engine renames the node it moves. The name it picks is a readable
+        # one, Spawned3, as in the editor's own reparent, not an internal
+        # @Node3D@N, and the answer says it was substituted (#1126).
         @{ Tool = "scene_reparent_node"; Session = "editor"; Steps = @(
             (Step "nest" "scene_instantiate_node" @{ node_type = "Node3D"; parent_path = $observedRoot; name = "Nest" }),
             (Step "namesake" "scene_instantiate_node" @{ node_type = "Node3D"; parent_path = "$observedRoot/Nest"; name = "Spawned2" }),
             (Witness "before" "children" @("Nest")),
             (Step "call" "scene_reparent_node" @{ target_node = "$observedRoot/Spawned2"; new_parent_path = "$observedRoot/Nest" }),
             (Witness "after" "children" @("Nest")))
-           Agree = { param($s) Agree "node_path" $s.call.node_path (Get-ObservedNewChild $s.before.returned $s.after.returned) } },
+           Agree = { param($s)
+               $moved = Get-ObservedNewChild $s.before.returned $s.after.returned
+               $name = ([string]$moved).Substring(([string]$moved).LastIndexOf("/") + 1)
+               Agree "node_path" $s.call.node_path $moved
+               Agree "node_name" $s.call.node_name $name
+               Agree "name_substituted" ($true -eq $s.call.name_substituted) ($name -ne "Spawned2")
+               Agree "node_name, readable" "a readable name" $(if ($name.StartsWith("@")) { $name } else { "a readable name" }) } },
         # A removal that succeeded cannot leave the node, and one that cannot
         # is refused, so no input makes exists differ from false.
         @{ Tool = "scene_remove_node"; Session = "editor"; Steps = @(
@@ -318,10 +326,7 @@ function Get-ObservedPostStateCases {
            Agree = { param($s) Agree "defined_by_project" $s.call.defined_by_project $s.witness.returned } },
         # The file read back after the write, not the request (#1019). The
         # witness loads it past the editor's cache and reports the class the
-        # engine made from it. A type the engine cannot make is the input that
-        # crosses resource_type, and today it disagrees: the answer gives the
-        # header and the engine loads a MissingResource (#1125). It gets its
-        # case with that fix.
+        # engine made from it, or the class_name of the script it carries.
         @{ Tool = "resource_create"; Session = "editor"; Steps = @(
             (Step "call" "resource_create" @{ save_path = "res://observed_shape.tres"; resource_type = "CircleShape2D"; properties = @{ radius = 3 }; overwrite = $true }),
             (Witness "witness" "load_fresh" @("res://observed_shape.tres", @("radius"))),
@@ -329,6 +334,19 @@ function Get-ObservedPostStateCases {
            Agree = { param($s)
                Agree "resource_type" $s.call.resource_type $s.witness.returned.class
                Agree "file_bytes" $s.call.file_bytes $s.length.returned } },
+        # A class_name type, which the header cannot name: the engine makes a
+        # Resource carrying the script, and named in the header it loaded as a
+        # MissingResource while the answer named the class (#1125).
+        @{ Tool = "resource_create"; Session = "editor"; Steps = @(
+            (Step "script" "script_create" @{ script_path = "res://observed_item.gd"; source_text = "class_name ObservedItem`nextends Resource`n`n@export var power := 1`n" }),
+            (Step "call" "resource_create" @{ save_path = "res://observed_item.tres"; resource_type = "ObservedItem"; properties = @{ power = 5 } }),
+            (Witness "witness" "load_fresh" @("res://observed_item.tres", @("power"))),
+            (Witness "length" "file_length" @("res://observed_item.tres")))
+           Agree = { param($s)
+               Agree "resource_type" $s.call.resource_type $(if ($s.witness.returned.script_class) { $s.witness.returned.script_class } else { $s.witness.returned.class })
+               Agree "engine_type" $s.call.engine_type $s.witness.returned.class
+               Agree "file_bytes" $s.call.file_bytes $s.length.returned
+               Agree "properties.power" 5 $s.witness.returned.properties.power } },
         # uid and uid_registered are the engine's; the request names neither.
         @{ Tool = "scene_pack_branch"; Session = "editor"; Steps = @(
             (Step "call" "scene_pack_branch" @{ target_node = "$observedRoot/Subject"; scene_path = "res://observed_packed.tscn" }),

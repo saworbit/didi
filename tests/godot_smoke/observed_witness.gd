@@ -150,6 +150,10 @@ func load_fresh(path: String, properties: Array) -> Dictionary:
 	if resource == null:
 		return {"loaded": false}
 	var answer := {"loaded": true, "class": resource.get_class()}
+	# A scripted resource's class_name, which is the class it was saved as
+	# (#1125). Empty for one with no script, and for a script itself.
+	var script: Script = resource.get_script()
+	answer["script_class"] = String(script.get_global_name()) if script != null else ""
 	var uid := ResourceLoader.get_resource_uid(path)
 	answer["uid"] = ResourceUID.id_to_text(uid) if uid != ResourceUID.INVALID_ID else ""
 	answer["uid_registered"] = uid != ResourceUID.INVALID_ID and ResourceUID.has_id(uid)

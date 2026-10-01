@@ -704,8 +704,101 @@ void writes_a_number_as_the_type_it_names() {
                 std::string::npos);
 }
 
+// A class_name script declares a type ClassDB never lists. Break caught:
+// resource_create wrote [gd_resource type="ObservedItem"], which Godot loads
+// as a MissingResource and a game cannot load at all, and answered success
+// with resource_type "ObservedItem". Measured on 4.5.1 and 4.7.2 (#1125).
+// Godot writes such a resource as its engine base, with script_class and
+// the script set, and so does this now, with no allow_unknown_type needed.
+void writes_a_class_name_type_the_way_godot_does() {
+    ProjectFixture project("class-name-type");
+    std::ofstream("item.gd", std::ios::binary)
+        << "class_name ObservedItem\nextends Resource\n\n@export var power := 1\nvar note: String\n";
+
+    const auto written = create({
+        {"save_path", "res://art/item.tres"},
+        {"resource_type", "ObservedItem"},
+        {"properties", {{"power", 5}, {"resource_name", "sword"}}}
+    });
+    ASSERT_TRUE(!written.isError);
+    const auto tres = project.read("art/item.tres");
+    ASSERT_TRUE(tres.rfind("[gd_resource type=\"Resource\" script_class=\"ObservedItem\" load_steps=2 format=3]", 0) == 0);
+    ASSERT_TRUE(tres.find("[ext_resource type=\"Script\" path=\"res://item.gd\" id=\"") != std::string::npos);
+    // The script first, so the loader sets the script's own properties on an
+    // instance that has them.
+    const auto body = tres.substr(tres.find("[resource]\n") + 11);
+    ASSERT_TRUE(body.rfind("script = ExtResource(\"", 0) == 0);
+    ASSERT_TRUE(body.find("power = 5\n") != std::string::npos);
+    ASSERT_TRUE(body.find("resource_name = \"sword\"\n") != std::string::npos);
+
+    const auto payload = payloadOf(written);
+    ASSERT_EQ(payload["resource_type"], "ObservedItem");
+    ASSERT_EQ(payload["engine_type"], "Resource");
+    ASSERT_EQ(payload["property_check"]["script_class"], "ObservedItem");
+    ASSERT_EQ(payload["property_check"]["script"], "res://item.gd");
+    ASSERT_EQ(payload["property_check"]["declared_by_script"], json::array({"power"}));
+    ASSERT_TRUE(payload.find("limitation") == payload.end());
+
+    // A name neither the script nor Resource declares is refused as before.
+    const auto refused = create({
+        {"save_path", "res://art/typo.tres"},
+        {"resource_type", "ObservedItem"},
+        {"properties", {{"powr", 5}}}
+    });
+    ASSERT_TRUE(refused.isError);
+    ASSERT_TRUE(payloadOf(refused)["error"]["message"].get<std::string>().find("'powr'") != std::string::npos);
+    ASSERT_TRUE(!project.exists("art/typo.tres"));
+
+    // Another script as script would contradict the type, so it is refused.
+    std::ofstream("other.gd", std::ios::binary) << "extends Resource\n";
+    const auto contradicted = create({
+        {"save_path", "res://art/contradicted.tres"},
+        {"resource_type", "ObservedItem"},
+        {"properties", {{"script", {{"type", "ExtResource"}, {"path", "res://other.gd"}}}}}
+    });
+    ASSERT_TRUE(contradicted.isError);
+    ASSERT_TRUE(!project.exists("art/contradicted.tres"));
+}
+
+// The class is found along an extends chain of class_names and quoted paths,
+// with the members of every script on the way, and a chain that ends on a
+// class that is not a Resource is refused rather than written.
+void follows_a_class_name_chain_to_its_engine_base() {
+    ProjectFixture project("class-name-chain");
+    std::ofstream("base_item.gd", std::ios::binary)
+        << "class_name BaseItem\nextends Resource\n\n@export var weight := 1.0\n";
+    std::ofstream("middle_item.gd", std::ios::binary)
+        << "extends BaseItem\n\n@export_range(0, 10) var level := 0\n";
+    std::ofstream("weapon.gd", std::ios::binary)
+        << "class_name Weapon extends \"res://middle_item.gd\"\n\n@export\nvar damage := 3\n";
+    std::ofstream("spawner.gd", std::ios::binary) << "class_name Spawner\nextends Node2D\n";
+
+    const auto weapon = create({
+        {"save_path", "res://weapon.tres"},
+        {"resource_type", "Weapon"},
+        {"properties", {{"damage", 9}, {"level", 2}, {"weight", 0.5}}}
+    });
+    ASSERT_TRUE(!weapon.isError);
+    ASSERT_TRUE(project.read("weapon.tres").rfind("[gd_resource type=\"Resource\" script_class=\"Weapon\"", 0) == 0);
+    const auto by_script = payloadOf(weapon)["property_check"]["declared_by_script"];
+    ASSERT_EQ(by_script, json::array({"damage", "level", "weight"}));
+
+    const auto node = create({
+        {"save_path", "res://spawner.tres"},
+        {"resource_type", "Spawner"},
+        {"properties", json::object()}
+    });
+    ASSERT_TRUE(node.isError);
+    ASSERT_TRUE(payloadOf(node)["error"]["message"].get<std::string>().find("Node2D is not one") != std::string::npos);
+    ASSERT_TRUE(!project.exists("spawner.tres"));
+}
+
 struct Register {
     Register() {
+        registerTest("resource_references.class_name_type_written_as_godot_does",
+                     writes_a_class_name_type_the_way_godot_does);
+        registerTest("resource_references.class_name_chain_to_engine_base",
+                     follows_a_class_name_chain_to_its_engine_base);
         registerTest("resource_references.writes_declared_vector_type",
                      writes_a_vector_as_the_type_the_property_declares);
         registerTest("resource_references.packed_composites_written_flat",

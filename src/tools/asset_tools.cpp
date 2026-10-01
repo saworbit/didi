@@ -5,6 +5,7 @@
 #include "didi/offline/resource_indexer.hpp"
 #include "didi/offline/project_audit.hpp"
 #include "didi/offline/project_impact.hpp"
+#include "didi/offline/project_text_scan.hpp"
 #include "didi/offline/audio_bus_layout.hpp"
 #include "didi/offline/import_options.hpp"
 #include "didi/offline/project_file_lock.hpp"
@@ -27,6 +28,7 @@
 #include <initializer_list>
 #include <iterator>
 #include <map>
+#include <regex>
 #include <sstream>
 #include <set>
 #include <string>
@@ -1022,6 +1024,118 @@ std::string storedResourceType(const std::string& text) {
     return text.substr(opening.size(), end - opening.size());
 }
 
+// The script_class="..." on that same header line, which names the class_name
+// a scripted resource was saved as. Empty when there is none.
+std::string storedScriptClass(const std::string& text) {
+    const auto line_end = text.find('\n');
+    const auto header = text.substr(0, line_end);
+    const std::string key = " script_class=\"";
+    const auto start = header.find(key);
+    if (start == std::string::npos) return {};
+    const auto end = header.find('"', start + key.size());
+    if (end == std::string::npos) return {};
+    return header.substr(start + key.size(), end - start - key.size());
+}
+
+// A type a class_name script declares. ClassDB never lists one, so Godot cannot
+// make it from a header that names it: [gd_resource type="ObservedItem"] loads
+// as a MissingResource, and a game fails to load it at all. Godot writes such a
+// resource as its engine base, names the class in script_class, and sets the
+// script, and that is what this is for (#1125).
+struct ScriptClass {
+    std::string name;
+    std::string script_path;
+    std::string engine_base;
+    // Every top-level var along the script chain, which the loader sets through
+    // the script just as it sets an engine property.
+    std::set<std::string> members;
+};
+
+// The class_name a project script declares, read from the scripts on disk,
+// with the chain it extends followed to an engine class. nullopt when no
+// script declares the name; an error when one does and its chain cannot be
+// followed, or ends on a class that is not a Resource.
+Result<std::optional<ScriptClass>> findProjectScriptClass(const std::string& name) {
+    static const std::regex class_name_line(R"re(^class_name\s+([A-Za-z_][A-Za-z0-9_]*))re");
+    static const std::regex extends_line(
+        R"re(^(?:class_name\s+\S+\s+)?extends\s+("[^"]*"|[A-Za-z_][A-Za-z0-9_]*))re");
+    static const std::regex member_line(
+        R"re(^(?:@[A-Za-z_][A-Za-z0-9_]*(?:\([^)]*\))?\s+)*var\s+([A-Za-z_][A-Za-z0-9_]*))re");
+    const auto scan = offline::scanProjectText(".", offline::ScanIndex::fresh);
+    std::map<std::string, const std::string*> scripts;
+    std::map<std::string, std::string> declared;
+    for (const auto& source : scan.sources) {
+        if (!strings::endsWith(source.path, ".gd")) continue;
+        scripts[source.path] = &source.contents;
+        std::istringstream lines(source.contents);
+        std::string line;
+        while (std::getline(lines, line)) {
+            std::smatch match;
+            if (std::regex_search(line, match, class_name_line)) {
+                declared.emplace(match[1].str(), source.path);
+                break;
+            }
+        }
+    }
+    const auto found = declared.find(name);
+    if (found == declared.end()) return std::optional<ScriptClass>{};
+
+    ScriptClass script_class;
+    script_class.name = name;
+    script_class.script_path = found->second;
+    std::string path = found->second;
+    std::set<std::string> visited;
+    while (visited.insert(path).second) {
+        const auto script = scripts.find(path);
+        if (script == scripts.end()) {
+            return Error::invalidArgument(name + " is declared by " + script_class.script_path +
+                                          ", which extends " + path +
+                                          ", and that script is not in this project.");
+        }
+        std::string extends;
+        std::istringstream lines(*script->second);
+        std::string line;
+        while (std::getline(lines, line)) {
+            std::smatch match;
+            if (std::regex_search(line, match, member_line)) {
+                script_class.members.insert(match[1].str());
+            } else if (extends.empty() && std::regex_search(line, match, extends_line)) {
+                extends = match[1].str();
+            }
+        }
+        if (!extends.empty() && extends.front() == '"') {
+            path = extends.substr(1, extends.size() - 2);
+            continue;
+        }
+        const auto named = declared.find(extends);
+        if (named != declared.end()) {
+            path = named->second;
+            continue;
+        }
+        // No extends line means RefCounted, which is what Godot assumes.
+        script_class.engine_base = extends.empty() ? "RefCounted" : extends;
+        break;
+    }
+    if (script_class.engine_base.empty()) {
+        return Error::invalidArgument(name + " is declared by " + script_class.script_path +
+                                      ", whose extends chain loops back on itself.");
+    }
+    const auto& reference = offline::ClassReference::instance();
+    std::string ancestor = script_class.engine_base;
+    std::set<std::string> walked;
+    while (!ancestor.empty() && ancestor != "Resource" && walked.insert(ancestor).second) {
+        const json* record = reference.find(ancestor);
+        ancestor = record ? record->value("inherits", std::string()) : std::string();
+    }
+    if (ancestor != "Resource") {
+        return Error::invalidArgument(
+            name + " is declared by " + script_class.script_path + ", which extends " +
+            script_class.engine_base + ". A .tres holds a Resource, and " +
+            script_class.engine_base + " is not one. Use a script that extends Resource.");
+    }
+    return std::optional<ScriptClass>{std::move(script_class)};
+}
+
 bool isUsableSubResourceId(const std::string& id) {
     if (id.empty() || id.size() > 128) return false;
     for (unsigned char character : id) {
@@ -1129,16 +1243,67 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
         return verdict;
     };
 
+    // A type no engine list names may be a class_name a project script
+    // declares. Written as its engine base with the script set, it loads as
+    // that class; written under its own name it loaded as a MissingResource
+    // while this answered success (#1125).
+    const auto engine_named = engine_classes.find(resource_type);
+    const bool engine_lacks_type = engine_named != engine_classes.end() && !engine_named->second;
+    std::optional<ScriptClass> script_class;
+    if (!(engine_named != engine_classes.end() && engine_named->second) &&
+        !offline::ClassReference::instance().find(resource_type)) {
+        auto found = findProjectScriptClass(resource_type);
+        if (found.isErr()) return CallToolResult::fromError(found.error(), "Argument 'resource_type': ");
+        script_class = std::move(found.value());
+        // The script is about to be resolved through the shared index, which
+        // may predate it; the search above has just read the tree fresh.
+        if (script_class) offline::ResourceIndexer::invalidateSharedIndex();
+    }
+    const std::string header_type = script_class ? script_class->engine_base : resource_type;
+    std::vector<std::pair<std::string, json>> to_check;
+    std::vector<std::pair<std::string, json>> to_write;
+    json declared_by_script = json::array();
+    if (script_class) {
+        to_write.emplace_back("script", json{{"type", "ExtResource"},
+                                             {"path", script_class->script_path},
+                                             {"resource_type", "Script"}});
+    }
+    for (const auto& [name, value] : ordered.value()) {
+        if (script_class && name == "script") {
+            const bool same_script = value.is_object() && value.value("type", "") == "ExtResource" &&
+                                     value.value("path", "") == script_class->script_path;
+            if (!same_script) {
+                return CallToolResult::errorJson(
+                    400, "Argument 'properties': " + resource_type + " is the class_name of " +
+                             script_class->script_path + ", and that script is set on the resource "
+                             "already. Leave script out, or name that script.",
+                    {{"code", "invalid_arguments"}, {"field", "properties"}});
+            }
+            continue;
+        }
+        to_write.emplace_back(name, value);
+        if (script_class && script_class->members.count(name)) {
+            declared_by_script.push_back(name);
+            continue;
+        }
+        to_check.emplace_back(name, value);
+    }
+
     // Before anything is rendered or written. A property the type does not
     // declare used to be written into [resource], reported in
     // properties_written, and then dropped by Godot on load with nothing in the
     // surface able to show the loss: resource_inspect reports type, size, uid
     // and dependencies, and no properties.
-    auto property_check = checkPropertiesAgainstType(resource_type, ordered.value(),
+    auto property_check = checkPropertiesAgainstType(header_type, to_check,
                                                      "Argument 'properties'",
                                                      allow_unknown_type,
-                                                     verdictFor(resource_type));
+                                                     verdictFor(header_type));
     if (property_check.isErr()) return CallToolResult::fromError(property_check.error());
+    if (script_class) {
+        property_check.value()["script_class"] = script_class->name;
+        property_check.value()["script"] = script_class->script_path;
+        property_check.value()["declared_by_script"] = std::move(declared_by_script);
+    }
 
     // `checked: true` reads as "verified against your engine", and it was
     // verified against whichever engine the shipped dump was taken from. A
@@ -1279,8 +1444,8 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
     std::ostringstream body;
     body << "\n[resource]\n";
     json written_order = json::array();
-    const auto root_declared = declaredPropertyTypes(resource_type);
-    for (const auto& [name, value] : ordered.value()) {
+    const auto root_declared = declaredPropertyTypes(header_type);
+    for (const auto& [name, value] : to_write) {
         const auto declaration = root_declared.find(name);
         auto literal = tresLiteral(value, name, &scope,
                                    declaration == root_declared.end()
@@ -1293,7 +1458,8 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
 
     std::ostringstream out;
     const size_t load_steps = scope.externals.size() + sub_resources.size() + 1;
-    out << "[gd_resource type=\"" << resource_type << "\"";
+    out << "[gd_resource type=\"" << header_type << "\"";
+    if (script_class) out << " script_class=\"" << script_class->name << "\"";
     // Godot writes load_steps only when there is more than the resource itself,
     // and omitting it where it is 1 is what the editor's own files look like.
     if (load_steps > 1) out << " load_steps=" << load_steps;
@@ -1337,10 +1503,13 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
     // editor's copy is reloaded from it in place, which is what the editor does
     // itself when it notices a change on disk. Absent when no editor answered.
     const auto editor_copy = refreshEditorCopies(ipc, {reported_path});
+    // A scripted resource is the class its header names in script_class, which
+    // is what the engine makes it; the type beside it is the engine base.
+    const auto stored_script_class = storedScriptClass(stored);
     json created = {
         {"status", "created_offline"},
         {"save_path", reported_path},
-        {"resource_type", stored_type},
+        {"resource_type", stored_script_class.empty() ? stored_type : stored_script_class},
         {"file_bytes", stored.size()},
         // In file order, because that is the order Godot applies them in and
         // the caller has no other way to see what it got.
@@ -1353,6 +1522,17 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
         {"property_check", property_check.value()},
         {"sub_resource_property_checks", std::move(sub_property_checks)}
     };
+    if (!stored_script_class.empty()) created["engine_type"] = stored_type;
+    // allow_unknown_type past an engine that said it has no such class, and no
+    // script declaring it: the file is written as asked, and the answer says
+    // what the engine will make of it rather than naming the type as if it
+    // would load (#1125).
+    if (engine_lacks_type && !script_class) {
+        created["limitation"] =
+            "The attached engine has no class named " + resource_type +
+            " and no project script declares it as a class_name, so the editor loads this file "
+            "as a MissingResource that only keeps its data, and a game cannot load it at all.";
+    }
     reportEditorCopy(created, editor_copy);
     return CallToolResult::successJson(std::move(created));
 }

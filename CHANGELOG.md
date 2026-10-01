@@ -394,6 +394,27 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **resource_create writes a class_name type the way Godot does (#1125).** A
+  type a project script declares with `class_name` was written into the header
+  under its own name, which Godot loads as a `MissingResource` and a game
+  cannot load at all, and the answer named the class as if it would load.
+  Writing it as a `Resource` with the script set was refused for the script's
+  own properties. The class is now found in the project's scripts, with no
+  `allow_unknown_type` needed, and written as its engine base with
+  `script_class` and the script, names checked against the engine base and
+  every `var` along the chain. The answer gives the class and its
+  `engine_type`. A type `allow_unknown_type` forces past an attached engine
+  that lacks it now carries a `limitation` saying it loads as a
+  `MissingResource`.
+
+- **scene_reparent_node gives a clashing node a readable name and says so
+  (#1126).** Moving a node into a parent that already had a child of its name
+  left it named like `@Node3D@20131`, and the answer did not mention the
+  rename. It now gets the readable name the editor's own reparent picks,
+  `Twin2` for `Twin`, the answer carries `node_name`, `requested_name` and
+  `name_substituted: true` as `scene_instantiate_node` does, and undo restores
+  the old name.
+
 - **scene_call_method and signal_emit are exempt for good from the observed
   check (#1020).** Both run project code and claim no state after the call:
   `returned`, `emitted` and `connection_count` describe the call. An exemption
