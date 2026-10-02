@@ -323,6 +323,13 @@ $env:DIDI_STARTUP_GODOT = "C:/Godot/Godot_v4.6.2-stable_win64_console.exe"
 python -m unittest tests.test_editor_startup_live -v
 ```
 
+`tests/test_didi_setup.py` drives `didi setup` and `didi doctor` (Q12). Its offline half runs on every CI platform: from a directory holding only `project.godot`, each client file setup writes has to start a server that answers, and a rerun has to leave every file byte-identical. Its live half is opt-in. Set `DIDI_SETUP_GODOT` to one or more editor executables, separated by the platform's path separator, and each one is started by `setup --godot ... --headless` on a fresh project; the server the written `.mcp.json` starts then has to reach that editor. CI does not run the live half yet.
+
+```powershell
+$env:DIDI_SETUP_GODOT = "C:/Godot/Godot_v4.5.1-stable_win64_console.exe;C:/Godot/Godot_v4.7.2-stable_win64_console.exe"
+python -m unittest tests.test_didi_setup -v
+```
+
 The Windows live integration harness copies the tracked fixture into `build/` and starts real Godot processes. It preserves the Phase 1/2 sequence, adds Phase 3 concurrent editor/game routing, and now exercises Phase 4 bounded search, SVG reimport, reversible isolation, capture IDs, mutation diffs, exact undo restoration, and cleanup. The Phase 8 import block runs a menu scene whose music stops, as the control, then sets the loop options on an OGG and a WAV import with `asset_configure_import` after a dry run, checks seven refusals, and runs the scene again to see the music still playing. The earlier coverage still checks scripts, groups, autoloads, nested settings, InputEvent forms, persistence rollback, scene lifecycle, resource ownership, unsafe paths, and honest errors:
 
 ```powershell
@@ -467,6 +474,13 @@ A tool that reads or writes a property of a node, or of a resource the node hold
   cannot be recorded; `tests/test_contract_snapshots.py` fails the build until
   it has one.
 - Update [Current Capability Matrix](CAPABILITIES.md) and [Tool Reference](TOOL_REFERENCE.md).
+
+## Project setup implementation map
+
+- `src/setup/build_identity.cpp`: parses and orders build ids, and reads the one a binary carries out of its bytes, so an addon is judged before any editor loads it.
+- `src/setup/addon_install.cpp`: finds the addon beside the executable, compares it with a project's, installs by staged rename, and enables the plugin through `offline::writeProjectSettingLiteral`.
+- `src/setup/client_config.cpp`: each project-scoped client's file, merged with `nlohmann::ordered_json` or as a marked TOML block, and the agent guide block. The server arguments match the dock's Connect page (`addons/didi/didi_client_config.gd`); change both together.
+- `src/setup/commands.cpp`: the `setup` and `doctor` command lines, the report, and waiting for an editor to answer.
 
 ## Phase 3 and managed recovery implementation map
 

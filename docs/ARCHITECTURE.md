@@ -12,7 +12,7 @@ Existing AI integrations for game engines usually rely on two flawed patterns:
 
 ### The C++ & GDExtension Solution
 - **Native In-Process Access**: The extension uses Godot's GDExtension C interface to call `EditorInterface`, edited-scene nodes, `EditorUndoRedoManager`, and editor viewport textures for the supported live surface.
-- **Dual Execution Topology**: The codebase builds both a standalone MCP stdio executable (`didi.exe` on Windows, `didi` on POSIX) and an in-engine extension library (`didi_extension.dll`, `libdidi_extension.so`, or `libdidi_extension.dylib`), connected through a local named pipe or Unix-domain socket. Stdio uses one newline-delimited JSON-RPC object per line; `Content-Length` framing is rejected.
+- **Dual Execution Topology**: The codebase builds both a standalone MCP stdio executable (`didi.exe` on Windows, `didi` on POSIX) and an in-engine extension library (`didi_extension.dll`, `libdidi_extension.so`, or `libdidi_extension.dylib`), connected through a local named pipe or Unix-domain socket. Stdio uses one newline-delimited JSON-RPC object per line; `Content-Length` framing is rejected. The same executable carries two command-line subcommands that never speak MCP: `didi setup` installs the addon that matches the executable's build into a project, enables it and writes client configuration, and `didi doctor` checks a project from outside the editor (`src/setup/`). They exist for the state no tool can reach, before any client is configured.
 - **Deterministic Lifetime & Zero External Runtime**: Native compiled artifacts with zero Node.js, npm, or Python runtime dependencies.
 
 ---

@@ -101,7 +101,8 @@ The `README.md` inside the archive has the notes for that platform. On macOS, cl
 > ```
 >
 > Copy the built `addons/didi` folder in first; that copy is a filesystem step and is not part of
-> the tool surface. The call returns `execution_mode: "offline_fallback"` and nothing has loaded
+> the tool surface. An agent that can run a command can do both at once instead:
+> `didi setup --project <dir>` copies the addon that matches the binary and enables it. The call returns `execution_mode: "offline_fallback"` and nothing has loaded
 > the value yet, so start Godot afterwards and attach with `runtime_attach_session`. Close any
 > editor already open on the project before writing, because saving its own settings would
 > overwrite the file.

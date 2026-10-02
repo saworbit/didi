@@ -1579,7 +1579,7 @@ That route exists for one reason: enabling the Didi addon is itself a `project_s
 { "setting": "editor_plugins/enabled", "value": ["res://addons/didi/plugin.cfg"] }
 ```
 
-Copy the built `addons/didi` folder into the project first; that copy is a filesystem step and is not part of the tool surface. Nothing has loaded the value when the call returns, so start Godot afterwards and attach. If a Godot editor is already running on the project without the addon, close it before writing, because saving its own settings would overwrite the file.
+Copy the built `addons/didi` folder into the project first; that copy is a filesystem step and is not part of the tool surface. `didi setup --project <dir>`, run from a shell, does the copy and this write together, and refuses an addon from another build ([Setting up a project](ADMIN_GUIDE.md#setting-up-a-project-didi-setup-and-didi-doctor)). Nothing has loaded the value when the call returns, so start Godot afterwards and attach. If a Godot editor is already running on the project without the addon, close it before writing, because saving its own settings would overwrite the file.
 
 ### Scene groups
 
