@@ -157,6 +157,11 @@ static func is_inside_project(path: String) -> bool:
 ## `--project` is first and never optional: Didi refuses to start without an
 ## explicit project root, so a configuration without it is a configuration that
 ## exits before it serves anything.
+##
+## `didi setup` writes the same arguments with these defaults
+## (serverArguments in src/setup/client_config.cpp), so a project configured
+## from the command line and one configured here look the same. Change both
+## together.
 static func arguments() -> PackedStringArray:
 	var args := PackedStringArray(["--project", project_root()])
 	args.append("--log-level")
