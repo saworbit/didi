@@ -4786,7 +4786,8 @@ std::optional<UndoHistoryState> editedSceneHistory(GDExtensionObjectPtr editor,
 UndoVerdict judgeUndoReference(GDExtensionObjectPtr editor, GDExtensionObjectPtr manager,
                                const UndoCommit& ref,
                                std::optional<UndoHistoryState>* own_out = nullptr,
-                               std::optional<UndoHistoryState>* other_out = nullptr) {
+                               std::optional<UndoHistoryState>* other_out = nullptr,
+                               const Result<std::vector<std::string>>* open_scenes = nullptr) {
     auto& ledger = undoLedger();
     if (ref.run != ledger.run()) {
         // Judged by the ledger, whose run is the only thing it compares first.
@@ -4803,7 +4804,7 @@ UndoVerdict judgeUndoReference(GDExtensionObjectPtr editor, GDExtensionObjectPtr
     // still open.
     if (!candidate) {
         UndoVerdict verdict;
-        const auto open = openScenePaths(editor);
+        const auto open = open_scenes ? *open_scenes : openScenePaths(editor);
         const bool still_open =
             ref.scene_path.empty() ||
             (open.isOk() && std::find(open.value().begin(), open.value().end(), ref.scene_path) !=
@@ -4852,6 +4853,20 @@ json verdictJson(const UndoVerdict& verdict, const UndoCommit& ref) {
     return out;
 }
 
+// The refusal for a reference that cannot be undone on its own. Each code is
+// spelled out rather than built from the state's name, so the refusal census
+// in tests/test_refusal_remedies.py can see it.
+json undoRefusalData(UndoState state) {
+    switch (state) {
+    case UndoState::blocked: return {{"code", "undo_entry_blocked"}};
+    case UndoState::later_history: return {{"code", "undo_entry_later_history"}};
+    case UndoState::undone: return {{"code", "undo_entry_undone"}};
+    case UndoState::gone:
+    case UndoState::available: break;
+    }
+    return {{"code", "undo_entry_gone"}};
+}
+
 // editor.undoStatus: whether each reference can be undone on its own now.
 json undoStatusAnswer(const json& params) {
     const auto refs = params.find("refs");
@@ -4869,6 +4884,8 @@ json undoStatusAnswer(const json& params) {
     auto manager = undoManager(editor.value());
     if (manager.isErr()) return errorJson(manager.error().code, manager.error().message);
     json states = json::array();
+    // Read once: every reference outside the current scene asks for it.
+    const auto open_scenes = openScenePaths(editor.value());
     for (const auto& item : *refs) {
         std::string problem;
         const auto ref = UndoCommit::fromJson(item, &problem);
@@ -4878,7 +4895,9 @@ json undoStatusAnswer(const json& params) {
                                          "has the wrong type."}});
             continue;
         }
-        states.push_back(verdictJson(judgeUndoReference(editor.value(), manager.value(), *ref), *ref));
+        states.push_back(verdictJson(
+            judgeUndoReference(editor.value(), manager.value(), *ref, nullptr, nullptr, &open_scenes),
+            *ref));
     }
     return liveResult({{"status", "success"}, {"run", undoLedger().run()}, {"states", std::move(states)}});
 }
@@ -4916,9 +4935,9 @@ json undoReferencedAction(const json& params) {
     std::optional<UndoHistoryState> other;
     const auto verdict = judgeUndoReference(editor.value(), manager.value(), *ref, &own, &other);
     if (verdict.state != UndoState::available) {
-        return refuse(409, verdict.reason,
-                         {{"code", std::string("undo_entry_") + undoStateName(verdict.state)},
-                          {"undo", verdictJson(verdict, *ref)}});
+        json data = undoRefusalData(verdict.state);
+        data["undo"] = verdictJson(verdict, *ref);
+        return refuse(409, verdict.reason, std::move(data));
     }
     auto pressed = pressEditorHistoryItem(editor.value(), true);
     if (pressed.isErr()) return refuse(pressed.error().code, pressed.error().message, json::object());
