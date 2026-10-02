@@ -472,7 +472,7 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 ### Fixed
 
 - **A script Didi creates no longer draws `Unrecognized UID` on Godot 4.5 and
-  4.6.** `script_create` wrote the file and never told the editor, which first
+  4.6 (#1150).** `script_create` wrote the file and never told the editor, which first
   met it on its next scan, and the editor scans whenever its window takes
   focus. If another Godot process had written the script's `.uid` sidecar in
   the meantime, as `project_export` does, 4.5 and 4.6 looked the uid up before
@@ -486,7 +486,7 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
   observed check holds both `script_create` cases to it.
 
 - **A refused project settings save says the rollback worked, and the engine
-  says the save failed once.** When `ProjectSettings.save` failed,
+  says the save failed once (#1150).** When `ProjectSettings.save` failed,
   `project_set_setting`, `project_set_autoload` and `project_set_input_action`
   put the old value back and then saved again into the file the engine had
   just failed to write. That failed the same way: the engine printed
@@ -494,7 +494,7 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
   failed" while the setting was back and the file untouched. The second save
   now runs only when the failed one moved the file.
 
-- **The harness editor says its red lines are meant.** Its Output panel opens
+- **The harness editor says its red lines are meant (#1150).** Its Output panel opens
   with a line saying the errors it shows are failures the harness causes on
   purpose, each named in `tests/run_godot_integration.ps1`, which fails a run
   on any other.
