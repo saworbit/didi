@@ -2134,6 +2134,25 @@
         "name": "Godot Editor State",
         "uri": "godot://editor/state"
       },
+      "godot://project/journal": {
+        "_meta": {
+          "didi": {
+            "currentMode": "offline_fallback",
+            "editorConnected": false,
+            "executionModes": [
+              "live",
+              "offline_fallback"
+            ],
+            "implemented": true,
+            "liveAvailable": false,
+            "subscribable": false
+          }
+        },
+        "description": "Every change Didi made to this project, newest first, with whether each can still be undone on its own.",
+        "mimeType": "application/json",
+        "name": "Change Journal",
+        "uri": "godot://project/journal"
+      },
       "godot://project/tree": {
         "_meta": {
           "didi": {
@@ -3962,7 +3981,8 @@
                   "facts",
                   "tools",
                   "sessions",
-                  "log"
+                  "log",
+                  "journal"
                 ],
                 "type": "string"
               },
@@ -3991,6 +4011,9 @@
             },
             "facts": {
               "type": "array"
+            },
+            "journal": {
+              "type": "object"
             },
             "lights": {
               "type": "array"
@@ -4310,6 +4333,11 @@
               "default": false,
               "description": "Return a non-mutating change preview instead of executing.",
               "type": "boolean"
+            },
+            "journal_entry": {
+              "description": "Undo only this godot://project/journal entry.",
+              "minimum": 1,
+              "type": "integer"
             }
           },
           "type": "object"

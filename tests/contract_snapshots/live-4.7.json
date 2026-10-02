@@ -3026,6 +3026,16 @@
             }
           }
         },
+        "godot://project/journal": {
+          "_meta": {
+            "didi": {
+              "currentMode": "live",
+              "editorConnected": true,
+              "liveAvailable": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
         "godot://project/tree": {
           "_meta": {
             "didi": {

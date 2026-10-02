@@ -5,7 +5,6 @@
 #include "didi/runtime/session_lock.hpp"
 
 #include <algorithm>
-#include <array>
 #include <cctype>
 #include <ctime>
 #include <fstream>
@@ -42,18 +41,18 @@ std::string utf8Prefix(const std::string& text, size_t max) {
 
 // Envelope fields every answer can carry. They describe the call, not the
 // change, and the journal already records the call.
-constexpr std::array<const char*, 12> kEnvelopeKeys = {
+constexpr const char* kEnvelopeKeys[] = {
     "execution_mode", "is_live_engine", "session",          "follow_up",
     "transport",      "offline_reason", "status",           "_meta",
     "limitation",     "warnings",       "confirmation",     "recovery"};
 
 // Arguments that steer the call rather than name the change.
-constexpr std::array<const char*, 5> kSteeringArguments = {
+constexpr const char* kSteeringArguments[] = {
     "confirmation_token", "dry_run", "_meta", "request_id", "fields"};
 
 // The arguments that say what a call was aimed at, in the order a person
 // reading the journal looks for them.
-constexpr std::array<const char*, 22> kTargetKeys = {
+constexpr const char* kTargetKeys[] = {
     "target_node", "node_path",     "parent_path", "scene_path",   "script_path",
     "path",        "file_path",     "save_path",   "resource_path", "asset_path",
     "setting",     "name",          "action",      "bus_name",     "bus",
@@ -61,16 +60,16 @@ constexpr std::array<const char*, 22> kTargetKeys = {
     "property_name", "journal_entry"};
 
 // Answer fields that name a file the call wrote.
-constexpr std::array<const char*, 10> kWrittenFileKeys = {
+constexpr const char* kWrittenFileKeys[] = {
     "resource_file", "layout_path", "project_layout_path", "library_path", "written_to",
     "save_path",     "output_path", "asset_path",          "script_path",  "file_path"};
 
 // The values beside a setting or property name that the name governs.
-constexpr std::array<const char*, 11> kGovernedValueKeys = {
+constexpr const char* kGovernedValueKeys[] = {
     "value", "old_value", "previous", "previous_value", "before", "after",
     "new",   "old",       "requested_value", "current", "default"};
 
-constexpr std::array<const char*, 5> kNameKeys = {"setting", "name", "property", "property_name",
+constexpr const char* kNameKeys[] = {"setting", "name", "property", "property_name",
                                                   "key"};
 
 bool contains(const auto& keys, std::string_view key) {
@@ -204,12 +203,12 @@ std::filesystem::path journalPath(const std::filesystem::path& project_root) {
 }
 
 bool isSecretKey(std::string_view key) {
-    static constexpr std::array<const char*, 14> kSecretWords = {
+    static constexpr const char* kSecretWords[] = {
         "password", "passwd",     "passphrase",  "secret",      "token",
         "apikey",   "api_key",    "api-key",     "privatekey",  "private_key",
         "private-key", "credential", "authorization", "access_key"};
     const auto text = lowered(key);
-    return std::any_of(kSecretWords.begin(), kSecretWords.end(),
+    return std::any_of(std::begin(kSecretWords), std::end(kSecretWords),
                        [&text](const char* word) { return text.find(word) != std::string::npos; });
 }
 

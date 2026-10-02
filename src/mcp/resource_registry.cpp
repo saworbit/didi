@@ -442,9 +442,10 @@ void ResourceRegistry::registerAllDefaultResources() {
     change_journal.description =
         "Every change Didi made to this project, newest first, with whether each can still be undone on its own.";
     change_journal.mimeType = "application/json";
-    // Read from a file whether or not an editor is attached, so the read is
-    // local work; going live adds whether each entry can still be undone.
-    change_journal.capability = {{"live", "offline_fallback"}, true, {}, "local"};
+    // Read from a file whether or not an editor is attached, but only an
+    // editor can say whether each entry can still be undone, so a read without
+    // one is a fallback: attaching improves the answer (#419).
+    change_journal.capability = {{"live", "offline_fallback"}, true, {}};
     change_journal.readHandler = [this]() -> Result<std::string> {
         std::error_code error;
         const auto root = std::filesystem::current_path(error);

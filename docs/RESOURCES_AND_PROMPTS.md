@@ -53,8 +53,9 @@ Example shape:
 
 ## `godot://project/journal`
 
-- Modes: `live`, `offline_fallback`; read without an editor, it is local work
-  and says `execution_mode: "local"`.
+- Modes: `live`, `offline_fallback`. Without an editor every entry is still
+  there; only whether each can be undone is missing, which is why that read is
+  a fallback.
 - MIME type: `application/json`.
 - The change journal (Q15): every mutating call any Didi server made in this
   project, newest first, the last 50 of the 200 the journal keeps. It is the
