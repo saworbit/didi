@@ -208,10 +208,47 @@ Result<ProjectSettingRead> readProjectSetting(const std::filesystem::path& proje
     return report;
 }
 
+namespace {
+Result<ProjectSettingWrite> writeSettingLine(const std::filesystem::path& project_root,
+                                             const std::string& setting,
+                                             const std::optional<std::string>& literal);
+}  // namespace
+
 Result<ProjectSettingWrite> writeProjectSetting(const std::filesystem::path& project_root,
                                                 const std::string& setting,
                                                 const json& value,
                                                 bool remove) {
+    if (remove) return writeSettingLine(project_root, setting, std::nullopt);
+    auto literal = settingLiteral(value);
+    if (literal.isErr()) return literal.error();
+    return writeSettingLine(project_root, setting, literal.value());
+}
+
+Result<ProjectSettingWrite> writeProjectSettingLiteral(const std::filesystem::path& project_root,
+                                                       const std::string& setting,
+                                                       const std::string& literal) {
+    // A literal the engine would refuse makes the whole file unloadable, which
+    // is worse than not writing it. valueProblem alone cannot say so: an
+    // unclosed `PackedStringArray("a"` begins like a value, and only the walk
+    // over a file finds that it never ends. So the literal is read as the one
+    // key of a file of its own, and has to come back as exactly that key with
+    // exactly that value, or it would spill into the lines below it.
+    if (literal.empty() || literal.find_first_of("\r\n") != std::string::npos) {
+        return Error::invalidArgument("Not a single-line Godot value literal: " + literal);
+    }
+    const auto probe = config_file::scan("[probe]\nkey=" + literal + "\n");
+    if (config_file::loadFailure(probe) || probe.trailing_key || probe.entries.size() != 1 ||
+        probe.entries.front().key != "key" || strings::trim(probe.entries.front().value_text) != literal) {
+        return Error::invalidArgument("Not a Godot value literal Godot would load: " + literal);
+    }
+    return writeSettingLine(project_root, setting, literal);
+}
+
+namespace {
+Result<ProjectSettingWrite> writeSettingLine(const std::filesystem::path& project_root,
+                                             const std::string& setting,
+                                             const std::optional<std::string>& literal) {
+    const bool remove = !literal.has_value();
     // The same name rules the live writer applies, so a name refused with an
     // editor attached is refused without one.
     if (setting.empty() || setting.front() == '/' || setting.back() == '/' ||
@@ -229,11 +266,7 @@ Result<ProjectSettingWrite> writeProjectSetting(const std::filesystem::path& pro
     report.key = setting.substr(slash + 1);
     report.removed = remove;
 
-    if (!remove) {
-        auto literal = settingLiteral(value);
-        if (literal.isErr()) return literal.error();
-        report.literal = literal.value();
-    }
+    if (!remove) report.literal = *literal;
 
     // Held from the read to the write, or a second server's write lands between
     // them and this one replaces it (#929).
@@ -373,5 +406,6 @@ Result<ProjectSettingWrite> writeProjectSetting(const std::filesystem::path& pro
     if (written.isErr()) return written.error();
     return report;
 }
+}  // namespace
 
 } // namespace didi::offline

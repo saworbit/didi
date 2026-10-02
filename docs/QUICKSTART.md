@@ -36,6 +36,19 @@ The `README.md` inside the archive has the notes for that platform. On macOS, cl
 
 ## 🎮 Step 2: Enable the Godot Plugin
 
+> **One command does Steps 2 and 3.** From the build directory, or the archive's `bin` folder:
+>
+> ```
+> didi setup --project D:/my_game --client cursor --godot C:/Godot/Godot_v4.7.2-stable_win64.exe
+> ```
+>
+> It copies the addon that matches this `didi` into the project, enables it, writes the client's
+> configuration (`--client` takes `claude-code`, `cursor`, `vscode`, `codex` or `all`) and an
+> agent guide in `AGENTS.md`, then starts the editor and waits until it answers. Run it again
+> after an upgrade: it replaces an older addon, and refuses to replace a newer one without
+> `--replace-addon`. `didi doctor --project D:/my_game` checks all of it from outside the
+> editor. The rest of this step is the same thing by hand.
+
 1. Copy the built `build/addons/didi` folder (or the archive's `addons/didi`) into your Godot project root, as `addons/didi`:
    ```
    your_game_project/

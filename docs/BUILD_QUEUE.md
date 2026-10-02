@@ -46,7 +46,7 @@ fails when a phase's status differs between the roadmap and the phase design.
 | [Q9](#q9-proof-in-one-call) | Proof in one call | 14 | Q8 | not yet | PLANNED |
 | [Q10](#q10-graph-builders-that-round-trip) | Graph builders that round-trip | 9 | Q7 | not yet | PLANNED |
 | [Q11](#q11-godots-own-debugger-and-language-server) | Godot's own debugger and language server | 7, 8 | none | #1139 | IN PROGRESS |
-| [Q12](#q12-didi-setup-and-didi-doctor) | didi setup and didi doctor | 12 | none | not yet | PLANNED |
+| [Q12](#q12-didi-setup-and-didi-doctor) | didi setup and didi doctor | 12 | none | #1144 | IN PROGRESS |
 | [Q13](#q13-project-defined-tools) | Project-defined tools | 12 | Q7, Q8 | not yet | PLANNED |
 | [Q14](#q14-a-skill-pack-measured) | A skill pack, measured | 12 | Q12 | not yet | PLANNED |
 | [Q15](#q15-change-journal-with-undo) | Change journal with undo | 13 | Q2 | not yet | PLANNED |

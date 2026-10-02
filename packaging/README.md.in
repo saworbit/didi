@@ -26,6 +26,23 @@ xattr -dr com.apple.quarantine /path/to/didi-macos-arm64
 ```
 
 <!-- /platform:macos -->
+Put this folder somewhere permanent, **outside** any Godot project: the server
+stays here and your client is pointed at it. Then one command does the rest,
+with your own project path and the client you use (`claude-code`, `cursor`,
+`vscode`, `codex` or `all`):
+
+```
+bin/@EXE@ setup --project @EXAMPLE_PROJECT@ --client claude-code
+```
+
+It copies `addons/didi` into the project, enables the plugin, writes the
+client's configuration and an agent guide, and says what it did. Add
+`--godot <path to the Godot editor>` to start the editor and wait until it
+answers. Run it again after an upgrade. `bin/@EXE@ doctor --project
+@EXAMPLE_PROJECT@` checks everything from outside the editor.
+
+The same steps by hand:
+
 1. Put this folder somewhere permanent, **outside** any Godot project. The
    server stays here and your client is pointed at it.
 2. Copy `addons/didi` into your Godot project, so that it sits at

@@ -435,6 +435,21 @@ jobs:
           # could ask for a mode and quietly start without it.
           "$DIDI_PYTHON" -m unittest tests.test_cli_arguments -v
 
+      - name: Verify didi setup gives a bare project a working session
+        shell: bash
+        run: |
+          # From a directory holding only project.godot, one command installs
+          # the addon that matches the binary and writes each client's
+          # configuration, and each configuration has to start a server that
+          # answers. On every platform, because the addon is found beside the
+          # binary by a layout each build lays out its own way (Q12).
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            export DIDI_TEST_BINARY="$PWD/build/didi.exe"
+          else
+            export DIDI_TEST_BINARY="$PWD/build/didi"
+          fi
+          "$DIDI_PYTHON" -m unittest tests.test_didi_setup -v
+
       - name: Verify a verdict names the engine that produced it
         shell: bash
         run: |
