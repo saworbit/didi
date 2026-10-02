@@ -15,6 +15,9 @@ const SETTLE_AFTER_SCAN_MS := 4000
 
 
 func _enter_tree() -> void:
+	# In the editor's own Output panel, because that is where someone watching
+	# a run sees its red lines, and nothing there told them those are meant.
+	print("[DidiSmoke] This editor is Didi's integration harness. The red errors it shows are failures the harness causes on purpose; tests/run_godot_integration.ps1 names the request behind each one and fails the run on any other.")
 	call_deferred("_open_smoke_scene")
 
 

@@ -5818,6 +5818,15 @@ text = "Not a key"
         Assert-True (-not (@((Tool-Payload $failureById[204]).autoloads.name) -contains "RollbackProbe")) "Failed autoload mutation remained in memory after rollback."
         Assert-True ([bool]$failureById[205].result.isError) "InputMap save failure returned fake success."
         Assert-True (-not (@((Tool-Payload $failureById[206]).actions.action) -contains "rollback_probe")) "Failed InputMap mutation remained live after rollback reload."
+        # The failed save never touched the file, so the value back in memory
+        # was the whole rollback. Saving again into the file the engine had just
+        # failed to write printed its error twice and answered "rollback failed".
+        foreach ($refusedId in @(201, 203, 205)) {
+            $refusedSave = ($failureById[$refusedId].result.content | Where-Object { $_.type -eq "text" } | Select-Object -First 1).text | ConvertFrom-Json
+            Assert-True ($refusedSave.error.message -match "was rolled back") "Request $refusedId reported a rollback that worked as failed: $($refusedSave.error.message)"
+            $saveAttempts = @($refusedSave.error.data.engine_diagnostics | Where-Object { $_.message -match "Couldn't save project" })
+            Assert-True ($saveAttempts.Count -eq 1) "Request $refusedId had the engine try project.godot $($saveAttempts.Count) times: $(@($refusedSave.error.data.engine_diagnostics | ForEach-Object { $_.message }) -join '; ')"
+        }
         $notWritten = $failureById[207].result.content[0].text | ConvertFrom-Json
         Assert-True ([bool]$failureById[207].result.isError -and $notWritten.error.code -eq 409 -and $notWritten.error.data.code -eq "save_not_written") "A scene save the editor could not write was reported as saved: $($failureById[207].result.content[0].text)"
     }
@@ -5902,7 +5911,7 @@ text = "Not a key"
     # inconsistent four times a run (vibe session seventeen). Every allowed line
     # names the request that causes it on purpose; any other line fails the run.
     $allowedEngineLines = @(
-        @{ Pattern = "Couldn't save project\.godot"; Cause = "requests 201, 203 and 205 deny the project file to prove rollback" },
+        @{ Pattern = "Couldn't save project\.godot"; Cause = "requests 201, 203 and 205 each save once into a project file denied to prove rollback" },
         @{ Pattern = "Cannot save file 'res://main\.tscn'"; Cause = "request 207 saves a scene into a root that will not take a file" },
         @{ Pattern = 'Identifier "SignalProbeState" not declared|Failed to load script "res://signal_uses_autoload\.gd"|Failed (to )?parse script:? res://signal_uses_autoload\.gd'; Cause = "signal_uses_autoload.gd does not compile, on purpose, for target_script_not_compiled; the first script check parses every script through the editor's language server, which says so once" },
         @{ Pattern = "corrupt_asset\.png|IHDR: CRC error|ERR_FILE_CORRUPT"; Cause = "request 2700 imports a PNG with a wrong CRC on every chunk" },
