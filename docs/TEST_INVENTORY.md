@@ -10,14 +10,14 @@ Every number here is derived from the suites themselves rather than written down
 
 | Measure | Count |
 | --- | ---: |
-| Automated tests | **1556** |
+| Automated tests | **1575** |
 | Live-harness assertions | 1456 |
 
 The badge in the [README](../README.md) shows the automated test total. Harness assertions are counted separately because they are assertions inside one live scenario, not independently runnable cases; adding them together would flatter the number.
 
 ## Native C++ suite (`didi_tests`)
 
-**1003 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
+**1011 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
 
 | Suite | Tests |
 | --- | ---: |
@@ -87,6 +87,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `ViewportIsolation` | 2 |
 | `autoload_diagnostics` | 9 |
 | `config_file_syntax` | 31 |
+| `didi_setup` | 8 |
 | `ghost_preview` | 4 |
 | `phase7` | 1 |
 | `phase7b_anim` | 6 |
@@ -104,7 +105,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 
 ## Python contract suites (`tests/test_*.py`)
 
-**553 tests.** Derived from `test_*` methods on every `unittest.TestCase` subclass, read with `ast`.
+**564 tests.** Derived from `test_*` methods on every `unittest.TestCase` subclass, read with `ast`.
 
 | File | Tests |
 | --- | ---: |
@@ -117,6 +118,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `test_control_room_app.py` | 14 |
 | `test_control_room_protocol.py` | 17 |
 | `test_didi_binary.py` | 10 |
+| `test_didi_setup.py` | 11 |
 | `test_documentation_validator.py` | 104 |
 | `test_editor_console.py` | 9 |
 | `test_editor_startup_live.py` | 1 |

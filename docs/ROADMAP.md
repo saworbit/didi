@@ -287,7 +287,7 @@ coordination as the thing that blocked it. See
 
 **Exit gate:** Subscription lifecycle, reconnect behavior, ordering, loss disclosure, and backpressure are specified and tested. Older supported MCP clients retain a documented compatibility path. Every prompt checks capability metadata instead of assuming tool availability.
 
-## Phase 12: Distribution and Ecosystem Maturity (`PLANNED`)
+## Phase 12: Distribution and Ecosystem Maturity (`IN PROGRESS`)
 
 **Objective:** Mature packaging, release channels, extension governance, compatibility guarantees, and operator-facing distribution workflows.
 

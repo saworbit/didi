@@ -9,7 +9,7 @@
 [![CI](https://github.com/saworbit/didi/actions/workflows/ci.yml/badge.svg)](https://github.com/saworbit/didi/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/saworbit/didi/actions/workflows/codeql.yml/badge.svg)](https://github.com/saworbit/didi/actions/workflows/codeql.yml)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/saworbit/didi/badge)](https://scorecard.dev/viewer/?uri=github.com/saworbit/didi)
-[![Tests](https://img.shields.io/badge/tests-1556-2ea043?logo=pytest&logoColor=white)](docs/TEST_INVENTORY.md)
+[![Tests](https://img.shields.io/badge/tests-1575-2ea043?logo=pytest&logoColor=white)](docs/TEST_INVENTORY.md)
 [![Release](https://img.shields.io/github/v/release/saworbit/didi?logo=github&color=blue)](https://github.com/saworbit/didi/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Godot Engine](https://img.shields.io/badge/Godot-4.5%2B-478cbf?logo=godotengine&logoColor=white)](https://godotengine.org/)
@@ -212,13 +212,21 @@ See the [Roadmap](docs/ROADMAP.md), [Phase 7 feasibility evidence](docs/PHASE_7_
    cmake -B build -S .
    cmake --build build --config Release
    ```
-2. **Enable Godot Plugin**:
+2. **Set up a project in one command**:
+   ```powershell
+   build/Release/didi.exe setup --project D:/my_game --client claude-code --godot C:/Godot/Godot_v4.7.2-stable_win64.exe
+   ```
+   This installs the addon that matches the binary, enables it, writes `.mcp.json` and an
+   agent guide in `AGENTS.md`, starts the editor and waits until it answers. `--client`
+   also takes `cursor`, `vscode`, `codex` or `all`, and `didi doctor --project D:/my_game`
+   checks the result from outside the editor. Steps 3 and 4 below are the same thing by hand.
+3. **Enable Godot Plugin**:
    Copy `build/addons/didi` into your project as `addons/didi` and check **Enable** in **Project Settings $\rightarrow$ Plugins**.
    A **Didi** tab appears beside 2D, 3D and Script.
    The build assembles the addon under `build/`. The `addons/didi` folder in this repository is
    the manifest that goes into that assembly, not a build output, so its `bin/` holds whatever
    was last put there by hand.
-3. **Connect AI Assistant**:
+4. **Connect AI Assistant**:
    Open the Didi tab, go to **Connect**, and copy the generated configuration — it already
    carries the located binary and this project's path. Or write it by hand into
    `claude_desktop_config.json` or `.cursor/mcp.json`:

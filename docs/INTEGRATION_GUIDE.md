@@ -35,6 +35,12 @@ turn is unnecessary.
 
 ## 1. Setting Up the Godot Project
 
+`didi setup --project <dir> --client <name>` does this section and the
+project-scoped half of section 2 in one command, and `didi doctor --project
+<dir>` checks the result from outside the editor; see
+[Setting up a project](ADMIN_GUIDE.md#setting-up-a-project-didi-setup-and-didi-doctor).
+The steps below are the same thing by hand.
+
 1. Copy the `addons/didi` directory into your Godot project's root `addons/` folder:
    ```
    your_godot_project/

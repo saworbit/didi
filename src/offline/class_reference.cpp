@@ -36,7 +36,7 @@ std::optional<std::filesystem::path>& overridePath() {
 
 } // namespace
 
-std::filesystem::path executableDirectory() {
+std::filesystem::path executablePath() {
     std::error_code error;
 #if defined(_WIN32)
     std::wstring buffer(MAX_PATH, L'\0');
@@ -46,7 +46,7 @@ std::filesystem::path executableDirectory() {
         if (written == 0) return {};
         if (written < buffer.size()) {
             buffer.resize(written);
-            return std::filesystem::path(buffer).parent_path();
+            return std::filesystem::path(buffer);
         }
         buffer.resize(buffer.size() * 2);
     }
@@ -58,12 +58,17 @@ std::filesystem::path executableDirectory() {
     if (_NSGetExecutablePath(buffer.data(), &size) != 0) return {};
     buffer.resize(std::char_traits<char>::length(buffer.c_str()));
     const auto resolved = std::filesystem::weakly_canonical(buffer, error);
-    return error ? std::filesystem::path(buffer).parent_path() : resolved.parent_path();
+    return error ? std::filesystem::path(buffer) : resolved;
 #else
     const auto resolved = std::filesystem::read_symlink("/proc/self/exe", error);
     if (error) return {};
-    return resolved.parent_path();
+    return resolved;
 #endif
+}
+
+std::filesystem::path executableDirectory() {
+    const auto path = executablePath();
+    return path.empty() ? path : path.parent_path();
 }
 
 std::optional<std::filesystem::path> ClassReference::resolveReferencePath() {

@@ -79,6 +79,73 @@ argument. The last case is the one that used to hurt in unattended runs:
 `--log-level --yolo` consumed the flag, so the process came up without the mode
 the operator asked for and without the warning that says confirmations are off.
 
+### Setting up a project: `didi setup` and `didi doctor`
+
+Two subcommands, named as the first argument, put Didi into a project and check
+it from outside the editor. Neither is a tool: they run before any client is
+configured, which is the state no tool can reach. Both take `--project <dir>`
+explicitly, never from `DIDI_PROJECT_ROOT`, and both print one line per step, or
+a JSON report with `--json`. They exit `0` when nothing failed, `1` when a step
+failed, and `2` when the command line was refused.
+
+```
+didi setup --project D:/my_game --client claude-code --godot C:/Godot/Godot_v4.7.2-stable_win64.exe
+didi doctor --project D:/my_game
+```
+
+| `didi setup` option | Purpose |
+| :--- | :--- |
+| `--client <name>` | Write this client's project configuration. Repeat it or give a comma list: `claude-code` (`.mcp.json`), `cursor` (`.cursor/mcp.json`), `vscode` (`.vscode/mcp.json`), `codex` (`.codex/config.toml`), or `all` |
+| `--godot <exe>` | Start this editor on the project and wait until it answers |
+| `--headless` | Start that editor without a window |
+| `--wait` | Wait for an editor someone else opens |
+| `--timeout <seconds>` | How long to wait for the editor, 1 to 3600, default 120 |
+| `--replace-addon` | Install this build over an addon that is newer, or whose build cannot be told |
+| `--no-agent-guide` | Do not write the agent guide |
+
+What `setup` does, in order, and what stops it:
+
+1. Finds the addon that came with the binary: `addons/didi` beside it in a build
+   directory, `../addons/didi` in a release archive, `../lib/didi/addons/didi`
+   in an install prefix. The build id compiled into its library has to equal the
+   server's own, or nothing is installed.
+2. Stops, changing nothing, when an editor has the project open and the addon or
+   `project.godot` still needs a change: the editor holds the extension library,
+   and saving its settings would overwrite `project.godot`.
+3. Installs the addon at `res://addons/didi`. An addon of the same build whose
+   files match is left alone; an older or incomplete one is replaced; a newer
+   one, or one whose build cannot be ordered, is replaced only with
+   `--replace-addon`, and the answer names both builds either way. The new copy
+   is staged beside the old one and swapped in by rename.
+4. Adds `res://addons/didi/plugin.cfg` to `editor_plugins/enabled`, keeping
+   every plugin already there.
+5. Writes the `didi` server into each named client's file. Only that entry is
+   touched: other servers, other keys, their order and the file's indentation
+   stay. JSON with comments, JSON that does not parse, and a Codex
+   `config.toml` that declares `mcp_servers.didi` outside the block setup
+   writes are refused and left as they are. The arguments are the ones the
+   dock's Connect page writes: `--project <root> --log-level INFO`.
+6. Writes the agent guide between `<!-- BEGIN didi -->` and `<!-- END didi -->`
+   into `AGENTS.md`, or into the project's `CLAUDE.md`, `.claude/CLAUDE.md` or
+   `CLAUDE.local.md` when Claude Code is named and one exists, since Claude Code
+   then reads that file and not `AGENTS.md`. A rerun replaces only the block.
+   New files are UTF-8 with no byte-order mark; an existing file keeps its own
+   mark and line endings.
+7. With `--godot`, starts the editor and waits for it to publish a session,
+   accept a handshake and answer one request on its main thread, then lets go
+   of the session so the server a client starts next can take it.
+
+`didi doctor` reports what the dock's Diagnostics page reports, under the same
+names, plus what only a command outside the editor can compare: the addon's
+build against the server's, each client file's server against the addon's, and
+each client file's `--project` against this project. A missing or disabled
+addon fails; a build mismatch, or no editor open, is a warning.
+
+The client configuration records absolute paths for one machine. Keep
+`.mcp.json`, `.cursor/mcp.json`, `.vscode/mcp.json` and `.codex/config.toml`
+out of version control unless everyone who clones the project keeps Didi and
+the project at the same paths.
+
 A launch that prints nothing on stderr and stays running got exactly the
 configuration you wrote.
 

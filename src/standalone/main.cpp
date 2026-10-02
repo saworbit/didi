@@ -4,6 +4,7 @@
 #include "didi/common/logger.hpp"
 #include "didi/common/project_path.hpp"
 #include "didi/common/version.hpp"
+#include "didi/setup/commands.hpp"
 #include <iostream>
 #include <csignal>
 
@@ -148,6 +149,15 @@ static bool takeValue(const std::vector<std::string>& arguments, size_t& index,
 
 // argv is already UTF-8 by the time it gets here, whichever entry point ran.
 static int runDidi(const std::vector<std::string>& arguments) {
+    // A subcommand is the first argument or nothing. Every argument the server
+    // takes is an option, and a bare word was refused as unexpected, so naming
+    // one here cannot change what an existing launch line means.
+    if (arguments.size() > 1 && (arguments[1] == "setup" || arguments[1] == "doctor")) {
+        const std::vector<std::string> rest(arguments.begin() + 2, arguments.end());
+        return arguments[1] == "setup" ? didi::setup::runSetupCommand(rest)
+                                       : didi::setup::runDoctorCommand(rest);
+    }
+
     std::signal(SIGINT, signalHandler);
     std::signal(SIGTERM, signalHandler);
 
@@ -197,7 +207,14 @@ static int runDidi(const std::vector<std::string>& arguments) {
         } else if (arg == "--help" || arg == "-h") {
             std::cout << "Didi - Native Model Context Protocol (MCP) Server for Godot 4.5+\n\n"
                       << "Usage:\n"
-                      << "  didi [options]\n\n"
+                      << "  didi [options]\n"
+                      << "  didi setup --project <dir> [--client <name>] [--godot <exe>]\n"
+                      << "  didi doctor --project <dir>\n\n"
+                      << "Commands:\n"
+                      << "  setup                 Install the matching addon into a project, enable it,\n"
+                      << "                        and write client configuration (didi setup --help)\n"
+                      << "  doctor                Check a project's addon, editor and client\n"
+                      << "                        configuration (didi doctor --help)\n\n"
                       << "Options:\n"
                       << "  -v, --version         Show version information\n"
                       << "  -h, --help            Show this help dialog\n"

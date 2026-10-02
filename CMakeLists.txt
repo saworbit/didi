@@ -233,6 +233,10 @@ set(CORE_SOURCES
     src/mcp/repeated_failures.cpp
     src/mcp/control_room.cpp
     src/tools/control_room_tools.cpp
+    src/setup/build_identity.cpp
+    src/setup/addon_install.cpp
+    src/setup/client_config.cpp
+    src/setup/commands.cpp
     ${CONTROL_ROOM_GENERATED_SOURCE}
 )
 
@@ -424,6 +428,7 @@ set(TEST_SOURCES
     tests/test_blackboard_resources.cpp
     tests/test_project_search.cpp
     tests/test_project_settings_file.cpp
+    tests/test_didi_setup.cpp
     tests/test_config_file_syntax.cpp
     tests/test_image_diff.cpp
     tests/test_test_runner.cpp

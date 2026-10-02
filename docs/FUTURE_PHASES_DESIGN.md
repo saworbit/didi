@@ -333,7 +333,7 @@ above, two were delivered by later work and one remains open; see the note there
 
 ## Phase 12: Distribution and Ecosystem Maturity
 
-**Status:** `PLANNED`
+**Status:** `IN PROGRESS`
 
 **Goal:** Make Didi straightforward to install, upgrade, audit, extend, and support as production-grade local development tooling.
 

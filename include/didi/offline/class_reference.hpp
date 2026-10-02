@@ -52,8 +52,10 @@ private:
     json m_classes = json::object();
 };
 
-// Absolute directory holding the running executable, or empty when the platform
-// refuses to say. Kept here because the class reference is its only caller.
+// The running executable, and the absolute directory holding it, or empty when
+// the platform refuses to say. Here because the class reference was the first
+// caller; `didi setup` writes the path into client configurations.
+std::filesystem::path executablePath();
 std::filesystem::path executableDirectory();
 
 } // namespace didi::offline

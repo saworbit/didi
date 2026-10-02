@@ -24,9 +24,9 @@ written against 1.8.0 can break on any of them.
 `PARTIAL_DELIVERY`, three canonical tools are registered and unimplemented, and
 [the roadmap](docs/ROADMAP.md) has Phase 12, the phase that owns reproducible
 artifacts, supported platform matrices and compatibility guarantees across
-versions, still unstarted. Until it lands there is no upgrade or rollback
-guarantee beyond the changelog, and no commitment to a support window for an
-older minor line.
+versions, barely started: `didi setup` and `didi doctor` are the whole of it so
+far. Until it lands there is no upgrade or rollback guarantee beyond the
+changelog, and no commitment to a support window for an older minor line.
 
 Read the version for what changed. Read this section and the roadmap for how
 much of the thing exists.
@@ -50,6 +50,32 @@ Discovery now exposes 120 canonical tools plus 10 legacy registrations (130 tota
 The three Phase 7 blockers are unchanged; the newest name is `asset_configure_import`, recorded in [Surface Amendments](docs/SURFACE_AMENDMENTS.md).
 
 ### Added
+
+- **`didi setup` and `didi doctor` (#1144, Q12 part 1).** Getting Didi into a
+  project took five steps across two programs, and the ones trials lost most
+  time to were a stale addon beside a newer server (#325, #326), an addon an
+  agent could not enable (#382) and a client file written by hand. `didi setup
+  --project <dir>` installs the addon that came with the binary, after reading
+  the build id out of both libraries, so an addon from another build is never
+  installed and a newer one is never replaced without the answer naming both. It
+  enables the plugin in `project.godot` in the `PackedStringArray` form the
+  Plugins checkbox writes, writes the `didi` server into each named client's
+  project file (`--client claude-code`, `cursor`, `vscode`, `codex` or `all`)
+  without touching any other server or reformatting the file, and writes an
+  agent guide between `<!-- BEGIN didi -->` and `<!-- END didi -->` into the
+  instructions file each client reads: `AGENTS.md`, or `CLAUDE.md` when the
+  project has one, since Claude Code then reads only that. With `--godot <exe>`
+  it starts the editor and waits until it answers on the build just installed.
+  A rerun changes nothing, a file it cannot reproduce exactly (JSON with
+  comments, a TOML that declares `mcp_servers.didi` itself) is refused and left
+  alone, and an editor that has the project open stops it before it writes
+  anything. `didi doctor --project <dir>` runs the dock's Diagnostics checks
+  from the command line, and adds two the dock cannot: whether the addon and
+  each client's configured server are the same build, and whether each
+  configuration points at this project. Measured from a directory holding only
+  `project.godot` on 4.5.1, 4.6.2 and 4.7.2: one command to an editor that
+  answers. Claude Desktop and Windsurf, whose single user-level entry can point
+  at one project only, are part 2.
 
 - **Script diagnostics come from the open editor's GDScript language server
   (#1139, Q11 part 1).** `script_check_syntax`, `script_create` and

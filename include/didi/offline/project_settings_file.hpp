@@ -85,6 +85,14 @@ Result<ProjectSettingWrite> writeProjectSetting(const std::filesystem::path& pro
                                                 const json& value,
                                                 bool remove);
 
+// The same write with a literal the caller has already rendered, for a value
+// whose Variant type JSON cannot name. `didi setup` enables its plugin with the
+// PackedStringArray the editor's Plugins checkbox writes, so the file reads as
+// though a person had ticked the box. The literal must be one Godot parses.
+Result<ProjectSettingWrite> writeProjectSettingLiteral(const std::filesystem::path& project_root,
+                                                       const std::string& setting,
+                                                       const std::string& literal);
+
 // The refusal for a project.godot Godot will not load, or nothing when it loads.
 //
 // The project does not open at all, so any answer read out of the file would
