@@ -1738,11 +1738,44 @@ bool pathWithin(const std::filesystem::path& root, const std::filesystem::path& 
             candidate_value[root_value.size()] == '/');
 }
 
+Result<std::string> projectDirectoryOnDisk();
+
+// project.godot's modified time and size, which any write moves. Read from the
+// directory entry, so a file the editor cannot open still answers.
+struct ProjectFileStamp {
+    std::filesystem::file_time_type written;
+    std::uintmax_t bytes{0};
+    bool operator==(const ProjectFileStamp&) const = default;
+};
+
+std::optional<ProjectFileStamp> projectFileStamp() {
+    auto directory = projectDirectoryOnDisk();
+    if (directory.isErr()) return std::nullopt;
+    const auto file = didi::paths::projectPathFromUtf8(directory.value()) / "project.godot";
+    std::error_code time_error;
+    std::error_code size_error;
+    const auto written = std::filesystem::last_write_time(file, time_error);
+    const auto bytes = std::filesystem::file_size(file, size_error);
+    if (time_error || size_error) return std::nullopt;
+    return ProjectFileStamp{written, bytes};
+}
+
+// Puts a setting back after ProjectSettings.save failed. file_before is
+// project.godot as it stood before that save.
 Result<void> restoreProjectSetting(GDExtensionObjectPtr project_settings, VariantValue& name,
-                                   VariantValue& previous) {
+                                   VariantValue& previous,
+                                   const std::optional<ProjectFileStamp>& file_before) {
     auto restored = callObject(project_settings, "ProjectSettings", "set_setting", 402577236LL,
                                {&name, &previous});
     if (restored.isErr()) return restored.error();
+    // A save that failed and left the file as it was needs nothing more: the
+    // old value back in memory is the whole rollback. Saving again into a file
+    // the engine has just failed to write fails the same way, so the engine
+    // printed its error a second time and a rollback that had worked answered
+    // "rollback failed". Measured on 4.6.2 with project.godot and its folder
+    // denied to the editor: the setting was gone from memory and the file
+    // unchanged. Only a save that did move the file is written over.
+    if (file_before.has_value() && projectFileStamp() == file_before) return Result<void>::ok();
     auto saved = callObject(project_settings, "ProjectSettings", "save", 166280745LL);
     if (saved.isErr()) return saved.error();
     auto code = scalarFromVariant<int64_t>(saved.value(), GDEXTENSION_VARIANT_TYPE_INT);
@@ -2095,6 +2128,64 @@ Result<json> refreshCachedCopy(GDExtensionObjectPtr loader, const std::string& p
                                  std::to_string(code.value()) + ").";
     }
     return result;
+}
+
+// Whether the editor's file index lists a file, or nothing when it cannot say:
+// no editor, or a folder the index does not list yet, which update_file cannot
+// put a file in anyway.
+std::optional<bool> editorIndexListsFile(const std::string& resource_path) {
+    const auto slash = resource_path.find_last_of('/');
+    if (slash == std::string::npos || slash + 1 >= resource_path.size()) return std::nullopt;
+    auto editor = editorInterface();
+    if (editor.isErr()) return std::nullopt;
+    auto filesystem = callObject(editor.value(), "EditorInterface", "get_resource_filesystem", 780151678LL);
+    if (filesystem.isErr()) return std::nullopt;
+    auto filesystem_object = objectFromVariant(filesystem.value());
+    if (filesystem_object.isErr() || !filesystem_object.value()) return std::nullopt;
+    auto directory_value = makeString(resource_path.substr(0, slash + 1));
+    if (directory_value.isErr()) return std::nullopt;
+    auto found = callObject(filesystem_object.value(), "EditorFileSystem", "get_filesystem_path",
+                            3188521125LL, {&directory_value.value()});
+    if (found.isErr()) return std::nullopt;
+    auto directory_object = objectFromVariant(found.value());
+    if (directory_object.isErr() || !directory_object.value()) return std::nullopt;
+    auto file_value = makeString(resource_path.substr(slash + 1));
+    if (file_value.isErr()) return std::nullopt;
+    auto index = callObject(directory_object.value(), "EditorFileSystemDirectory", "find_file_index",
+                            1321353865LL, {&file_value.value()});
+    if (index.isErr()) return std::nullopt;
+    auto position = scalarFromVariant<int64_t>(index.value(), GDEXTENSION_VARIANT_TYPE_INT);
+    if (position.isErr()) return std::nullopt;
+    return position.value() >= 0;
+}
+
+// Puts a file the server wrote into the editor's index when the index does not
+// list it, which is what the editor does for a file it saves itself: its save
+// callback calls update_file. Left out, the file waits for the editor's next
+// scan, which meets it as a new file, and on 4.5 and 4.6 a new file whose .uid
+// sidecar some other Godot process wrote makes that scan print `Unrecognized
+// UID`: the engine looks the uid up before asking whether it knows it, and 4.7
+// asks first. project_export runs such a process, and the editor scans every
+// time its window takes focus, so the error met the user on clicking back into
+// Godot. Measured on 4.6.2 with script_create, a headless editor on the same
+// project, and scan_sources. A file no loader takes as it stands, an asset
+// waiting for its import, is the import pass's to index.
+void indexUnlistedWrite(GDExtensionObjectPtr loader, const std::string& path, json& result) {
+    const auto listed = editorIndexListsFile(path);
+    if (!listed.has_value() || listed.value()) return;
+    auto path_value = makeString(path);
+    auto hint = makeString("");
+    if (path_value.isErr() || hint.isErr()) return;
+    auto loadable = callObject(loader, "ResourceLoader", "exists", 4185558881LL,
+                               {&path_value.value(), &hint.value()});
+    if (loadable.isErr()) return;
+    auto exists = scalarFromVariant<GDExtensionBool>(loadable.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+    if (exists.isErr() || !exists.value()) return;
+    const auto indexed = GodotBridge::instance().indexWrittenResource(path);
+    if (!indexed.has_value()) return;
+    result["indexed"] = true;
+    if (!indexed->uid.empty()) result["uid"] = indexed->uid;
+    result["uid_registered"] = indexed->registered;
 }
 
 // The sentence script_check_syntax already carries for this condition, so the
@@ -10400,7 +10491,8 @@ json GodotBridge::execute(const std::string& method, const json& params,
         //
         // A path open in a tab also has its tab reloaded, which
         // reloadOpenSceneTab describes. discard_unsaved says the caller accepts
-        // losing a tab's unsaved changes to it.
+        // losing a tab's unsaved changes to it. A path the editor's index does
+        // not list yet is indexed, which indexUnlistedWrite describes.
         if (session_kind != "editor") return bridgeError(409, "session_kind_rejected");
         if (params.contains("discard_unsaved") && !params["discard_unsaved"].is_boolean()) {
             return errorJson(400, "discard_unsaved must be a boolean");
@@ -10451,6 +10543,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
         for (const auto& path : paths) {
             auto refreshed = refreshCachedCopy(loader.value(), path);
             if (refreshed.isErr()) return errorJson(500, refreshed.error().message);
+            indexUnlistedWrite(loader.value(), path, refreshed.value());
             if (open_scenes.count(path)) {
                 reloadOpenSceneTab(editor.value(), path, discard_unsaved, unsaved, reloaded_one,
                                    refreshed.value());
@@ -12887,12 +12980,14 @@ json GodotBridge::execute(const std::string& method, const json& params,
         auto applied = callObject(project_settings.value(), "ProjectSettings", "set_setting", 402577236LL,
                                   {&name.value(), &replacement.value()});
         if (applied.isErr()) return errorJson(applied.error().code, applied.error().message);
+        const auto file_before = projectFileStamp();
         auto saved = callObject(project_settings.value(), "ProjectSettings", "save", 166280745LL);
         auto save_code = saved.isOk()
             ? scalarFromVariant<int64_t>(saved.value(), GDEXTENSION_VARIANT_TYPE_INT)
             : Result<int64_t>(saved.error());
         if (save_code.isErr() || save_code.value() != 0) {
-            auto rollback_save = restoreProjectSetting(project_settings.value(), name.value(), previous.value());
+            auto rollback_save = restoreProjectSetting(project_settings.value(), name.value(), previous.value(),
+                                                       file_before);
             const std::string detail = save_code.isErr()
                 ? save_code.error().message
                 : ::didi::godot::describeGodotError(save_code.value());
@@ -13039,12 +13134,14 @@ json GodotBridge::execute(const std::string& method, const json& params,
         auto applied = callObject(project_settings.value(), "ProjectSettings", "set_setting", 402577236LL,
                                   {&setting_name.value(), &replacement.value()});
         if (applied.isErr()) return errorJson(applied.error().code, applied.error().message);
+        const auto file_before = projectFileStamp();
         auto saved = callObject(project_settings.value(), "ProjectSettings", "save", 166280745LL);
         auto save_code = saved.isOk()
             ? scalarFromVariant<int64_t>(saved.value(), GDEXTENSION_VARIANT_TYPE_INT)
             : Result<int64_t>(saved.error());
         if (save_code.isErr() || save_code.value() != 0) {
-            auto rollback = restoreProjectSetting(project_settings.value(), setting_name.value(), previous.value());
+            auto rollback = restoreProjectSetting(project_settings.value(), setting_name.value(), previous.value(),
+                                                  file_before);
             if (rollback.isErr()) return errorJson(500, "Autoload save failed and rollback failed: " + rollback.error().message);
             return errorJson(500, "ProjectSettings.save failed; autoload mutation was rolled back");
         }
@@ -13305,12 +13402,14 @@ json GodotBridge::execute(const std::string& method, const json& params,
         auto applied = callObject(project_settings.value(), "ProjectSettings", "set_setting", 402577236LL,
                                   {&setting_name.value(), &replacement.value()});
         if (applied.isErr()) return errorJson(applied.error().code, applied.error().message);
+        const auto file_before = projectFileStamp();
         auto saved = callObject(project_settings.value(), "ProjectSettings", "save", 166280745LL);
         auto save_code = saved.isOk()
             ? scalarFromVariant<int64_t>(saved.value(), GDEXTENSION_VARIANT_TYPE_INT)
             : Result<int64_t>(saved.error());
         if (save_code.isErr() || save_code.value() != 0) {
-            auto rollback = restoreProjectSetting(project_settings.value(), setting_name.value(), previous.value());
+            auto rollback = restoreProjectSetting(project_settings.value(), setting_name.value(), previous.value(),
+                                                  file_before);
             if (rollback.isErr()) return errorJson(500, "InputMap save failed and rollback failed: " + rollback.error().message);
             return errorJson(500, "ProjectSettings.save failed; InputMap mutation was rolled back");
         }

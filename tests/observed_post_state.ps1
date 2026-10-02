@@ -139,6 +139,12 @@ function Agree([string]$Field, $Observed, $Witnessed) {
     return @{ Field = $Field; Observed = $Observed; Witnessed = $Witnessed }
 }
 
+# What the engine has to hold after the call whatever the answer says. A case's
+# Expect names state the tool owes the engine and does not report.
+function Expect([string]$Field, $Expected, $Witnessed) {
+    return @{ Field = $Field; Expected = $Expected; Witnessed = $Witnessed }
+}
+
 # The one child a call added, as the witness saw it, or everything it saw
 # added when that is not exactly one, so a disagreement says what appeared.
 function Get-ObservedNewChild($Before, $After) {
@@ -403,15 +409,21 @@ function Get-ObservedPostStateCases {
            Agree = { param($s)
                Agree "uid" $s.call.uid $s.witness.returned.uid
                Agree "uid_registered" $s.call.uid_registered $s.witness.returned.uid_registered } },
+        # The script is in the editor's index, its uid registered, when the call
+        # returns. Left for the editor's next scan, which runs whenever its window
+        # takes focus, a script whose .uid sidecar project_export's Godot wrote in
+        # the meantime made 4.5 and 4.6 print `Unrecognized UID` for it.
         @{ Tool = "script_create"; Session = "editor"; Steps = @(
             (Step "call" "script_create" @{ script_path = "res://observed_created.gd"; source_text = "extends Node`n`n`nfunc answer() -> int:`n`treturn 1`n" }),
             (Witness "witness" "load_fresh" @("res://observed_created.gd", @())))
-           Agree = { param($s) Agree "has_errors" $s.call.has_errors (@($s.witness.returned.methods) -notcontains "answer") } },
+           Agree = { param($s) Agree "has_errors" $s.call.has_errors (@($s.witness.returned.methods) -notcontains "answer") }
+           Expect = { param($s) Expect "uid_registered" $true $s.witness.returned.uid_registered } },
         # A script that does not compile, so has_errors cannot be a constant.
         @{ Tool = "script_create"; Session = "editor"; Steps = @(
             (Step "call" "script_create" @{ script_path = "res://observed_broken.gd"; source_text = "extends Node`n`n`nfunc answer() -> int:`n`treturn undeclared_name`n" }),
             (Witness "witness" "load_fresh" @("res://observed_broken.gd", @())))
-           Agree = { param($s) Agree "has_errors" $s.call.has_errors (@($s.witness.returned.methods) -notcontains "answer") } },
+           Agree = { param($s) Agree "has_errors" $s.call.has_errors (@($s.witness.returned.methods) -notcontains "answer") }
+           Expect = { param($s) Expect "uid_registered" $true $s.witness.returned.uid_registered } },
         @{ Tool = "script_patch_method"; Session = "editor"; Steps = @(
             (Step "call" "script_patch_method" @{ file_path = "res://observed_created.gd"; method_name = "answer"; new_definition = "func answer() -> int:`n`treturn 2`n" }),
             (Witness "witness" "load_fresh" @("res://observed_created.gd", @())))
@@ -688,6 +700,13 @@ function Invoke-ObservedPostStateCases([string]$FixtureRoot, [string]$EditorSess
         foreach ($pair in @(& $entry.Case.Agree $payloads)) {
             if (-not (Test-ObservedAgreement $pair.Observed $pair.Witnessed)) {
                 $disagreements += "$($entry.Case.Tool).$($pair.Field) answered $($pair.Observed | ConvertTo-Json -Compress -Depth 20) but the engine reports $($pair.Witnessed | ConvertTo-Json -Compress -Depth 20)"
+            }
+        }
+        if ($entry.Case.ContainsKey("Expect")) {
+            foreach ($pair in @(& $entry.Case.Expect $payloads)) {
+                if (-not (Test-ObservedAgreement $pair.Expected $pair.Witnessed)) {
+                    $disagreements += "After $($entry.Case.Tool) the engine reports $($pair.Field) $($pair.Witnessed | ConvertTo-Json -Compress -Depth 20), not $($pair.Expected | ConvertTo-Json -Compress -Depth 20)"
+                }
             }
         }
     }

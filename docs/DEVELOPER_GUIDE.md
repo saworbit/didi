@@ -545,6 +545,14 @@ find the call (its answer carries the line under `engine_diagnostics`), then fix
 the cause or, when the line is the point of the request, add an entry that says
 which request and why. Never widen a pattern to make a run pass.
 
+The harness's editor runs windowed, so the allowed lines show in red in its
+Output panel and as toasts during a run, and the fixture's smoke plugin opens
+that panel with a line saying so. The editor also rescans the project whenever
+its window takes focus, which makes the timing of a scan depend on the desktop:
+a line that comes and goes between runs can be a scan meeting a file written
+behind the editor. Reproduce it by calling `scan_sources` from an `@tool`
+method rather than rerunning until it passes (#1150).
+
 Lines the host causes -- a CI runner with no GPU or audio device, whose engine
 says so while its drivers start -- are allowed by where in the engine they come
 from (`Where`, matched against the `at:` line) as well as by what they say, so

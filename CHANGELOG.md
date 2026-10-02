@@ -500,6 +500,34 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **A script Didi creates no longer draws `Unrecognized UID` on Godot 4.5 and
+  4.6 (#1150).** `script_create` wrote the file and never told the editor, which first
+  met it on its next scan, and the editor scans whenever its window takes
+  focus. If another Godot process had written the script's `.uid` sidecar in
+  the meantime, as `project_export` does, 4.5 and 4.6 looked the uid up before
+  checking they knew it and printed `ERROR: Unrecognized UID` once per script
+  as the user clicked back into Godot; 4.7 checks first. It failed the live
+  harness on both lines whenever its editor rescanned after the export case.
+  A file the server writes that the editor's index does not list is now put
+  in it with `EditorFileSystem.update_file`, which is what the editor does for
+  a file it saves itself, so the uid is registered when the call returns. Every
+  writer that refreshes the editor's copy after a write gets the same, and the
+  observed check holds both `script_create` cases to it.
+
+- **A refused project settings save says the rollback worked, and the engine
+  says the save failed once (#1150).** When `ProjectSettings.save` failed,
+  `project_set_setting`, `project_set_autoload` and `project_set_input_action`
+  put the old value back and then saved again into the file the engine had
+  just failed to write. That failed the same way: the engine printed
+  `Couldn't save project.godot` a second time, and the answer said "rollback
+  failed" while the setting was back and the file untouched. The second save
+  now runs only when the failed one moved the file.
+
+- **The harness editor says its red lines are meant (#1150).** Its Output panel opens
+  with a line saying the errors it shows are failures the harness causes on
+  purpose, each named in `tests/run_godot_integration.ps1`, which fails a run
+  on any other.
+
 - **project_export and gridmap_export_mesh_library are checked against the
   engine (#1020).** Each starts a Godot of its own and answers with what it
   read back from the file it wrote: `size_bytes` and `item_count`. The
