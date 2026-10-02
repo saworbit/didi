@@ -11,7 +11,7 @@ Every number here is derived from the suites themselves rather than written down
 | Measure | Count |
 | --- | ---: |
 | Automated tests | **1575** |
-| Live-harness assertions | 1456 |
+| Live-harness assertions | 1458 |
 
 The badge in the [README](../README.md) shows the automated test total. Harness assertions are counted separately because they are assertions inside one live scenario, not independently runnable cases; adding them together would flatter the number.
 
@@ -148,7 +148,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 
 ## Live Godot harness (`tests/*.ps1`)
 
-**1456 assertions.** Derived from `Assert-True` call sites. The harness is one long live scenario rather than a set of named cases, so this counts assertions and says so.
+**1458 assertions.** Derived from `Assert-True` call sites. The harness is one long live scenario rather than a set of named cases, so this counts assertions and says so.
 
 | File | Assertions |
 | --- | ---: |
@@ -157,7 +157,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `observed_post_state.ps1` | 13 |
 | `phase7_success.ps1` | 2 |
 | `refusal_remedies.ps1` | 3 |
-| `run_godot_integration.ps1` | 1381 |
+| `run_godot_integration.ps1` | 1383 |
 | `scene_tab_reload.ps1` | 26 |
 | `typed_object_layer.ps1` | 25 |
 
