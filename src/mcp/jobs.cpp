@@ -22,6 +22,8 @@ const char* jobStateName(JobState state) {
     return "working";
 }
 
+JobStore::JobStore() : JobStore(Limits{}) {}
+
 JobStore::JobStore(Limits limits, Clock wall_clock)
     : m_limits(limits), m_clock(std::move(wall_clock)) {}
 

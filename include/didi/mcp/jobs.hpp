@@ -87,7 +87,11 @@ public:
     using Work = std::function<json(const std::atomic<bool>& cancelled)>;
     using Clock = std::function<int64_t()>;
 
-    explicit JobStore(Limits limits = {}, Clock wall_clock = {});
+    // Two constructors rather than a defaulted Limits: GCC and Clang refuse
+    // a default argument that needs a nested struct's member initialisers
+    // inside the class that declares it.
+    JobStore();
+    explicit JobStore(Limits limits, Clock wall_clock = {});
     ~JobStore();
     JobStore(const JobStore&) = delete;
     JobStore& operator=(const JobStore&) = delete;
