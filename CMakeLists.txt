@@ -179,6 +179,7 @@ set(CORE_SOURCES
     src/offline/speculative_verify.cpp
     src/runtime/ghost_preview.cpp
     src/runtime/spatial_queries.cpp
+    src/runtime/undo_capture.cpp
     src/runtime/animation_requests.cpp
     src/runtime/audio_requests.cpp
     src/offline/class_reference.cpp
@@ -195,6 +196,7 @@ set(CORE_SOURCES
     src/gdextension/runtime_request_router.cpp
     src/gdextension/expression_sandbox.cpp
     src/gdextension/property_paths.cpp
+    src/gdextension/undo_ledger.cpp
     src/offline/gdscript_diagnostics.cpp
     src/offline/resource_indexer.cpp
     src/offline/audio_bus_layout.cpp
@@ -231,6 +233,7 @@ set(CORE_SOURCES
     src/mcp/follow_ups.cpp
     src/mcp/refusal_remedies.cpp
     src/mcp/repeated_failures.cpp
+    src/mcp/change_journal.cpp
     src/mcp/control_room.cpp
     src/tools/control_room_tools.cpp
     src/setup/build_identity.cpp
@@ -440,6 +443,8 @@ set(TEST_SOURCES
     tests/test_follow_ups.cpp
     tests/test_jobs.cpp
     tests/test_property_paths.cpp
+    tests/test_undo_ledger.cpp
+    tests/test_change_journal.cpp
     tests/test_refusal_remedies.cpp
     tests/test_repeated_failures.cpp
     tests/test_control_room.cpp

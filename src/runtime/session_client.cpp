@@ -1,5 +1,6 @@
 #include "didi/runtime/session_client.hpp"
 #include "didi/runtime/session_lock.hpp"
+#include "didi/runtime/undo_capture.hpp"
 #include "didi/common/ipc_channel.hpp"
 #include "didi/common/secure_random.hpp"
 #include "didi/common/project_path.hpp"
@@ -2140,7 +2141,9 @@ Result<json> RuntimeRouteLease::sendRequest(const std::string& method, const jso
     const int bounded_timeout_ms = timeout_ms < 0
                                        ? kMaxPublicLiveRequestMs
                                        : std::min(timeout_ms, kMaxPublicLiveRequestMs);
-    return client->sendRequest(method, routed_params, bounded_timeout_ms);
+    auto response = client->sendRequest(method, routed_params, bounded_timeout_ms);
+    collectUndoSteps(response);
+    return response;
 }
 
 std::optional<RuntimeRouteLease> acquireRuntimeRouteLease(

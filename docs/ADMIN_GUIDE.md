@@ -226,6 +226,17 @@ processes touching it are the `didi` processes started against that project.
 | Version control | Ignored by this repository's `.gitignore`. A real project may reasonably want to commit its architectural decisions, so decide deliberately rather than by default. |
 | Stale lock file | The lock is held by an open OS handle, not by the file existing. A leftover `.lock` after a crash blocks nothing. |
 
+The change journal is one more file there, `.didi/journal.json`, beside
+`journal.lock`: every mutating call any Didi server made in the project, read as
+`godot://project/journal`.
+
+| Concern | Behaviour |
+| :--- | :--- |
+| Growth | The last 200 entries, each value cut to a 512-byte preview and each entry to about 4 KB; about 130 KB after the live harness's run. Older entries are dropped and counted. |
+| Content | Arguments and answers, with secrets redacted by key name. See [Security Policy](../SECURITY.md). |
+| A damaged file | Moved aside to `journal.unreadable-<ms>.json` by the next recorded change, which starts a new journal. |
+| Version control | Ignored by this repository's `.gitignore`, and worth ignoring in a real project too: it holds argument values. |
+
 ---
 
 ## 🚀 CI/CD Pipeline & Headless Deployment

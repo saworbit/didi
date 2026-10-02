@@ -175,6 +175,7 @@ if (-not $fixtureRoot.StartsWith($buildRoot + [IO.Path]::DirectorySeparatorChar,
 . (Join-Path $PSScriptRoot 'phase7_success.ps1')
 . (Join-Path $PSScriptRoot 'scene_tab_reload.ps1')
 . (Join-Path $PSScriptRoot 'typed_object_layer.ps1')
+. (Join-Path $PSScriptRoot 'change_journal.ps1')
 Remove-TestDirectory -Path $fixtureRoot
 # Only what the fixture tracks. The Python suites run the server against
 # tests/godot_smoke and leave runtime state in its .didi/, which a whole copy
@@ -5627,6 +5628,10 @@ text = "Not a key"
     # Q7 in docs/BUILD_QUEUE.md. Its fixture scene is its own, and it leaves
     # main.tscn open as it found it.
     Invoke-TypedObjectLayerBlock -EditorSession $editorSession -FixtureRoot $fixtureRoot
+
+    # Q15 in docs/BUILD_QUEUE.md. Its fixture scene is its own, and it leaves
+    # main.tscn open as it found it.
+    Invoke-ChangeJournalBlock -EditorSession $editorSession -FixtureRoot $fixtureRoot
 
     # Last, while the editor and the game are both still attached, so no block
     # after it depends on what its cases leave behind. Q2 in docs/BUILD_QUEUE.md.

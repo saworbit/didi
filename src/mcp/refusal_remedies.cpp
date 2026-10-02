@@ -433,6 +433,55 @@ const std::map<std::string, Rule>& rules() {
             return noRemedy("The history has nothing in that direction.");
         }},
 
+        // --- The change journal's undo by entry (Q15) ----------------------
+        {"journal_entry_not_found", [](const Refusal&) {
+            return noRemedy("godot://project/journal lists the entries this project still keeps.");
+        }},
+        {"journal_entry_not_undoable", [](const Refusal&) {
+            return noRemedy("The entry left no step in the editor's undo history; make the "
+                            "change back with a new call instead.");
+        }},
+        {"journal_unreadable", [](const Refusal&) {
+            return noRemedy("The journal file does not parse. The next recorded change moves it "
+                            "aside and starts a new one.");
+        }},
+        {"journal_format_newer", [](const Refusal&) {
+            return noRemedy("A newer Didi wrote this journal; use that version, or move "
+                            ".didi/journal.json aside.");
+        }},
+        {"invalid_undo_reference", [](const Refusal&) {
+            return noRemedy("The entry's undo reference is damaged, so the journal file was "
+                            "edited by hand; make the change back with a new call instead.");
+        }},
+        {"undo_entry_blocked", [](const Refusal& r) {
+            const auto undo = r.data.value("undo", json::object());
+            if (undo.is_object() && undo.value("next_call", json()).is_object()) {
+                return json{{"next_call", undo["next_call"]}};
+            }
+            return noRemedy("The editor's Undo would take a newer action in the other history "
+                            "first. Undo that one first, or leave this one.");
+        }},
+        {"undo_entry_later_history", [](const Refusal&) {
+            return noRemedy("Later actions in the same history depend on it. Undo them first, "
+                            "newest first, or make the change back with a new call.");
+        }},
+        {"undo_entry_undone", [](const Refusal&) {
+            return noRemedy("It is already undone.");
+        }},
+        {"undo_entry_gone", [](const Refusal&) {
+            return noRemedy("Its history no longer holds it; make the change back with a new "
+                            "call instead.");
+        }},
+        {"undo_entry_misdirected", [](const Refusal&) {
+            return nextCall("editor_redo", json::object(),
+                            "Puts back the action the editor's Undo took instead.");
+        }},
+        {"journal_entry_multi_step", [](const Refusal&) {
+            return noRemedy("Undo by entry undoes one action. Undo the entry's actions with "
+                            "editor_undo while they are the newest, or make the change back "
+                            "with a new call.");
+        }},
+
         // --- Busy: the same call, later ------------------------------------
         {"asset_reimport_active", [](const Refusal&) { return retryAfter(1000); }},
         {"editor_import_busy", [](const Refusal&) { return retryAfter(2000); }},

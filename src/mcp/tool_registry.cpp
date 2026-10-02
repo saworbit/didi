@@ -2,6 +2,7 @@
 #include "didi/tools/visual_test_lab_path.hpp"
 
 #include "didi/offline/gdscript_diagnostics.hpp"
+#include "didi/mcp/change_journal.hpp"
 #include "didi/mcp/error_data.hpp"
 #include "didi/mcp/follow_ups.hpp"
 #include "didi/mcp/parameter_descriptions.hpp"
@@ -10,6 +11,7 @@
 #include "didi/common/logger.hpp"
 #include "didi/runtime/audio_requests.hpp"
 #include "didi/runtime/session_kind_policy.hpp"
+#include "didi/runtime/undo_capture.hpp"
 #include "didi/common/project_path.hpp"
 #include "didi/common/scene_node_path.hpp"
 #include "didi/tools/resolved_tool_binding.hpp"
@@ -454,6 +456,9 @@ public:
                           : (!m_sessions && m_source
                                  ? m_source->sendRequest(method, params, timeout_ms)
                                  : Result<json>(Error::notConnected()));
+        // A lease collects in RuntimeRouteLease::sendRequest; a client with no
+        // sessions behind it answers here directly.
+        if (!state || !state->lease.has_value()) runtime::collectUndoSteps(result);
         if (state && state->lease.has_value() && result.isErr()) {
             auto error = normalizeLiveRouteError(result.error(), state->lease->descriptor);
             ipc::markTransportRepeated(error, repeated);
@@ -1107,6 +1112,7 @@ static json outputSchemaForTool(const std::string& name) {
                               {"log_note", string_type},
                               {"log_returned", integer_type},
                               {"log_truncated", boolean_type},
+                              {"journal", {{"type", "object"}}},
                               {"truncated", boolean_type}},
                              {"execution_mode", "lights"});
     }
@@ -2306,6 +2312,57 @@ CallToolResult ToolRegistry::callTool(const std::string& name, const json& argum
     return withFollowUps(withErrorDataFloor(dispatchTool(name, arguments, scope), binding));
 }
 
+// The change journal's record of a finished mutating call (Q15). Only a
+// project has a journal: the server serves its working directory, and one with
+// no project.godot is not a project. A journal that cannot be written does not
+// fail the call; a successful answer says it was not recorded and why.
+static void journalCall(const ResolvedToolBinding& binding, const json& arguments,
+                        CallToolResult& result, const std::string& execution_mode,
+                        const std::optional<runtime::RuntimeRouteLease>& lease,
+                        const json& undo_steps) {
+    std::error_code error;
+    const auto root = std::filesystem::current_path(error);
+    if (error || !std::filesystem::exists(root / "project.godot", error)) return;
+    json payload = json::object();
+    if (!result.isError && result.structuredContent.has_value() &&
+        result.structuredContent->is_object()) {
+        payload = *result.structuredContent;
+    } else {
+        for (const auto& item : result.content) {
+            if (item.type != "text") continue;
+            auto parsed = json::parse(item.text, nullptr, false);
+            if (!parsed.is_discarded() && parsed.is_object()) payload = std::move(parsed);
+            break;
+        }
+    }
+    journal::Call call;
+    call.tool = std::string(binding.canonical_name);
+    call.arguments = arguments.is_object() ? arguments : json::object();
+    call.succeeded = !result.isError;
+    call.answer = call.succeeded ? payload : payload.value("error", json::object());
+    call.undo_steps = undo_steps;
+    call.execution_mode = execution_mode;
+    if (execution_mode == "live" && lease.has_value() && lease->descriptor.has_value()) {
+        call.session_id = lease->descriptor->session_id;
+    }
+    auto stored = journal::append(root, journal::entryFor(call));
+    if (stored.isOk()) return;
+    DIDI_LOG_WARN("JOURNAL", "A ", call.tool, " call was not journalled: ", stored.error().message);
+    if (result.isError) return;
+    const json note = {{"recorded", false}, {"reason", stored.error().message}};
+    for (auto& item : result.content) {
+        if (item.type != "text") continue;
+        auto parsed = json::parse(item.text, nullptr, false);
+        if (parsed.is_discarded() || !parsed.is_object()) continue;
+        parsed["journal"] = note;
+        item.text = parsed.dump(-1, ' ', false, json::error_handler_t::replace);
+        break;
+    }
+    if (result.structuredContent.has_value() && result.structuredContent->is_object()) {
+        (*result.structuredContent)["journal"] = note;
+    }
+}
+
 CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& arguments,
                                           const RequestScope& scope) {
     const auto binding = resolveAliasBinding(name, arguments);
@@ -2874,10 +2931,21 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
             route_binding.emplace(
                 dispatcher->bind(lease, liveCallIsRepeatable(binding, authorized_arguments), &dispatched_requests));
         }
+        // What the editor's undo history gained during this call comes back
+        // with the bridge's answers and is collected here, for the journal.
+        runtime::UndoStepCapture undo_capture;
+        const bool journalled = MutationSafety::isMutation(binding);
         auto result = tool->boundHandler
                           ? tool->boundHandler(binding, authorized_arguments)
                           : tool->handler(authorized_arguments);
         if (result.isError) {
+            // A failed call is journalled only when the editor's history shows
+            // it changed something anyway.
+            if (journalled && !undo_capture.steps().empty()) {
+                journalCall(binding, authorized_arguments, result,
+                            supports_live && lease.has_value() ? "live" : "", lease,
+                            undo_capture.steps());
+            }
             if (dispatcher) {
                 if (const auto error = dispatcher->lastError(); error.has_value()) {
                     // An offline-only tool, or a live tool with no route, has no
@@ -2971,6 +3039,10 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
                     // Human-readable text is allowed for errors and descriptions; only JSON payloads are attributed here.
                 }
             }
+        }
+        if (journalled) {
+            journalCall(binding, authorized_arguments, result, execution_mode, lease,
+                        undo_capture.steps());
         }
         return protected_mutation ? finish(std::move(result)) : std::move(result);
     } catch (const json::type_error& e) {
@@ -3164,7 +3236,7 @@ void ToolRegistry::registerAllDefaultTools() {
         // A status call for one light used to fetch every tool's mode as well:
         // the tools array was 77% of the answer (#776). lights is required by
         // the output schema, so it is always returned and is not a section.
-        t.sections = {"server", "project", "surface", "facts", "tools", "sessions", "log"};
+        t.sections = {"server", "project", "surface", "facts", "tools", "sessions", "log", "journal"};
         t.handler = [this](const json& args) {
             // The source client, not the lease-dispatch wrapper: the wrapper is a
             // route lease provider but not a session client, and route
@@ -5010,7 +5082,15 @@ void ToolRegistry::registerAllDefaultTools() {
         ToolDefinition t;
         t.name = "editor_undo";
         t.description = "Reverts the last operation through Godot's EditorUndoRedoManager.";
-        t.inputSchema = {{"type", "object"}};
+        // Q15: one change journal entry instead of whatever is newest. The
+        // refusal says why an entry cannot be undone on its own.
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties",
+             {{"journal_entry",
+               {{"type", "integer"},
+                {"minimum", 1},
+                {"description", "Undo only this godot://project/journal entry."}}}}}};
         t.handler = [this](const json& args) { return handleEditorUndo(args, m_ipcClient); };
         registerTool(std::move(t));
     }

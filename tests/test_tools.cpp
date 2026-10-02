@@ -7327,8 +7327,12 @@ static void test_resource_registry() {
     reg.registerAllDefaultResources();
     auto resources = reg.listResources();
 
-    ASSERT_EQ(resources.size(), 6);
+    ASSERT_EQ(resources.size(), 7);
     ASSERT_TRUE(reg.getResource("godot://project/tree") != nullptr);
+    // The change journal (Q15): a file read, judged live when an editor is there.
+    ASSERT_TRUE(reg.getResource("godot://project/journal") != nullptr);
+    ASSERT_EQ(reg.getResource("godot://project/journal")->toJson()["_meta"]["didi"]["executionModes"],
+              didi::json::array({"live", "offline_fallback"}));
     ASSERT_TRUE(reg.getResource("godot://editor/state") != nullptr);
     ASSERT_TRUE(reg.getResource("godot://runtime/logs") != nullptr);
     // The default board is listed so a client can discover it. Other boards are

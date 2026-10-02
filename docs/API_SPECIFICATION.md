@@ -223,6 +223,8 @@ tool live because an unrelated request opened a route to an editor.
 `resources/read` is scoped the same way. `godot://editor/state` and
 `godot://runtime/logs` read from a live session, so a modern read that named no
 session gets the offline payload rather than another task's editor.
+`godot://project/journal` reads its file either way, and only the judgement of
+which entries can still be undone needs the session.
 
 Naming a session the server is not already routed to opens a route to it. That
 route is held alongside any others, so two tasks interleaving requests on one
@@ -343,7 +345,7 @@ serves a stale claim is worse than no cache.
 | `tools/call` | Client $\rightarrow$ Server | Executes a tool by name with arguments |
 | `resources/list` | Client $\rightarrow$ Server | Lists all available static and dynamic resources |
 | `resources/templates/list` | Client $\rightarrow$ Server | Lists the parameterised resource shapes, currently `blackboard://{board}/state` and `blackboard://{board}/tasks` |
-| `resources/read` | Client $\rightarrow$ Server | Retrieves contents of a specific resource URI (`godot://...`) |
+| `resources/read` | Client $\rightarrow$ Server | Retrieves contents of a specific resource URI (`godot://...`), the change journal `godot://project/journal` among them |
 | `prompts/list` | Client $\rightarrow$ Server | Lists all registered prompt templates |
 | `prompts/get` | Client $\rightarrow$ Server | Evaluates a prompt template with provided arguments |
 | `tasks/get` | Client $\rightarrow$ Server | Reads a task this server answered a `tools/call` with, and its result once completed. See [Jobs and the tasks extension](#jobs-and-the-tasks-extension). |

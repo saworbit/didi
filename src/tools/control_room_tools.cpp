@@ -1,6 +1,7 @@
 #include "didi/common/json_bounds.hpp"
 #include "didi/common/project_path.hpp"
 #include "didi/common/version.hpp"
+#include "didi/mcp/change_journal.hpp"
 #include "didi/mcp/control_room.hpp"
 #include "didi/mcp/tool_registry.hpp"
 #include "didi/mcp/tool_availability.hpp"
@@ -197,6 +198,12 @@ CallToolResult handleControlRoom(const json& args, const std::shared_ptr<ipc::II
     inputs.captured_at = controlRoomTimestamp();
 
     json model = buildControlRoomModel(inputs, ToolRegistry::instance().listTools());
+    // The last changes Didi made here and whether each can still be undone on
+    // its own (Q15). A file read, plus one bounded question to the editor.
+    if (!error) {
+        model["journal"] = journal::view(cwd, lease.has_value() ? &*lease : nullptr,
+                                         kControlRoomJournalRows, true);
+    }
     model["execution_mode"] = "local_status";
     return CallToolResult::successJson(model);
 }
