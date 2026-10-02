@@ -166,6 +166,7 @@ set(CORE_SOURCES
     src/mcp/resource_registry.cpp
     src/mcp/prompt_registry.cpp
     src/runtime/session_client.cpp
+    src/runtime/language_server_client.cpp
     src/runtime/checkpoint_store.cpp
     src/runtime/managed_process.cpp
     src/runtime/managed_recovery.cpp
@@ -190,6 +191,7 @@ set(CORE_SOURCES
     src/gdextension/runtime_log.cpp
     src/gdextension/engine_output_logger.cpp
     src/gdextension/engine_diagnostics.cpp
+    src/gdextension/protocol_servers.cpp
     src/gdextension/runtime_request_router.cpp
     src/gdextension/expression_sandbox.cpp
     src/gdextension/property_paths.cpp
@@ -245,7 +247,9 @@ if(DIDI_ELASTIC_INGRESS)
         COMPILE_DEFINITIONS DIDI_ELASTIC_INGRESS=1)
 endif()
 if(WIN32)
-    target_link_libraries(didi_core PUBLIC bcrypt)
+    # ws2_32 for the editor's language server, which listens on TCP, and
+    # shell32 for CommandLineToArgvW, which reads the editor's own arguments.
+    target_link_libraries(didi_core PUBLIC bcrypt ws2_32 shell32)
 endif()
 
 # 1. Standalone MCP Server Executable (didi.exe)
@@ -453,6 +457,7 @@ set(TEST_SOURCES
     tests/test_asset_configure_import.cpp
     tests/test_project_add_export_preset.cpp
     tests/test_engine_diagnostics.cpp
+    tests/test_language_server_client.cpp
 )
 
 if(DIDI_BUILD_TESTS)

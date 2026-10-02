@@ -2265,7 +2265,7 @@
           "openWorldHint": true,
           "readOnlyHint": true
         },
-        "description": "Runs lightweight file/source diagnostics and attempts Godot --headless --check-only when a file path is supplied. Legacy name for script_check_syntax, which is listed separately and is the same tool. Prefer the canonical name: it is what error data reports as canonical_tool.",
+        "description": "Checks GDScript with Didi's lexical rules and, for a file, the open editor's language server or a headless Godot compile. Legacy name for script_check_syntax, which is listed separately and is the same tool. Prefer the canonical name: it is what error data reports as canonical_tool.",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {
@@ -2274,7 +2274,7 @@
               "type": "string"
             },
             "source_text": {
-              "description": "An unsaved script buffer to check instead of a file. This runs Didi's own lexical rules only: there is no file for the Godot compiler to open, so has_errors does not cover type errors, undeclared identifiers, absent methods or unknown base classes. The result says so in engine_checked and limitation. Use project_verify_changes for a compiler verdict on unsaved source.",
+              "description": "An unsaved buffer to check instead of a file. Only Didi's lexical rules run on it, so has_errors misses type errors and undeclared names; limitation says so. project_verify_changes compiles unsaved source.",
               "type": "string"
             }
           },
@@ -2297,6 +2297,9 @@
             },
             "engine_available": {
               "type": "boolean"
+            },
+            "engine_backend": {
+              "type": "string"
             },
             "engine_checked": {
               "type": "boolean"
@@ -2342,6 +2345,9 @@
             },
             "has_errors": {
               "type": "boolean"
+            },
+            "language_server_unavailable_reason": {
+              "type": "string"
             },
             "limitation": {
               "type": "string"
@@ -10115,7 +10121,7 @@
           "openWorldHint": true,
           "readOnlyHint": true
         },
-        "description": "Runs lightweight file/source diagnostics and attempts Godot --headless --check-only when a file path is supplied.",
+        "description": "Checks GDScript with Didi's lexical rules and, for a file, the open editor's language server or a headless Godot compile.",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {
@@ -10124,7 +10130,7 @@
               "type": "string"
             },
             "source_text": {
-              "description": "An unsaved script buffer to check instead of a file. This runs Didi's own lexical rules only: there is no file for the Godot compiler to open, so has_errors does not cover type errors, undeclared identifiers, absent methods or unknown base classes. The result says so in engine_checked and limitation. Use project_verify_changes for a compiler verdict on unsaved source.",
+              "description": "An unsaved buffer to check instead of a file. Only Didi's lexical rules run on it, so has_errors misses type errors and undeclared names; limitation says so. project_verify_changes compiles unsaved source.",
               "type": "string"
             }
           },
@@ -10147,6 +10153,9 @@
             },
             "engine_available": {
               "type": "boolean"
+            },
+            "engine_backend": {
+              "type": "string"
             },
             "engine_checked": {
               "type": "boolean"
@@ -10192,6 +10201,9 @@
             },
             "has_errors": {
               "type": "boolean"
+            },
+            "language_server_unavailable_reason": {
+              "type": "string"
             },
             "limitation": {
               "type": "string"

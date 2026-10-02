@@ -825,6 +825,12 @@ static json outputSchemaForTool(const std::string& name) {
                               {"engine_unavailable_reason", string_type},
                               {"engine_timed_out", boolean_type},
                               {"truncated", boolean_type},
+                              // Which engine answered: the attached editor's
+                              // language server, or a headless compile, and
+                              // why the server was not used when an editor
+                              // was there (Q11).
+                              {"engine_backend", string_type},
+                              {"language_server_unavailable_reason", string_type},
                               // Always returned, and the field to branch on.
                               // The four nullable engine fields above read the
                               // same for a check that never asked a compiler
@@ -3579,18 +3585,15 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "script_check_syntax";
-        t.description = "Runs lightweight file/source diagnostics and attempts Godot --headless --check-only when a file path is supplied.";
+        t.description = "Checks GDScript with Didi's lexical rules and, for a file, the open editor's language server or a headless Godot compile.";
         t.inputSchema = {
             {"type", "object"},
             {"properties", {
                 {"file_path", {{"type", "string"}, {"description", "Path to script file"}}},
                 {"source_text", {{"type", "string"}, {"description",
-                    "An unsaved script buffer to check instead of a file. This runs Didi's own "
-                    "lexical rules only: there is no file for the Godot compiler to open, so "
-                    "has_errors does not cover type errors, undeclared identifiers, absent "
-                    "methods or unknown base classes. The result says so in engine_checked and "
-                    "limitation. Use project_verify_changes for a compiler verdict on unsaved "
-                    "source."}}}
+                    "An unsaved buffer to check instead of a file. Only Didi's lexical rules run "
+                    "on it, so has_errors misses type errors and undeclared names; limitation "
+                    "says so. project_verify_changes compiles unsaved source."}}}
             }}
         };
         // The source client, not the lease dispatch wrapper. This tool sends no

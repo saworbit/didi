@@ -1960,6 +1960,9 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
         // Editor only: the scenes open in its tabs, asked before a writer
         // replaces one (#1068).
         "editor.openScenes",
+        // Editor only: where its language server and debug adapter listen
+        // (Q11).
+        "editor.getProtocolServers",
         "export.reloadPresets",
         "vision.setCameraTransform",
         "vision.toggleDebugDraw", "tilemap.setCells", "tilemap.getUsedRect",

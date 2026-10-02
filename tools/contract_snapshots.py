@@ -50,6 +50,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -602,6 +603,12 @@ def stop(editor: subprocess.Popen, pid: Any) -> None:
                 pass
 
 
+def free_loopback_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
 def record_live(binary: Path, godot: Path, offline: dict, keep: bool = False) -> tuple[str, dict, list[str]]:
     """The engine line, its snapshot, and every call that answered unlike calls.json says."""
     line, version = engine_line(godot)
@@ -610,8 +617,16 @@ def record_live(binary: Path, godot: Path, offline: dict, keep: bool = False) ->
     env = dict(workspace.env, APPDATA=str(workspace.appdata), GODOT_BIN=str(godot))
     workspace.env = env
     log = open(workspace.root / "editor.log", "wb")
+    # Its own language server and debug adapter ports, so an editor the
+    # recording machine already has open cannot answer script_check_syntax
+    # about another project (Q11).
+    language_server_port = free_loopback_port()
+    debug_adapter_port = free_loopback_port()
+    while debug_adapter_port == language_server_port:
+        debug_adapter_port = free_loopback_port()
     editor = subprocess.Popen(
-        [str(godot), "--headless", "--editor", "--path", str(workspace.project)],
+        [str(godot), "--headless", "--editor", "--path", str(workspace.project),
+         "--lsp-port", str(language_server_port), "--dap-port", str(debug_adapter_port)],
         stdout=log, stderr=subprocess.STDOUT, env=env,
     )
     descriptor: dict = {}

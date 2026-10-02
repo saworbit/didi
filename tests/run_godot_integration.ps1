@@ -526,9 +526,22 @@ Assert-True (($prelaunchDiscovery.diagnostics.error -join "`n") -match "regular 
 Remove-Item -LiteralPath $malformedDescriptorPath, $oversizedDescriptorPath -Force
 Remove-Item -LiteralPath $nonFileDescriptorPath -Recurse -Force
 
+# Ports of the editor's own language server and debug adapter. A developer's
+# editor already holds the defaults, and a second editor on one port never
+# starts its server, so a check would be answered by the developer's editor
+# about another project. Didi reads these from the editor's command line (Q11).
+function Get-FreeLoopbackPort {
+    $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+    $listener.Start()
+    try { return $listener.LocalEndpoint.Port } finally { $listener.Stop() }
+}
+$languageServerPort = Get-FreeLoopbackPort
+do { $debugAdapterPort = Get-FreeLoopbackPort } while ($debugAdapterPort -eq $languageServerPort)
+
 try {
     $godot = Start-Process -FilePath $GodotExecutable `
-        -ArgumentList @("--editor", "--path", $fixtureRoot, "--log-file", $editorEngineLogPath) `
+        -ArgumentList @("--editor", "--path", $fixtureRoot, "--log-file", $editorEngineLogPath,
+            "--lsp-port", $languageServerPort, "--dap-port", $debugAdapterPort) `
         -PassThru -WindowStyle Hidden `
         -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
 
@@ -3460,7 +3473,13 @@ try {
     foreach ($named in @(503, 517)) {
         $checked = Tool-Payload $phase5ById[$named]
         Assert-True ($checked.engine_version -match "^Godot Engine v\d") "Request $named did not name the engine that ran: $($checked.engine_version)"
-        Assert-True ($null -ne $checked.engine_executable) "Request $named did not name the binary it ran."
+        # A script check is answered by the attached editor's language server,
+        # which is no binary Didi ran (Q11). The shader check still spawns one.
+        if ($named -eq 517) {
+            Assert-True ($checked.engine_backend -eq "language_server") "script_check_syntax beside a live editor was answered by $($checked.engine_backend): $($checked.language_server_unavailable_reason)"
+        } else {
+            Assert-True ($null -ne $checked.engine_executable) "Request $named did not name the binary it ran."
+        }
         Assert-True ($checked.attached_engine_version -match "$($engineVersion.Major)\.$($engineVersion.Minor)") "Request $named reported the attached engine as $($checked.attached_engine_version), which is not the $($engineVersion.Raw) this session is on."
         # GODOT_BIN points at the engine this editor is running, so the check
         # spawned that same line and must say so. Null would mean one of the two
@@ -3472,7 +3491,10 @@ try {
     # offline-only caller is in (#687). Request 518 runs before 501's attach.
     $unattachedCheck = Tool-Payload $phase5ById[518]
     Assert-True ($unattachedCheck.attached_engine_version -match "^Godot Engine v\d") "script_check_syntax before any attach reported attached_engine_version=$($unattachedCheck.attached_engine_version) beside a live editor."
-    Assert-True ($null -ne $unattachedCheck.engine_exit_code) "script_check_syntax did not report the exit code of the engine it ran."
+    # Nothing attached and an editor observable: its language server answers,
+    # through a route held for the one request and released (Q11).
+    Assert-True ($unattachedCheck.engine_backend -eq "language_server") "script_check_syntax before any attach was answered by $($unattachedCheck.engine_backend): $($unattachedCheck.language_server_unavailable_reason)"
+    Assert-True ($unattachedCheck.matches_attached_engine -eq $true) "The language server's answer did not say it was the attached engine's."
 
     $validShader = Tool-Payload $phase5ById[503]
     Assert-True ($validShader.success -eq $true -and $validShader.has_errors -eq $false) "Valid shader did not compile cleanly."
@@ -4813,10 +4835,14 @@ try {
         (@{ jsonrpc = "2.0"; id = 380; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
         (Tool-Request 381 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
         (Tool-Request 382 "scene_open" @{ scene_path = "res://signal_compile.tscn" }),
+        # The same script checked before and after its autoload exists, by the
+        # editor's language server (Q11): an error, then none, with no note.
+        (Tool-Request 3901 "script_check_syntax" @{ file_path = "res://signal_uses_autoload.gd" }),
         # Registered now, so the editor has never had it and every script naming
         # it is uncompilable until that editor restarts. This is the state
         # project_set_autoload's own requires_editor_restart is about.
         (Tool-Request 383 "project_set_autoload" @{ name = "SignalProbeState"; path = "res://signal_state.gd" }),
+        (Tool-Request 3902 "script_check_syntax" @{ file_path = "res://signal_uses_autoload.gd" }),
         (Tool-Request 384 "script_get_symbols" @{ file_path = "res://signal_uses_autoload.gd" }),
         (Tool-Request 385 "signal_connect" @{ emitter_node = "/root/SignalCompile/Plain"; signal_name = "tree_entered"; target_node = "/root/SignalCompile/Plain"; target_method = "_on_probe" }),
         (Tool-Request 386 "signal_connect" @{ emitter_node = "/root/SignalCompile/Uses"; signal_name = "tree_entered"; target_node = "/root/SignalCompile/Uses"; target_method = "_on_probe" }),
@@ -4858,6 +4884,19 @@ try {
     Assert-True ($absent.error.data.code -eq "target_method_not_found") "A method absent from the file is reported as $($absent.error.data.code)."
 
     Assert-True (-not $compileById[388].result.isError) "The probe autoload was left registered."
+
+    # #383's case, answered by the language server rather than demoted. Before
+    # the autoload exists the identifier is a real error; once
+    # project_set_autoload has registered it the script is clean, and no
+    # diagnostic carries the note the headless check's demotion writes.
+    $beforeAutoload = Tool-Payload $compileById[3901]
+    Assert-True ($beforeAutoload.engine_backend -eq "language_server") "The check before the autoload was answered by $($beforeAutoload.engine_backend): $($beforeAutoload.language_server_unavailable_reason)"
+    $unresolved = @($beforeAutoload.diagnostics | Where-Object { $_.rule -eq "godot_language_server" -and $_.severity -eq "error" -and $_.message -match "SignalProbeState" })
+    Assert-True ($beforeAutoload.has_errors -eq $true -and $unresolved.Count -ge 1) "The language server did not report SignalProbeState before it was an autoload: $(@($beforeAutoload.diagnostics | ForEach-Object { $_.message }) -join '; ')"
+    $afterAutoload = Tool-Payload $compileById[3902]
+    Assert-True ($afterAutoload.engine_backend -eq "language_server") "The check after the autoload was answered by $($afterAutoload.engine_backend): $($afterAutoload.language_server_unavailable_reason)"
+    Assert-True ($afterAutoload.has_errors -eq $false) "A script naming a registered autoload still has errors: $(@($afterAutoload.diagnostics | ForEach-Object { $_.message }) -join '; ')"
+    Assert-True (@($afterAutoload.diagnostics | Where-Object { $_.message -match "SignalProbeState" -or $_.note }).Count -eq 0) "The autoload was demoted rather than resolved: $(@($afterAutoload.diagnostics) | ConvertTo-Json -Compress -Depth 4)"
     # A coordinate written the way every other vector on this surface is
     # written. LLM_INSTRUCTIONS states the object rule with no exception and the
     # two cell writers took arrays, so an agent following its own instructions
@@ -5865,7 +5904,7 @@ text = "Not a key"
     $allowedEngineLines = @(
         @{ Pattern = "Couldn't save project\.godot"; Cause = "requests 201, 203 and 205 deny the project file to prove rollback" },
         @{ Pattern = "Cannot save file 'res://main\.tscn'"; Cause = "request 207 saves a scene into a root that will not take a file" },
-        @{ Pattern = 'Identifier "SignalProbeState" not declared|Failed to load script "res://signal_uses_autoload\.gd"|Failed parse script res://signal_uses_autoload\.gd'; Cause = "signal_uses_autoload.gd does not compile, on purpose, for target_script_not_compiled; a GDScript language server client re-parses it on connect" },
+        @{ Pattern = 'Identifier "SignalProbeState" not declared|Failed to load script "res://signal_uses_autoload\.gd"|Failed (to )?parse script:? res://signal_uses_autoload\.gd'; Cause = "signal_uses_autoload.gd does not compile, on purpose, for target_script_not_compiled; the first script check parses every script through the editor's language server, which says so once" },
         @{ Pattern = "corrupt_asset\.png|IHDR: CRC error|ERR_FILE_CORRUPT"; Cause = "request 2700 imports a PNG with a wrong CRC on every chunk" },
         @{ Pattern = 'Identifier "undeclared_name" not declared|Failed to load script "res://observed_broken\.gd"'; Cause = "the observed post-state block writes observed_broken.gd, which does not compile, on purpose, so script_create's has_errors cannot be a constant" },
         @{ Pattern = "didi_output_canary_warning"; Cause = "the runtime fixture prints a warning canary for runtime_read_output" },

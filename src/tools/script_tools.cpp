@@ -11,10 +11,14 @@
 #include "didi/tools/editor_copy_refresh.hpp"
 #include "didi/offline/project_file_lock.hpp"
 #include "didi/offline/resource_indexer.hpp"
+#include "didi/runtime/language_server_client.hpp"
 #include "didi/runtime/session_client.hpp"
 #include "didi/common/atomic_write.hpp"
+#include <algorithm>
 #include <cctype>
 #include <fstream>
+#include <map>
+#include <mutex>
 #include <sstream>
 #include <optional>
 #include <string>
@@ -74,6 +78,147 @@ std::optional<CallToolResult> unreadableScriptRefusal(const std::filesystem::pat
          {"retryable", false}});
 }
 
+namespace {
+
+// The engine half of a script check, and which engine gave it.
+struct ScriptEngineCheck {
+    std::vector<offline::ScriptDiagnostic> diagnostics;
+    offline::GDScriptDiagnostics::EngineCheck engine;
+    // The attached editor's GDScript language server answered, rather than a
+    // headless `--check-only` process.
+    bool language_server{false};
+    // Why an attached editor's language server was not used, when one was
+    // tried. Empty when no editor was attached.
+    std::string language_server_unavailable;
+    bool truncated{false};
+};
+
+// Where each editor session's language server listens, asked of its bridge
+// once and forgotten when a check there fails, so a port the user changes is
+// asked for again.
+std::mutex g_endpoint_mutex;
+std::map<std::string, runtime::LanguageServerEndpoint> g_endpoints;
+
+constexpr int kProtocolServersTimeoutMs = 3000;
+
+// The language server of the editor this server would report about, and the
+// reason when there is an editor and no usable server. Asking its bridge holds
+// a route for the length of one request when none is held, and never moves the
+// process selection: a check is not an attach.
+std::optional<runtime::LanguageServerEndpoint> editorLanguageServer(
+    runtime::IRuntimeSessionClient& sessions, const runtime::SessionDescriptor& editor,
+    std::string& unavailable) {
+    {
+        std::lock_guard<std::mutex> lock(g_endpoint_mutex);
+        const auto cached = g_endpoints.find(editor.session_id);
+        if (cached != g_endpoints.end()) return cached->second;
+    }
+    const auto held_sessions = sessions.heldSessions();
+    const bool held = std::any_of(held_sessions.begin(), held_sessions.end(),
+                                  [&](const runtime::SessionDescriptor& session) {
+                                      return session.session_id == editor.session_id;
+                                  });
+    if (!held) {
+        auto opened = sessions.openSessionRoute(editor.session_id);
+        if (opened.isErr()) {
+            unavailable = "The attached editor could not be asked where its language server "
+                          "listens: " + opened.error().message;
+            return std::nullopt;
+        }
+    }
+    Result<json> answer = Error::notConnected("No route to the editor was held");
+    if (auto lease = sessions.acquireRouteLeaseFor(editor.session_id)) {
+        answer = lease->sendRequest("editor.getProtocolServers", json::object(),
+                                    kProtocolServersTimeoutMs);
+    }
+    if (!held) sessions.closeSessionRoute(editor.session_id);
+    if (answer.isErr()) {
+        unavailable =
+            answer.error().code == 501
+                ? std::string("The attached editor's Didi extension is older than this server and "
+                              "cannot say where its language server listens; install the addon "
+                              "from this build")
+                : "The attached editor did not say where its language server listens: " +
+                      answer.error().message;
+        return std::nullopt;
+    }
+    const json& body = answer.value();
+    const json server =
+        body.is_object() && body.contains("language_server") ? body["language_server"] : json();
+    if (!server.is_object() || !server.contains("port") || !server["port"].is_number_integer()) {
+        unavailable = "The attached editor runs no GDScript language server";
+        return std::nullopt;
+    }
+    runtime::LanguageServerEndpoint endpoint;
+    endpoint.host = server.contains("host") && server["host"].is_string()
+                        ? server["host"].get<std::string>()
+                        : std::string("127.0.0.1");
+    const auto port = server["port"].get<long long>();
+    endpoint.port = port < 0 || port > 65535 ? -1 : static_cast<int>(port);
+    endpoint.port_source = server.contains("port_source") && server["port_source"].is_string()
+                               ? server["port_source"].get<std::string>()
+                               : std::string("editor_settings");
+    std::lock_guard<std::mutex> lock(g_endpoint_mutex);
+    g_endpoints[editor.session_id] = endpoint;
+    return endpoint;
+}
+
+// Checks a script file on disk: Didi's lexical rules, then the engine.
+//
+// The engine is the attached editor's GDScript language server when there is
+// one (Q11). It already holds the project's autoloads and class names, so a
+// script that names an autoload is analyzed as the game will run it. Otherwise
+// it is a headless `godot --check-only`, which has no SceneTree and so no
+// autoloads, and whose "Identifier not found" for one is demoted (#383).
+ScriptEngineCheck checkScriptFile(const std::string& res_path,
+                                  const std::shared_ptr<ipc::IIpcClient>& ipc) {
+    ScriptEngineCheck check;
+    const auto sessions = std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(ipc);
+    const auto editor = sessions ? sessions->observableSession()
+                                 : std::optional<runtime::SessionDescriptor>{};
+    std::optional<std::string> source;
+    if (editor.has_value() && editor->kind == "editor") {
+        std::string relative = res_path;
+        if (relative.rfind("res://", 0) == 0) relative.erase(0, 6);
+        std::ifstream input(paths::projectPathFromUtf8(relative), std::ios::binary);
+        if (input.is_open()) {
+            std::ostringstream contents;
+            contents << input.rdbuf();
+            source = contents.str();
+        }
+    }
+    if (source.has_value()) {
+        std::string unavailable;
+        if (const auto endpoint = editorLanguageServer(*sessions, *editor, unavailable)) {
+            const auto answered = runtime::checkScriptWithLanguageServer(
+                *endpoint, editor->session_id, editor->project_path, res_path, *source);
+            if (answered.answered) {
+                // The lexical rules on the same text. analyze() runs no
+                // compiler when it is handed the source.
+                if (!source->empty()) {
+                    check.diagnostics = offline::GDScriptDiagnostics::analyze(res_path, *source);
+                }
+                check.diagnostics.insert(check.diagnostics.end(), answered.diagnostics.begin(),
+                                         answered.diagnostics.end());
+                check.language_server = true;
+                check.truncated = answered.truncated;
+                check.engine.version = editor->engine_version;
+                check.engine.ran = true;
+                check.engine.duration_seconds = answered.seconds;
+                return check;
+            }
+            std::lock_guard<std::mutex> lock(g_endpoint_mutex);
+            g_endpoints.erase(editor->session_id);
+            unavailable = answered.failure;
+        }
+        check.language_server_unavailable = unavailable;
+    }
+    check.diagnostics = offline::GDScriptDiagnostics::analyze(res_path, "", &check.engine);
+    return check;
+}
+
+} // namespace
+
 CallToolResult handleScriptCheckSyntax(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     std::string file_path = args.value("file_path", "");
     std::string source_text = args.value("source_text", "");
@@ -91,7 +236,7 @@ CallToolResult handleScriptCheckSyntax(const json& args, std::shared_ptr<ipc::II
         if (resolved.isErr()) {
             return CallToolResult::fromError(resolved.error(), "Invalid script file path: ");
         }
-        analysis_path = paths::projectPathToUtf8(resolved.value());
+        analysis_path = paths::resourcePathOf(resolved.value());
         // Before the encoding question, because a file this process cannot open
         // answers neither question and used to answer both wrongly (#653).
         if (auto refused = unreadableScriptRefusal(resolved.value(), file_path)) return *refused;
@@ -105,6 +250,7 @@ CallToolResult handleScriptCheckSyntax(const json& args, std::shared_ptr<ipc::II
     json diag_arr = json::array();
     bool has_error = false;
     size_t diagnostics_count = 0;
+    ScriptEngineCheck checked;
     if (encoding_refusal.has_value()) {
         has_error = true;
         diagnostics_count = 1;
@@ -114,7 +260,13 @@ CallToolResult handleScriptCheckSyntax(const json& args, std::shared_ptr<ipc::II
                                 {"line", 0},
                                 {"column", 0}});
     } else {
-        auto diags = offline::GDScriptDiagnostics::analyze(analysis_path, source_text, &engine);
+        if (source_text.empty()) {
+            checked = checkScriptFile(analysis_path, ipc);
+            engine = checked.engine;
+        }
+        const auto diags = source_text.empty()
+                               ? checked.diagnostics
+                               : offline::GDScriptDiagnostics::analyze(analysis_path, source_text);
         diagnostics_count = diags.size();
         for (const auto& d : diags) {
             if (d.severity == "error") has_error = true;
@@ -193,35 +345,23 @@ CallToolResult handleScriptCheckSyntax(const json& args, std::shared_ptr<ipc::II
             "send it to project_verify_changes, which compiles it in an isolated copy of the "
             "project; for one on a file, write it with script_create and check it by file_path.";
     }
-    // Whether the compiler was asked at all, which is a different fact from
-    // whether it answered.
-    //
-    // A source_text check runs Didi's own lexical rules and nothing else, by
-    // design: there is no file for `--check-only` to open. Nothing in the
-    // result said so, so six scripts with real compile errors -- a typed
-    // variable assigned the wrong type, a mistyped keyword, an undeclared
-    // identifier, an absent method, an unknown base class, a wrong constructor
-    // arity -- each came back has_errors: false, which is the same answer a
-    // clean script gets (#728). Worse, the engine fields came back all-null,
-    // which is byte for byte what a GODOT_BIN that cannot be launched returns,
-    // so one shape stood for three states. This field separates them: false
-    // means nobody asked, and engine_available answers whether an engine that
-    // was asked replied.
-    result["engine_checked"] = engine_was_asked;
-    if (!engine_was_asked) {
-        result["limitation"] =
-            "The Godot compiler was not run. A source_text check has no file to compile, so "
-            "has_errors covers only Didi's own lexical rules -- unbalanced brackets, bad "
-            "indentation, a tab and space mix -- and not type errors, undeclared identifiers, "
-            "absent methods or unknown base classes. For a compiler verdict on unsaved source, "
-            "send it to project_verify_changes, which compiles it in an isolated copy of the "
-            "project; for one on a file, write it with script_create and check it by file_path.";
-    }
     // Published so a caller can see whether the subprocess ran at all, which
     // is what the shader half already reports and this one did not. False is
     // the honest answer on a machine with no Godot: the lexer found what it
     // found, and nothing compiled the script.
     if (engine_was_asked) {
+        // Which engine answered: the attached editor's language server, which
+        // knows the project's autoloads and class names, or a headless
+        // compile. When an editor was attached and its server was not used,
+        // the reason says why, because the headless answer is the one with
+        // the autoload demotion in it (Q11).
+        // A file refused for its encoding was shown to no engine.
+        if (!encoding_refusal.has_value()) {
+            result["engine_backend"] = checked.language_server ? "language_server" : "check_only";
+        }
+        if (!checked.language_server_unavailable.empty()) {
+            result["language_server_unavailable_reason"] = checked.language_server_unavailable;
+        }
         result["engine_available"] = engine.ran;
         result["engine_exit_code"] =
             engine.exit_code.has_value() ? json(*engine.exit_code) : json(nullptr);
@@ -238,7 +378,7 @@ CallToolResult handleScriptCheckSyntax(const json& args, std::shared_ptr<ipc::II
     }
     // The compiler pass is bounded by time, and a pass cut short can have
     // stopped before the error that mattered (Q5).
-    result["truncated"] = engine_was_asked && engine.timed_out;
+    result["truncated"] = engine_was_asked && (engine.timed_out || checked.truncated);
 
     // Which engine answered. The whole question this tool exists for is "will
     // the engine accept this?", and resolveGodotExecutable picks newest-first
@@ -335,7 +475,7 @@ CallToolResult handleScriptCreate(const json& args, std::shared_ptr<ipc::IIpcCli
     // path goes through the active code page on Windows and throws for anything
     // the code page cannot hold, and Godot reports its errors against res://,
     // which is what the location patterns here match.
-    auto diags = offline::GDScriptDiagnostics::analyze(reported_path);
+    const auto diags = checkScriptFile(reported_path, ipc).diagnostics;
     json diag_arr = json::array();
     bool has_error = false;
     for (const auto& d : diags) {
@@ -555,7 +695,7 @@ CallToolResult handleScriptPatchMethod(const json& args, std::shared_ptr<ipc::II
     // The res:// path for the same reason script_create passes it: a narrow
     // absolute path throws on Windows for characters outside the code page, and
     // Godot's diagnostics name res:// paths.
-    auto diags = offline::GDScriptDiagnostics::analyze(reported_path);
+    const auto diags = checkScriptFile(reported_path, ipc).diagnostics;
     json diag_arr = json::array();
     bool has_error = false;
     for (const auto& d : diags) {

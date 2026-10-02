@@ -3,6 +3,7 @@
 #include "didi/gdextension/editor_hook.hpp"
 #include "didi/gdextension/expression_sandbox.hpp"
 #include "didi/gdextension/property_paths.hpp"
+#include "didi/gdextension/protocol_servers.hpp"
 #include "didi/gdextension/runtime_bridge.hpp"
 #include "didi/gdextension/viewport_renderer.hpp"
 #include "didi/common/logger.hpp"
@@ -9928,6 +9929,79 @@ json GodotBridge::execute(const std::string& method, const json& params,
                                       removed.error().message);
         }
         return liveResult({{"reload_requested", true}});
+    }
+    if (method == "editor.getProtocolServers") {
+        // Where this editor's GDScript language server and Debug Adapter
+        // Protocol server listen, so the server can reach them (Q11). The
+        // settings name a port; an editor started with --lsp-port or
+        // --dap-port listens on that instead, and only the process's own
+        // command line still says so. A server this engine was built without
+        // has no setting and is answered null.
+        if (session_kind != "editor") return bridgeError(409, "session_kind_rejected");
+        if (!hasOnlyKeys(params, {})) {
+            return errorJson(400, "editor.getProtocolServers takes no parameters");
+        }
+        auto editor = editorInterface();
+        if (editor.isErr()) return errorJson(editor.error().code, editor.error().message);
+        // EditorInterface.get_editor_settings is 4086932459, and
+        // EditorSettings.has_setting 3927539163 and get_setting 1868160156, on
+        // 4.5.1, 4.6.2 and 4.7.2.
+        auto settings_value =
+            callObject(editor.value(), "EditorInterface", "get_editor_settings", 4086932459LL);
+        if (settings_value.isErr()) {
+            return errorJson(settings_value.error().code, settings_value.error().message);
+        }
+        auto settings = objectFromVariant(settings_value.value());
+        if (settings.isErr() || !settings.value()) {
+            return errorJson(500, "The editor has no EditorSettings to read its servers' ports from");
+        }
+        const auto setting = [&](const std::string& name) -> std::optional<VariantValue> {
+            auto setting_name = makeString(name);
+            if (setting_name.isErr()) return std::nullopt;
+            auto present = callObject(settings.value(), "EditorSettings", "has_setting", 3927539163LL,
+                                      {&setting_name.value()});
+            if (present.isErr()) return std::nullopt;
+            auto has = scalarFromVariant<GDExtensionBool>(present.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+            if (has.isErr() || !has.value()) return std::nullopt;
+            auto value = callObject(settings.value(), "EditorSettings", "get_setting", 1868160156LL,
+                                    {&setting_name.value()});
+            if (value.isErr()) return std::nullopt;
+            return std::move(value.value());
+        };
+        const auto setting_port = [&](const std::string& name) -> std::optional<int64_t> {
+            auto value = setting(name);
+            if (!value) return std::nullopt;
+            const auto type = GodotApi::instance().variant_get_type(value->ptr());
+            if (type != GDEXTENSION_VARIANT_TYPE_INT) return std::nullopt;
+            auto port = scalarFromVariant<int64_t>(*value, type);
+            if (port.isErr()) return std::nullopt;
+            return port.value();
+        };
+        const auto overrides = godot::protocolPortOverrides(godot::processArguments());
+        const auto describe = [&](const std::string& port_setting, const std::optional<int>& override,
+                                  const std::string& host) -> json {
+            const auto configured = setting_port(port_setting);
+            if (!configured.has_value()) return nullptr;
+            json server = {{"host", host},
+                           {"port", override.has_value() ? int64_t{*override} : *configured},
+                           {"port_source", override.has_value() ? "command_line" : "editor_settings"}};
+            if (override.has_value()) server["settings_port"] = *configured;
+            return server;
+        };
+        std::string language_server_host = "127.0.0.1";
+        if (auto host = setting("network/language_server/remote_host")) {
+            const auto type = GodotApi::instance().variant_get_type(host->ptr());
+            if (type == GDEXTENSION_VARIANT_TYPE_STRING) {
+                auto text = stringFromVariant(*host, type);
+                if (text.isOk()) language_server_host = text.value();
+            }
+        }
+        // The debug adapter always binds 127.0.0.1; it has no host setting.
+        return liveResult({{"language_server",
+                            describe("network/language_server/remote_port",
+                                     overrides.language_server, language_server_host)},
+                           {"debug_adapter", describe("network/debug_adapter/remote_port",
+                                                      overrides.debug_adapter, "127.0.0.1")}});
     }
     if (method == "editor.openScenes") {
         // Asked before a writer replaces scene files, so a scene open in a tab
