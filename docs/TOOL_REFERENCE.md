@@ -1770,6 +1770,8 @@ A Godot that cannot be started, because nothing is at the path or the file there
 
 Runs `dotnet build` with `configuration` (`Debug` or `Release`, default `Debug`) and `timeout_seconds` (`1..300`, default `60`). Optional `project_file` must be a normalized project-contained `.sln` or `.csproj`; when omitted, exactly one of either must sit at the project root, and a `.sln` there is built in preference to a `.csproj` beside it. The result includes exit/timeout/output metadata and bounded structured MSBuild diagnostics, whose `path` is `res://` for any file inside the project. `dotnet_executable` and `dotnet_version` name the toolchain that answered, and `DOTNET_BIN` redirects it; a value that cannot be used is passed over and reported in `dotnet_executable_configured_rejected`, and an executable that is not a .NET SDK is a `503` rather than a build verdict. `dotnet --version` runs first under the same `timeout_seconds`, and one that does not answer in time is `504 timeout`, retryable, since a slow SDK is still there (#1078). `projects_built` counts the projects MSBuild produced an assembly for, and `success` is false when `dotnet` exits `0` having built none, which is what a solution with unresolvable project paths or no configuration mapping does. This is a real build and may update normal `bin`/`obj` outputs.
 
+`request_id` (`string`, optional) runs the call as a job: it answers within about ten seconds with the result or `status: "working"`, and the same call with the same `request_id` reads the job rather than running the work again. A client that declared the `2026-07-28` tasks extension is answered with a task instead. See [Jobs and the tasks extension](API_SPECIFICATION.md#jobs-and-the-tasks-extension).
+
 ### `shader_get_visual_graph` — Live
 
 Returns the nodes and connections of a `VisualShader` graph, per shader type.
@@ -1887,6 +1889,8 @@ An open editor reads `export_presets.cfg` once, when it starts, and writes its o
 ### `project_export` — Offline
 
 Requires an existing `preset` and a normalized project-contained `output_path` with no control characters, which `gridmap_export_mesh_library` requires of its `output_path` too, since the path goes on Godot's command line. `mode` is `release` (default), `debug`, or `pack`; `timeout_seconds` is `1..900` (default `300`). The destination is preserved unless `overwrite: true`. Didi invokes the corresponding headless Godot export operation and verifies that a non-empty output artifact exists before reporting success. Installed export templates and platform SDKs remain Godot/operator prerequisites.
+
+`request_id` (`string`, optional) runs the call as a job: it answers within about ten seconds with the result or `status: "working"`, and the same call with the same `request_id` reads the job rather than running the work again. A client that declared the `2026-07-28` tasks extension is answered with a task instead. See [Jobs and the tasks extension](API_SPECIFICATION.md#jobs-and-the-tasks-extension).
 
 `project_export` asks the same question through the same code, so the two cannot answer differently about the same file, and its confirmation preview asks it too: a preset the file does not declare is refused at the dry run with `404` and the names that are there under `available_presets`, rather than previewed cleanly and refused on the confirm. When Godot refuses the export, its console output is carried as `engine_output` under `error.data` with the terminal escapes removed, rather than concatenated into the message.
 

@@ -245,6 +245,72 @@ constexpr const char* kConfirmationRequestKey = "didi_confirm_mutation";
 constexpr const char* kClientCapabilitiesMetaKey = "io.modelcontextprotocol/clientCapabilities";
 constexpr const char* kClientInfoMetaKey = "io.modelcontextprotocol/clientInfo";
 
+// Long work as jobs (Q8 in docs/BUILD_QUEUE.md).
+constexpr const char* kTasksExtension = "io.modelcontextprotocol/tasks";
+
+// The tools that run as a job when asked to. Each runs an offline helper that
+// can take minutes, during which the stdio loop answered nothing else.
+bool runsAsJob(const std::string& canonical) {
+    return canonical == "project_export" || canonical == "csharp_check_build";
+}
+
+// Whether this request declared the tasks extension in its own capabilities.
+// Only the request's own declaration counts: the extension forbids answering
+// a request with a task when that request did not declare it, whatever an
+// earlier one said.
+bool requestDeclaresTasks(const json& params) {
+    if (!params.is_object()) return false;
+    const auto meta = params.find("_meta");
+    if (meta == params.end() || !meta->is_object()) return false;
+    const auto capabilities = meta->find(kClientCapabilitiesMetaKey);
+    if (capabilities == meta->end() || !capabilities->is_object()) return false;
+    const auto extensions = capabilities->find("extensions");
+    return extensions != capabilities->end() && extensions->is_object() &&
+           extensions->contains(kTasksExtension);
+}
+
+// A request id the caller chose: long enough not to collide by accident, and
+// plain enough to log and to show.
+bool validRequestId(const json& value) {
+    if (!value.is_string()) return false;
+    const auto& text = value.get_ref<const std::string&>();
+    if (text.size() < 8 || text.size() > 64) return false;
+    return std::all_of(text.begin(), text.end(), [](unsigned char c) {
+        return std::isalnum(c) != 0 || c == '.' || c == '_' || c == ':' || c == '-';
+    });
+}
+
+// A job as the tasks extension shows one. An abandoned job is the extension's
+// failed: it ended on an error of the server's, not of the work.
+json taskJson(const JobView& view) {
+    const char* status = "working";
+    switch (view.state) {
+        case JobState::Working: status = "working"; break;
+        case JobState::Completed: status = "completed"; break;
+        case JobState::Cancelled: status = "cancelled"; break;
+        case JobState::Abandoned: status = "failed"; break;
+    }
+    json task = {{"taskId", view.id},
+                 {"status", status},
+                 {"createdAt", isoTimestamp(view.created_at_ms)},
+                 {"lastUpdatedAt", isoTimestamp(view.updated_at_ms)},
+                 {"ttlMs", view.ttl_ms},
+                 {"pollIntervalMs", view.poll_interval_ms}};
+    if (view.state == JobState::Working) {
+        task["statusMessage"] = view.cancel_requested
+                                    ? "Cancellation was asked for, and the work is stopping."
+                                    : "The work is running.";
+    } else if (view.state == JobState::Cancelled) {
+        task["statusMessage"] = "Stopped at the client's request before it finished; whatever "
+                                "the work had done by then stays done.";
+    } else if (view.state == JobState::Abandoned) {
+        task["statusMessage"] = "The server stopped the work: " + view.abandoned_reason;
+        task["error"] = {{"code", static_cast<int>(JsonRpcErrorCode::InternalError)},
+                         {"message", "The job was abandoned: " + view.abandoned_reason}};
+    }
+    return task;
+}
+
 bool clientCanElicitForms(const json& params) {
     if (!params.is_object() || !params.contains("_meta") || !params["_meta"].is_object()) {
         return false;
@@ -323,9 +389,14 @@ json uiExtensionDeclaration() {
 
 // Every extension this server declares. Response economy is always on offer,
 // because it changes nothing for a client that does not ask for it.
-json serverExtensions(bool ui_available) {
+json serverExtensions(bool ui_available, bool tasks_available) {
     json extensions = ui_available ? uiExtensionDeclaration() : json::object();
     extensions.update(responseEconomyDeclaration());
+    // Only to server/discover, which is where a 2026-07-28 client reads a
+    // server's capabilities. The extension is negotiated per request, and a
+    // 2024-11-05 handshake has no per-request capabilities to negotiate it
+    // with, so declaring it there would promise what no legacy request gets.
+    if (tasks_available) extensions[kTasksExtension] = json::object();
     return extensions;
 }
 
@@ -538,6 +609,67 @@ DescriptorHeld McpServer::descriptorHolderFor(const RequestScope& scope) {
     return [this](const json& descriptor) { return m_descriptorLedger.alreadySent(descriptor); };
 }
 
+// How a job is shown to the call that asked about it (Q8).
+//
+// A finished job answers with exactly what its call answered, with the job
+// named under _meta. A running one answers a client that declared the tasks
+// extension with the task the extension defines, and any other client with a
+// working answer saying how to read it. That answer is a success: nothing has
+// failed, and an agent that reads isError as "try something else" should not
+// start the work a second time.
+json McpServer::answerJob(const JobView& view, bool as_task, const ResponseEconomy& economy,
+                          const DescriptorHeld& client_holds) const {
+    json job = {{"job_id", view.id},
+                {"state", jobStateName(view.state)},
+                {"started_at", isoTimestamp(view.created_at_ms)}};
+    if (!view.request_id.empty()) job["request_id"] = view.request_id;
+    if (view.state == JobState::Completed && view.result.has_value()) {
+        json result = complete(economizeToolResult(*view.result, economy, client_holds));
+        const auto provenance = m_jobProvenance.find(view.id);
+        if (provenance != m_jobProvenance.end() &&
+            (provenance->second.second || !result.value("isError", false))) {
+            result = withConfirmationProvenance(std::move(result), provenance->second.first.c_str());
+        }
+        result["_meta"]["didi"]["job"] = std::move(job);
+        return result;
+    }
+    if (view.state == JobState::Working && as_task) {
+        json task = taskJson(view);
+        task["resultType"] = "task";
+        return task;
+    }
+    CallToolResult answer;
+    if (view.state == JobState::Working) {
+        job["elapsed_ms"] = std::max<int64_t>(0, view.updated_at_ms - view.created_at_ms);
+        job["poll_interval_ms"] = view.poll_interval_ms;
+        json payload = {
+            {"status", "working"},
+            {"job", job},
+            {"follow_up",
+             json::array({{{"work", "poll"},
+                           {"tool", view.tool},
+                           {"reason", view.request_id.empty()
+                                          ? std::string("The work is still running.")
+                                          : "The work is still running. Call " + view.tool +
+                                                " again with the same arguments and request_id " +
+                                                view.request_id +
+                                                " to read it; it will not run a second time."}}})}};
+        if (view.cancel_requested) payload["job"]["cancel_requested"] = true;
+        answer = CallToolResult::successJson(payload);
+    } else if (view.state == JobState::Cancelled) {
+        answer = CallToolResult::errorJson(
+            409,
+            "The " + view.tool + " job was cancelled before it finished, so it has no answer. "
+            "Whatever it had done by then stays done. A new request_id starts the work again.",
+            {{"code", "job_cancelled"}, {"field", "request_id"}, {"job", job}, {"retryable", false}});
+    } else {
+        answer = CallToolResult::errorJson(
+            500, "The " + view.tool + " job stopped without an answer: " + view.abandoned_reason,
+            {{"code", "internal_error"}, {"job", job}, {"retryable", false}});
+    }
+    return complete(economizeToolResult(answer.toJson(), economy, client_holds));
+}
+
 ResponseEconomy McpServer::responseEconomyFor(ProtocolEra era, const json& params) const {
     // The operator's switch is not another client's declaration, so it is not
     // what the era split below guards against: it applies to every request on
@@ -597,7 +729,7 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
                 // walk the whole sequence -- declare, read it back, look for
                 // the app resource -- to a 400 on the only resource the
                 // extension exists for (#717).
-                {"extensions", serverExtensions(m_uiAppMode != UiAppMode::Off)}
+                {"extensions", serverExtensions(m_uiAppMode != UiAppMode::Off, true)}
             }},
             {"_meta", {
                 {kServerInfoMetaKey, {{"name", kServerName}, {"version", kServerVersion}}},
@@ -698,7 +830,7 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
                 // works: this is the listing itself moving.
                 {"resources", {{"subscribe", true}, {"listChanged", true}}},
                 {"prompts", {{"listChanged", false}}},
-                {"extensions", serverExtensions(m_uiAppMode != UiAppMode::Off)}
+                {"extensions", serverExtensions(m_uiAppMode != UiAppMode::Off, false)}
             }},
             {"serverInfo", {
                 {"name", kServerName},
@@ -908,6 +1040,101 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
         } else {
             arguments = supplied_arguments;
         }
+
+        // Long work as jobs (Q8). Decided here, before any of the confirmation
+        // paths below, so every one of them reaches the registry the same way.
+        // request_id is the caller's handle on the work and not an argument of
+        // it, so nothing past this point sees it: a dry run, its confirmation
+        // token and the call it confirms all bind to the same arguments.
+        const auto* called_tool = ToolRegistry::instance().getTool(name);
+        const std::string canonical =
+            called_tool ? std::string(called_tool->canonical_name) : name;
+        const bool job_tool = runsAsJob(canonical);
+        std::optional<std::string> request_id;
+        if (job_tool && arguments.is_object() && arguments.contains("request_id")) {
+            if (!validRequestId(arguments["request_id"])) {
+                return JsonRpcResponse::makeSuccess(
+                    req.id, encode(CallToolResult::errorJson(
+                                400,
+                                "request_id must be 8 to 64 letters, digits, '.', '_', ':' or "
+                                "'-'. It names this work, so pick one that will not be reused "
+                                "for different work.",
+                                {{"code", "invalid_arguments"}, {"field", "request_id"}})));
+            }
+            request_id = arguments["request_id"].get<std::string>();
+            arguments.erase("request_id");
+        }
+        const bool job_preview = arguments.is_object() && arguments.contains("dry_run") &&
+                                 arguments["dry_run"].is_boolean() &&
+                                 arguments["dry_run"].get<bool>();
+        const bool as_task = era == ProtocolEra::Modern && requestDeclaresTasks(req.params);
+        const bool as_job = job_tool && !job_preview && (request_id.has_value() || as_task);
+        const std::string fingerprint = as_job ? jobFingerprint(canonical, arguments) : std::string();
+        if (as_job && request_id.has_value()) {
+            if (const auto existing = m_jobs.findByRequest(conversation, canonical, *request_id)) {
+                // The same id with no other arguments is a read of the job; with
+                // arguments, they have to be the ones it was started with, or the
+                // id is being reused for different work and the answer kept
+                // under it is not this call's.
+                const bool names_only_the_job = arguments.is_object() && arguments.empty();
+                if (!names_only_the_job && existing->fingerprint != fingerprint) {
+                    return JsonRpcResponse::makeSuccess(
+                        req.id, encode(CallToolResult::errorJson(
+                                    409,
+                                    "request_id " + *request_id + " already names a " + canonical +
+                                        " job started with different arguments, so this call was "
+                                        "not run. Send the arguments that job was started with to "
+                                        "read it, or a new request_id to start this work.",
+                                    {{"code", "request_id_conflict"},
+                                     {"field", "request_id"},
+                                     {"job_id", existing->id},
+                                     {"retryable", false}})));
+                }
+                return JsonRpcResponse::makeSuccess(
+                    req.id, answerJob(*existing, as_task, economy, client_holds));
+            }
+        }
+        // Every route below ends here. A job runs the same registry call on a
+        // thread of its own, and is answered from the store.
+        // `stamp_errors` keeps each route's own rule: a person's approval and
+        // a skipped gate are stamped on every answer, an agent's own token
+        // only on a success.
+        auto respond = [&](const json& call_arguments, const char* provenance,
+                           bool stamp_errors) -> JsonRpcResponse {
+            if (!as_job) {
+                auto result = ToolRegistry::instance().callTool(name, call_arguments, scope);
+                auto encoded = encode(result);
+                if (provenance != nullptr && (stamp_errors || !result.isError)) {
+                    encoded = withConfirmationProvenance(std::move(encoded), provenance);
+                }
+                return JsonRpcResponse::makeSuccess(req.id, std::move(encoded));
+            }
+            auto started = m_jobs.start(
+                conversation, canonical, request_id.value_or(std::string()), fingerprint,
+                [name, call_arguments, scope](const std::atomic<bool>&) {
+                    return ToolRegistry::instance().callTool(name, call_arguments, scope).toJson();
+                });
+            if (started.isErr()) {
+                return JsonRpcResponse::makeSuccess(
+                    req.id, encode(CallToolResult::fromError(started.error())));
+            }
+            if (provenance != nullptr) {
+                m_jobProvenance[started.value().id] = {provenance, stamp_errors};
+            }
+            // Under managed recovery a mutation goes through the recovery's own
+            // before and after steps, which keep state of their own and were
+            // written for one call at a time. So the stdio loop waits the job
+            // out there: the work still has a request id that a retry reads,
+            // and nothing else runs beside it. Bounded by the tool's own
+            // timeout, which is at most fifteen minutes.
+            const auto wait = ToolRegistry::instance().managedRecoveryEnabled()
+                                  ? std::chrono::milliseconds(std::chrono::hours(1))
+                                  : (as_task ? m_taskGrace : m_jobWait);
+            const auto settled = m_jobs.waitFor(started.value().id, wait);
+            return JsonRpcResponse::makeSuccess(
+                req.id, answerJob(settled.value_or(started.value()), as_task, economy, client_holds));
+        };
+
         // The client is returning a person's decision on a previous offer.
         if (req.params.contains("inputResponses") && req.params["inputResponses"].is_object()) {
             const auto state = decodeRequestState(req.params.value("requestState", json()));
@@ -943,9 +1170,7 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
             }
             json approved = arguments;
             approved["confirmation_token"] = state->at("token");
-            auto result = ToolRegistry::instance().callTool(name, approved, scope);
-            return JsonRpcResponse::makeSuccess(
-                req.id, withConfirmationProvenance(encode(result), "human"));
+            return respond(approved, "human", true);
         }
 
         // A destructive tool with no token yet, and a client that can ask a
@@ -971,9 +1196,7 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
                 if (!minted.token.empty()) {
                     json approved = arguments;
                     approved["confirmation_token"] = minted.token;
-                    auto result = ToolRegistry::instance().callTool(name, approved, scope);
-                    return JsonRpcResponse::makeSuccess(
-                        req.id, withConfirmationProvenance(encode(result), "skipped"));
+                    return respond(approved, "skipped", true);
                 }
                 // Skipping confirmation is not skipping validation. A call that
                 // could not run still reports why, and the preview's own refusal
@@ -1030,12 +1253,7 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
             }
         }
 
-        auto result = ToolRegistry::instance().callTool(name, arguments, scope);
-        auto encoded = encode(result);
-        if (already_confirmed && !result.isError) {
-            encoded = withConfirmationProvenance(std::move(encoded), "agent");
-        }
-        return JsonRpcResponse::makeSuccess(req.id, std::move(encoded));
+        return respond(arguments, already_confirmed ? "agent" : nullptr, false);
     }
 
     // Resources
@@ -1270,6 +1488,34 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
             prompt_result["description"] = definition->description;
         }
         return JsonRpcResponse::makeSuccess(req.id, complete(prompt_result));
+    }
+
+    // The tasks extension (Q8). Any request may name a task it was given; the
+    // id is 128 random bits, which is the extension's guidance for a server
+    // that cannot bind a task to an authorisation context.
+    if (req.method == "tasks/get" || req.method == "tasks/cancel" || req.method == "tasks/update") {
+        if (!req.params.is_object() || !req.params.contains("taskId") ||
+            !req.params["taskId"].is_string()) {
+            return JsonRpcResponse::makeError(req.id, JsonRpcErrorCode::InvalidParams,
+                                              "taskId must be the string a task was answered with");
+        }
+        const auto task_id = req.params["taskId"].get<std::string>();
+        const auto view = req.method == "tasks/cancel" ? m_jobs.cancel(task_id) : m_jobs.find(task_id);
+        if (!view.has_value()) {
+            return JsonRpcResponse::makeError(
+                req.id, JsonRpcErrorCode::InvalidParams,
+                "No task " + task_id + " is kept here: it was never answered by this server "
+                "process, or it finished more than an hour ago and was dropped.");
+        }
+        // Cancel and update are acknowledgements. No task this server makes ever
+        // asks the client for input, so an update has nothing to deliver to.
+        if (req.method != "tasks/get") return JsonRpcResponse::makeSuccess(req.id, complete(json::object()));
+        json task = taskJson(*view);
+        if (view->state == JobState::Completed && view->result.has_value()) {
+            task["result"] = complete(economizeToolResult(
+                *view->result, responseEconomyFor(scope.era, req.params), [](const json&) { return false; }));
+        }
+        return JsonRpcResponse::makeSuccess(req.id, complete(std::move(task)));
     }
 
     return JsonRpcResponse::makeError(req.id, JsonRpcErrorCode::MethodNotFound, "Method not found: " + req.method);

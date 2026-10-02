@@ -1,4 +1,5 @@
 #include "didi/offline/process_runner.hpp"
+#include "didi/common/cancellation.hpp"
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -224,11 +225,17 @@ Result<ProcessResult> runProcess(const ProcessRequest& request) {
             WaitForSingleObject(process.hProcess, 5000);
             break;
         }
+        if (cancellationRequested()) {
+            result.cancelled = true;
+            if (job_assigned) TerminateJobObject(job, 130); else TerminateProcess(process.hProcess, 130);
+            WaitForSingleObject(process.hProcess, 5000);
+            break;
+        }
     }
     drain();
     DWORD exit_code = 1;
     if (!GetExitCodeProcess(process.hProcess, &exit_code)) exit_code = 1;
-    result.exit_code = result.timed_out ? 124 : static_cast<int>(exit_code);
+    result.exit_code = result.timed_out ? 124 : (result.cancelled ? 130 : static_cast<int>(exit_code));
     CloseHandle(read_pipe);
     CloseHandle(process.hThread);
     CloseHandle(process.hProcess);
@@ -318,6 +325,12 @@ Result<ProcessResult> runProcess(const ProcessRequest& request) {
             waitpid(child, &wait_status, 0);
             break;
         }
+        if (cancellationRequested()) {
+            result.cancelled = true;
+            killChildTree();
+            waitpid(child, &wait_status, 0);
+            break;
+        }
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     for (;;) {
@@ -327,6 +340,7 @@ Result<ProcessResult> runProcess(const ProcessRequest& request) {
     }
     close(output_pipe[0]);
     if (result.timed_out) result.exit_code = 124;
+    else if (result.cancelled) result.exit_code = 130;
     else if (WIFEXITED(wait_status)) result.exit_code = WEXITSTATUS(wait_status);
     else if (WIFSIGNALED(wait_status)) result.exit_code = 128 + WTERMSIG(wait_status);
     else result.exit_code = 1;

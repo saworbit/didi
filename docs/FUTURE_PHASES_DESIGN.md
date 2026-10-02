@@ -293,7 +293,7 @@ above, two were delivered by later work and one remains open; see the note there
 
 ## Phase 11: MCP Protocol and Workflow Evolution
 
-**Status:** `PLANNED`
+**Status:** `IN PROGRESS`
 
 **Goal:** Use broader MCP capabilities honestly while retaining authenticated local engine IPC.
 

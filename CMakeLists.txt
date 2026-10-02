@@ -182,6 +182,7 @@ set(CORE_SOURCES
     src/runtime/audio_requests.cpp
     src/offline/class_reference.cpp
     src/mcp/mutation_safety.cpp
+    src/mcp/jobs.cpp
     src/tools/phase7_live_forward.cpp
     src/tools/hierarchy_view.cpp
     ${PHASE7_GENERATED_SOURCE}
@@ -428,6 +429,7 @@ set(TEST_SOURCES
     tests/test_tool_profile.cpp
     tests/test_response_economy.cpp
     tests/test_follow_ups.cpp
+    tests/test_jobs.cpp
     tests/test_property_paths.cpp
     tests/test_refusal_remedies.cpp
     tests/test_repeated_failures.cpp

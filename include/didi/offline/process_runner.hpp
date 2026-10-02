@@ -37,6 +37,9 @@ struct ProcessResult {
     // job alone and is false on POSIX. This one is true on POSIX when the group
     // exists, because here the group is what the timeout signals.
     bool contained{false};
+    // The job running this process was cancelled, and the process, with
+    // everything under it, was stopped the way a timeout stops it (Q8).
+    bool cancelled{false};
     double duration_seconds{0.0};
     std::string output;
 };

@@ -4,6 +4,7 @@
 #include <string>
 #include <memory>
 #include <atomic>
+#include <chrono>
 #include <optional>
 #include <mutex>
 #include <set>
@@ -16,6 +17,7 @@
 #include "didi/mcp/prompt_registry.hpp"
 #include "didi/mcp/response_economy.hpp"
 #include "didi/mcp/repeated_failures.hpp"
+#include "didi/mcp/jobs.hpp"
 #include "didi/common/ipc_channel.hpp"
 #include "didi/runtime/session_client.hpp"
 #include "didi/offline/blackboard.hpp"
@@ -154,7 +156,32 @@ private:
     std::optional<std::string> m_listingFingerprint;
     std::atomic<bool> m_watching{false};
 
+    // Long work as jobs (Q8). A job runs a tool call on its own thread and
+    // keeps the answer; only this thread, the stdio loop, reads it out to a
+    // client. Declared last so it is destroyed first, cancelling and joining
+    // any job still running before the rest of the server goes.
+    //
+    // How long a call that asked for a job by request_id waits for it before
+    // answering that it is still working, and how long a task-extension call
+    // waits before answering with a task. Both stay under the route deadlines.
+    std::chrono::milliseconds m_jobWait{10000};
+    std::chrono::milliseconds m_taskGrace{250};
+    // The confirmation a job's call went through, for the answer read later.
+    // The label, and whether the route stamps it on an error too.
+    std::unordered_map<std::string, std::pair<std::string, bool>> m_jobProvenance;
+    json answerJob(const JobView& view, bool as_task, const ResponseEconomy& economy,
+                   const DescriptorHeld& client_holds) const;
+    JobStore m_jobs;
+
 public:
+    // Test seam: the job waits, shortened so a test of a working job does not
+    // spend ten seconds, and the store, so a test can see what is running.
+    void setJobWaitsForTesting(std::chrono::milliseconds wait, std::chrono::milliseconds grace) {
+        m_jobWait = wait;
+        m_taskGrace = grace;
+    }
+    const JobStore& jobsForTesting() const { return m_jobs; }
+
     // Test seam. Subscription bookkeeping and the notification payload are the
     // parts worth asserting without standing up a process and a real clock.
     // The single writer, exposed because the interleaving test has to drive it

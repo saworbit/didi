@@ -279,7 +279,7 @@ coordination as the thing that blocked it. See
 
 **Exit gate:** Parallel experiments are isolated by project/workspace and ownership identity. Capacity and artifact budgets are enforced under concurrency. Crashes, timeouts, cancellation, and parent death leave no owned live children or writable workspaces behind.
 
-## Phase 11: MCP Protocol and Workflow Evolution (`PLANNED`)
+## Phase 11: MCP Protocol and Workflow Evolution (`IN PROGRESS`)
 
 **Objective:** Evolve protocol ergonomics, workflow composition, capability negotiation, and compatibility without destabilizing canonical behavior.
 
