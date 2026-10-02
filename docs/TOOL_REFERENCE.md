@@ -479,9 +479,9 @@ Like every mutation, all three write operations expose `dry_run` and require a
 
 ### `script_check_syntax` — Offline
 
-Runs Didi's string/comment-aware lightweight GDScript diagnostics. When an in-project `file_path` is supplied, it also attempts `godot --headless --check-only`.
+Runs Didi's string/comment-aware lightweight GDScript diagnostics. When an in-project `file_path` is supplied, it also asks an engine: the GDScript language server of an editor open on this project when one can be reached, and `godot --headless --check-only` otherwise.
 
-The compiler pass has a 5-second limit. A pass stopped there answers `engine_timed_out: true` and `truncated: true` with a `limitation`, because a diagnostic it had not printed yet is missing, and `has_errors: false` is then not a verdict.
+The headless compiler pass has a 5-second limit. A pass stopped there answers `engine_timed_out: true` and `truncated: true` with a `limitation`, because a diagnostic it had not printed yet is missing, and `has_errors: false` is then not a verdict.
 
 - `file_path` (`string`, optional).
 - `source_text` (`string`, optional).
@@ -532,6 +532,22 @@ when it is false, so `has_errors` is never read as a compiler verdict nobody
 made. A check given `source_text` spawns no Godot by design and carries neither.
 `engine_exit_code` and `engine_duration_seconds` accompany a check that did run,
 so a caller can see the subprocess happened.
+
+#### The editor's language server
+
+With an editor open on this project, the check is answered by that editor's GDScript language server, the analyzer every Godot editor serves over the Language Server Protocol, headless ones included. The editor already holds the project's autoloads and class names, so a script that names an autoload is analyzed as the game will run it and nothing is demoted. Consuming Godot's server is not building one. `engine_backend` says which engine answered, `"language_server"` or `"check_only"`, on every check that named a file.
+
+A language-server answer carries the editor's `engine_version` and `matches_attached_engine: true`, with `engine_executable` and `engine_exit_code` null because Didi ran no binary. Its diagnostics are under `rule: "godot_language_server"`, and include the engine's own warnings, such as `(UNUSED_VARIABLE)`, at `severity: "warning"`. Line and column are the engine's: a 4.7 editor points at the identifier, a 4.5 or 4.6 one at the start of the statement. `script_create` and `script_patch_method` check what they wrote the same way.
+
+The editor's bridge says where its server listens: the port in Editor Settings > Network > Language Server, or the one the editor was started with `--lsp-port`. The engine consumes that option and reports it nowhere an extension can read, so the bridge reads the editor process's own command line. Asking holds a route to the editor for one request when none is held, and never changes which session is attached. Didi connects only to a loopback address.
+
+When the server cannot be used, the check falls back to `--check-only` and `language_server_unavailable_reason` says why: nothing listens on the port, it did not answer in time, the editor's addon is older than this server, or it answered for another project. Two editors cannot share one port, and the second one's server never starts, so a client reaching the port can be talking to the first editor about the wrong project. The server names its project when `initialize` is sent another one, so that answer is named and not used. Give each editor its own port.
+
+Three things happen in the editor. The connection is kept open between checks, and the Output panel shows `[LSP] Connection Taken` once. The first client an editor sees makes it parse every script in the project, once, on its main thread, and print `Failed parse script` (4.5) or `LSP: Failed to parse script:` (4.6, 4.7) for each one that does not parse; later checks parse only the file asked about. And Godot keeps the last client that spoke as the one to send edits to: once that client has gone, creating a callback from the Connect dialog prints an engine error. A connection held open puts that off until the Didi server exits.
+
+The server analyzes a file as the editor knows the project. A `class_name` script or an autoload written into the project behind a running editor is unknown to it until the editor scans or reloads the project, and `--check-only` reads the same class cache, so a class it has not seen is an error to both.
+
+#### The headless check
 
 Godot's `--headless --check-only` runs in a process with no `SceneTree`, and a project's autoload singletons are registered when the `SceneTree` is built. So the check reports `Compile Error: Identifier not found: <Name>` for every autoload a script names, on every call, for a script the engine compiles and runs without complaint. This is permanent. It is not the `project_set_autoload` limitation below, which clears when the editor restarts; no invocation avoids this one, and `--path`, the `res://` spelling and `--editor` were all confirmed to report it on Godot 4.7.2.
 

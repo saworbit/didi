@@ -51,6 +51,24 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Added
 
+- **Script diagnostics come from the open editor's GDScript language server
+  (#1139, Q11 part 1).** `script_check_syntax`, `script_create` and
+  `script_patch_method` compiled a file in a separate `godot --headless
+  --check-only`, which has no SceneTree and so no autoloads, and a script that
+  named one came back with a false error until a heuristic demoted it (#383).
+  With an editor open on the project they now ask that editor's language
+  server, which knows the project's autoloads and class names and is measured
+  to answer the same way on 4.5.1, 4.6.2 and 4.7.2; the answer says so in
+  `engine_backend`, and its diagnostics, the engine's own warnings included,
+  are under `rule: "godot_language_server"`. The editor's bridge reports the
+  port, from its settings or from `--lsp-port` on its own command line, which
+  the engine consumes and reports nowhere else. A server that answers for
+  another project's editor, two editors contending for one port, is named and
+  not used, and the headless check remains the fallback with
+  `language_server_unavailable_reason` saying why. The connection is kept
+  open between checks; the first one makes the editor parse every script once
+  and print an error for each that does not parse.
+
 - **`project_export` and `csharp_check_build` can run as jobs, and a retried call
   no longer runs twice (#1137, Q8 part 1).** The server answers one request at
   a time, and either tool held it for as long as its helper ran, up to 900

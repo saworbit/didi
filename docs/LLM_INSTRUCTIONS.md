@@ -165,7 +165,7 @@ where it is. Editor or game.
 
 ### Work with scripts
 
-- `script_check_syntax` runs lightweight checks and can invoke `godot --headless --check-only` only for a file path.
+- `script_check_syntax` runs lightweight checks and, for a file path, asks the open editor's GDScript language server, or `godot --headless --check-only` when none answers. `engine_backend` says which, and `language_server_unavailable_reason` why the server was not used.
 - `script_get_symbols` extracts parser-recognized symbols from a file or source text.
 - `script_patch_method` rewrites a symbol the script already declares, then runs available diagnostics. A name it does not declare is a 404, not an append: pass `create_if_missing` when adding is what you meant, and read `created` in the result to tell the two apart. `symbol_type` is one of `function`, `variable`, `constant`, `signal`, `enum`, `class`.
 - `shader_get_visual_graph` describes a VisualShader as nodes and links. It is refused on a shader written as code, which is the answer, not a failure.
