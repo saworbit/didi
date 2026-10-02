@@ -158,6 +158,7 @@ Didi uses an optimized, low-overhead framing protocol over project-keyed process
 - Maximum framed payload: `128 MB`.
 - Servers distinguish malformed frames from handler failures, preserve a parsed request ID in application-error responses, and return handler exceptions as internal (`500`) failures.
 - The local pipe/socket avoids TCP port allocation and firewall prompts.
+- Didi listens on no TCP port. Its one TCP connection is outbound, to the GDScript language server the attached editor already runs on a loopback address, which script checks use when an editor is open (Q11). The editor's bridge names the port (`editor.getProtocolServers`), and the connection is kept for the life of the server process.
 - No latency or throughput target is part of the compatibility contract; measure the target workstation and scene when performance matters.
 
 ---
