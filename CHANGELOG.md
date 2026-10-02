@@ -51,6 +51,19 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Added
 
+- **`project_export` and `csharp_check_build` can run as jobs, and a retried call
+  no longer runs twice (#1137, Q8 part 1).** The server answers one request at
+  a time, and either tool held it for as long as its helper ran, up to 900
+  seconds for an export. Given a `request_id`, the call runs on a thread of its
+  own and answers within about ten seconds with its result or
+  `status: "working"`, and the same call with the same `request_id` reads the
+  kept answer rather than running the work again; different arguments under the
+  same id are `409 request_id_conflict`. A `2026-07-28` client that declares the
+  `io.modelcontextprotocol/tasks` extension gets a task instead, read with
+  `tasks/get` and stopped with `tasks/cancel`, which kills the helper and
+  everything under it. A call with neither runs as before. At most four jobs
+  run at once and each is kept an hour.
+
 - **A property inside a node's sub-resource can be read and written, several at
   a time, as one undo step (#1133, Q7 part 1).** `property_name` on
   `scene_get_property` and `scene_set_property` takes Godot's own property

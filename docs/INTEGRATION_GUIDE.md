@@ -193,6 +193,26 @@ loses nothing. A tool outside the profile is refused with a message that names
 change during a session; restart the server to switch. See
 [Tool profiles](API_SPECIFICATION.md#tool-profiles).
 
+### Optional: long calls as jobs
+
+`project_export` and `csharp_check_build` run a helper that can take minutes,
+and the server answers nothing else while one runs synchronously. Either can
+run as a job instead, so a host's tool timeout never runs the work twice:
+
+- A `2026-07-28` host that declares `io.modelcontextprotocol/tasks` in a
+  request's `_meta["io.modelcontextprotocol/clientCapabilities"].extensions`
+  may get a task back from that request (`resultType: "task"`), and reads it
+  with `tasks/get` and stops it with `tasks/cancel`.
+- Any host, or the agent itself, can pass a `request_id` in the tool's
+  arguments. The call answers within about ten seconds with its result or
+  `status: "working"`, and sending the same call again with the same
+  `request_id` reads the job. A host that retries tool calls on a timeout
+  should add one, so the retry reads the first run instead of starting a
+  second.
+
+See [Jobs and the tasks extension](API_SPECIFICATION.md#jobs-and-the-tasks-extension)
+for the answer shapes and limits.
+
 ### Optional: smaller answers, for a client that reads structuredContent
 
 Every successful tool answer carries its payload twice, parsed in

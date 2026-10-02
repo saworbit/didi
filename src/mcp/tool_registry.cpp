@@ -5253,7 +5253,8 @@ void ToolRegistry::registerAllDefaultTools() {
         t.inputSchema = {{"type", "object"}, {"properties", {
             {"project_file", {{"type", "string"}}},
             {"configuration", {{"type", "string"}, {"enum", {"Debug", "Release"}}, {"default", "Debug"}}},
-            {"timeout_seconds", {{"type", "integer"}, {"minimum", 1}, {"maximum", 300}, {"default", 60}}}
+            {"timeout_seconds", {{"type", "integer"}, {"minimum", 1}, {"maximum", 300}, {"default", 60}}},
+            {"request_id", {{"type", "string"}, {"minLength", 8}}}
         }}};
         t.handler = [this](const json& args) { return handleCSharpCheckBuild(args, m_ipcClient); };
         registerTool(std::move(t));
@@ -5286,7 +5287,8 @@ void ToolRegistry::registerAllDefaultTools() {
             {"preset", {{"type", "string"}}}, {"output_path", {{"type", "string"}}},
             {"mode", {{"type", "string"}, {"enum", {"release", "debug", "pack"}}, {"default", "release"}}},
             {"overwrite", {{"type", "boolean"}, {"default", false}}},
-            {"timeout_seconds", {{"type", "integer"}, {"minimum", 1}, {"maximum", 900}, {"default", 300}}}
+            {"timeout_seconds", {{"type", "integer"}, {"minimum", 1}, {"maximum", 900}, {"default", 300}}},
+            {"request_id", {{"type", "string"}, {"minLength", 8}}}
         }}, {"required", {"preset", "output_path"}}};
         t.handler = [this](const json& args) { return handleProjectExport(args, m_ipcClient); };
         registerTool(std::move(t));

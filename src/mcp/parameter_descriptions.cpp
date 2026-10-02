@@ -29,6 +29,9 @@ namespace {
 // Keyed by parameter name, for names that mean one thing across the surface.
 const std::unordered_map<std::string, std::string>& sharedDescriptions() {
     static const std::unordered_map<std::string, std::string> table = {
+        // Q8: the caller's handle on long work, read again by the same call.
+        {"request_id",
+         "Runs the call once, as a job: a repeat with the same request_id reads its result."},
         {"target_node",
          "Path to the node in the active edited scene this acts on, such as "
          "/root/Main/Player. The argument is target_node, not node_path."},

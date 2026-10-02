@@ -602,6 +602,9 @@ const std::map<std::string, Rule>& rules() {
                             "itself, or give the node a resource of its own.");
         }},
         {"batch_writes_overlap", [](const Refusal&) { return field("writes"); }},
+        // Long work as jobs (Q8). Both are about the id, not the work.
+        {"request_id_conflict", [](const Refusal&) { return field("request_id"); }},
+        {"job_cancelled", [](const Refusal&) { return field("request_id"); }},
         {"animation_library_unloadable", [](const Refusal&) { return field("library_path"); }},
         {"not_an_animation_library", [](const Refusal&) { return field("library_path"); }},
         {"library_path_case_mismatch", [](const Refusal&) { return field("library_path"); }},

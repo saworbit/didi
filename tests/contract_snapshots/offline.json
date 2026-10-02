@@ -2218,6 +2218,7 @@
             "sessionDescriptor"
           ]
         },
+        "io.modelcontextprotocol/tasks": {},
         "io.modelcontextprotocol/ui": {
           "mimeTypes": [
             "text/html;profile=mcp-app"
@@ -3901,6 +3902,11 @@
             },
             "project_file": {
               "description": "A normalized project-contained .sln or .csproj to build. When omitted, exactly one of either must sit at the project root, and a .sln there is built in preference to a .csproj beside it. The answer's project_file names the one that was built.",
+              "type": "string"
+            },
+            "request_id": {
+              "description": "Runs the call once, as a job: a repeat with the same request_id reads its result.",
+              "minLength": 8,
               "type": "string"
             },
             "timeout_seconds": {
@@ -6103,6 +6109,11 @@
               "description": "The export preset name, exactly as export_presets.cfg spells it.",
               "maxLength": 256,
               "minLength": 1,
+              "type": "string"
+            },
+            "request_id": {
+              "description": "Runs the call once, as a job: a repeat with the same request_id reads its result.",
+              "minLength": 8,
               "type": "string"
             },
             "timeout_seconds": {

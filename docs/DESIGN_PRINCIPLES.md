@@ -224,8 +224,10 @@ pass is only true for the files it ran against.
 - Long work runs as a job with a stored result, so a client timeout never runs
   a write twice.
 
-**Enforced by.** [Q8](BUILD_QUEUE.md#q8-long-work-as-jobs) and
-[Q9](BUILD_QUEUE.md#q9-proof-in-one-call).
+**Enforced by.** [Q8](BUILD_QUEUE.md#q8-long-work-as-jobs), whose first part runs
+`project_export` and `csharp_check_build` as jobs: a `request_id` repeated after a
+client timeout reads the job instead of running the work again, and a native
+test counts the runs. [Q9](BUILD_QUEUE.md#q9-proof-in-one-call) is the rest.
 
 ## P8. Own the boundary, stay in scope, derive every fact
 

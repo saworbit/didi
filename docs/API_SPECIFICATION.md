@@ -124,7 +124,7 @@ list of steps:
 
 | Field | Meaning |
 | :--- | :--- |
-| `work` | `save` or `restart`. |
+| `work` | `save`, `restart`, or `poll` for a job still running (see [Jobs](#jobs-and-the-tasks-extension)). |
 | `tool` | The call that does it, when one can: `editor_save_scene` for a save. Nothing Didi sends restarts an editor, so a restart names none. |
 | `reason` | What is undone, in a sentence. |
 
@@ -346,6 +346,9 @@ serves a stale claim is worse than no cache.
 | `resources/read` | Client $\rightarrow$ Server | Retrieves contents of a specific resource URI (`godot://...`) |
 | `prompts/list` | Client $\rightarrow$ Server | Lists all registered prompt templates |
 | `prompts/get` | Client $\rightarrow$ Server | Evaluates a prompt template with provided arguments |
+| `tasks/get` | Client $\rightarrow$ Server | Reads a task this server answered a `tools/call` with, and its result once completed. See [Jobs and the tasks extension](#jobs-and-the-tasks-extension). |
+| `tasks/cancel` | Client $\rightarrow$ Server | Asks a task to stop, and acknowledges; the helper it runs is killed with everything under it |
+| `tasks/update` | Client $\rightarrow$ Server | Acknowledges and does nothing, since no task here asks for input |
 
 Only `notifications/*` methods may omit `id`. Request-only methods such as `tools/call`, `resources/read`, and `prompts/get` are ignored when sent as notifications and cannot execute mutations. For calls and prompt retrievals, `name`/`uri` must be strings and an `arguments` member, when present, must be an object; violations return `-32602` without terminating the server. `prompts/get` arguments are closed the way tool arguments are: an argument the prompt does not declare returns `-32602` naming the property, with `argument`, `prompt` and the accepted names in `data`. The `description` on a `prompts/get` result is the same one `prompts/list` publishes for that prompt.
 
@@ -475,6 +478,70 @@ the output schema requires is never a section, so `didi_control_room` always
 returns `lights`. An unknown name, an empty list or a repeated name is refused
 by the schema. A read shaped as one list, such as `project_list_resources` or
 `scene_get_hierarchy`, is narrowed with its bounds and filters instead.
+
+### Jobs and the tasks extension
+
+Q8 in the [Build Queue](BUILD_QUEUE.md#q8-long-work-as-jobs). The server answers
+one request at a time, and `project_export` and `csharp_check_build` run a
+helper process that can take minutes, during which nothing else was answered.
+Either can now run as a **job**: the same tool call, through the same pipeline,
+on a thread of its own, with its answer kept.
+
+**`request_id`.** Both tools take an optional `request_id`, 8 to 64 letters,
+digits, `.`, `_`, `:` or `-`, chosen by the caller. A call that carries one runs
+as a job and waits up to about ten seconds for it:
+
+- Finished in that time, the answer is exactly what the call answers without a
+  `request_id`, with the job named under `_meta.didi.job`
+  (`job_id`, `request_id`, `state`, `started_at`).
+- Still running, the answer is a success, `{"status": "working", "job": {...},
+  "follow_up": [{"work": "poll", ...}]}`, with `elapsed_ms` and
+  `poll_interval_ms` in `job`.
+- The same call again with the same `request_id` reads the job and never runs
+  the work a second time: the working answer while it runs, the stored answer
+  once it finishes. The `request_id` alone, with no other arguments, reads it
+  too. The same `request_id` with different arguments is
+  `409 request_id_conflict`, and runs nothing.
+- A job cancelled through `tasks/cancel` reads as `409 job_cancelled`. A job
+  whose work threw reads as `500`.
+
+The `request_id` is not an argument of the work. It is removed before anything
+else reads the call, so a dry run, its confirmation token and the confirmed call
+bind to the same arguments, and a repeat is matched before a single-use token is
+spent again. A call with neither a `request_id` nor the extension below behaves
+exactly as it did.
+
+**The tasks extension.** A `2026-07-28` request that declares
+`io.modelcontextprotocol/tasks` in its own
+`_meta["io.modelcontextprotocol/clientCapabilities"].extensions` may be answered
+with a task when it calls one of these tools: `resultType: "task"`, with
+`taskId`, `status`, `createdAt`, `lastUpdatedAt`, `ttlMs` and `pollIntervalMs`.
+The work is given a quarter of a second first, so a call refused on its
+arguments is answered at once. `tasks/get` answers the task's state, and once it
+has `status: "completed"`, the call's answer under `result`. `tasks/cancel`
+acknowledges, stops the helper process and everything under it, and the task
+ends `cancelled`. `tasks/update` acknowledges and does nothing, because no task
+here asks the client for input. An unknown or expired `taskId` is `-32602`.
+`server/discover` declares the extension; `initialize` does not, because the
+extension is negotiated per request and a `2024-11-05` request carries no
+capabilities to negotiate it with. A request that did not declare it never
+receives a task.
+
+**Limits.** At most four jobs run at once; a fifth is `429 rate_limited` with
+`retry_after_ms`, and nothing starts. A job is kept an hour from its creation,
+and at most 64 are kept, the oldest finished one going first. Jobs are kept in
+the server process: they do not survive it, and a server that exits cancels the
+jobs still running. Task ids are 128 random bits, since a stdio server has no
+authorisation context to bind a task to. No notification is sent about a job; a
+client polls. Under [managed recovery](MANAGED_RECOVERY.md) a job's call waits
+for its job to finish, because a mutation there passes through recovery steps
+written for one call at a time; its `request_id` still reads the kept answer.
+
+**Not yet.** `asset_reimport` is still answered within the bridge's fifteen
+second wait, so its `timeout_ms` still stops at 10 seconds (#996); it becomes a
+job next. While an export job runs, a tool that starts its own helper Godot
+waits for it, because the helper's isolation is a process-wide setting held for
+the length of a run.
 
 ### Mutation safety extension
 

@@ -235,6 +235,22 @@ Handlers never see the declaration and never need to. `--session-descriptor
 once` is the operator's way to the descriptor half for a client that declared
 nothing; it enters in `McpServer::responseEconomyFor`, beside the declarations.
 
+### Jobs
+
+A long tool call can run as a job (Q8,
+[API specification](API_SPECIFICATION.md#jobs-and-the-tasks-extension)).
+`McpServer::handleRequest` decides it for `tools/call` before any confirmation
+path, through `runsAsJob`, and every route to the registry ends in its `respond`
+lambda, so a new route there must end in it too. The job runs
+`ToolRegistry::callTool` itself on a thread of its own, held by `JobStore` in
+`src/mcp/jobs.cpp`, so a job's answer is exactly the synchronous one. That makes
+a handler that becomes a job tool run beside the stdio loop: it must not keep
+unsynchronised state, and the registry's route-lease binding is per thread for
+that reason. A handler that wants to stop early when its job is cancelled
+reads `cancellationRequested()` from `didi/common/cancellation.hpp`;
+`offline::runProcess` already does, and kills the child tree. A job thread never
+writes to stdout: only the loop answers, from the store.
+
 ### Refusal remedies
 
 Every refusal names what fixes it: `retry_with`, `field`, `next_call`,
@@ -424,6 +440,8 @@ CallToolResult handleExportMesh(const json& args, std::shared_ptr<ipc::IIpcClien
 ### 4. Add live engine dispatch when applicable
 
 Route the method from `EditorHook::executeOnMainThread` into a bounded implementation that performs real Godot calls on the main thread. Return a structured error whenever a required object, method bind, or engine operation is unavailable. Never return success metadata before the operation completes.
+
+A tool that reads or writes a property of a node, or of a resource the node holds, goes through the typed object layer in `godot_bridge.cpp` rather than calling `Object.set` itself (Q7): `resolvePropertyPath` checks every step of a path against the property list, `prepareWrite` makes every check a write makes, the same ones a dry run makes, and `recordWrite` records it in the edited scene's UndoRedo history. What can be decided from strings, the path grammar, which file keeps a resource, the excluded writes and when two writes overlap, is in `src/gdextension/property_paths.cpp` and tested without an engine in `tests/test_property_paths.cpp`.
 
 ### 5. Test and document
 
