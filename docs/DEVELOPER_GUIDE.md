@@ -67,11 +67,13 @@ didi/
 │   ├── common/           # Result<T>, Error, Logger, Base64/PNG, JSON, STB, IPC channels
 │   ├── mcp/              # JSON-RPC 2.0, MCP server, tool/resource/prompt registries
 │   ├── offline/          # GDScript diagnostics, resource indexer, test runner
+│   ├── runtime/          # Session routing, recovery, the editor language server client
 │   └── gdextension/      # GDExtension interface, editor queue, Godot bridge, viewport renderer
 ├── src/
 │   ├── common/           # Platform IPC (Win32 Named Pipes, POSIX sockets)
 │   ├── mcp/              # MCP protocol handlers
 │   ├── offline/          # AST analysis, file indexing, headless subprocess runner
+│   ├── runtime/          # Session client, managed recovery, language_server_client.cpp
 │   ├── tools/            # Public tool handlers for the canonical and legacy surfaces
 │   ├── gdextension/      # In-engine GDExtension module & renderer
 │   └── standalone/       # main.cpp entry point for didi.exe
@@ -534,12 +536,18 @@ for the duration of the call, so the run survives either way, but the output is
 still easier to read unpiped. CI uses pwsh 7, where the redirection was always
 harmless.
 
-**An IDE may connect to the harness's editor.** The editor serves the GDScript
-language server on port 6005, and an extension such as godot-tools connects to
-whichever editor is there. On connect the editor re-parses every script, so the
-fixture script that is broken on purpose prints `Failed parse script` from
-`reload_all_workspace_scripts`. The allow list names that wording, so it shows
-in the tally and passes. Any other line it brings is still a finding.
+**The harness's editor has its own protocol ports.** An editor serves the
+GDScript language server on 6005 and the debug adapter on 6006 unless told
+otherwise, and a second editor on the same port never starts its server, so a
+script check could be answered by the developer's own editor about another
+project. The harness starts its editor with `--lsp-port` and `--dap-port` on
+free loopback ports, and `tools/contract_snapshots.py` does the same; an IDE
+extension such as godot-tools on 6005 reaches the developer's editor, not the
+harness's. Didi's own first script check is the editor's first language server
+client, so the editor re-parses every script once and the fixture script that
+is broken on purpose prints `Failed parse script` (4.5) or `LSP: Failed to parse
+script:` (4.6, 4.7). The allow list names both wordings, so it shows in the
+tally and passes. Any other line it brings is still a finding.
 
 The native runner accepts `--list` to print every registered case and
 `--filter=<substring>` to run a subset. The value goes after an `=` with no

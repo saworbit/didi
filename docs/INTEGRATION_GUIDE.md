@@ -308,6 +308,8 @@ declares no content-security-policy domains and the host's default `default-src
 ### Q: Is there any network port conflict?
 **A:** Didi uses project-keyed process-unique local Windows named pipes (`\\.\pipe\godot_didi_<project-key>_<pid>_<session-id>`) or POSIX Unix-domain sockets instead of TCP, so it does not allocate a network port or require a firewall rule.
 
+One port is the editor's, not Didi's. Script checks connect to the GDScript language server the open editor runs, on 6005 unless Editor Settings > Network > Language Server or `--lsp-port` say otherwise. Two editors on one machine contend for that port, and the second one's server never starts. Didi notices when the server that answers belongs to another project, falls back to a headless check, and says so in `language_server_unavailable_reason`; give each editor its own port to keep the language server answer.
+
 Phase 3 discovers endpoints from access-controlled descriptors and authenticates each request. Default POSIX paths are owner-only; Windows descriptors/endpoints allow the owning SID and local administrators. `--pipe-name`/`DIDI_PIPE_NAME` remains a legacy/direct IPC override and is not required for process-unique session routing.
 
 ---
