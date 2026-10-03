@@ -760,6 +760,74 @@ void writes_a_class_name_type_the_way_godot_does() {
     ASSERT_TRUE(!project.exists("art/contradicted.tres"));
 }
 
+// The same class_name one level down. A sub-resource of a project class was
+// refused as not a class, and with allow_unknown_type it was written as
+// [sub_resource type="ObservedItem"] with no script, which Godot loads as a
+// MissingResource (#1131). A resource holding items of its own script class is
+// the ordinary shape of game data.
+void writes_a_class_name_sub_resource_the_way_godot_does() {
+    ProjectFixture project("class-name-sub-resource");
+    std::ofstream("item.gd", std::ios::binary)
+        << "class_name ObservedItem\nextends Resource\n\n@export var power := 1\n";
+
+    const auto written = create({
+        {"save_path", "res://art/bag.tres"},
+        {"resource_type", "Resource"},
+        {"sub_resources", json::array({
+            {{"id", "sword"}, {"resource_type", "ObservedItem"}, {"properties", {{"power", 5}}}},
+            {{"id", "shield"}, {"resource_type", "ObservedItem"},
+             {"properties", {{"power", 2}, {"resource_name", "shield"}}}}})},
+        {"properties", {{"metadata/first", {{"type", "SubResource"}, {"id", "sword"}}},
+                        {"metadata/second", {{"type", "SubResource"}, {"id", "shield"}}}}}
+    });
+    ASSERT_TRUE(!written.isError);
+    const auto tres = project.read("art/bag.tres");
+    // One [ext_resource] for the script, whichever entries use it.
+    const std::string script_line = "[ext_resource type=\"Script\" path=\"res://item.gd\" id=\"";
+    ASSERT_TRUE(tres.find(script_line) != std::string::npos);
+    ASSERT_TRUE(tres.find(script_line, tres.find(script_line) + 1) == std::string::npos);
+    // The engine base in the header, the script first under it.
+    const auto sword = tres.find("[sub_resource type=\"Resource\" id=\"sword\"]\nscript = ExtResource(\"");
+    const auto shield = tres.find("[sub_resource type=\"Resource\" id=\"shield\"]\nscript = ExtResource(\"");
+    ASSERT_TRUE(sword != std::string::npos);
+    ASSERT_TRUE(shield != std::string::npos);
+    ASSERT_TRUE(tres.find("power = 5\n", sword) < shield);
+    ASSERT_TRUE(tres.find("resource_name = \"shield\"\n", shield) != std::string::npos);
+    ASSERT_TRUE(tres.find("type=\"ObservedItem\"") == std::string::npos);
+
+    const auto payload = payloadOf(written);
+    ASSERT_EQ(payload["sub_resources_written"][0]["resource_type"], "ObservedItem");
+    ASSERT_EQ(payload["sub_resources_written"][0]["engine_type"], "Resource");
+    const auto check = payload["sub_resource_property_checks"]["shield"];
+    ASSERT_EQ(check["script_class"], "ObservedItem");
+    ASSERT_EQ(check["script"], "res://item.gd");
+    ASSERT_EQ(check["declared_by_script"], json::array({"power"}));
+
+    // A name neither the script nor Resource declares is refused, as at the top.
+    const auto typo = create({
+        {"save_path", "res://art/typo.tres"},
+        {"resource_type", "Resource"},
+        {"sub_resources", json::array({
+            {{"id", "sword"}, {"resource_type", "ObservedItem"}, {"properties", {{"powr", 5}}}}})}
+    });
+    ASSERT_TRUE(typo.isError);
+    ASSERT_TRUE(payloadOf(typo)["error"]["message"].get<std::string>().find("'powr'") != std::string::npos);
+    ASSERT_TRUE(!project.exists("art/typo.tres"));
+
+    // A type nothing declares is still refused, and the refusal no longer sends
+    // a class_name script to allow_unknown_type.
+    const auto unknown = create({
+        {"save_path", "res://art/unknown.tres"},
+        {"resource_type", "Resource"},
+        {"sub_resources", json::array({
+            {{"id", "x"}, {"resource_type", "NoSuchItem"}, {"properties", json::object()}}})}
+    });
+    ASSERT_TRUE(unknown.isError);
+    const auto message = payloadOf(unknown)["error"]["message"].get<std::string>();
+    ASSERT_TRUE(message.find("class_name script, which") == std::string::npos);
+    ASSERT_TRUE(message.find("found when a project script declares it") != std::string::npos);
+}
+
 // The class is found along an extends chain of class_names and quoted paths,
 // with the members of every script on the way, and a chain that ends on a
 // class that is not a Resource is refused rather than written.
@@ -797,6 +865,8 @@ struct Register {
     Register() {
         registerTest("resource_references.class_name_type_written_as_godot_does",
                      writes_a_class_name_type_the_way_godot_does);
+        registerTest("resource_references.class_name_sub_resource_written_as_godot_does",
+                     writes_a_class_name_sub_resource_the_way_godot_does);
         registerTest("resource_references.class_name_chain_to_engine_base",
                      follows_a_class_name_chain_to_its_engine_base);
         registerTest("resource_references.writes_declared_vector_type",

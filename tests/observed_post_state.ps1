@@ -385,30 +385,37 @@ function Get-ObservedPostStateCases {
         @{ Tool = "resource_create"; Session = "editor"; Steps = @(
             (Step "call" "resource_create" @{ save_path = "res://observed_shape.tres"; resource_type = "CircleShape2D"; properties = @{ radius = 3 }; overwrite = $true }),
             (Witness "witness" "load_fresh" @("res://observed_shape.tres", @("radius"))),
-            (Witness "length" "file_length" @("res://observed_shape.tres")))
+            (Witness "length" "file_length" @("res://observed_shape.tres")),
+            (Witness "indexed" "indexed" @("res://observed_shape.tres")))
            Agree = { param($s)
                Agree "resource_type" $s.call.resource_type $s.witness.returned.class
-               Agree "file_bytes" $s.call.file_bytes $s.length.returned } },
+               Agree "file_bytes" $s.call.file_bytes $s.length.returned }
+           Expect = { param($s) Expect "indexed" $true $s.indexed.returned } },
         # A class_name type, which the header cannot name: the engine makes a
         # Resource carrying the script, and named in the header it loaded as a
         # MissingResource while the answer named the class (#1125).
         @{ Tool = "resource_create"; Session = "editor"; Steps = @(
             (Step "script" "script_create" @{ script_path = "res://observed_item.gd"; source_text = "class_name ObservedItem`nextends Resource`n`n@export var power := 1`n" }),
-            (Step "call" "resource_create" @{ save_path = "res://observed_item.tres"; resource_type = "ObservedItem"; properties = @{ power = 5 } }),
-            (Witness "witness" "load_fresh" @("res://observed_item.tres", @("power"))),
-            (Witness "length" "file_length" @("res://observed_item.tres")))
+            (Step "call" "resource_create" @{ save_path = "res://observed_item.tres"; resource_type = "ObservedItem"; properties = @{ power = 5; "metadata/held" = @{ type = "SubResource"; id = "held" } }; sub_resources = @(@{ id = "held"; resource_type = "ObservedItem"; properties = @{ power = 3 } }) }),
+            (Witness "witness" "load_fresh" @("res://observed_item.tres", @("power", "metadata/held:power", "metadata/held:script"))),
+            (Witness "length" "file_length" @("res://observed_item.tres")),
+            (Witness "indexed" "indexed" @("res://observed_item.tres")))
            Agree = { param($s)
                Agree "resource_type" $s.call.resource_type $(if ($s.witness.returned.script_class) { $s.witness.returned.script_class } else { $s.witness.returned.class })
                Agree "engine_type" $s.call.engine_type $s.witness.returned.class
                Agree "file_bytes" $s.call.file_bytes $s.length.returned
-               Agree "properties.power" 5 $s.witness.returned.properties.power } },
+               Agree "properties.power" 5 $s.witness.returned.properties.power
+               Agree "sub_resources.held.power" 3 $s.witness.returned.properties."metadata/held:power"
+               Agree "sub_resources.held.script" "res://observed_item.gd" $s.witness.returned.properties."metadata/held:script" }
+           Expect = { param($s) Expect "indexed" $true $s.indexed.returned } },
         # uid and uid_registered are the engine's; the request names neither.
         @{ Tool = "scene_pack_branch"; Session = "editor"; Steps = @(
             (Step "call" "scene_pack_branch" @{ target_node = "$observedRoot/Subject"; scene_path = "res://observed_packed.tscn" }),
             (Witness "witness" "load_fresh" @("res://observed_packed.tscn", @())))
            Agree = { param($s)
                Agree "uid" $s.call.uid $s.witness.returned.uid
-               Agree "uid_registered" $s.call.uid_registered $s.witness.returned.uid_registered } },
+               Agree "uid_registered" $s.call.uid_registered $s.witness.returned.uid_registered }
+           Expect = { param($s) Expect "uid_registered" $true $s.witness.returned.uid_registered } },
         # The script is in the editor's index, its uid registered, when the call
         # returns. Left for the editor's next scan, which runs whenever its window
         # takes focus, a script whose .uid sidecar project_export's Godot wrote in
@@ -452,8 +459,10 @@ function Get-ObservedPostStateCases {
            Agree = { param($s) Agree "size_bytes" $s.call.size_bytes $s.witness.returned } },
         @{ Tool = "gridmap_export_mesh_library"; Session = "editor"; Steps = @(
             (Step "call" "gridmap_export_mesh_library" @{ source_scene = "res://phase5_mesh_source.tscn"; output_path = "res://observed_items.meshlib"; generate_collisions = $false; overwrite = $true; timeout_seconds = 60 }),
-            (Witness "witness" "load_fresh" @("res://observed_items.meshlib", @())))
-           Agree = { param($s) Agree "item_count" $s.call.item_count $s.witness.returned.item_count } },
+            (Witness "witness" "load_fresh" @("res://observed_items.meshlib", @())),
+            (Witness "indexed" "indexed" @("res://observed_items.meshlib")))
+           Agree = { param($s) Agree "item_count" $s.call.item_count $s.witness.returned.item_count }
+           Expect = { param($s) Expect "indexed" $true $s.indexed.returned } },
         # A name already taken is refused rather than renamed, though
         # AudioServer would call the new bus "Observed 2", so no input crosses.
         @{ Tool = "audio_add_bus"; Session = "editor"; Steps = @(
@@ -487,7 +496,8 @@ function Get-ObservedPostStateCases {
             (Witness "witness" "load_fresh" @("res://observed_created.tscn", @())))
            Agree = { param($s)
                Agree "uid" $s.call.uid $s.witness.returned.uid
-               Agree "uid_registered" $s.call.uid_registered $s.witness.returned.uid_registered } },
+               Agree "uid_registered" $s.call.uid_registered $s.witness.returned.uid_registered }
+           Expect = { param($s) Expect "uid_registered" $true $s.witness.returned.uid_registered } },
         # The tabs read after the close, not a constant (#1019). The scene the
         # case above created is still open in a tab; it is brought to the front,
         # closed, and the observed scene brought back for the witness. No input

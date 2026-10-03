@@ -536,6 +536,23 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
   read-only, the engine's error, and a remedy that says to make the file
   writable and send the call again. A rollback that also fails is still a 500.
 
+- **resource_create writes a class_name sub-resource the way Godot does
+  (#1131).** #1125 fixed this for the top-level type only. A `sub_resources`
+  entry of a project `class_name` type was refused as not a class, and with
+  `allow_unknown_type` written under its own name with no script, which Godot
+  loads as a `MissingResource`. It is now written as its engine base with
+  `script = ExtResource(..)` first, one `[ext_resource]` for the script however
+  many entries use it, and its names are checked against the base and the
+  script's vars. Neither refusal recommends `allow_unknown_type` for a
+  class_name script any more.
+
+- **The harness holds every writer to the editor's index (#1154).** Only
+  `script_create` was checked. Both `resource_create` cases and
+  `gridmap_export_mesh_library` now expect the editor to list the file they
+  wrote, and `scene_create` and `scene_pack_branch` expect the engine to know
+  the uid. Their files carry no uid, so the index is the fact to check there.
+  With the indexing call removed, all of them fail.
+
 - **No helper launch can forget to suppress its session (#1161).** Each of
   the four places that start a helper Godot set `DIDI_OFFLINE_HELPER` itself,
   and a new one that left it out would have published a runtime session with
