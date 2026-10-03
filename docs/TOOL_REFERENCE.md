@@ -728,7 +728,7 @@ Every diff also reports two perceptual measures, whether or not a tolerance was 
 
 ### `viewport_create_test_lab` — Offline
 
-Writes `res://didi_test_lab.tscn` with a basic light, environment node, ground box, and three cameras. A `.tscn` or `.scn` target is instanced under the lab as `TargetInstance`; any other resource is attached to a `TargetInstance` holder node as `metadata/didi_target`, since a plain resource cannot be a node. The result says which happened with `target_instanced`, and reports `target_resource_path` resolved, the way every writer does.
+Writes `res://didi_test_lab.tscn` with a basic light, environment node, ground box, and three cameras. A `.tscn` or `.scn` target is instanced under the lab as `TargetInstance`; any other resource is attached to a `TargetInstance` holder node as `metadata/didi_target`, since a plain resource cannot be a node. The result says which happened with `target_instanced`, and reports `target_resource_path` resolved, the way every writer does, and `file_bytes`, the size of the file read back from disk. The header carries no uid, as `resource_create`'s does not; the one it used to carry was not a uid Godot could read, so every lab had none anyway (#1164).
 
 The lab lives at the project root, not under `addons/didi`, so `project_audit_assets` and the search tools can see it, and a project without the addon does not have the folder invented for it. The target is checked before anything is written or created: a target that does not exist is refused with `404` and the project is left exactly as it was.
 

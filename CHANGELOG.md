@@ -536,6 +536,14 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
   read-only, the engine's error, and a remedy that says to make the file
   writable and send the call again. A rollback that also fails is still a 500.
 
+- **The visual test lab no longer carries a uid Godot cannot read (#1164).**
+  `viewport_create_test_lab` wrote `uid="uid://didi_test_lab_sandbox"`. A uid
+  is letters a to z and digits, so Godot dropped it without a line and every
+  lab had none. The header now carries no uid, as `resource_create`'s does not.
+  The answer adds `file_bytes`, read back from disk, and the observed check
+  compares it with the engine's own read and expects the editor to index the
+  lab.
+
 - **resource_create writes a class_name sub-resource the way Godot does
   (#1131).** #1125 fixed this for the top-level type only. A `sub_resources`
   entry of a project `class_name` type was refused as not a class, and with

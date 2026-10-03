@@ -448,6 +448,18 @@ function Get-ObservedPostStateCases {
            Agree = { param($s)
                Agree "preset" $s.call.preset $s.witness.returned.preset
                Agree "preset_count" $s.call.preset_count $s.witness.returned.preset_count } },
+        # The lab, written behind the editor, read back by its length; no input
+        # gives it a length, so the case guards against a constant. Its target
+        # is the shape the first resource_create case wrote (#1164). The lab's
+        # path is fixed and an earlier scan in the run has indexed it, so the
+        # index check holds it there without isolating the indexing call; the
+        # resource_create cases do that.
+        @{ Tool = "viewport_create_test_lab"; Session = "editor"; Steps = @(
+            (Step "call" "viewport_create_test_lab" @{ target_resource_path = "res://observed_shape.tres"; overwrite = $true }),
+            (Witness "length" "file_length" @("res://didi_test_lab.tscn")),
+            (Witness "indexed" "indexed" @("res://didi_test_lab.tscn")))
+           Agree = { param($s) Agree "file_bytes" $s.call.file_bytes $s.length.returned }
+           Expect = { param($s) Expect "indexed" $true $s.indexed.returned } },
         # The two exporters each start a Godot of their own and answer with
         # what they read back from the file it wrote (#1020). Neither field has
         # a counterpart in the request, so the cases guard against a constant.
