@@ -21,11 +21,12 @@ inline constexpr char kOfflineHelperEnvironment[] = "DIDI_OFFLINE_HELPER";
 // discovery to find, and a run killed at its timeout would leave the descriptor
 // behind for the tombstone reaper.
 //
-// The variable goes in the child's own environment, through
-// ProcessRequest::environment, and never in this process's. It used to be set
-// here, under a lock held for the whole launch so two callers could not undo
-// each other's setting, which made every helper launch wait for any other: an
-// export run as a job held it for minutes (Q8).
+// The variable goes in the child's own environment, and never in this
+// process's. It used to be set here, under a lock held for the whole launch so
+// two callers could not undo each other's setting, which made every helper
+// launch wait for any other: an export run as a job held it for minutes (Q8).
+// runProcess sets it on every child it starts, so no launch site can leave it
+// out (#1161).
 inline std::vector<std::pair<std::string, std::string>> offlineHelperEnvironment() {
     return {{kOfflineHelperEnvironment, "1"}};
 }

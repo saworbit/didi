@@ -536,6 +536,18 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
   read-only, the engine's error, and a remedy that says to make the file
   writable and send the call again. A rollback that also fails is still a 500.
 
+- **No helper launch can forget to suppress its session (#1161).** Each of
+  the four places that start a helper Godot set `DIDI_OFFLINE_HELPER` itself,
+  and a new one that left it out would have published a runtime session with
+  nothing to catch it. `runProcess`, which starts every helper, now sets it on
+  every child, and a native test holds it there.
+
+- **The offline contract snapshot no longer fails beside an open editor
+  (#1145).** The recorder gave the server a private session directory, but the
+  server still reported on the machine's temporary directories, so an editor
+  open elsewhere, or a descriptor a killed one left, became part of the answer.
+  The recorder now points those variables at a directory of its own.
+
 - **A synchronous `asset_reimport` timeout no longer says to retry in five
   seconds (#1159).** The retry landed inside the apply the timed-out call left
   running. The refusal now names `request_id`, which runs the call as a job, and

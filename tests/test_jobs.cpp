@@ -266,6 +266,14 @@ void test_a_childs_environment_is_its_own() {
     ASSERT_EQ(refused.error().code, 400);
 }
 
+// Every child the runner starts is a helper, so a Godot among them publishes
+// no runtime session whichever site launched it, and a site that sets nothing
+// of its own cannot leave the marker out (#1161).
+void test_every_child_is_told_it_is_a_helper() {
+    ASSERT_EQ(childSees("DIDI_OFFLINE_HELPER", {}), "1");
+    ASSERT_EQ(childSees("DIDI_OFFLINE_HELPER", {{"DIDI_CHILD_ONLY", "x"}}), "1");
+}
+
 // Two launches with different settings at once, each seeing its own. A
 // variable set on this process could only do this under a lock that made the
 // second wait for the first, which is what an export job made every helper
@@ -545,6 +553,7 @@ struct RegisterJobTests {
                      test_the_fingerprint_ignores_the_attempt_and_the_key_order);
         registerTest("Jobs.CancelledJobStopsItsProcess", test_a_cancelled_job_stops_the_process_it_started);
         registerTest("Jobs.ChildEnvironmentIsItsOwn", test_a_childs_environment_is_its_own);
+        registerTest("Jobs.EveryChildIsToldItIsAHelper", test_every_child_is_told_it_is_a_helper);
         registerTest("Jobs.TwoLaunchesWithDifferentEnvironmentsRunAtOnce",
                      test_two_launches_with_different_environments_run_at_once);
         registerTest("Jobs.RequestIdRepeatDoesNotRunAgain",

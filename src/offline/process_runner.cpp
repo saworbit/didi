@@ -1,5 +1,6 @@
 #include "didi/offline/process_runner.hpp"
 #include "didi/common/cancellation.hpp"
+#include "didi/offline/deep_domain_support.hpp"
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -181,6 +182,13 @@ Result<ProcessResult> runProcess(const ProcessRequest& request) {
         }
     }
 
+    // Every process this starts is one Didi started to answer a question, and a
+    // Godot among them must not publish a runtime session. Set here rather than
+    // at each launch site, so a new site cannot forget it (#1161). A request
+    // that names the variable itself still wins, being later in the list.
+    auto environment = offlineHelperEnvironment();
+    environment.insert(environment.end(), request.environment.begin(), request.environment.end());
+
     ProcessResult result;
     const auto started = std::chrono::steady_clock::now();
 
@@ -196,11 +204,11 @@ Result<ProcessResult> runProcess(const ProcessRequest& request) {
     }
     std::vector<wchar_t> mutable_command(command_line.begin(), command_line.end());
     mutable_command.push_back(L'\0');
-    // The child's own block, built only when it differs from this process's,
-    // so a launch that sets nothing inherits exactly as it always has.
+    // The child's own block: this process's environment with the request's
+    // variables, and the helper marker, on top.
     std::vector<wchar_t> environment_block;
-    if (!request.environment.empty()) {
-        for (const auto& entry : detail::childEnvironment(request.environment)) {
+    if (!environment.empty()) {
+        for (const auto& entry : detail::childEnvironment(environment)) {
             auto wide = utf8ToWide(entry);
             if (wide.isErr()) return wide.error();
             environment_block.insert(environment_block.end(), wide.value().begin(), wide.value().end());
@@ -348,8 +356,8 @@ Result<ProcessResult> runProcess(const ProcessRequest& request) {
     // array that already exists is one.
     std::vector<std::string> environment_storage;
     std::vector<char*> environment_pointers;
-    if (!request.environment.empty()) {
-        environment_storage = detail::childEnvironment(request.environment);
+    if (!environment.empty()) {
+        environment_storage = detail::childEnvironment(environment);
         for (auto& entry : environment_storage) environment_pointers.push_back(entry.data());
         environment_pointers.push_back(nullptr);
     }
