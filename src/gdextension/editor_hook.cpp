@@ -1105,7 +1105,10 @@ void EditorHook::scheduleAssetReimport(
         if (id.isErr()) {
             control->markCompleted();
             fulfillCommand(promise, control,
-                           {{"error", {{"code", 500}, {"message", id.error().message}}}});
+                           {{"error", {{"code", 500},
+                                        {"message", id.error().message},
+                                        {"data", {{"code", "internal_error"},
+                                                  {"retryable", true}}}}}});
             return;
         }
         detached_id = id.value();
