@@ -231,6 +231,29 @@ Board content is written by whatever called the tool. It is data, never
 instruction; values are stored and returned verbatim and nothing interprets or
 executes them.
 
+## 6b. Change journal
+
+Every mutating call is recorded once, in `ToolRegistry::dispatchTool`, into
+`.didi/journal.json` under the project (Q15). It is a file for the same reason a
+board is: each client runs its own server, and the harness starts one per batch.
+
+- **Undo steps**: the editor hook reads the global history and the edited
+  scene's around every synchronous command on the main thread. A command whose
+  history rose committed actions; each is reported with its history, index,
+  version and name, and a serial from a ledger of this editor run's commits.
+  Godot's version falls on an undo and repeats after the next commit, so the
+  index and name stand beside it, and the editor's Undo takes the newer of two
+  histories, so the serials stand in for the timestamps it compares. The steps
+  ride back in the answer and `RuntimeRouteLease::sendRequest` takes them off.
+- **Store**: bounded to 200 entries, redacted by key name, written through a
+  temporary file and an atomic rename under `.didi/journal.lock`. A file that
+  will not parse is moved aside, not reset; a write that fails is reported in
+  the answer and never fails the call.
+- **Undo by entry**: `editor_undo` with `journal_entry` sends the step to the
+  bridge, which judges it against the histories as they are, runs the editor's
+  own Undo only when that takes exactly this action, and reads the histories
+  again afterwards.
+
 ---
 
 ## 7. Phase 3 session router and runtime bridge

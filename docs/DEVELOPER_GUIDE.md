@@ -280,6 +280,31 @@ leaves none, or an exemption with its issue. `tests/test_follow_ups.py` fails a
 mutating tool with no entry and a declared kind of work no rule produces, and
 the live harness fails a step a tool did not declare.
 
+### The change journal
+
+Every call `MutationSafety::isMutation` names is journalled by
+`ToolRegistry::dispatchTool` after its handler returns, into the project's
+`.didi/journal.json` (Q15, `src/mcp/change_journal.cpp`). A new mutating tool
+is journalled without doing anything; what it can do is make its entry useful.
+Report the value it replaced under `old_value`, `before`, `previous_value` or
+`previous`, and name a file it wrote under one of the keys
+`journal::entryFor` reads (`written_to`, `save_path`, `script_path`,
+`resource_file`, `updated_files` and the rest).
+
+The undo step comes from the bridge, not the tool. `EditorHook::processQueue`
+reads the global history and the edited scene's around every synchronous
+command, through `GodotBridge::snapshotUndoHistories` and
+`attachUndoCommits`, and the actions a command committed go back as
+`undo_steps`, inside `error.data` when it failed.
+`RuntimeRouteLease::sendRequest` hands them to the `runtime::UndoStepCapture`
+dispatch opened and removes them, so no answer carries them. A handler that
+commits through `createAction` and `commitAction` needs nothing more; one that
+runs on an asynchronous scheduler, as `scene.callMethod` does, is not read
+around. What can be undone on its own is decided in
+`src/gdextension/undo_ledger.cpp` from numbers and names, and
+`tests/test_undo_ledger.cpp` holds the rules; `tests/change_journal.ps1` checks
+the editor agrees.
+
 ### Bounded reads
 
 Every read-only tool has an entry in `tests/bounded_reads.json`: `bounded`,

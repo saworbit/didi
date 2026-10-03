@@ -2,6 +2,7 @@
 
 #include "didi/common/json.hpp"
 #include "didi/common/types.hpp"
+#include "didi/gdextension/undo_ledger.hpp"
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -366,6 +367,18 @@ public:
     // saved or not, an undo or redo, or project code the editor ran (#1049).
     // Only Godot 4.7 can say; before it the answer says so in limitation.
     void reportEditedSceneSaved(json& result);
+
+    // The change journal's undo references (Q15). The editor hook reads the
+    // global history and the edited scene's around every command, and the
+    // actions the command committed travel back with its answer as
+    // `undo_steps`, inside error.data when it failed. The server takes them
+    // off before any caller sees the answer, and journals them.
+    struct UndoSnapshot {
+        std::optional<UndoHistoryState> global;
+        std::optional<UndoHistoryState> scene;
+    };
+    UndoSnapshot snapshotUndoHistories();
+    void attachUndoCommits(json& result, const UndoSnapshot& before);
     // A wait for scan work already under way, begun now. Empty when the
     // addon's watch is unavailable, which leaves nothing to wait on.
     std::optional<ScanSettle> beginScanSettle();

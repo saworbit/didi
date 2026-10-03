@@ -1,0 +1,7 @@
+[gd_scene format=3]
+
+[node name="JournalRoot" type="Node2D"]
+
+[node name="A" type="Node2D" parent="."]
+
+[node name="B" type="Node2D" parent="."]

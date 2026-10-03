@@ -96,10 +96,13 @@ only place a contract such as P1 can be enforced once instead of tool by tool.
 began: a single write, a path into a sub-resource and a batch all go through one
 prepare-then-commit pipeline that checks, records UndoRedo, honours `dry_run` and
 reads back, and the live harness proves a batch undoes as one step. The rest
-of Q7 widens that layer to every value and to ClassDB methods,
+of Q7 widens that layer to every value and to ClassDB methods, and
 [Q13](BUILD_QUEUE.md#q13-project-defined-tools) routes project-defined tools
-through it, and [Q15](BUILD_QUEUE.md#q15-change-journal-with-undo) records
-every write it makes.
+through it. From [Q15](BUILD_QUEUE.md#q15-change-journal-with-undo), every
+mutating call is journalled where every call passes, in dispatch, with the
+undo step the bridge read off the editor's history around the command, which
+it does for every command on the main thread rather than per handler. The live
+harness reads the journal back, undoes one entry from it and checks the engine.
 
 ## P4. The agent pays only for what it uses
 

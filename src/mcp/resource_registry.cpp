@@ -1,4 +1,5 @@
 #include "didi/mcp/resource_registry.hpp"
+#include "didi/mcp/change_journal.hpp"
 #include "didi/mcp/control_room_app.hpp"
 #include "didi/offline/blackboard.hpp"
 #include "didi/offline/resource_indexer.hpp"
@@ -431,6 +432,29 @@ void ResourceRegistry::registerAllDefaultResources() {
         return offline_state.dump();
     };
     registerResource(std::move(editor_state));
+
+    // godot://project/journal (Q15). A file in the project, so it reads with no
+    // editor attached; an attached editor adds whether each entry can still be
+    // undone on its own.
+    ResourceDefinition change_journal;
+    change_journal.uri = "godot://project/journal";
+    change_journal.name = "Change Journal";
+    change_journal.description =
+        "Every change Didi made to this project, newest first, with whether each can still be undone on its own.";
+    change_journal.mimeType = "application/json";
+    // Read from a file whether or not an editor is attached, but only an
+    // editor can say whether each entry can still be undone, so a read without
+    // one is a fallback: attaching improves the answer (#419).
+    change_journal.capability = {{"live", "offline_fallback"}, true, {}};
+    change_journal.readHandler = [this]() -> Result<std::string> {
+        std::error_code error;
+        const auto root = std::filesystem::current_path(error);
+        if (error) return Error(500, "The project directory cannot be read.");
+        const auto lease = scopedRouteLease(m_ipcClient);
+        return journal::view(root, lease.has_value() ? &*lease : nullptr)
+            .dump(-1, ' ', false, json::error_handler_t::replace);
+    };
+    registerResource(std::move(change_journal));
 
     // 3. godot://runtime/logs
     ResourceDefinition runtime_logs;

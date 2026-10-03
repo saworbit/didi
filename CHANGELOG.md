@@ -51,6 +51,35 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Added
 
+- **A change journal, and undo of one change on its own (#1149, Q15 part 1).**
+  Nothing recorded what an agent changed: six trials on two vendors, and
+  `editor_undo` was never called, though every editor mutation answers
+  `undo_redo_registered: true`, and the person reviewing the work could not
+  tell which entries in the editor's history were the agent's. Every mutating
+  call is now journalled in the project's `.didi/journal.json`, recorded once in
+  dispatch rather than by each tool: the tool, its target, the value before
+  where the tool reports one and the answer it read back, the files it says it
+  wrote, and the steps the editor's undo history gained. Those steps come from
+  the bridge, which reads the edited scene's history and the global one around
+  every command it runs; they travel back with the answer and the server takes
+  them off before any caller sees it, so no tool's answer changed shape. The
+  journal keeps 200 entries, redacts by key name (a password, token, secret, API
+  or private key, and the value of a setting whose name is one), is written
+  atomically under a lock two servers share, and a journal that cannot be
+  written never fails the call; the answer says `journal.recorded: false` and
+  why. `godot://project/journal` reads it, newest first, and an attached editor
+  judges in one request whether each entry can still be undone on its own:
+  `available`, `later_history`, `blocked` when the editor's Undo would reach a
+  newer action in the other history first, `undone`, or `gone`.
+  `editor_undo` takes `journal_entry` and undoes exactly that entry or refuses
+  with the reason, without touching a history, and reads the histories again
+  afterwards to report the version it observed. Godot's undo version falls on
+  an undo and repeats after the next change, and its Undo takes the newer of
+  two histories; both were measured on 4.5.1, 4.6.2 and 4.7.2, and the judgement
+  allows for both. `didi_control_room` gains a `journal` section with the last
+  ten. The dock's journal tab and the Control Room page's undo buttons are
+  part 2.
+
 - **`didi setup` and `didi doctor` (#1144, Q12 part 1).** Getting Didi into a
   project took five steps across two programs, and the ones trials lost most
   time to were a stale addon beside a newer server (#325, #326), an addon an

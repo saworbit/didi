@@ -332,7 +332,19 @@ void EditorHook::processQueue() {
                 scheduleScriptCall(cmd.params, cmd.response_promise, cmd.control)) {
                 continue;
             }
+            // What the command committed to the editor's undo history goes
+            // back with its answer, for the change journal (Q15). Undo and
+            // redo move a history without committing anything, and a game
+            // has no editor history to read.
+            const bool journals_undo = m_sessionKind == runtime::SessionKind::editor &&
+                                       cmd.method != "editor.undo" &&
+                                       cmd.method != "editor.redo" &&
+                                       cmd.method != "editor.undoStatus";
+            const auto undo_before = journals_undo
+                                         ? GodotBridge::instance().snapshotUndoHistories()
+                                         : GodotBridge::UndoSnapshot{};
             json result = executeOnMainThread(cmd.method, cmd.params);
+            if (journals_undo) GodotBridge::instance().attachUndoCommits(result, undo_before);
             if ((cmd.method == "scene.create" || cmd.method == "scene.packBranch") && result.is_object() &&
                 result.value("uid_registration_deferred", false) && result.contains("scene_path")) {
                 // Saved, with a uid the engine cannot index yet. The answer
@@ -1934,6 +1946,8 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
         "editor.getState", "editor.getRecoveryState", "editor.getSelection", "scene.getHierarchy", "scene.instantiateNode",
         "scene.removeNode", "scene.reparentNode", "scene.setProperty",
         "scene.getProperty", "scene.duplicateNode", "editor.undo", "editor.redo",
+        // Editor only: whether journalled actions can still be undone (Q15).
+        "editor.undoStatus",
         "editor.saveScene", "script.attachToNode",
         "script.detachFromNode", "project.listAutoloads", "project.setAutoload",
         "project.removeAutoload", "project.listInputActions", "project.setInputAction",

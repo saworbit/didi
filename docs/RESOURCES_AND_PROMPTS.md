@@ -51,6 +51,45 @@ Example shape:
 - Offline mode reports that no editor extension is connected.
 - Selection, camera transforms, scene filename, and UndoRedo depth are not currently exposed.
 
+## `godot://project/journal`
+
+- Modes: `live`, `offline_fallback`. Without an editor every entry is still
+  there; only whether each can be undone is missing, which is why that read is
+  a fallback.
+- MIME type: `application/json`.
+- The change journal (Q15): every mutating call any Didi server made in this
+  project, newest first, the last 50 of the 200 the journal keeps. It is the
+  file `.didi/journal.json`, so a second client, or a server started after the
+  calls were made, reads the same record.
+- Each entry carries `id`, `at`, `tool`, `outcome` (`applied`, or `failed` for a
+  failed call the editor's history shows changed something anyway), `target`
+  (the arguments that say what it was aimed at), `arguments`, `before` where the
+  tool reported the value it replaced, `after` (the answer as the tool read it
+  back, without the envelope), `files` (what the answer says it wrote), `scene`
+  (where an unsaved change is), and `undo`: the steps the editor's undo history
+  gained, or `null` with `undo_note` saying why there are none. An entry an
+  undo by entry reversed has `undone_by`, and that undo is an entry of its own
+  with `undoes`.
+- `undo_state` says whether the entry can be undone on its own now:
+  `available`, `blocked` (the editor's Undo would reach a newer action in the
+  other history first, or its scene is not the current tab, with the
+  `scene_open` that fixes that), `later_history` (with `later_actions`),
+  `undone`, `gone` (its history was cleared, a later change replaced it, or an
+  earlier editor run made it), `none` (nothing to undo), or `unknown` (no
+  editor attached to ask). The attached editor judges every listed entry in one
+  request; `editor` says whether it did, and why not.
+- Values are redacted by key name before they reach the file: a key naming a
+  password, passphrase, secret, token, API or private key, credential or
+  authorization, and the value beside a setting or property whose name does.
+  Each value is cut to a 512-byte preview and each entry to about 4 KB.
+- Bounded: `total`, `dropped` (entries the journal no longer keeps) and
+  `truncated` say how much is not shown. A journal that does not parse reads
+  `status: "unreadable"`; the next recorded change moves it aside, to
+  `.didi/journal.unreadable-<ms>.json`, and starts a new one.
+- `editor_undo` with `journal_entry` undoes one entry. See
+  [the tool reference](TOOL_REFERENCE.md#9-editor-lifecycle).
+- Not subscribable. Re-read it after a change.
+
 ## `blackboard://<board>/state` and `blackboard://<board>/tasks`
 
 The board as a resource, so a client can read it without spending a tool call and,

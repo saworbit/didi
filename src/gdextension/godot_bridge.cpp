@@ -5,6 +5,7 @@
 #include "didi/gdextension/property_paths.hpp"
 #include "didi/gdextension/protocol_servers.hpp"
 #include "didi/gdextension/runtime_bridge.hpp"
+#include "didi/gdextension/undo_ledger.hpp"
 #include "didi/gdextension/viewport_renderer.hpp"
 #include "didi/common/logger.hpp"
 #include "didi/common/config_file_syntax.hpp"
@@ -29,11 +30,13 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <limits>
 #include <unordered_map>
 #include <map>
 #include <mutex>
 #include <optional>
+#include <random>
 #include <set>
 #include <sstream>
 #include <tuple>
@@ -3414,20 +3417,10 @@ Result<EditorHistoryCommand> editorHistoryCommand(GDExtensionObjectPtr editor, b
 // newer of the edited scene's history and the global one, as Ctrl+Z does.
 enum class HistoryMoved { None, Scene, Global };
 
-Result<HistoryMoved> runEditorHistoryCommand(GDExtensionObjectPtr editor,
-                                             GDExtensionObjectPtr manager,
-                                             GDExtensionObjectPtr scene_undo_redo, bool undo) {
+// Runs the editor's own Undo or Redo item, synchronously.
+Result<void> pressEditorHistoryItem(GDExtensionObjectPtr editor, bool undo) {
     auto command = editorHistoryCommand(editor, undo);
     if (command.isErr()) return command.error();
-    auto global_id = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(0));
-    if (global_id.isErr()) return global_id.error();
-    auto global = historyUndoRedo(manager, global_id.value());
-    const GDExtensionObjectPtr global_undo_redo = global.isOk() ? global.value() : nullptr;
-    auto scene_before = undoRedoVersion(scene_undo_redo);
-    if (scene_before.isErr()) return scene_before.error();
-    auto global_before = global_undo_redo ? undoRedoVersion(global_undo_redo) : Result<int64_t>(int64_t{0});
-    if (global_before.isErr()) return global_before.error();
-
     auto signal = makeStringName("id_pressed");
     auto id = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, command.value().id);
     if (signal.isErr() || id.isErr()) return Error::internal("Failed to build the menu command");
@@ -3441,6 +3434,27 @@ Result<HistoryMoved> runEditorHistoryCommand(GDExtensionObjectPtr editor,
                               " item did not run: " +
                               ::didi::godot::describeGodotError(emit_code.value()));
     }
+    return Result<void>::ok();
+}
+
+Result<HistoryMoved> runEditorHistoryCommand(GDExtensionObjectPtr editor,
+                                             GDExtensionObjectPtr manager,
+                                             GDExtensionObjectPtr scene_undo_redo, bool undo) {
+    // Found before anything is read, so an editor with no such item refuses
+    // without having touched a history.
+    auto command = editorHistoryCommand(editor, undo);
+    if (command.isErr()) return command.error();
+    auto global_id = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(0));
+    if (global_id.isErr()) return global_id.error();
+    auto global = historyUndoRedo(manager, global_id.value());
+    const GDExtensionObjectPtr global_undo_redo = global.isOk() ? global.value() : nullptr;
+    auto scene_before = undoRedoVersion(scene_undo_redo);
+    if (scene_before.isErr()) return scene_before.error();
+    auto global_before = global_undo_redo ? undoRedoVersion(global_undo_redo) : Result<int64_t>(int64_t{0});
+    if (global_before.isErr()) return global_before.error();
+
+    auto pressed = pressEditorHistoryItem(editor, undo);
+    if (pressed.isErr()) return pressed.error();
 
     auto scene_after = undoRedoVersion(scene_undo_redo);
     if (scene_after.isErr()) return scene_after.error();
@@ -3508,6 +3522,76 @@ void abandonAction(GDExtensionObjectPtr manager) {
     if (execute.isErr()) return;
     (void)callObject(manager, "EditorUndoRedoManager", "commit_action", 3216645846LL,
                      {&execute.value()});
+}
+
+// One of the editor's histories as the change journal reads it (Q15). The
+// manager answers null for a history it does not have, which is what a closed
+// scene's history becomes, and prints an engine error saying so, so only the
+// global history, which exists from the moment the plugin loads, and the
+// edited scene's are ever asked for. get_history_count, get_current_action,
+// get_action_name and get_current_action_name carry the same hashes on 4.5.1,
+// 4.6.2 and 4.7.2.
+Result<GDExtensionObjectPtr> undoRedoForHistory(GDExtensionObjectPtr manager, int64_t id) {
+    auto id_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, id);
+    if (id_value.isErr()) return id_value.error();
+    return historyUndoRedo(manager, id_value.value());
+}
+
+Result<UndoHistoryState> readUndoHistory(GDExtensionObjectPtr manager, int64_t id,
+                                         const std::string& scene_path) {
+    auto undo_redo = undoRedoForHistory(manager, id);
+    if (undo_redo.isErr()) return undo_redo.error();
+    const auto integer = [&undo_redo](const char* method, int64_t hash) -> Result<int64_t> {
+        auto value = callObject(undo_redo.value(), "UndoRedo", method, hash);
+        if (value.isErr()) return value.error();
+        return scalarFromVariant<int64_t>(value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+    };
+    UndoHistoryState state;
+    state.id = id;
+    state.scene_path = id == kGlobalUndoHistory ? std::string() : scene_path;
+    auto version = integer("get_version", 3905245786LL);
+    auto current = integer("get_current_action", 2455072627LL);
+    auto count = integer("get_history_count", 2455072627LL);
+    if (version.isErr()) return version.error();
+    if (current.isErr()) return current.error();
+    if (count.isErr()) return count.error();
+    state.version = version.value();
+    state.current = current.value();
+    state.count = count.value();
+    if (state.current >= 0) {
+        auto name = callObject(undo_redo.value(), "UndoRedo", "get_current_action_name", 201670096LL);
+        if (name.isErr()) return name.error();
+        auto text = stringFromVariant(name.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+        if (text.isErr()) return text.error();
+        state.action = text.value();
+    }
+    return state;
+}
+
+// get_action_name for one index of a history, empty when it cannot be read.
+std::string undoActionName(GDExtensionObjectPtr manager, int64_t id, int64_t index) {
+    auto undo_redo = undoRedoForHistory(manager, id);
+    if (undo_redo.isErr()) return {};
+    auto index_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
+    if (index_value.isErr()) return {};
+    auto name = callObject(undo_redo.value(), "UndoRedo", "get_action_name", 990163283LL,
+                           {&index_value.value()});
+    if (name.isErr()) return {};
+    auto text = stringFromVariant(name.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+    return text.isErr() ? std::string() : text.value();
+}
+
+// The commits this editor run has seen, for telling which of two histories
+// holds the newer action. Read and written only on the main thread.
+UndoLedger& undoLedger() {
+    static UndoLedger ledger([] {
+        std::random_device device;
+        std::ostringstream run;
+        run << std::hex << std::setfill('0') << std::setw(8) << device() << std::setw(8)
+            << device();
+        return run.str();
+    }());
+    return ledger;
 }
 
 // See the header for why the tolerance is sized to a float32 round trip.
@@ -4767,6 +4851,291 @@ void GodotBridge::reportEditedSceneSaved(json& result) {
         if (entry.is_string() && entry.get<std::string>() == path) saved = false;
     }
     result["scene_saved"] = saved;
+}
+
+namespace {
+
+// The edited scene's history, or nothing when no scene is open.
+std::optional<UndoHistoryState> editedSceneHistory(GDExtensionObjectPtr editor,
+                                                   GDExtensionObjectPtr manager) {
+    auto root = editedSceneRoot(editor);
+    if (root.isErr() || !root.value()) return std::nullopt;
+    auto root_value = makeObject(root.value());
+    if (root_value.isErr()) return std::nullopt;
+    auto id_value = callObject(manager, "EditorUndoRedoManager", "get_object_history_id",
+                               1107568780LL, {&root_value.value()});
+    if (id_value.isErr()) return std::nullopt;
+    auto id = scalarFromVariant<int64_t>(id_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+    if (id.isErr() || id.value() == kGlobalUndoHistory) return std::nullopt;
+    auto state = readUndoHistory(manager, id.value(), editedScenePath(root.value()));
+    if (state.isErr()) return std::nullopt;
+    return state.value();
+}
+
+// One reference judged against the editor as it is now. own_out, when given,
+// receives its history as read, for the caller that goes on to undo it.
+UndoVerdict judgeUndoReference(GDExtensionObjectPtr editor, GDExtensionObjectPtr manager,
+                               const UndoCommit& ref,
+                               std::optional<UndoHistoryState>* own_out = nullptr,
+                               std::optional<UndoHistoryState>* other_out = nullptr,
+                               const Result<std::vector<std::string>>* open_scenes = nullptr) {
+    auto& ledger = undoLedger();
+    if (ref.run != ledger.run()) {
+        // Judged by the ledger, whose run is the only thing it compares first.
+        return ledger.evaluate(ref, UndoHistoryState{}, false, std::nullopt, {});
+    }
+    const auto scene = editedSceneHistory(editor, manager);
+    const bool global = ref.history_id == kGlobalUndoHistory;
+    const bool candidate = global || (scene.has_value() && scene->id == ref.history_id);
+    // Only the global history and the edited scene's are read. The manager
+    // prints an engine error for a history it does not have, a scene's history
+    // goes when the scene closes, and nothing says which ids remain without
+    // asking for one. Those two are also the only ones the editor's Undo can
+    // reach, so a reference into any other is judged by whether its scene is
+    // still open.
+    if (!candidate) {
+        UndoVerdict verdict;
+        const auto open = open_scenes ? *open_scenes : openScenePaths(editor);
+        const bool still_open =
+            ref.scene_path.empty() ||
+            (open.isOk() && std::find(open.value().begin(), open.value().end(), ref.scene_path) !=
+                                open.value().end());
+        if (still_open) {
+            verdict.state = UndoState::blocked;
+            verdict.needs_scene_tab = true;
+            verdict.reason = "Its scene is not the current tab. The editor's Undo reaches only the "
+                             "current scene's history and the global one, so it is judged once its "
+                             "scene is current.";
+        } else {
+            verdict.reason = "Its scene is closed, and closing a scene discards its history.";
+        }
+        return verdict;
+    }
+    auto own = global ? readUndoHistory(manager, kGlobalUndoHistory, {})
+                      : Result<UndoHistoryState>(*scene);
+    if (own.isErr()) {
+        UndoVerdict verdict;
+        verdict.reason = "Its history cannot be read: " + own.error().message;
+        return verdict;
+    }
+    std::optional<UndoHistoryState> other;
+    if (global) {
+        other = scene;
+    } else {
+        auto read = readUndoHistory(manager, kGlobalUndoHistory, {});
+        if (read.isOk()) other = read.value();
+    }
+    if (own_out) *own_out = own.value();
+    if (other_out) *other_out = other;
+    return ledger.evaluate(ref, own.value(), candidate, other,
+                           [manager, &ref](int64_t index) {
+                               return undoActionName(manager, ref.history_id, index);
+                           });
+}
+
+json verdictJson(const UndoVerdict& verdict, const UndoCommit& ref) {
+    json out = verdict.toJson();
+    if (verdict.needs_scene_tab && !ref.scene_path.empty()) {
+        out["next_call"] = {{"tool", "scene_open"},
+                            {"arguments", {{"scene_path", ref.scene_path}}},
+                            {"reason", "Makes its scene the current tab, where the editor's "
+                                       "Undo can reach it."}};
+    }
+    return out;
+}
+
+// The refusal for a reference that cannot be undone on its own. Each code is
+// spelled out rather than built from the state's name, so the refusal census
+// in tests/test_refusal_remedies.py can see it.
+json undoRefusalData(UndoState state) {
+    switch (state) {
+    case UndoState::blocked: return {{"code", "undo_entry_blocked"}};
+    case UndoState::later_history: return {{"code", "undo_entry_later_history"}};
+    case UndoState::undone: return {{"code", "undo_entry_undone"}};
+    case UndoState::gone:
+    case UndoState::available: break;
+    }
+    return {{"code", "undo_entry_gone"}};
+}
+
+// editor.undoStatus: whether each reference can be undone on its own now.
+json undoStatusAnswer(const json& params) {
+    const auto refs = params.find("refs");
+    if (refs == params.end() || !refs->is_array()) {
+        return errorJson(400, "refs must be an array of undo references",
+                         {{"code", "invalid_undo_reference"}, {"field", "refs"}});
+    }
+    if (refs->size() > kMaxUndoStatusRefs) {
+        return errorJson(400, "At most " + std::to_string(kMaxUndoStatusRefs) +
+                                  " references can be judged in one call",
+                         {{"code", "invalid_undo_reference"}, {"field", "refs"}});
+    }
+    auto editor = editorInterface();
+    if (editor.isErr()) return errorJson(editor.error().code, editor.error().message);
+    auto manager = undoManager(editor.value());
+    if (manager.isErr()) return errorJson(manager.error().code, manager.error().message);
+    json states = json::array();
+    // Read once: every reference outside the current scene asks for it.
+    const auto open_scenes = openScenePaths(editor.value());
+    for (const auto& item : *refs) {
+        std::string problem;
+        const auto ref = UndoCommit::fromJson(item, &problem);
+        if (!ref.has_value()) {
+            states.push_back({{"state", "invalid"},
+                              {"reason", "Not an undo reference: " + problem + " is missing or "
+                                         "has the wrong type."}});
+            continue;
+        }
+        states.push_back(verdictJson(
+            judgeUndoReference(editor.value(), manager.value(), *ref, nullptr, nullptr, &open_scenes),
+            *ref));
+    }
+    return liveResult({{"status", "success"}, {"run", undoLedger().run()}, {"states", std::move(states)}});
+}
+
+// editor.undo with expect: undoes exactly the action the reference names, or
+// refuses without touching a history. The editor's own Undo is the only undo
+// that keeps EditorUndoRedoManager's stacks true (#913), and it takes the newer
+// of the edited scene's history and the global one, so the reference is
+// judged first, and the histories are read again afterwards to show that the
+// one it names moved back one step and the other did not move.
+json undoReferencedAction(const json& params) {
+    const json& expect = params["expect"];
+    // The journal entry the server is undoing, named in every refusal, because
+    // a live tool's refusal is the bridge's own and nothing is added to it on
+    // the way back.
+    const auto entry = params.value("journal_entry", json());
+    const std::string about =
+        entry.is_number_integer() ? "Journal entry " + std::to_string(entry.get<int64_t>()) + ": " : "";
+    const auto refuse = [&entry, &about](int code, const std::string& message, json data) {
+        if (entry.is_number_integer()) data["journal_entry"] = entry;
+        return errorJson(code, about + message, std::move(data));
+    };
+    std::string problem;
+    const auto ref = UndoCommit::fromJson(expect, &problem);
+    if (!ref.has_value()) {
+        return refuse(400, "expect is not an undo reference: " + problem +
+                                  " is missing or has the wrong type",
+                         {{"code", "invalid_undo_reference"}, {"field", problem}});
+    }
+    auto editor = editorInterface();
+    if (editor.isErr()) return refuse(editor.error().code, editor.error().message, json::object());
+    auto manager = undoManager(editor.value());
+    if (manager.isErr()) return refuse(manager.error().code, manager.error().message, json::object());
+    std::optional<UndoHistoryState> own;
+    std::optional<UndoHistoryState> other;
+    const auto verdict = judgeUndoReference(editor.value(), manager.value(), *ref, &own, &other);
+    if (verdict.state != UndoState::available) {
+        json data = undoRefusalData(verdict.state);
+        data["undo"] = verdictJson(verdict, *ref);
+        return refuse(409, verdict.reason, std::move(data));
+    }
+    auto pressed = pressEditorHistoryItem(editor.value(), true);
+    if (pressed.isErr()) return refuse(pressed.error().code, pressed.error().message, json::object());
+    auto own_after = readUndoHistory(manager.value(), ref->history_id, ref->scene_path);
+    std::optional<UndoHistoryState> other_after;
+    if (other.has_value()) {
+        auto read = readUndoHistory(manager.value(), other->id, other->scene_path);
+        if (read.isOk()) other_after = read.value();
+    }
+    const bool other_moved = other.has_value() &&
+                             (!other_after.has_value() || other_after->version != other->version);
+    const bool own_moved = own_after.isOk() && own_after.value().version != own->version;
+    if (other_moved) {
+        // The judgement said this cannot happen; say exactly what did.
+        return refuse(500,
+                         "The editor's Undo took an action in the other history (\"" +
+                             other->action + "\") instead of this one. That action is undone; "
+                             "editor_redo puts it back.",
+                         {{"code", "undo_entry_misdirected"},
+                          {"outcome", "unknown_outcome"},
+                          {"undone_action", other->action},
+                          {"undone_history", other->id == kGlobalUndoHistory ? "global" : "scene"}});
+    }
+    if (!own_moved) {
+        return refuse(409,
+                         "The editor ran its own Undo and no history moved. Godot refuses to "
+                         "undo while a mouse button is held down in the editor.",
+                         {{"code", "editor_declined"}, {"retryable", true}});
+    }
+    const auto& after = own_after.value();
+    if (after.version != ref->version - 1 || after.current != ref->index - 1) {
+        return refuse(500,
+                         "The editor's Undo moved this history, but not to the state before "
+                         "this action: version " + std::to_string(after.version) + ", action " +
+                             std::to_string(after.current) + ".",
+                         {{"code", "undo_entry_misdirected"},
+                          {"outcome", "unknown_outcome"},
+                          {"observed_version", after.version},
+                          {"observed_index", after.current}});
+    }
+    json stepped = {{"status", "success"},
+                    {"action", "undo"},
+                    {"history", ref->history_id == kGlobalUndoHistory ? "global" : "scene"},
+                    {"undone", ref->action},
+                    {"observed", {{"version", after.version},
+                                  {"current_action", after.action},
+                                  {"redo_available", after.count > after.current + 1}}}};
+    GodotBridge::instance().reportEditedSceneSaved(stepped);
+    return liveResult(stepped);
+}
+
+} // namespace
+
+GodotBridge::UndoSnapshot GodotBridge::snapshotUndoHistories() {
+    UndoSnapshot snapshot;
+    auto editor = editorInterface();
+    if (editor.isErr()) return snapshot;
+    auto manager = undoManager(editor.value());
+    if (manager.isErr()) return snapshot;
+    auto global = readUndoHistory(manager.value(), kGlobalUndoHistory, {});
+    if (global.isOk()) snapshot.global = global.value();
+    snapshot.scene = editedSceneHistory(editor.value(), manager.value());
+    return snapshot;
+}
+
+void GodotBridge::attachUndoCommits(json& result, const UndoSnapshot& before) {
+    if (!before.global.has_value() && !before.scene.has_value()) return;
+    if (!result.is_object()) return;
+    auto editor = editorInterface();
+    if (editor.isErr()) return;
+    auto manager = undoManager(editor.value());
+    if (manager.isErr()) return;
+    auto& ledger = undoLedger();
+    std::vector<UndoCommit> commits;
+    const auto observe = [&](const UndoHistoryState& was, const UndoHistoryState& now) {
+        auto made = ledger.observe(was, now, [&](int64_t index) {
+            return undoActionName(manager.value(), was.id, index);
+        });
+        commits.insert(commits.end(), made.begin(), made.end());
+    };
+    if (before.global.has_value()) {
+        if (auto now = readUndoHistory(manager.value(), kGlobalUndoHistory, {}); now.isOk()) {
+            observe(*before.global, now.value());
+        }
+    }
+    // The scene that was current when the command started, and only while it
+    // still is: reading a history the manager no longer has prints an engine
+    // error, and a command that closed or switched the scene committed nothing
+    // there that it was asked for. A scene saved for the first time inside the
+    // command reads with its new path.
+    if (before.scene.has_value()) {
+        const auto now = editedSceneHistory(editor.value(), manager.value());
+        if (now.has_value() && now->id == before.scene->id) observe(*before.scene, *now);
+    }
+    if (commits.empty()) return;
+    std::sort(commits.begin(), commits.end(),
+              [](const UndoCommit& a, const UndoCommit& b) { return a.serial < b.serial; });
+    json steps = json::array();
+    for (const auto& commit : commits) steps.push_back(commit.toJson());
+    const auto error = result.find("error");
+    if (error != result.end() && error->is_object()) {
+        auto& data = (*error)["data"];
+        if (!data.is_object()) data = json::object();
+        data["undo_steps"] = std::move(steps);
+        return;
+    }
+    result["undo_steps"] = std::move(steps);
 }
 
 bool GodotBridge::editorFirstScanApplied() {
@@ -15490,6 +15859,12 @@ json GodotBridge::execute(const std::string& method, const json& params,
         return liveSceneMutation(result);
     }
 
+    if (method == "editor.undo" && params.is_object() && params.contains("expect")) {
+        return undoReferencedAction(params);
+    }
+    if (method == "editor.undoStatus") {
+        return undoStatusAnswer(params.is_object() ? params : json::object());
+    }
     if (method == "editor.undo" || method == "editor.redo") {
         auto root = editedSceneRoot(editor);
         auto manager = undoManager(editor);

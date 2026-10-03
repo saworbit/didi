@@ -30,6 +30,8 @@ namespace mcp {
 inline constexpr std::size_t kControlRoomMaxToolRows = 400;
 inline constexpr std::size_t kControlRoomMaxSessions = 50;
 inline constexpr std::size_t kControlRoomMaxLogRecords = 500;
+// Change journal rows the dashboard shows, newest first (Q15).
+inline constexpr std::size_t kControlRoomJournalRows = 10;
 // What a caller gets without asking for more. The tool's result is visible
 // to the model as well as to the page, so the default is a glance rather
 // than the whole ring: five hundred records of four hundred characters is
