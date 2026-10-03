@@ -5834,6 +5834,8 @@ text = "Not a key"
         foreach ($refusedId in @(201, 203, 205)) {
             $refusedSave = ($failureById[$refusedId].result.content | Where-Object { $_.type -eq "text" } | Select-Object -First 1).text | ConvertFrom-Json
             Assert-True ($refusedSave.error.message -match "was rolled back") "Request $refusedId reported a rollback that worked as failed: $($refusedSave.error.message)"
+            # A file the editor cannot write is the caller's to fix, not a server fault (#1153).
+            Assert-True ($refusedSave.error.code -eq 409 -and $refusedSave.error.data.code -eq "project_file_not_writable" -and $refusedSave.error.data.rolled_back -eq $true -and $refusedSave.error.data.exists -eq $true -and $refusedSave.error.data.no_remedy -match "project\.godot") "Request $refusedId did not name project.godot as the caller's to fix: $($refusedSave.error | ConvertTo-Json -Compress -Depth 6)"
             $saveAttempts = @($refusedSave.error.data.engine_diagnostics | Where-Object { $_.message -match "Couldn't save project" })
             Assert-True ($saveAttempts.Count -eq 1) "Request $refusedId had the engine try project.godot $($saveAttempts.Count) times: $(@($refusedSave.error.data.engine_diagnostics | ForEach-Object { $_.message }) -join '; ')"
         }

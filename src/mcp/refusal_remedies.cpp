@@ -489,11 +489,24 @@ const std::map<std::string, Rule>& rules() {
         {"bridge_not_ready", [](const Refusal&) { return retryAfter(500); }},
         {"command_cancelled", [](const Refusal&) { return retryAfter(0); }},
         {"project_file_busy", [](const Refusal&) { return retryAfter(1000); }},
+        // The change was rolled back, and the same call fails the same way
+        // until a person fixes the file (#1153).
+        {"project_file_not_writable", [](const Refusal&) {
+            return noRemedy("Make project.godot writable: check it out, clear its read-only flag, "
+                            "or close the program holding it. Then send the same call again.");
+        }},
         {"profiler_read_active", [](const Refusal&) { return retryAfter(2000); }},
         {"runtime_step_active", [](const Refusal&) { return retryAfter(500); }},
         {"scene_exploration_active", [](const Refusal&) { return retryAfter(5000); }},
         {"invariant_watch_active", [](const Refusal&) { return retryAfter(5000); }},
-        {"reimport_idle_timeout", [](const Refusal&) { return retryAfter(5000); }},
+        // A synchronous call left the editor applying its scan, and the same
+        // call five seconds later lands inside that apply (#995). Running it
+        // as a job is what waits it out. A job carries its reimport_id, and
+        // its own deadline passed, so later is the fix there (#1159).
+        {"reimport_idle_timeout", [](const Refusal& r) {
+            if (r.data.contains("reimport_id")) return retryAfter(5000);
+            return field("request_id");
+        }},
         {"editor_scanning", [](const Refusal&) { return retryWith({{"timeout_ms", 10000}}); }},
         {"not_approved", [](const Refusal& r) {
             // A dismissed prompt was never answered, so asking again is fair; a
