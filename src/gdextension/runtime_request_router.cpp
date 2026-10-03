@@ -95,6 +95,12 @@ std::optional<json> rejectDisallowedSessionMethod(
         session);
 }
 
+std::optional<json> answerOffMainThread(const std::string& method, const json& params,
+                                        const runtime::SessionDescriptor& session) {
+    if (method != "asset.reimportStatus") return std::nullopt;
+    return decorateRuntimeResponse(EditorHook::instance().readDetachedReimport(params), session);
+}
+
 json awaitRuntimeCommand(CommandTicket ticket, const std::string& method,
                          const runtime::SessionDescriptor& session,
                          std::chrono::milliseconds deadline) {

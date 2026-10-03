@@ -52,6 +52,18 @@ function Assert-MutationsNameTheirFollowUps([string]$ManifestJson) {
         $entry = $followUpRegistry.tools.PSObject.Properties[$exchange.Tool]
         $declared = if ($null -ne $entry -and $null -ne $entry.Value.PSObject.Properties["leaves"]) { @($entry.Value.leaves) } else { @() }
         $steps = if ($null -ne $payload.PSObject.Properties["follow_up"]) { @($payload.follow_up) } else { @() }
+        # A job still running answers with a poll step of its own (Q8). It is
+        # the job's, not the tool's, so no tool declares it; it has to name
+        # the tool the job runs, which is the call that reads it.
+        if ($payload.status -eq "working" -and $null -ne $payload.PSObject.Properties["job"]) {
+            foreach ($step in $steps) {
+                $seen["poll"] = 1 + [int]$seen["poll"]
+                if ([string]$step.work -ne "poll" -or [string]$step.tool -ne $exchange.Tool -or [string]::IsNullOrWhiteSpace([string]$step.reason)) {
+                    $problems += "$where is a working job whose step is not a poll of $($exchange.Tool) with a reason: $($step | ConvertTo-Json -Compress)"
+                }
+            }
+            continue
+        }
         foreach ($step in $steps) {
             $work = [string]$step.work
             $seen[$work] = 1 + [int]$seen[$work]

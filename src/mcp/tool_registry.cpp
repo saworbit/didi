@@ -3384,11 +3384,13 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "asset_reimport";
-        t.description = "Reimports a validated atomic batch of project source assets and waits for two consecutive editor-idle frames. A batch holding a new file scans first and answers only once the editor has applied the scan, so a new script's class is registered by then. An import the engine refused is refused, naming the failed paths, with the engine's reason under engine_diagnostics.";
+        t.description = "Reimports project source assets and waits for the editor to go idle. A batch with a new file scans first and answers once the scan is applied, so a new script's class is registered. A refused import names the failed paths; the engine's reason is under engine_diagnostics.";
+        // Above 10000 only as a job (Q8): the handler refuses it otherwise.
         t.inputSchema = {{"type", "object"}, {"properties", {
             {"paths", {{"type", "array"}, {"minItems", 1}, {"maxItems", 256}, {"uniqueItems", true},
                        {"items", {{"type", "string"}, {"minLength", 7}, {"maxLength", 1024}}}}},
-            {"timeout_ms", {{"type", "integer"}, {"default", 10000}, {"minimum", 1}, {"maximum", 10000}}}
+            {"timeout_ms", {{"type", "integer"}, {"default", 10000}, {"minimum", 1}, {"maximum", 900000}}},
+            {"request_id", {{"type", "string"}, {"minLength", 8}}}
         }}, {"required", {"paths"}}};
         t.handler = [this](const json& args) { return handleAssetReimport(args, m_ipcClient); };
         registerTool(std::move(t));

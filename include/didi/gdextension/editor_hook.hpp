@@ -63,6 +63,56 @@ private:
     int m_consecutiveIdle{0};
 };
 
+// Reimports that answered their command at once, for asset_reimport run as a
+// job (Q8 in docs/BUILD_QUEUE.md, #996).
+//
+// A reimport that asks for a scan is not over until the editor has applied it,
+// and applying a scan of many new scripts draws frames for each one: half a
+// minute on a software-rendered editor for 25 scripts, past the fifteen seconds
+// any one command is waited for. A detached reimport answers its command with
+// an id instead, and its answer is kept here for the server's job to read with
+// asset.reimportStatus.
+//
+// That read is answered on the IPC thread, never the main one. The editor holds
+// every queued command while its progress dialog is open, and the dialog is
+// open for the whole of the work a detached reimport exists to wait out, so a
+// read through the queue would have waited for the very thing it asks about.
+class DetachedReimports {
+public:
+    using Clock = std::chrono::steady_clock;
+
+    // How long a working reimport is waited for with nobody reading it. A
+    // server that exits stops reading, and the wait it left would hold the one
+    // reimport slot until the editor finished or its deadline passed, which can
+    // be fifteen minutes. The work itself is the editor's and carries on.
+    static constexpr std::chrono::seconds kReaderLease{60};
+    // Answers kept. Only one reimport runs at a time, so these are the last few
+    // a reader may not have read yet.
+    static constexpr size_t kKept = 8;
+
+    // A new working entry under `id`, read as just read.
+    void begin(const std::string& id, Clock::time_point now);
+    // Its answer, once the reimport has one.
+    void finish(const std::string& id, json answer);
+    // What asset.reimportStatus answers for `id`, renewing the lease, or
+    // nothing when no such reimport is kept.
+    std::optional<json> read(const std::string& id, Clock::time_point now);
+    // Whether `id` is still working and nobody has read it for the lease.
+    bool unread(const std::string& id, Clock::time_point now) const;
+
+private:
+    struct Entry {
+        std::string id;
+        Clock::time_point started;
+        Clock::time_point last_read;
+        std::optional<json> answer;
+    };
+    // Its own lock, never the reimport mutex: the main thread holds that one
+    // across reimport_files, which runs frames.
+    mutable std::mutex m_mutex;
+    std::vector<Entry> m_entries;
+};
+
 class CommandControl {
 public:
     bool tryStart() {
@@ -160,6 +210,9 @@ public:
     void scheduleAssetReimport(const json& params,
                                const std::shared_ptr<std::promise<json>>& promise,
                                const std::shared_ptr<CommandControl>& control);
+    // asset.reimportStatus, answered on the calling thread: see
+    // DetachedReimports for why it never waits for the main one.
+    json readDetachedReimport(const json& params);
     // Starts a callback-driven Performance sample window. The command returns
     // on the callback that collects the last sample; nothing blocks the main
     // thread, and only one collector runs per session.
@@ -327,7 +380,13 @@ private:
         // before the editor applies what the scan found, in frames of its
         // own, so neither the reimport nor the answer goes by the flag alone.
         std::optional<ScanSettle> settle;
+        // Set when the command was answered at once with this id, and the
+        // answer goes to m_detachedReimports instead (Q8).
+        std::string detached_id;
     };
+
+    // Answers a finished reimport, to its command or to the detached store.
+    void answerAssetReimport(PendingAssetReimport& completed, json response);
 
     // An editor_reload_project waiting for the editor to apply a scan it
     // started after the call arrived (#1114).
@@ -394,6 +453,7 @@ private:
     std::optional<PendingScriptCallRequest> m_pendingScriptCall;
     std::optional<PendingMainScreenCapture> m_pendingMainScreenCapture;
     std::optional<PendingAssetReimport> m_pendingAssetReimport;
+    DetachedReimports m_detachedReimports;
     std::mutex m_profilerMutex;
     std::optional<PendingProfilerRead> m_pendingProfilerRead;
     std::mutex m_invariantMutex;
@@ -438,6 +498,12 @@ public:
     static bool runtimeStepActive(EditorHook& hook);
     static bool hasPendingRuntimeStep(EditorHook& hook);
     static bool hasPendingAssetReimport(EditorHook& hook);
+    // Runs one reimport frame, so a test can drive the lease without an engine.
+    static void processAssetReimportFrame(EditorHook& hook);
+    static DetachedReimports& detachedReimports(EditorHook& hook);
+    // A detached reimport as the frame loop would find it, begun at `started`.
+    static void plantDetachedReimport(EditorHook& hook, const std::string& id,
+                                      std::chrono::steady_clock::time_point started);
     static bool hasPendingProfilerRead(EditorHook& hook);
     static bool pumping(const EditorHook& hook);
     static void setPumping(EditorHook& hook, bool pumping);

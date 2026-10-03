@@ -486,10 +486,12 @@ by the schema. A read shaped as one list, such as `project_list_resources` or
 Q8 in the [Build Queue](BUILD_QUEUE.md#q8-long-work-as-jobs). The server answers
 one request at a time, and `project_export` and `csharp_check_build` run a
 helper process that can take minutes, during which nothing else was answered.
-Either can now run as a **job**: the same tool call, through the same pipeline,
+`asset_reimport` waits for the editor to apply a scan, which can take minutes on
+a slow editor, past the fifteen seconds the bridge waits for any one command.
+Each can now run as a **job**: the same tool call, through the same pipeline,
 on a thread of its own, with its answer kept.
 
-**`request_id`.** Both tools take an optional `request_id`, 8 to 64 letters,
+**`request_id`.** All three tools take an optional `request_id`, 8 to 64 letters,
 digits, `.`, `_`, `:` or `-`, chosen by the caller. A call that carries one runs
 as a job and waits up to about ten seconds for it:
 
@@ -539,9 +541,24 @@ client polls. Under [managed recovery](MANAGED_RECOVERY.md) a job's call waits
 for its job to finish, because a mutation there passes through recovery steps
 written for one call at a time; its `request_id` still reads the kept answer.
 
-**Not yet.** `asset_reimport` is still answered within the bridge's fifteen
-second wait, so its `timeout_ms` still stops at 10 seconds (#996); it becomes a
-job next. While an export job runs, a tool that starts its own helper Godot
+**`asset_reimport` as a job.** Its `timeout_ms` goes to 900000 as a job, and
+defaults to 300000 there; without a job it stops at 10000, and a larger value is
+`400 reimport_needs_job` with `field: "request_id"`. The job sends the bridge
+`asset.reimport` with `detach_timeout_ms`, and the bridge answers at once with
+`status: "accepted"` and a `reimport_id` instead of waiting. The job then reads
+`asset.reimportStatus` with that id every quarter second. The bridge answers
+that read on its IPC thread, never the editor's main thread, because the editor
+holds every queued command while its progress dialog is open, and the dialog is
+open for exactly the work the job waits out. The read answers `state: "working"`
+or `state: "finished"` with the reimport's answer, which is the job's answer
+with `reimport_id` added; an id the editor does not keep is
+`404 reimport_not_found`. A detached reimport nobody has read for 60 seconds
+stops being waited for, and its answer is `504 reimport_unread`, so a server
+that exited mid-job does not hold the one reimport slot. A bridge older than
+detaching ignores `detach_timeout_ms` and answers within the `timeout_ms` of
+10000 or less that the job also sends, and that answer is the job's.
+
+**Not yet.** While an export job runs, a tool that starts its own helper Godot
 waits for it, because the helper's isolation is a process-wide setting held for
 the length of a run.
 
