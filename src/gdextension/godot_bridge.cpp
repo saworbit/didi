@@ -1793,24 +1793,30 @@ Result<void> restoreProjectSetting(GDExtensionObjectPtr project_settings, Varian
 // caller's to fix, not a fault in the server (#1153). A failed rollback stays
 // a 500.
 json projectFileNotWritable(const std::string& change, const std::string& detail) {
-    json data = {{"code", "project_file_not_writable"}, {"rolled_back", true}, {"engine_error", detail}};
+    json project_file = nullptr;
+    bool exists = false;
+    bool read_only = false;
     auto directory = projectDirectoryOnDisk();
     if (directory.isOk()) {
         const auto file = didi::paths::projectPathFromUtf8(directory.value()) / "project.godot";
         std::error_code error;
-        const bool exists = std::filesystem::exists(file, error);
+        exists = std::filesystem::exists(file, error);
         const auto permissions = exists ? std::filesystem::status(file, error).permissions()
                                         : std::filesystem::perms::unknown;
-        data["project_file"] = didi::paths::nativePathToUtf8(file);
-        data["exists"] = exists;
-        data["read_only"] = exists && !error &&
-                            (permissions & std::filesystem::perms::owner_write) == std::filesystem::perms::none;
+        project_file = didi::paths::nativePathToUtf8(file);
+        read_only = exists && !error &&
+                    (permissions & std::filesystem::perms::owner_write) == std::filesystem::perms::none;
     }
     return errorJson(409,
                      "project.godot could not be saved (" + detail + "), so the " + change +
                          " was rolled back and nothing changed. The editor cannot write project.godot: "
                          "it is read-only, held by another program, or in a folder that refuses new files.",
-                     std::move(data));
+                     {{"code", "project_file_not_writable"},
+                      {"project_file", std::move(project_file)},
+                      {"exists", exists},
+                      {"read_only", read_only},
+                      {"rolled_back", true},
+                      {"engine_error", detail}});
 }
 
 Result<GDExtensionObjectPtr> editorInterface() {
