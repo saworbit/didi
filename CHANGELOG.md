@@ -528,6 +528,19 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **A project.godot the editor cannot write is the caller's to fix, not a
+  server fault (#1153).** When the save failed, `project_set_setting`,
+  `project_set_autoload` and `project_set_input_action` answered `500
+  internal_error`, which says the server broke and carries no remedy. They now
+  answer `409 project_file_not_writable` with the file, whether it exists and is
+  read-only, the engine's error, and a remedy that says to make the file
+  writable and send the call again. A rollback that also fails is still a 500.
+
+- **A synchronous `asset_reimport` timeout no longer says to retry in five
+  seconds (#1159).** The retry landed inside the apply the timed-out call left
+  running. The refusal now names `request_id`, which runs the call as a job, and
+  says the editor is still working. A job's own timeout keeps `retry_after_ms`.
+
 - **A script Didi creates no longer draws `Unrecognized UID` on Godot 4.5 and
   4.6 (#1150).** `script_create` wrote the file and never told the editor, which first
   met it on its next scan, and the editor scans whenever its window takes

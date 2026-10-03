@@ -1787,6 +1787,38 @@ Result<void> restoreProjectSetting(GDExtensionObjectPtr project_settings, Varian
     return Result<void>::ok();
 }
 
+// A save the engine refused, with the change rolled back so nothing moved.
+// The usual cause is a project.godot the editor cannot write: read-only, held
+// by another program, or in a folder that refuses new files. That is the
+// caller's to fix, not a fault in the server (#1153). A failed rollback stays
+// a 500.
+json projectFileNotWritable(const std::string& change, const std::string& detail) {
+    json project_file = nullptr;
+    bool exists = false;
+    bool read_only = false;
+    auto directory = projectDirectoryOnDisk();
+    if (directory.isOk()) {
+        const auto file = didi::paths::projectPathFromUtf8(directory.value()) / "project.godot";
+        std::error_code error;
+        exists = std::filesystem::exists(file, error);
+        const auto permissions = exists ? std::filesystem::status(file, error).permissions()
+                                        : std::filesystem::perms::unknown;
+        project_file = didi::paths::nativePathToUtf8(file);
+        read_only = exists && !error &&
+                    (permissions & std::filesystem::perms::owner_write) == std::filesystem::perms::none;
+    }
+    return errorJson(409,
+                     "project.godot could not be saved (" + detail + "), so the " + change +
+                         " was rolled back and nothing changed. The editor cannot write project.godot: "
+                         "it is read-only, held by another program, or in a folder that refuses new files.",
+                     {{"code", "project_file_not_writable"},
+                      {"project_file", std::move(project_file)},
+                      {"exists", exists},
+                      {"read_only", read_only},
+                      {"rolled_back", true},
+                      {"engine_error", detail}});
+}
+
 Result<GDExtensionObjectPtr> editorInterface() {
     auto& api = GodotApi::instance();
     if (!api.isLiveReady()) return Error::notConnected("Godot main-loop bridge is not ready");
@@ -12995,7 +13027,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 return errorJson(500, "ProjectSettings.save failed (" + detail + ") and rollback failed: " +
                                       rollback_save.error().message);
             }
-            return errorJson(500, "ProjectSettings.save failed; mutation was rolled back (" + detail + ")");
+            return projectFileNotWritable("setting", detail);
         }
         auto stored = projectFileSettingLiteral(setting);
         if (stored.isErr()) {
@@ -13143,7 +13175,9 @@ json GodotBridge::execute(const std::string& method, const json& params,
             auto rollback = restoreProjectSetting(project_settings.value(), setting_name.value(), previous.value(),
                                                   file_before);
             if (rollback.isErr()) return errorJson(500, "Autoload save failed and rollback failed: " + rollback.error().message);
-            return errorJson(500, "ProjectSettings.save failed; autoload mutation was rolled back");
+            return projectFileNotWritable("autoload", save_code.isErr()
+                                                          ? save_code.error().message
+                                                          : ::didi::godot::describeGodotError(save_code.value()));
         }
         auto stored = projectFileAutoload(autoload_name);
         if (stored.isErr()) {
@@ -13411,7 +13445,9 @@ json GodotBridge::execute(const std::string& method, const json& params,
             auto rollback = restoreProjectSetting(project_settings.value(), setting_name.value(), previous.value(),
                                                   file_before);
             if (rollback.isErr()) return errorJson(500, "InputMap save failed and rollback failed: " + rollback.error().message);
-            return errorJson(500, "ProjectSettings.save failed; InputMap mutation was rolled back");
+            return projectFileNotWritable("input action", save_code.isErr()
+                                                              ? save_code.error().message
+                                                              : ::didi::godot::describeGodotError(save_code.value()));
         }
         auto stored = projectFileDefinesInputAction(action);
         if (stored.isErr()) {

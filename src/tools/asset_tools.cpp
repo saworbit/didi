@@ -2460,7 +2460,15 @@ CallToolResult handleAssetReimport(const json& args, std::shared_ptr<ipc::IIpcCl
     // scan is no longer trustworthy whether the call succeeded or not.
     offline::ResourceIndexer::invalidateSharedIndex();
     if (response.isErr()) {
-        return CallToolResult::fromError(response.error(), "Failed to reimport assets: ");
+        auto error = response.error();
+        // The editor carries on with the work after a timeout, so the advice
+        // is to wait it out as a job, not to send the same call again (#1159).
+        if (error.data.is_object() && error.data.value("code", std::string()) == "reimport_idle_timeout") {
+            error.message += ". The editor is still working on it, so do not send another reimport "
+                             "now; give the next call a request_id, which runs it as a job that "
+                             "waits up to 900000 ms";
+        }
+        return CallToolResult::fromError(error, "Failed to reimport assets: ");
     }
     return CallToolResult::successJson(response.value());
 }

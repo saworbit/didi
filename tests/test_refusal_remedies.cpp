@@ -83,6 +83,11 @@ static void test_a_refusal_with_no_remedy_gets_the_one_its_code_carries() {
                               "asset_reimport");
     ASSERT_EQ(busy["retry_after_ms"], 1000);
 
+    // A file only a person can fix, said as such (#1153).
+    const auto unwritable = floored(409, "project.godot could not be saved",
+                                    {{"code", "project_file_not_writable"}}, "project_set_setting");
+    ASSERT_TRUE(unwritable["no_remedy"].get<std::string>().find("project.godot") != std::string::npos);
+
     // The argument the schema check quoted.
     const auto missing = floored(400, "Missing required argument 'target_node'.", nullptr,
                                  "scene_get_property");
@@ -276,8 +281,26 @@ static void test_the_arguments_as_a_whole_have_a_fix() {
     ASSERT_EQ(floored(400, "path is required", nullptr, "blackboard_write")["field"], "path");
 }
 
+// A synchronous reimport that timed out left the editor applying its scan, and
+// the same call five seconds later lands in that apply. A job's own deadline is
+// the case where waiting is the fix (#1159).
+static void test_a_reimport_timeout_names_the_job() {
+    const auto synchronous = floored(504, "Asset reimport did not reach editor idle before timeout",
+                                     {{"code", "reimport_idle_timeout"}, {"outcome", "unknown_outcome"}},
+                                     "asset_reimport");
+    ASSERT_EQ(synchronous["field"], "request_id");
+    ASSERT_FALSE(synchronous.contains("retry_after_ms"));
+
+    const auto job = floored(504, "Asset reimport did not reach editor idle before timeout",
+                             {{"code", "reimport_idle_timeout"}, {"reimport_id", "r-1"}},
+                             "asset_reimport");
+    ASSERT_EQ(job["retry_after_ms"], 5000);
+    ASSERT_FALSE(job.contains("field"));
+}
+
 struct RegisterRefusalRemedyTests {
     RegisterRefusalRemedyTests() {
+        registerTest("RefusalRemedies.ReimportTimeoutNamesTheJob", test_a_reimport_timeout_names_the_job);
         registerTest("RefusalRemedies.CodeCarriesItsRemedy",
                      test_a_refusal_with_no_remedy_gets_the_one_its_code_carries);
         registerTest("RefusalRemedies.RemedyFollowsTheTool", test_the_remedy_follows_the_tool);
