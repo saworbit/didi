@@ -1,5 +1,6 @@
 #include "didi/offline/speculative_verify.hpp"
 #include "didi/mcp/mcp_protocol.hpp"
+#include "didi/common/cancellation.hpp"
 #include "didi/common/ipc_channel.hpp"
 #include "didi/common/logger.hpp"
 #include "didi/offline/resource_indexer.hpp"
@@ -2291,6 +2292,111 @@ CallToolResult handleInstantiateAsset(const json& args, std::shared_ptr<ipc::IIp
     return CallToolResult::notConnected("Godot Editor is offline. Launch Godot Editor to instantiate assets directly into the scene tree.");
 }
 
+namespace {
+
+// asset_reimport as a job (Q8 in docs/BUILD_QUEUE.md, #996). The longest wait
+// any tool takes, project_export's; and the wait when a job names none, which
+// on a software-rendered editor is a scan of a couple of hundred new scripts.
+constexpr int64_t kMaxReimportJobMs = 900000;
+constexpr int64_t kDefaultReimportJobMs = 300000;
+constexpr auto kReimportPollInterval = std::chrono::milliseconds(250);
+
+// A bridge answer that carries its own error, as the failure it is, the way
+// the IPC client turns a failed request into one.
+Result<json> bridgeAnswer(const json& answer) {
+    if (answer.is_object() && answer.contains("error") && answer["error"].is_object()) {
+        const auto& error = answer["error"];
+        return Error(error.value("code", 500),
+                     error.value("message", std::string("The bridge reported a failure")),
+                     error.value("data", json()));
+    }
+    return answer;
+}
+
+// Starts a detached reimport and reads it until the bridge has its answer.
+//
+// The bridge answers asset.reimport at once with an id, and the reimport's own
+// answer -- the same one a synchronous call gets -- once the editor has done
+// the work, which for a scan of many new scripts is long past the fifteen
+// seconds any one command is waited for. asset.reimportStatus is answered off
+// the editor's main thread, so it answers while the editor applies the scan.
+Result<json> reimportAsJob(const json& args, const std::shared_ptr<ipc::IIpcClient>& ipc) {
+    const int64_t timeout_ms = args.value("timeout_ms", kDefaultReimportJobMs);
+    // The call's own route, held for the whole job: a session selected
+    // meanwhile is an editor that never heard of this reimport.
+    const auto lease = runtime::acquireRuntimeRouteLease(ipc);
+    if (!lease.has_value()) {
+        return Error::notConnected("Godot Editor is offline. Launch Godot to reimport assets.");
+    }
+    const json request = {{"paths", args["paths"]},
+                          // A bridge older than detaching ignores
+                          // detach_timeout_ms and answers within this.
+                          {"timeout_ms", std::min<int64_t>(timeout_ms, 10000)},
+                          {"detach_timeout_ms", timeout_ms}};
+    // Started the way a synchronous call is sent, so a failure to start reads
+    // and retires the route exactly as it would there.
+    auto accepted = ipc->sendRequest("asset.reimport", request, ipc::kWaitForDefinitiveResponse);
+    if (accepted.isErr()) return accepted.error();
+    const auto& started = accepted.value();
+    if (!started.is_object() || !started.contains("reimport_id") || !started["reimport_id"].is_string()) {
+        // Answered in full, by a bridge that ran it the old way.
+        return started;
+    }
+    const auto id = started["reimport_id"].get<std::string>();
+    const auto named = [&id](Result<json> answer) -> Result<json> {
+        if (answer.isOk()) {
+            if (answer.value().is_object()) answer.value()["reimport_id"] = id;
+            return answer;
+        }
+        auto error = answer.error();
+        if (error.data.is_null()) error.data = json::object();
+        if (error.data.is_object()) error.data["reimport_id"] = id;
+        return error;
+    };
+    // The bridge answers on its own deadline. This one is for a bridge that
+    // stopped answering the reads altogether.
+    const auto give_up = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms) +
+                         std::chrono::seconds(60);
+    std::optional<Error> last_failure;
+    while (!cancellationRequested()) {
+        std::this_thread::sleep_for(kReimportPollInterval);
+        // Straight down the lease, so a read that waited behind another
+        // command is asked again rather than taken for a hung engine.
+        auto read = runtime::sendLiveRouteRequest(*lease, "asset.reimportStatus",
+                                                  {{"reimport_id", id}},
+                                                  ipc::kWaitForDefinitiveResponse, true);
+        if (read.response.isErr()) {
+            // A read lost on the way says nothing about the reimport, so the
+            // next one asks again. A refusal from the bridge itself is the
+            // answer: an editor that restarted keeps none of its reimports.
+            if (!ipc::transportFailureState(read.response.error()).has_value()) {
+                return named(read.response.error());
+            }
+            last_failure = read.response.error();
+        } else if (read.response.value().value("state", std::string()) == "finished") {
+            return named(bridgeAnswer(read.response.value().value("answer", json::object())));
+        }
+        if (std::chrono::steady_clock::now() >= give_up) {
+            return Error(504,
+                         "The editor stopped answering reads of reimport " + id +
+                             " before it had an answer, so whether the assets were reimported is "
+                             "unknown." +
+                             (last_failure.has_value() ? " The last read failed: " + last_failure->message
+                                                       : std::string()),
+                         {{"code", "reimport_status_unanswered"},
+                          {"outcome", "unknown_outcome"},
+                          {"reimport_id", id},
+                          {"retryable", true}});
+        }
+    }
+    // The job keeps no answer once cancelled. The editor's work carries on,
+    // and the bridge stops waiting on it when nobody reads it.
+    return Error(409, "The reimport job was cancelled before it had an answer.",
+                 {{"code", "job_cancelled"}, {"reimport_id", id}, {"retryable", false}});
+}
+
+}  // namespace
+
 CallToolResult handleAssetReimport(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     if (!args.is_object() || !args.contains("paths") || !args["paths"].is_array() ||
         args["paths"].empty() || args["paths"].size() > 256) {
@@ -2316,13 +2422,38 @@ CallToolResult handleAssetReimport(const json& args, std::shared_ptr<ipc::IIpcCl
             return CallToolResult::errorJson(400, "Invalid asset reimport request: paths must be unique");
         }
     }
+    // Ten seconds is what fits inside the bridge's fifteen-second wait for any
+    // one command. A job waits on a thread of its own, so its reimport answers
+    // at once with an id and is read until it finishes (Q8, #996).
+    const bool as_job = runningAsJob();
+    const int64_t max_timeout_ms = as_job ? kMaxReimportJobMs : 10000;
     if (args.contains("timeout_ms") &&
         (!args["timeout_ms"].is_number_integer() || args["timeout_ms"].get<int64_t>() < 1 ||
-         args["timeout_ms"].get<int64_t>() > 10000)) {
-        return CallToolResult::errorJson(400, "Invalid asset reimport request: timeout_ms must be an integer from 1 to 10000");
+         args["timeout_ms"].get<int64_t>() > max_timeout_ms)) {
+        if (!as_job && args["timeout_ms"].is_number_integer() &&
+            args["timeout_ms"].get<int64_t>() > 10000 &&
+            args["timeout_ms"].get<int64_t>() <= kMaxReimportJobMs) {
+            return CallToolResult::errorJson(
+                400,
+                "timeout_ms above 10000 needs request_id. Without one the call is answered within "
+                "the bridge's wait for a single command; with one it runs as a job, which waits "
+                "up to 900000.",
+                {{"code", "reimport_needs_job"}, {"field", "request_id"}});
+        }
+        return CallToolResult::errorJson(
+            400, "Invalid asset reimport request: timeout_ms must be an integer from 1 to " +
+                     std::to_string(max_timeout_ms));
     }
     if (!ipc || !ipc->isConnected()) {
         return CallToolResult::notConnected("Godot Editor is offline. Launch Godot to reimport assets.");
+    }
+    if (as_job) {
+        auto answered = reimportAsJob(args, ipc);
+        offline::ResourceIndexer::invalidateSharedIndex();
+        if (answered.isErr()) {
+            return CallToolResult::fromError(answered.error(), "Failed to reimport assets: ");
+        }
+        return CallToolResult::successJson(answered.value());
     }
     auto response = ipc->sendRequest("asset.reimport", args, ipc::kWaitForDefinitiveResponse);
     // A reimport rewrites .import sidecars and can change uids, so the shared

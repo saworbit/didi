@@ -31,7 +31,7 @@ const std::unordered_map<std::string, std::string>& sharedDescriptions() {
     static const std::unordered_map<std::string, std::string> table = {
         // Q8: the caller's handle on long work, read again by the same call.
         {"request_id",
-         "Runs the call once, as a job: a repeat with the same request_id reads its result."},
+         "Runs the call as a job; repeating it with this request_id reads the result."},
         {"target_node",
          "Path to the node in the active edited scene this acts on, such as "
          "/root/Main/Player. The argument is target_node, not node_path."},
@@ -303,9 +303,9 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
          "The res:// resource to inspect. Matched exactly, so res://player.gd never answers "
          "with res://player.gd.uid."},
         {"asset_reimport.timeout_ms",
-         "How long to wait for the editor to finish reimporting, and to apply any scan the batch "
-         "needed, in milliseconds. A timeout's error.data says whether the editor was "
-         "still scanning (editor_scanning) or applying the scan (scan_applied)."},
+         "Wait for the reimport and any scan it needs, in ms: at most 10000, or 900000 with "
+         "request_id (default 300000 then). A timeout's error.data says if the editor was "
+         "scanning (editor_scanning) or applying it (scan_applied)."},
         {"instantiate_asset.asset_path",
          "The res:// asset to put in the scene."},
         {"instantiate_asset.parent_path",

@@ -113,6 +113,10 @@ bool GDExtensionIpc::start(const std::string& kind, const std::string& project_p
             return std::move(*rejected);
         }
 
+        if (auto answered = answerOffMainThread(method, params, *session); answered.has_value()) {
+            return std::move(*answered);
+        }
+
         DIDI_LOG_INFO("GDEXT_IPC", "Live command started: ", method);
 
         // Forward to EditorHook to execute safely on Godot's Main Thread

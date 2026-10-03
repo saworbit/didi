@@ -51,6 +51,22 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Added
 
+- **`asset_reimport` runs as a job, so a scan of many new scripts can be waited
+  out (#996, Q8 part 2).** A reimport that had to scan was answered within the
+  bridge's fifteen-second wait for one command or not at all, so `timeout_ms`
+  stopped at 10 seconds, which a software-rendered editor spends registering a
+  handful of new scripts. Given a `request_id`, `asset_reimport` runs as a job
+  like `project_export`: the bridge starts the reimport detached and answers at
+  once with an id, the server reads it with `asset.reimportStatus`, which the
+  bridge answers off the editor's main thread so it answers while the editor
+  applies the scan, and `timeout_ms` goes to 900000 (default 300000). The
+  answer is the reimport's own, with its `reimport_id`. A long `timeout_ms`
+  without a `request_id` is `400 reimport_needs_job`. A detached reimport no
+  server has read for a minute is let go, so a server that exited mid-job does
+  not hold the one reimport slot. The live harness keeps one server alive
+  across the reads, which `Invoke-Didi` cannot, and checks forty new classes
+  registered and the batch's SVG reimported once.
+
 - **A change journal, and undo of one change on its own (#1149, Q15 part 1).**
   Nothing recorded what an agent changed: six trials on two vendors, and
   `editor_undo` was never called, though every editor mutation answers

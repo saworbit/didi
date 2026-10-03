@@ -2658,7 +2658,7 @@
           "openWorldHint": false,
           "readOnlyHint": false
         },
-        "description": "Reimports a validated atomic batch of project source assets and waits for two consecutive editor-idle frames. A batch holding a new file scans first and answers only once the editor has applied the scan, so a new script's class is registered by then. An import the engine refused is refused, naming the failed paths, with the engine's reason under engine_diagnostics.",
+        "description": "Reimports project source assets and waits for the editor to go idle. A batch with a new file scans first and answers once the scan is applied, so a new script's class is registered. A refused import names the failed paths; the engine's reason is under engine_diagnostics.",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {
@@ -2679,10 +2679,15 @@
               "type": "array",
               "uniqueItems": true
             },
+            "request_id": {
+              "description": "Runs the call as a job; repeating it with this request_id reads the result.",
+              "minLength": 8,
+              "type": "string"
+            },
             "timeout_ms": {
               "default": 10000,
-              "description": "How long to wait for the editor to finish reimporting, and to apply any scan the batch needed, in milliseconds. A timeout's error.data says whether the editor was still scanning (editor_scanning) or applying the scan (scan_applied).",
-              "maximum": 10000,
+              "description": "Wait for the reimport and any scan it needs, in ms: at most 10000, or 900000 with request_id (default 300000 then). A timeout's error.data says if the editor was scanning (editor_scanning) or applying it (scan_applied).",
+              "maximum": 900000,
               "minimum": 1,
               "type": "integer"
             }
@@ -3930,7 +3935,7 @@
               "type": "string"
             },
             "request_id": {
-              "description": "Runs the call once, as a job: a repeat with the same request_id reads its result.",
+              "description": "Runs the call as a job; repeating it with this request_id reads the result.",
               "minLength": 8,
               "type": "string"
             },
@@ -6146,7 +6151,7 @@
               "type": "string"
             },
             "request_id": {
-              "description": "Runs the call once, as a job: a repeat with the same request_id reads its result.",
+              "description": "Runs the call as a job; repeating it with this request_id reads the result.",
               "minLength": 8,
               "type": "string"
             },

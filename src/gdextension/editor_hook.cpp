@@ -6,7 +6,9 @@
 #include "didi/gdextension/runtime_bridge.hpp"
 #include "didi/gdextension/expression_sandbox.hpp"
 #include "didi/common/logger.hpp"
+#include "didi/common/secure_random.hpp"
 #include "didi/common/types.hpp"
+#include <algorithm>
 #include <set>
 #include <unordered_set>
 
@@ -20,31 +22,34 @@ std::string sessionKindName(std::optional<runtime::SessionKind> kind) {
     return *kind == runtime::SessionKind::editor ? "editor" : "game";
 }
 
+// Everything the engine printed at warning level or above since this command
+// started, on its answer. One place, so a deferred command -- a reimport, a
+// coroutine, a capture -- carries what printed across the frames it waited for
+// as well as a synchronous one does, and so does a detached reimport's answer.
+void attachDiagnosticsSinceStart(const std::shared_ptr<CommandControl>& control, json& response) {
+    const auto [method, cursor] = control->started();
+    if (cursor == 0 || methodReportsEngineOutputItself(method)) return;
+    auto& ring = EditorHook::instance().engineOutput();
+    const size_t total = ring.countFrom(cursor, "warning");
+    if (total == 0) return;
+    auto records = ring.read(cursor, kMaxEngineDiagnostics, "warning");
+    if (records.isErr()) return;
+    const auto found = records.value().find("records");
+    if (found != records.value().end()) attachEngineDiagnostics(response, *found, total);
+}
+
 void fulfillCommand(const std::shared_ptr<std::promise<json>>& promise,
                     const std::shared_ptr<CommandControl>& control,
                     json response) {
     if (promise && control && control->tryClaimResponse()) {
-        // Everything the engine printed at warning level or above since this
-        // command started, on its answer. One place, so a deferred command --
-        // a reimport, a coroutine, a capture -- carries what printed across
-        // the frames it waited for as well as a synchronous one does.
-        const auto [method, cursor] = control->started();
-        if (cursor != 0 && !methodReportsEngineOutputItself(method)) {
-            auto& ring = EditorHook::instance().engineOutput();
-            const size_t total = ring.countFrom(cursor, "warning");
-            if (total > 0) {
-                auto records = ring.read(cursor, kMaxEngineDiagnostics, "warning");
-                if (records.isOk()) {
-                    const auto found = records.value().find("records");
-                    if (found != records.value().end()) {
-                        attachEngineDiagnostics(response, *found, total);
-                    }
-                }
-            }
-        }
+        attachDiagnosticsSinceStart(control, response);
         promise->set_value(std::move(response));
     }
 }
+
+// How long a detached reimport may be waited for, which is how long its job
+// may run: fifteen minutes, the longest wait any tool takes (project_export).
+constexpr int64_t kMaxDetachedReimportMs = 900000;
 
 } // namespace
 
@@ -85,6 +90,49 @@ std::optional<json> validateSessionKindForMethod(
                                        selected.has_value() ? json(*selected) : json(nullptr)},
                                       {"allowed_session_kinds", std::move(allowed)},
                                       {"retryable", false}}}}}};
+}
+
+void DetachedReimports::begin(const std::string& id, Clock::time_point now) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    // Room for the new one by dropping the oldest finished answer. One
+    // reimport runs at a time, so the rest have answers to drop.
+    while (m_entries.size() >= kKept) {
+        auto finished = std::find_if(m_entries.begin(), m_entries.end(),
+                                     [](const Entry& entry) { return entry.answer.has_value(); });
+        if (finished == m_entries.end()) break;
+        m_entries.erase(finished);
+    }
+    m_entries.push_back(Entry{id, now, now, std::nullopt});
+}
+
+void DetachedReimports::finish(const std::string& id, json answer) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    for (auto& entry : m_entries) {
+        if (entry.id == id && !entry.answer.has_value()) entry.answer = std::move(answer);
+    }
+}
+
+std::optional<json> DetachedReimports::read(const std::string& id, Clock::time_point now) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    for (auto& entry : m_entries) {
+        if (entry.id != id) continue;
+        entry.last_read = now;
+        json status = {{"reimport_id", id},
+                       {"state", entry.answer.has_value() ? "finished" : "working"},
+                       {"elapsed_ms", std::chrono::duration_cast<std::chrono::milliseconds>(
+                                          now - entry.started).count()}};
+        if (entry.answer.has_value()) status["answer"] = *entry.answer;
+        return status;
+    }
+    return std::nullopt;
+}
+
+bool DetachedReimports::unread(const std::string& id, Clock::time_point now) const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    for (const auto& entry : m_entries) {
+        if (entry.id == id) return !entry.answer.has_value() && now - entry.last_read >= kReaderLease;
+    }
+    return false;
 }
 
 EditorHook& EditorHook::instance() {
@@ -1032,6 +1080,39 @@ void EditorHook::scheduleAssetReimport(
         }
         timeout_ms = params["timeout_ms"].get<int64_t>();
     }
+    // A detached reimport answers now with an id and is waited for up to this
+    // long instead (Q8). A bridge older than it ignores the field and runs the
+    // request as it always has, bounded by timeout_ms, which is why the server
+    // sends both.
+    bool detached = false;
+    if (params.contains("detach_timeout_ms")) {
+        if (!params["detach_timeout_ms"].is_number_integer() ||
+            params["detach_timeout_ms"].get<int64_t>() < 1 ||
+            params["detach_timeout_ms"].get<int64_t>() > kMaxDetachedReimportMs) {
+            control->markCompleted();
+            fulfillCommand(promise, control,
+                           {{"error", {{"code", 400},
+                                        {"message", "detach_timeout_ms must be an integer from 1 to " +
+                                                        std::to_string(kMaxDetachedReimportMs)}}}});
+            return;
+        }
+        detached = true;
+        timeout_ms = params["detach_timeout_ms"].get<int64_t>();
+    }
+    std::string detached_id;
+    if (detached) {
+        auto id = security::secureRandomHex(16);
+        if (id.isErr()) {
+            control->markCompleted();
+            fulfillCommand(promise, control,
+                           {{"error", {{"code", 500},
+                                        {"message", id.error().message},
+                                        {"data", {{"code", "internal_error"},
+                                                  {"retryable", true}}}}}});
+            return;
+        }
+        detached_id = id.value();
+    }
 
     std::lock_guard<std::recursive_mutex> lock(m_reimportMutex);
     if (m_pendingAssetReimport.has_value()) {
@@ -1063,14 +1144,23 @@ void EditorHook::scheduleAssetReimport(
         ReimportProgress(now, std::chrono::milliseconds(timeout_ms)),
         promise, control, resolved.value().needs_scan
     });
+    // Kept before anything runs frames, so an answer a nested frame gives has
+    // somewhere to go.
+    if (detached) {
+        m_pendingAssetReimport->detached_id = detached_id;
+        m_detachedReimports.begin(detached_id, now);
+    }
 
     // A scan seen running, Didi's or the editor's own, until it is applied.
     auto started = GodotBridge::instance().startAssetReimport(resolved.value(), m_filesystemSettle);
     if (started.isErr()) {
+        // Refused before anything was reimported, so the command answers it,
+        // detached or not: there is no work left to read about.
         m_pendingAssetReimport.reset();
-        control->markCompleted();
         json error = {{"code", started.error().code}, {"message", started.error().message}};
         if (!started.error().data.is_null()) error["data"] = started.error().data;
+        if (detached) m_detachedReimports.finish(detached_id, {{"error", error}});
+        control->markCompleted();
         fulfillCommand(promise, control, {{"error", std::move(error)}});
         return;
     }
@@ -1084,7 +1174,51 @@ void EditorHook::scheduleAssetReimport(
     DIDI_LOG_INFO("EDITOR_HOOK", "Started bounded asset reimport for ",
                   resolved.value().reimported.size(), " imported and ",
                   resolved.value().refreshed.size(), " refreshed path(s)",
-                  started.value().held ? ", the reimport held until the editor's scan is over" : "");
+                  started.value().held ? ", the reimport held until the editor's scan is over" : "",
+                  detached ? ", detached as " + detached_id : std::string());
+    if (!detached) return;
+    // Accepted, not done. The answer says so in its own words, so a reader
+    // that knows nothing of detaching cannot take it for a finished reimport.
+    control->markCompleted();
+    fulfillCommand(promise, control,
+                   {{"status", "accepted"},
+                    {"reimport_id", detached_id},
+                    {"paths", resolved.value().paths},
+                    {"detach_timeout_ms", timeout_ms},
+                    {"message", "The reimport has started and is not finished. Read its answer "
+                                "with asset.reimportStatus."}});
+}
+
+json EditorHook::readDetachedReimport(const json& params) {
+    if (!params.is_object() || !params.contains("reimport_id") || !params["reimport_id"].is_string()) {
+        return {{"error", {{"code", 400}, {"message", "reimport_id must be the string asset.reimport "
+                                                       "answered with"}}}};
+    }
+    const auto id = params["reimport_id"].get<std::string>();
+    auto status = m_detachedReimports.read(id, DetachedReimports::Clock::now());
+    if (!status.has_value()) {
+        // An editor that restarted has none of the previous one's reimports,
+        // and that is the usual way to get here.
+        return {{"error", {{"code", 404},
+                            {"message", "This editor keeps no reimport " + id + ". It was started "
+                                        "in an editor process that has since stopped, or it "
+                                        "finished long enough ago to have been dropped."},
+                            {"data", {{"code", "reimport_not_found"},
+                                      {"outcome", "unknown_outcome"},
+                                      {"retryable", false}}}}}};
+    }
+    return std::move(*status);
+}
+
+void EditorHook::answerAssetReimport(PendingAssetReimport& completed, json response) {
+    completed.control->markCompleted();
+    if (completed.detached_id.empty()) {
+        fulfillCommand(completed.response_promise, completed.control, std::move(response));
+        return;
+    }
+    attachDiagnosticsSinceStart(completed.control, response);
+    m_detachedReimports.finish(completed.detached_id, std::move(response));
+    DIDI_LOG_INFO("EDITOR_HOOK", "Detached asset reimport ", completed.detached_id, " finished");
 }
 
 bool EditorHook::scheduleMainScreenCapture(
@@ -1437,6 +1571,31 @@ void EditorHook::processAssetReimportFrame() {
         std::lock_guard<std::recursive_mutex> lock(m_reimportMutex);
         if (!m_pendingAssetReimport.has_value()) return;
         observed_control = m_pendingAssetReimport->control;
+        // A detached reimport nobody has read for the lease belongs to a
+        // server that went away. Waiting on for it would refuse every other
+        // reimport until this one ended, so the wait stops here. The editor's
+        // own work is not Didi's to stop, and carries on.
+        const auto& detached_id = m_pendingAssetReimport->detached_id;
+        if (!detached_id.empty() &&
+            m_detachedReimports.unread(detached_id, std::chrono::steady_clock::now())) {
+            const bool started = !m_pendingAssetReimport->reimport_deferred;
+            completed = std::move(m_pendingAssetReimport);
+            m_pendingAssetReimport.reset();
+            response = {{"error", {{"code", 504},
+                                    {"message", "Nobody read this reimport for " +
+                                                    std::to_string(DetachedReimports::kReaderLease.count()) +
+                                                    " seconds, so the bridge stopped waiting for it."},
+                                    {"data", {{"code", "reimport_unread"},
+                                              {"outcome", started ? "unknown_outcome" : "not_imported"},
+                                              {"retryable", true},
+                                              {"route_quarantine", false}}}}}};
+        }
+    }
+    if (completed.has_value()) {
+        DIDI_LOG_WARN("EDITOR_HOOK", "Stopped waiting for detached asset reimport ",
+                      completed->detached_id, ": nobody read it for the lease");
+        answerAssetReimport(*completed, std::move(response));
+        return;
     }
     const auto now = std::chrono::steady_clock::now();
     auto scanning = GodotBridge::instance().isEditorFilesystemScanning();
@@ -1653,8 +1812,7 @@ void EditorHook::processAssetReimportFrame() {
         }
     }
     if (!completed.has_value()) return;
-    completed->control->markCompleted();
-    fulfillCommand(completed->response_promise, completed->control, std::move(response));
+    answerAssetReimport(*completed, std::move(response));
 }
 
 void EditorHook::scheduleRuntimeStep(
@@ -1853,6 +2011,16 @@ void EditorHook::cancelPendingCommands(const std::string& reason) {
                                         {"message", reason},
                                         {"data", {{"code", "live_session_ended"},
                                                   {"retryable", false}}}}}});
+    }
+    // A detached one answered its command already, so its answer is kept
+    // rather than sent, for a reader that asks before the session goes.
+    if (active_reimport.has_value() && !active_reimport->detached_id.empty()) {
+        m_detachedReimports.finish(active_reimport->detached_id,
+                                   {{"error", {{"code", 503},
+                                               {"message", reason},
+                                               {"data", {{"code", "live_session_ended"},
+                                                         {"outcome", "unknown_outcome"},
+                                                         {"retryable", false}}}}}});
     }
     std::optional<PendingProfilerRead> active_profiler;
     {
@@ -2184,6 +2352,27 @@ bool EditorHookTestAccess::hasPendingRuntimeStep(EditorHook& hook) {
 bool EditorHookTestAccess::hasPendingAssetReimport(EditorHook& hook) {
     std::lock_guard<std::recursive_mutex> lock(hook.m_reimportMutex);
     return hook.m_pendingAssetReimport.has_value();
+}
+
+void EditorHookTestAccess::processAssetReimportFrame(EditorHook& hook) {
+    hook.processAssetReimportFrame();
+}
+
+DetachedReimports& EditorHookTestAccess::detachedReimports(EditorHook& hook) {
+    return hook.m_detachedReimports;
+}
+
+void EditorHookTestAccess::plantDetachedReimport(EditorHook& hook, const std::string& id,
+                                                 std::chrono::steady_clock::time_point started) {
+    auto control = std::make_shared<CommandControl>();
+    control->markCompleted();
+    std::lock_guard<std::recursive_mutex> lock(hook.m_reimportMutex);
+    hook.m_pendingAssetReimport.emplace(EditorHook::PendingAssetReimport{
+        {"res://planted.gd"}, {}, {"res://planted.gd"},
+        ReimportProgress(started, std::chrono::minutes(15)),
+        std::make_shared<std::promise<json>>(), control, true});
+    hook.m_pendingAssetReimport->detached_id = id;
+    hook.m_detachedReimports.begin(id, started);
 }
 
 bool EditorHookTestAccess::hasPendingProfilerRead(EditorHook& hook) {

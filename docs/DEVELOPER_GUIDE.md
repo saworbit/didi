@@ -253,6 +253,22 @@ reads `cancellationRequested()` from `didi/common/cancellation.hpp`;
 `offline::runProcess` already does, and kills the child tree. A job thread never
 writes to stdout: only the loop answers, from the store.
 
+A live tool that waits on the editor longer than the bridge's fifteen-second
+command wait cannot be a job on the server alone, because the wait is the
+bridge's. `asset_reimport` is the pattern: `runningAsJob()` tells the handler it
+is on a job's thread, it sends `asset.reimport` with `detach_timeout_ms`, and
+the bridge answers at once with a `reimport_id` and keeps the eventual answer in
+`DetachedReimports` (`editor_hook.hpp`). The handler polls
+`asset.reimportStatus`, which `answerOffMainThread` in
+`runtime_request_router.cpp` answers on the IPC thread: the editor holds every
+queued command while its progress dialog is open, so a read through the queue
+would wait for the very work it asks about. Anything answered there must take
+only its own lock, never one the main thread holds across a call that runs
+frames. The reads go down the call's route lease rather than through the
+registry's dispatcher, so a read that waited behind another command is asked
+again instead of quarantining the route; a bridge that stops being read lets
+the reimport go after `DetachedReimports::kReaderLease`.
+
 ### Refusal remedies
 
 Every refusal names what fixes it: `retry_with`, `field`, `next_call`,

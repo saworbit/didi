@@ -202,7 +202,8 @@ change during a session; restart the server to switch. See
 ### Optional: long calls as jobs
 
 `project_export` and `csharp_check_build` run a helper that can take minutes,
-and the server answers nothing else while one runs synchronously. Either can
+and the server answers nothing else while one runs synchronously;
+`asset_reimport` can wait minutes for a slow editor to apply a scan. Each can
 run as a job instead, so a host's tool timeout never runs the work twice:
 
 - A `2026-07-28` host that declares `io.modelcontextprotocol/tasks` in a

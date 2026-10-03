@@ -654,6 +654,12 @@ const std::map<std::string, Rule>& rules() {
         // Long work as jobs (Q8). Both are about the id, not the work.
         {"request_id_conflict", [](const Refusal&) { return field("request_id"); }},
         {"job_cancelled", [](const Refusal&) { return field("request_id"); }},
+        // asset_reimport as a job. A long wait needs a request_id; a job whose
+        // reimport was lost to the reader starts again under a new one.
+        {"reimport_needs_job", [](const Refusal&) { return field("request_id"); }},
+        {"reimport_unread", [](const Refusal&) { return field("request_id"); }},
+        {"reimport_not_found", [](const Refusal&) { return field("request_id"); }},
+        {"reimport_status_unanswered", [](const Refusal&) { return field("request_id"); }},
         {"animation_library_unloadable", [](const Refusal&) { return field("library_path"); }},
         {"not_an_animation_library", [](const Refusal&) { return field("library_path"); }},
         {"library_path_case_mismatch", [](const Refusal&) { return field("library_path"); }},

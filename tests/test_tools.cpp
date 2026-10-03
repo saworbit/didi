@@ -6402,7 +6402,10 @@ static void test_asset_reimport_public_validation_and_schema() {
     ASSERT_EQ(definition["_meta"]["didi"]["executionModes"], didi::json::array({"live"}));
     ASSERT_EQ(definition["inputSchema"]["properties"]["paths"]["minItems"], 1);
     ASSERT_EQ(definition["inputSchema"]["properties"]["paths"]["maxItems"], 256);
-    ASSERT_EQ(definition["inputSchema"]["properties"]["timeout_ms"]["maximum"], 10000);
+    // 900000 as a job; a call that is not one is still held to 10000 by the
+    // handler, which says what lifts it (Q8, tests/test_reimport_job.cpp).
+    ASSERT_EQ(definition["inputSchema"]["properties"]["timeout_ms"]["maximum"], 900000);
+    ASSERT_EQ(definition["inputSchema"]["properties"]["request_id"]["minLength"], 8);
 
     for (const auto& args : {
         didi::json::object(), didi::json{{"paths", didi::json::array()}},

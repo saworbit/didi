@@ -442,6 +442,7 @@ set(TEST_SOURCES
     tests/test_response_economy.cpp
     tests/test_follow_ups.cpp
     tests/test_jobs.cpp
+    tests/test_reimport_job.cpp
     tests/test_property_paths.cpp
     tests/test_undo_ledger.cpp
     tests/test_change_journal.cpp

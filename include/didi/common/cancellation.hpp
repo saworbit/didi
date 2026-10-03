@@ -40,4 +40,9 @@ inline bool cancellationRequested() {
     return flag != nullptr && flag->load(std::memory_order_acquire);
 }
 
+// Whether this thread is running a job at all. A handler whose wait is bounded
+// by a deadline the stdio loop cannot outlive may wait longer here, because a
+// job's caller is not waiting on that loop.
+inline bool runningAsJob() { return detail::t_cancellation != nullptr; }
+
 }  // namespace didi
