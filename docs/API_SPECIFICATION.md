@@ -558,9 +558,12 @@ that exited mid-job does not hold the one reimport slot. A bridge older than
 detaching ignores `detach_timeout_ms` and answers within the `timeout_ms` of
 10000 or less that the job also sends, and that answer is the job's.
 
-**Not yet.** While an export job runs, a tool that starts its own helper Godot
-waits for it, because the helper's isolation is a process-wide setting held for
-the length of a run.
+**Helper launches run side by side.** A Godot that Didi starts to answer a
+question, for a check, a verification or an export, is told not to publish a
+runtime session through a variable set in that child's own environment. It used
+to be set on the server process under a lock held for the length of the run, so
+while an export job ran, every other tool that starts a helper Godot waited for
+it. Nothing waits for another launch now.
 
 ### Mutation safety extension
 

@@ -182,6 +182,7 @@ std::set<std::string> sandboxBaselineErrors(const std::string& godot,
     // itself reports, without checking anything of the caller's.
     probe.arguments = {"--headless", "--quit"};
     probe.working_directory = sandbox_project;
+    probe.environment = offlineHelperEnvironment();
     probe.timeout = std::chrono::milliseconds(timeout_seconds * 1000);
     auto ran = runProcess(probe);
     if (ran.isErr() || ran.value().timed_out) {
@@ -225,6 +226,7 @@ Result<SpeculativeSceneRun> runSceneInSandbox(const std::string& godot,
     play.arguments = {"--headless", "--quit-after", std::to_string(request.run_frames),
                       request.run_scene_relative};
     play.working_directory = sandbox_project;
+    play.environment = offlineHelperEnvironment();
     play.timeout = std::chrono::milliseconds(request.timeout_seconds * 1000);
     auto ran = runProcess(play);
     if (ran.isErr()) {
@@ -553,8 +555,8 @@ Result<SpeculativeVerifyResult> verifyChangesInSandbox(const SpeculativeVerifyRe
 
     // Neither the checks nor the run wants a Godot that publishes a runtime
     // session. Both are engines Didi started to answer a question, and a
-    // session from one of them is a session the next discovery would find.
-    const ScopedOfflineHelperEnvironment offline_helper;
+    // session from one of them is a session the next discovery would find, so
+    // every launch below carries offlineHelperEnvironment().
     const std::string godot = resolveGodotExecutable();
 
     // Before the proposal is written, and that ordering is the whole point.
@@ -593,6 +595,7 @@ Result<SpeculativeVerifyResult> verifyChangesInSandbox(const SpeculativeVerifyRe
         check.executable = godot;
         check.arguments = {"--headless", "--check-only", "-s", change.relative};
         check.working_directory = sandbox_project;
+    check.environment = offlineHelperEnvironment();
         check.timeout = std::chrono::milliseconds(request.timeout_seconds * 1000);
         auto ran = runProcess(check);
         if (ran.isErr()) {

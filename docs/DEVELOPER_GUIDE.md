@@ -251,7 +251,11 @@ unsynchronised state, and the registry's route-lease binding is per thread for
 that reason. A handler that wants to stop early when its job is cancelled
 reads `cancellationRequested()` from `didi/common/cancellation.hpp`;
 `offline::runProcess` already does, and kills the child tree. A job thread never
-writes to stdout: only the loop answers, from the store.
+writes to stdout: only the loop answers, from the store. Never set an
+environment variable on the server process for a child to inherit: a job may
+be launching something beside you. Put it in `ProcessRequest::environment`,
+which sets it on that child alone; `offlineHelperEnvironment()` is the one every
+helper Godot carries.
 
 A live tool that waits on the editor longer than the bridge's fifteen-second
 command wait cannot be a job on the server alone, because the wait is the

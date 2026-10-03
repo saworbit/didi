@@ -51,6 +51,18 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Added
 
+- **A long export no longer makes every other helper launch wait (#1137, Q8
+  part 3).** A Godot Didi starts to answer a question is told not to publish a
+  runtime session by `DIDI_OFFLINE_HELPER`, which was set on the server process
+  and held under a lock for the whole launch, so an export running as a job
+  held `project_verify_changes`, `shader_check_compile` and every other helper
+  launch for as long as the export ran. The variable is now set in the child's
+  own environment, built for that launch alone (`ProcessRequest::environment`:
+  a `CreateProcessW` environment block on Windows, the child's `environ`
+  before `execvp` on POSIX), and the lock is gone. A native test runs two
+  launches with different settings side by side and checks each saw its own.
+  With this, Q8 is complete.
+
 - **`asset_reimport` runs as a job, so a scan of many new scripts can be waited
   out (#996, Q8 part 2).** A reimport that had to scan was answered within the
   bridge's fifteen-second wait for one command or not at all, so `timeout_ms`
