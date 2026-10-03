@@ -320,8 +320,6 @@ Result<offline::ProcessResult> runGodot(const std::filesystem::path& root,
                                         int timeout_seconds) {
     offline::ProcessRequest request;
     request.executable = offline::resolveGodotExecutable();
-    // Set on this child alone, so other launches never wait for this one.
-    request.environment = offline::offlineHelperEnvironment();
     request.arguments = std::move(arguments);
     request.working_directory = root;
     request.timeout = std::chrono::seconds(timeout_seconds);

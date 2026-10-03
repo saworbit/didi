@@ -25,6 +25,7 @@ import re
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 try:
@@ -283,6 +284,21 @@ class OfflineSurface(unittest.TestCase):
         offline = contract.record_offline(binary)
         self.assert_matches("offline.json", contract.render(offline))
         self.assert_matches("offline-core.json", contract.render(contract.record_offline_core(binary, offline)))
+
+    def test_a_session_elsewhere_on_this_machine_is_not_recorded(self):
+        # An editor open on another project, or a descriptor a killed one left
+        # behind, sits in a directory the server finds through the temporary
+        # directory variables and reports on. The recorder points those at a
+        # directory of its own, so this machine's sessions stay out (#1145).
+        binary = didi_binary.resolve()
+        with tempfile.TemporaryDirectory() as elsewhere:
+            sessions = Path(elsewhere) / "didi-sessions"
+            sessions.mkdir()
+            (sessions / "stale.json").write_text('{"session_id": "stale"}', encoding="utf-8")
+            names = ("XDG_RUNTIME_DIR", "TMPDIR", "TMP", "TEMP", "TEMPDIR")
+            with mock.patch.dict(os.environ, {name: elsewhere for name in names}):
+                offline = contract.record_offline(binary)
+        self.assert_matches("offline.json", contract.render(offline))
 
 
 if __name__ == "__main__":

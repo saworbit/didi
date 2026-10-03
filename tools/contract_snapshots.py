@@ -397,7 +397,14 @@ class Workspace:
         # does not collect a temporary project per run.
         self.appdata = self.root / "appdata"
         self.appdata.mkdir()
-        self.env = dict(os.environ, DIDI_SESSION_DIR=str(self.sessions))
+        # The server also reports on every other directory a session could be
+        # in, found through these variables, so an editor open elsewhere on
+        # this machine, or a descriptor a killed one left behind, would become
+        # part of the answer (#1145).
+        self.temp = self.root / "temp"
+        self.temp.mkdir()
+        private_temp = {name: str(self.temp) for name in ("XDG_RUNTIME_DIR", "TMPDIR", "TMP", "TEMP", "TEMPDIR")}
+        self.env = dict(os.environ, DIDI_SESSION_DIR=str(self.sessions), **private_temp)
         self.identities = Identities()
         self.identities.path(self.sessions, "<sessions>")
         self.identities.path(self.project, "<project>")

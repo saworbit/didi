@@ -188,8 +188,10 @@ and prints a diff, and without `--godot` only `offline.json` is recorded.
 `--binary` names the server to record (the newest build by default, as the
 Python suites pick it), `--out <dir>` writes what a run recorded even when it
 failed, and `--keep-work` keeps each temporary project with its `editor.log`.
-The editor is given its own `DIDI_SESSION_DIR`, `APPDATA` and `GODOT_BIN`, so
-neither another editor on the machine nor your editor settings reach an answer.
+Every recording gets its own `DIDI_SESSION_DIR` and temporary directory, which
+is where the server looks for sessions elsewhere (#1145), and the editor its own
+`APPDATA` and `GODOT_BIN`, so neither another editor on the machine nor your
+editor settings reach an answer.
 
 CI checks `offline.json` in `tests.test_contract_snapshots` on all three build
 platforms, and each `live-<line>.json` in the Godot job for that line. A failed
@@ -254,8 +256,8 @@ reads `cancellationRequested()` from `didi/common/cancellation.hpp`;
 writes to stdout: only the loop answers, from the store. Never set an
 environment variable on the server process for a child to inherit: a job may
 be launching something beside you. Put it in `ProcessRequest::environment`,
-which sets it on that child alone; `offlineHelperEnvironment()` is the one every
-helper Godot carries.
+which sets it on that child alone. `runProcess` adds `offlineHelperEnvironment()`
+to every child it starts, so a helper Godot never publishes a session.
 
 A live tool that waits on the editor longer than the bridge's fifteen-second
 command wait cannot be a job on the server alone, because the wait is the
