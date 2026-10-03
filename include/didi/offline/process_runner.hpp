@@ -4,6 +4,7 @@
 #include <chrono>
 #include <filesystem>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace didi::offline {
@@ -14,6 +15,12 @@ struct ProcessRequest {
     std::filesystem::path working_directory;
     std::chrono::milliseconds timeout{30000};
     size_t max_output_bytes{1024 * 1024};
+    // Variables set for the child alone, on top of this process's own, each
+    // replacing one of the same name. This process's environment is never
+    // touched, so two launches with different settings can run at once: a
+    // process-wide variable had to be held under a lock for the whole run, and
+    // an export job held it for minutes (Q8).
+    std::vector<std::pair<std::string, std::string>> environment;
 };
 
 struct ProcessResult {
@@ -46,10 +53,16 @@ struct ProcessResult {
 
 Result<ProcessResult> runProcess(const ProcessRequest& request);
 
-#if defined(_WIN32)
 namespace detail {
+#if defined(_WIN32)
 std::wstring quoteWindowsArgument(const std::wstring& argument);
-}
 #endif
+// This process's environment as NAME=VALUE entries with `overrides` applied: an
+// entry of the same name is replaced, else the override is added. Names compare
+// without case on Windows, as the system does, and the result is sorted the way
+// CreateProcess documents for an environment block.
+std::vector<std::string> childEnvironment(
+    const std::vector<std::pair<std::string, std::string>>& overrides);
+}  // namespace detail
 
 } // namespace didi::offline

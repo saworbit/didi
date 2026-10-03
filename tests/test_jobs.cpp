@@ -12,6 +12,7 @@
 #include "didi/offline/process_runner.hpp"
 
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -20,6 +21,8 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
+#include <vector>
 
 #define ASSERT_TRUE(cond) if (!(cond)) throw std::runtime_error("Assertion failed: " #cond);
 #define ASSERT_FALSE(cond) ASSERT_TRUE(!(cond))
@@ -187,6 +190,98 @@ void test_a_cancelled_job_stops_the_process_it_started() {
     ASSERT_FALSE(run.value().timed_out);
     ASSERT_EQ(run.value().exit_code, 130);
     ASSERT_TRUE(std::chrono::steady_clock::now() - started < 15s);
+}
+
+// --- A child's own environment ----------------------------------------------
+
+// The value of `name` as a child launched with `environment` sees it, printed
+// by the platform's shell, with an optional pause first.
+std::string childSees(const std::string& name,
+                      std::vector<std::pair<std::string, std::string>> environment,
+                      int pause_seconds = 0) {
+    didi::offline::ProcessRequest request;
+#if defined(_WIN32)
+    request.executable = "cmd";
+    const std::string pause =
+        pause_seconds > 0 ? "ping -n " + std::to_string(pause_seconds + 1) + " 127.0.0.1 >nul & " : "";
+    request.arguments = {"/d", "/c", pause + "echo [%" + name + "%]"};
+#else
+    request.executable = "sh";
+    const std::string pause = pause_seconds > 0 ? "sleep " + std::to_string(pause_seconds) + "; " : "";
+    request.arguments = {"-c", pause + "printf '[%s]' \"$" + name + "\""};
+#endif
+    request.working_directory = std::filesystem::temp_directory_path();
+    request.timeout = 30s;
+    request.environment = std::move(environment);
+    const auto run = didi::offline::runProcess(request);
+    if (run.isErr()) return "error: " + run.error().message;
+    const auto& output = run.value().output;
+    const auto open = output.find('[');
+    const auto close = output.rfind(']');
+    if (open == std::string::npos || close == std::string::npos || close < open) return output;
+    return output.substr(open + 1, close - open - 1);
+}
+
+void setParentVariable(const char* name, const char* value) {
+#if defined(_WIN32)
+    _putenv_s(name, value);
+#else
+    if (*value == '\0') unsetenv(name);
+    else setenv(name, value, 1);
+#endif
+}
+
+void test_a_childs_environment_is_its_own() {
+    setParentVariable("DIDI_CHILD_ONLY", "");
+    ASSERT_EQ(childSees("DIDI_CHILD_ONLY", {{"DIDI_CHILD_ONLY", "from-request"}}), "from-request");
+    // Nothing was set on this process.
+    ASSERT_TRUE(std::getenv("DIDI_CHILD_ONLY") == nullptr);
+
+    // An override replaces the parent's value for the child alone.
+    setParentVariable("DIDI_CHILD_OVERRIDE", "parent");
+    ASSERT_EQ(childSees("DIDI_CHILD_OVERRIDE", {}), "parent");
+    ASSERT_EQ(childSees("DIDI_CHILD_OVERRIDE", {{"DIDI_CHILD_OVERRIDE", "child"}}), "child");
+    ASSERT_EQ(std::string(std::getenv("DIDI_CHILD_OVERRIDE")), "parent");
+#if defined(_WIN32)
+    // One name to Windows however it is spelled, so no second entry appears.
+    ASSERT_EQ(childSees("DIDI_CHILD_OVERRIDE", {{"didi_child_override", "lower"}}), "lower");
+    const auto entries = didi::offline::detail::childEnvironment({{"didi_child_override", "lower"}});
+    size_t named = 0;
+    for (const auto& entry : entries) {
+        std::string upper = entry.substr(0, entry.find('=', 1));
+        for (auto& c : upper) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        if (upper == "DIDI_CHILD_OVERRIDE") ++named;
+    }
+    ASSERT_EQ(named, 1u);
+#endif
+    setParentVariable("DIDI_CHILD_OVERRIDE", "");
+
+    // A name that cannot be one is refused before anything runs.
+    didi::offline::ProcessRequest bad;
+    bad.executable = "git";
+    bad.working_directory = std::filesystem::temp_directory_path();
+    bad.environment = {{"A=B", "c"}};
+    const auto refused = didi::offline::runProcess(bad);
+    ASSERT_TRUE(refused.isErr());
+    ASSERT_EQ(refused.error().code, 400);
+}
+
+// Two launches with different settings at once, each seeing its own. A
+// variable set on this process could only do this under a lock that made the
+// second wait for the first, which is what an export job made every helper
+// launch do for minutes.
+void test_two_launches_with_different_environments_run_at_once() {
+    std::string first;
+    std::string second;
+    const auto started = std::chrono::steady_clock::now();
+    std::thread one([&] { first = childSees("DIDI_CHILD_LANE", {{"DIDI_CHILD_LANE", "one"}}, 2); });
+    std::thread two([&] { second = childSees("DIDI_CHILD_LANE", {{"DIDI_CHILD_LANE", "two"}}, 2); });
+    one.join();
+    two.join();
+    ASSERT_EQ(first, "one");
+    ASSERT_EQ(second, "two");
+    // Side by side: one after the other would take four seconds and more.
+    ASSERT_TRUE(std::chrono::steady_clock::now() - started < 4s);
 }
 
 // --- The server ------------------------------------------------------------
@@ -449,6 +544,9 @@ struct RegisterJobTests {
         registerTest("Jobs.FingerprintIgnoresTheAttemptAndKeyOrder",
                      test_the_fingerprint_ignores_the_attempt_and_the_key_order);
         registerTest("Jobs.CancelledJobStopsItsProcess", test_a_cancelled_job_stops_the_process_it_started);
+        registerTest("Jobs.ChildEnvironmentIsItsOwn", test_a_childs_environment_is_its_own);
+        registerTest("Jobs.TwoLaunchesWithDifferentEnvironmentsRunAtOnce",
+                     test_two_launches_with_different_environments_run_at_once);
         registerTest("Jobs.RequestIdRepeatDoesNotRunAgain",
                      test_a_request_id_makes_a_job_that_answers_its_repeat_without_running_again);
         registerTest("Jobs.WithoutEitherTheCallRunsAsBefore",

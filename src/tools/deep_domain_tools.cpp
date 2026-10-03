@@ -318,13 +318,10 @@ private:
 Result<offline::ProcessResult> runGodot(const std::filesystem::path& root,
                                         std::vector<std::string> arguments,
                                         int timeout_seconds) {
-    // The guard serialises isolated launches itself.
-    offline::ScopedOfflineHelperEnvironment offline_environment;
-    if (!offline_environment.ready()) {
-        return Error::internal("Unable to isolate the offline Godot helper environment");
-    }
     offline::ProcessRequest request;
     request.executable = offline::resolveGodotExecutable();
+    // Set on this child alone, so other launches never wait for this one.
+    request.environment = offline::offlineHelperEnvironment();
     request.arguments = std::move(arguments);
     request.working_directory = root;
     request.timeout = std::chrono::seconds(timeout_seconds);

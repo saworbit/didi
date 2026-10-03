@@ -2,7 +2,9 @@
 #include "didi/common/cancellation.hpp"
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <chrono>
+#include <cstring>
 #include <limits>
 #include <thread>
 
@@ -15,6 +17,13 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#if defined(__APPLE__)
+// A shared library on macOS cannot name environ; the loader keeps it for the
+// program. _NSGetEnviron is the documented way to reach it from a library.
+#include <crt_externs.h>
+#else
+extern char** environ;
+#endif
 #endif
 
 namespace didi::offline {
@@ -30,7 +39,42 @@ void appendBounded(ProcessResult& result, const char* data, size_t size, size_t 
     }
 }
 
+#if !defined(_WIN32)
+char**& processEnvironment() {
+#if defined(__APPLE__)
+    return *_NSGetEnviron();
+#else
+    return environ;
+#endif
+}
+#endif
+
+// The variable's name: everything before the first '=' after the first
+// character. Windows keeps each drive's current directory as "=C:=C:\dir",
+// whose name starts with the '='.
+std::string environmentName(const std::string& entry) {
+    const auto equals = entry.find('=', 1);
+    return equals == std::string::npos ? entry : entry.substr(0, equals);
+}
+
 #if defined(_WIN32)
+std::string upperAscii(std::string text) {
+    for (auto& character : text) {
+        character = static_cast<char>(std::toupper(static_cast<unsigned char>(character)));
+    }
+    return text;
+}
+
+std::string wideToUtf8(const wchar_t* value) {
+    const int length = static_cast<int>(wcslen(value));
+    if (length == 0) return {};
+    const int required = WideCharToMultiByte(CP_UTF8, 0, value, length, nullptr, 0, nullptr, nullptr);
+    if (required <= 0) return {};
+    std::string narrow(static_cast<size_t>(required), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, value, length, narrow.data(), required, nullptr, nullptr);
+    return narrow;
+}
+
 Result<std::wstring> utf8ToWide(const std::string& value) {
     if (value.empty()) return std::wstring();
     if (value.size() > static_cast<size_t>(std::numeric_limits<int>::max())) {
@@ -50,8 +94,45 @@ Result<std::wstring> utf8ToWide(const std::string& value) {
 
 } // namespace
 
-#if defined(_WIN32)
 namespace detail {
+
+std::vector<std::string> childEnvironment(
+    const std::vector<std::pair<std::string, std::string>>& overrides) {
+    std::vector<std::string> entries;
+#if defined(_WIN32)
+    if (wchar_t* block = GetEnvironmentStringsW()) {
+        for (const wchar_t* entry = block; *entry != L'\0'; entry += wcslen(entry) + 1) {
+            auto narrow = wideToUtf8(entry);
+            if (!narrow.empty()) entries.push_back(std::move(narrow));
+        }
+        FreeEnvironmentStringsW(block);
+    }
+    // The system compares names without case, so Path and PATH are one name.
+    const auto key = [](const std::string& entry) { return upperAscii(environmentName(entry)); };
+#else
+    for (char** entry = processEnvironment(); entry != nullptr && *entry != nullptr; ++entry) {
+        entries.emplace_back(*entry);
+    }
+    const auto key = [](const std::string& entry) { return environmentName(entry); };
+#endif
+    for (const auto& [name, value] : overrides) {
+        std::string entry = name + "=" + value;
+        const auto wanted = key(entry);
+        auto found = std::find_if(entries.begin(), entries.end(),
+                                  [&](const std::string& existing) { return key(existing) == wanted; });
+        if (found != entries.end()) *found = std::move(entry);
+        else entries.push_back(std::move(entry));
+    }
+#if defined(_WIN32)
+    // CreateProcess documents an environment block as sorted by name, without
+    // case, and some programs look a variable up as if it were.
+    std::stable_sort(entries.begin(), entries.end(),
+                     [&](const std::string& a, const std::string& b) { return key(a) < key(b); });
+#endif
+    return entries;
+}
+
+#if defined(_WIN32)
 
 std::wstring quoteWindowsArgument(const std::wstring& argument) {
     if (!argument.empty() && argument.find_first_of(L" \t\n\v\"") == std::wstring::npos) {
@@ -77,9 +158,9 @@ std::wstring quoteWindowsArgument(const std::wstring& argument) {
     quoted.push_back(L'\"');
     return quoted;
 }
+#endif
 
 } // namespace detail
-#endif
 
 Result<ProcessResult> runProcess(const ProcessRequest& request) {
     if (request.executable.empty()) return Error::invalidArgument("Process executable is required");
@@ -91,6 +172,13 @@ Result<ProcessResult> runProcess(const ProcessRequest& request) {
     if (request.working_directory.empty() ||
         !std::filesystem::is_directory(request.working_directory, path_error) || path_error) {
         return Error::invalidArgument("Process working directory does not exist");
+    }
+    for (const auto& [name, value] : request.environment) {
+        if (name.empty() || name.find('=') != std::string::npos ||
+            name.find('\0') != std::string::npos || value.find('\0') != std::string::npos) {
+            return Error::invalidArgument("Process environment variable \"" + name +
+                                          "\" needs a name with no '=' and no NUL in either half");
+        }
     }
 
     ProcessResult result;
@@ -108,6 +196,18 @@ Result<ProcessResult> runProcess(const ProcessRequest& request) {
     }
     std::vector<wchar_t> mutable_command(command_line.begin(), command_line.end());
     mutable_command.push_back(L'\0');
+    // The child's own block, built only when it differs from this process's,
+    // so a launch that sets nothing inherits exactly as it always has.
+    std::vector<wchar_t> environment_block;
+    if (!request.environment.empty()) {
+        for (const auto& entry : detail::childEnvironment(request.environment)) {
+            auto wide = utf8ToWide(entry);
+            if (wide.isErr()) return wide.error();
+            environment_block.insert(environment_block.end(), wide.value().begin(), wide.value().end());
+            environment_block.push_back(L'\0');
+        }
+        environment_block.push_back(L'\0');
+    }
 
     SECURITY_ATTRIBUTES security{sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
     HANDLE read_pipe = nullptr;
@@ -152,8 +252,10 @@ Result<ProcessResult> runProcess(const ProcessRequest& request) {
     // spawned this way since #351; this path was the one that did not.
     const BOOL launched = CreateProcessW(
         nullptr, mutable_command.data(), nullptr, nullptr, TRUE,
-        CREATE_NO_WINDOW | CREATE_SUSPENDED,
-        nullptr, working_directory.c_str(), &startup, &process);
+        CREATE_NO_WINDOW | CREATE_SUSPENDED |
+            (environment_block.empty() ? 0 : CREATE_UNICODE_ENVIRONMENT),
+        environment_block.empty() ? nullptr : environment_block.data(),
+        working_directory.c_str(), &startup, &process);
     CloseHandle(write_pipe);
     CloseHandle(null_input);
     if (!launched) {
@@ -241,6 +343,16 @@ Result<ProcessResult> runProcess(const ProcessRequest& request) {
     CloseHandle(process.hProcess);
     if (job) CloseHandle(job);
 #else
+    // Built before the fork: after it, only calls that cannot allocate are
+    // safe in a process that had other threads, and pointing environ at an
+    // array that already exists is one.
+    std::vector<std::string> environment_storage;
+    std::vector<char*> environment_pointers;
+    if (!request.environment.empty()) {
+        environment_storage = detail::childEnvironment(request.environment);
+        for (auto& entry : environment_storage) environment_pointers.push_back(entry.data());
+        environment_pointers.push_back(nullptr);
+    }
     int output_pipe[2];
     if (pipe(output_pipe) != 0) return Error::internal("Failed to create process output pipe");
     const pid_t child = fork();
@@ -273,6 +385,9 @@ Result<ProcessResult> runProcess(const ProcessRequest& request) {
         argv.reserve(storage.size() + 1);
         for (auto& argument : storage) argv.push_back(argument.data());
         argv.push_back(nullptr);
+        // execvp hands the child this process's environ, and searches the PATH
+        // in it, so the child's own environment is put there first.
+        if (!environment_pointers.empty()) processEnvironment() = environment_pointers.data();
         execvp(request.executable.c_str(), argv.data());
         _exit(127);
     }
