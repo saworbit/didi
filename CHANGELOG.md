@@ -536,6 +536,31 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
   read-only, the engine's error, and a remedy that says to make the file
   writable and send the call again. A rollback that also fails is still a 500.
 
+- **The visual test lab no longer carries a uid Godot cannot read (#1164).**
+  `viewport_create_test_lab` wrote `uid="uid://didi_test_lab_sandbox"`. A uid
+  is letters a to z and digits, so Godot dropped it without a line and every
+  lab had none. The header now carries no uid, as `resource_create`'s does not.
+  The answer adds `file_bytes`, read back from disk, and the observed check
+  compares it with the engine's own read and expects the editor to index the
+  lab.
+
+- **resource_create writes a class_name sub-resource the way Godot does
+  (#1131).** #1125 fixed this for the top-level type only. A `sub_resources`
+  entry of a project `class_name` type was refused as not a class, and with
+  `allow_unknown_type` written under its own name with no script, which Godot
+  loads as a `MissingResource`. It is now written as its engine base with
+  `script = ExtResource(..)` first, one `[ext_resource]` for the script however
+  many entries use it, and its names are checked against the base and the
+  script's vars. Neither refusal recommends `allow_unknown_type` for a
+  class_name script any more.
+
+- **The harness holds every writer to the editor's index (#1154).** Only
+  `script_create` was checked. Both `resource_create` cases and
+  `gridmap_export_mesh_library` now expect the editor to list the file they
+  wrote, and `scene_create` and `scene_pack_branch` expect the engine to know
+  the uid. Their files carry no uid, so the index is the fact to check there.
+  With the indexing call removed, all of them fail.
+
 - **No helper launch can forget to suppress its session (#1161).** Each of
   the four places that start a helper Godot set `DIDI_OFFLINE_HELPER` itself,
   and a new one that left it out would have published a runtime session with

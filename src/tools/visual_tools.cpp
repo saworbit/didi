@@ -353,7 +353,11 @@ CallToolResult handleCreateVisualTestLab(const json& args, std::shared_ptr<ipc::
     std::ostringstream scene_file;
     scene_file << "[gd_scene";
     if (!target_resource.empty()) scene_file << " load_steps=2";
-    scene_file << " format=3 uid=\"uid://didi_test_lab_sandbox\"]\n\n";
+    // No uid, as resource_create writes none. The one this carried,
+    // uid://didi_test_lab_sandbox, is not a uid: Godot reads only a to z and
+    // digits after uid://, so it dropped it without a line and every lab had
+    // none (#1164).
+    scene_file << " format=3]\n\n";
     if (!target_resource.empty()) {
         scene_file << "[ext_resource type=\"" << target_type << "\" path=\""
                    << target_resource << "\" id=\"1_didi_target\"]\n\n";
@@ -393,10 +397,20 @@ CallToolResult handleCreateVisualTestLab(const json& args, std::shared_ptr<ipc::
         return CallToolResult::fromError(written.error(), "Failed to generate visual test lab sandbox scene file: ");
     }
     offline::ResourceIndexer::invalidateSharedIndex();
+    // The file as it landed, read back from disk, the way resource_create
+    // reports what it wrote rather than what it rendered (#1164).
+    std::error_code size_error;
+    const auto file_bytes = std::filesystem::file_size(paths::projectPathFromUtf8(disk_path), size_error);
+    if (size_error) {
+        return CallToolResult::errorJson(
+            500, "Wrote the visual test lab at " + lab_scene_path +
+                     " and could not read its size back: " + size_error.message());
+    }
 
     json res = {
         {"status", "created_offline"},
         {"scene_path", lab_scene_path},
+        {"file_bytes", file_bytes},
         {"target_resource_path", target_resource},
         // Which of the two scenes was written. A PackedScene target is
         // instanced under the lab; any other resource hangs off a holder node

@@ -173,9 +173,10 @@ func load_fresh(path: String, properties: Array) -> Dictionary:
 		for method in resource.get_script_method_list():
 			methods.append(String(method["name"]))
 		answer["methods"] = methods
+	# A property path, so "held:power" reads inside a sub-resource (#1131).
 	var values := {}
 	for property_name in properties:
-		values[property_name] = _plain(resource.get(property_name))
+		values[property_name] = _plain(resource.get_indexed(NodePath(property_name)))
 	answer["properties"] = values
 	return answer
 
@@ -265,6 +266,16 @@ func scene_open(path: String) -> Variant:
 	if editor == null:
 		return "no editor"
 	return editor.get_open_scenes().has(path)
+
+
+## Whether the editor's file index lists a file, which is what the editor
+## does for a file it saves itself. One written behind it waits for the next
+## scan, and on 4.5 and 4.6 that scan can print Unrecognized UID (#1150).
+func indexed(path: String) -> Variant:
+	var editor := Engine.get_singleton(&"EditorInterface")
+	if editor == null:
+		return "no editor"
+	return editor.get_resource_filesystem().get_file_type(path) != ""
 
 
 ## Loads a file and keeps it, so the editor holds a copy of it the way it does

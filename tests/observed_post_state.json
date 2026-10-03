@@ -348,8 +348,10 @@
       "witness": "TileMapLayer.get_cell_source_id, get_cell_atlas_coords and get_cell_alternative_tile through observed_witness.gd"
     },
     "viewport_create_test_lab": {
-      "exempt": "The editor copy block drives it and checks the editor's copy of the lab it rewrote, and no case compares its answer with an independent read of the file.",
-      "issue": 1020
+      "observed": [
+        "file_bytes"
+      ],
+      "witness": "FileAccess length through observed_witness.gd"
     },
     "viewport_set_camera_transform": {
       "observed": [

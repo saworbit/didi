@@ -3140,6 +3140,14 @@ static void test_the_test_lab_preview_names_the_file_it_replaces() {
     // be about.
     const auto created = registry.callTool("viewport_create_test_lab", arguments);
     ASSERT_TRUE(!created.isError);
+    // The size of the file that landed, and a header with no uid: the one it
+    // carried had underscores, which Godot cannot read as a uid (#1164).
+    {
+        std::ifstream lab_file("didi_test_lab.tscn", std::ios::binary);
+        const std::string lab((std::istreambuf_iterator<char>(lab_file)), std::istreambuf_iterator<char>());
+        ASSERT_EQ(didi::json::parse(created.content[0].text)["file_bytes"], lab.size());
+        ASSERT_TRUE(lab.rfind("[gd_scene load_steps=2 format=3]\n", 0) == 0);
+    }
 
     auto replacing = arguments;
     replacing["overwrite"] = true;

@@ -882,9 +882,10 @@ Result<json> checkPropertiesAgainstType(
             engine_verdict->engine_version +
             ", which is the engine this session is attached to. Godot cannot load a "
             "resource whose type it does not know, so the file would fail to load rather "
-            "than lose a property. Check the spelling with script_reflect_class. If the "
-            "type comes from a GDExtension or a class_name script, which neither the "
-            "shipped class reference nor ClassDB lists, pass allow_unknown_type: true.",
+            "than lose a property. Check the spelling with script_reflect_class. A "
+            "class_name is found when a project script declares it, with no flag. If the "
+            "type comes from a GDExtension this engine has not loaded, pass "
+            "allow_unknown_type: true.",
             json{{"retry_with", {{"allow_unknown_type", true}}}});
     }
     // Which list decided the type, so `checked: true` says what it was checked
@@ -903,22 +904,24 @@ Result<json> checkPropertiesAgainstType(
         // fails to instantiate the resource at all, so the file this would
         // write cannot be loaded. Refusing it is the same rule the property
         // check already applies, applied to the type (#465). The escape hatch
-        // is real -- a class_name script or a GDExtension type is not in the
-        // dump either -- so it is named rather than removed.
+        // is real -- a GDExtension type is not in the dump either -- so it is
+        // named rather than removed. A class_name script is found on its own.
         // A GDExtension type is in the attached engine's ClassDB and in no
         // dump, so an engine that has the class settles the question the
         // reference could not. Its properties still cannot be checked.
         const bool engine_has_type =
             engine_verdict.has_value() && engine_verdict->answered && engine_verdict->known;
         if (!allow_unknown_type && !engine_has_type) {
-            return Error::invalidArgument(
+            return Error(
+                400,
                 where + ": " + resource_type +
                 " is not a class in " + offline::ClassReference::instance().apiVersion() +
                 ". Godot cannot load a resource whose type it does not know, so writing "
                 "the file would report a resource that does not exist. Check the spelling "
-                "with script_reflect_class. If the type comes from a GDExtension or a "
-                "class_name script, which the shipped class reference cannot see, pass "
-                "allow_unknown_type: true.");
+                "with script_reflect_class. A class_name is found when a project script "
+                "declares it, with no flag. If the type comes from a GDExtension, which the "
+                "shipped class reference cannot see, pass allow_unknown_type: true.",
+                json{{"retry_with", {{"allow_unknown_type", true}}}});
         }
         return noteOracle(json{{"checked", false},
                                {"reason", "type_not_in_api_reference"},
@@ -1250,15 +1253,30 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
     // while this answered success (#1125).
     const auto engine_named = engine_classes.find(resource_type);
     const bool engine_lacks_type = engine_named != engine_classes.end() && !engine_named->second;
+    // A sub-resource's type is looked up the same way, one level down (#1131).
+    // Each name is looked up once, since a lookup reads every script in the project.
+    std::map<std::string, std::optional<ScriptClass>> script_classes_found;
+    const auto projectScriptClass = [&](const std::string& type_name) -> Result<std::optional<ScriptClass>> {
+        const auto named = engine_classes.find(type_name);
+        if ((named != engine_classes.end() && named->second) ||
+            offline::ClassReference::instance().find(type_name)) {
+            return std::optional<ScriptClass>{};
+        }
+        const auto known = script_classes_found.find(type_name);
+        if (known != script_classes_found.end()) return known->second;
+        auto found = findProjectScriptClass(type_name);
+        if (found.isErr()) return found;
+        // The script is about to be resolved through the shared index, which
+        // may predate it; the search has just read the tree fresh.
+        if (found.value()) offline::ResourceIndexer::invalidateSharedIndex();
+        script_classes_found.emplace(type_name, found.value());
+        return found;
+    };
     std::optional<ScriptClass> script_class;
-    if (!(engine_named != engine_classes.end() && engine_named->second) &&
-        !offline::ClassReference::instance().find(resource_type)) {
-        auto found = findProjectScriptClass(resource_type);
+    {
+        auto found = projectScriptClass(resource_type);
         if (found.isErr()) return CallToolResult::fromError(found.error(), "Argument 'resource_type': ");
         script_class = std::move(found.value());
-        // The script is about to be resolved through the shared index, which
-        // may predate it; the search above has just read the tree fresh.
-        if (script_class) offline::ResourceIndexer::invalidateSharedIndex();
     }
     const std::string header_type = script_class ? script_class->engine_base : resource_type;
     std::vector<std::pair<std::string, json>> to_check;
@@ -1320,13 +1338,49 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
     note_engine(property_check.value());
 
     json sub_property_checks = json::object();
+    std::map<std::string, ScriptClass> sub_script_classes;
     for (const auto& sub : sub_resources) {
+        auto sub_class = projectScriptClass(sub.resource_type);
+        if (sub_class.isErr()) {
+            return CallToolResult::fromError(sub_class.error(),
+                                             "sub_resources entry \"" + sub.id + "\": ");
+        }
+        std::vector<std::pair<std::string, json>> sub_to_check;
+        json sub_declared_by_script = json::array();
+        for (const auto& [name, value] : sub.properties) {
+            if (sub_class.value() && name == "script") {
+                const bool same_script = value.is_object() && value.value("type", "") == "ExtResource" &&
+                                         value.value("path", "") == sub_class.value()->script_path;
+                if (!same_script) {
+                    return CallToolResult::errorJson(
+                        400, "sub_resources entry \"" + sub.id + "\": " + sub.resource_type +
+                                 " is the class_name of " + sub_class.value()->script_path +
+                                 ", and that script is set on the sub-resource already. Leave script "
+                                 "out, or name that script.",
+                        {{"code", "invalid_arguments"}, {"field", "sub_resources"}});
+                }
+                continue;
+            }
+            if (sub_class.value() && sub_class.value()->members.count(name)) {
+                sub_declared_by_script.push_back(name);
+                continue;
+            }
+            sub_to_check.emplace_back(name, value);
+        }
+        const std::string sub_header =
+            sub_class.value() ? sub_class.value()->engine_base : sub.resource_type;
         auto sub_check = checkPropertiesAgainstType(
-            sub.resource_type, sub.properties,
+            sub_header, sub_to_check,
             "Sub-resource '" + sub.id + "' properties", allow_unknown_type,
-            verdictFor(sub.resource_type));
+            verdictFor(sub_header));
         if (sub_check.isErr()) return CallToolResult::fromError(sub_check.error());
         note_engine(sub_check.value());
+        if (sub_class.value()) {
+            sub_check.value()["script_class"] = sub_class.value()->name;
+            sub_check.value()["script"] = sub_class.value()->script_path;
+            sub_check.value()["declared_by_script"] = std::move(sub_declared_by_script);
+            sub_script_classes.emplace(sub.id, *sub_class.value());
+        }
         sub_property_checks[sub.id] = sub_check.value();
     }
 
@@ -1421,11 +1475,26 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
     std::ostringstream sub_blocks;
     json sub_written = json::array();
     for (const auto& sub : sub_resources) {
+        // A class_name type is written as Godot writes it: its engine base,
+        // with the script set before anything the script declares (#1131).
+        const auto scripted = sub_script_classes.find(sub.id);
+        const ScriptClass* sub_class = scripted == sub_script_classes.end() ? nullptr : &scripted->second;
+        const std::string sub_header = sub_class ? sub_class->engine_base : sub.resource_type;
         std::ostringstream block;
-        block << "\n[sub_resource type=\"" << sub.resource_type << "\" id=\"" << sub.id << "\"]\n";
+        block << "\n[sub_resource type=\"" << sub_header << "\" id=\"" << sub.id << "\"]\n";
         json names = json::array();
-        const auto sub_declared = declaredPropertyTypes(sub.resource_type);
+        const auto sub_declared = declaredPropertyTypes(sub_header);
+        std::vector<std::pair<std::string, json>> sub_to_write;
+        if (sub_class) {
+            sub_to_write.emplace_back("script", json{{"type", "ExtResource"},
+                                                     {"path", sub_class->script_path},
+                                                     {"resource_type", "Script"}});
+        }
         for (const auto& [name, value] : sub.properties) {
+            if (sub_class && name == "script") continue;
+            sub_to_write.emplace_back(name, value);
+        }
+        for (const auto& [name, value] : sub_to_write) {
             const auto declaration = sub_declared.find(name);
             auto literal = tresLiteral(
                 value, sub.id + "." + name, &scope,
@@ -1438,8 +1507,10 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
         // or one declared after it, would read as null in Godot.
         scope.visible_sub_ids.push_back(sub.id);
         sub_blocks << block.str();
-        sub_written.push_back({{"id", sub.id}, {"resource_type", sub.resource_type},
-                               {"properties_written", std::move(names)}});
+        json written_sub = {{"id", sub.id}, {"resource_type", sub.resource_type},
+                            {"properties_written", std::move(names)}};
+        if (sub_class) written_sub["engine_type"] = sub_header;
+        sub_written.push_back(std::move(written_sub));
     }
 
     std::ostringstream body;
