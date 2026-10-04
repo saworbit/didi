@@ -464,7 +464,7 @@ CallToolResult handleExecuteTestSession(const json& args, std::shared_ptr<ipc::I
     // the caller to put godot on PATH whatever GODOT_BIN said, where the other
     // tools that start their own Godot say engine_unavailable (#1045, #1076).
     // Windows refuses the launch itself; POSIX forks, and the exec that fails
-    // in the child exits 127.
+    // in the child exits 127, or for a detached game says so on a pipe.
     bool not_started = session_res.launch_failed;
 #if !defined(_WIN32)
     not_started = not_started ||

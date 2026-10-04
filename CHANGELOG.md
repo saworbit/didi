@@ -107,6 +107,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Fixed
 
+- `2026-10-04` A Godot that cannot be run is reported at once on Linux and macOS, and CI runs the live `didi setup` test on each engine line. [#1144](https://github.com/saworbit/didi/issues/1144) · [PR #1180](https://github.com/saworbit/didi/pull/1180)
 - `2026-10-04` A `class_name` written into a new folder is known to the next check, because the writer waits for the editor to list it. [#1177](https://github.com/saworbit/didi/issues/1177) · [PR #1179](https://github.com/saworbit/didi/pull/1179)
 - `2026-10-04` A rolled-back write no longer steps the scene's history behind the editor (part 2). [#1152](https://github.com/saworbit/didi/issues/1152) · [PR #1175](https://github.com/saworbit/didi/pull/1175)
 - `2026-10-04` Every Godot object Didi constructs is finished or not handed back. [#1166](https://github.com/saworbit/didi/issues/1166) · [PR #1171](https://github.com/saworbit/didi/pull/1171)

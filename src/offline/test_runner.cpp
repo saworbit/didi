@@ -17,7 +17,9 @@
 #include <unistd.h>
 #include <cerrno>
 #include <fcntl.h>
+#include <poll.h>
 #include <signal.h>
+#include <cstring>
 #endif
 
 #include <filesystem>
@@ -803,10 +805,32 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
     for (const auto& a : args_list) c_args.push_back(const_cast<char*>(a.c_str()));
     c_args.push_back(nullptr);
 
+    // A detached launch hears nothing from the game once it runs, so an
+    // execvp that failed, a path that is not executable among them, showed
+    // only as whatever waited for the game running out its time (#1144).
+    // Windows refuses such a launch in CreateProcess. Here the game writes
+    // errno on this pipe when its exec fails, and a successful exec closes it.
+    int exec_status[2] = {-1, -1};
+    if (detach) {
+        if (pipe(exec_status) != 0) {
+            close(pipefd[0]);
+            close(pipefd[1]);
+            result.success = false;
+            result.summary = "Failed to create POSIX pipe";
+            return result;
+        }
+        fcntl(exec_status[0], F_SETFD, FD_CLOEXEC);
+        fcntl(exec_status[1], F_SETFD, FD_CLOEXEC);
+    }
+
     pid_t pid = fork();
     if (pid < 0) {
         close(pipefd[0]);
         close(pipefd[1]);
+        if (detach) {
+            close(exec_status[0]);
+            close(exec_status[1]);
+        }
         result.success = false;
         result.summary = "Failed to fork process";
         return result;
@@ -845,6 +869,7 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
         setpgid(0, 0);
         close(pipefd[0]);
         if (detach) {
+            close(exec_status[0]);
             // Nobody will drain the pipe once this call returns, and a full one
             // would block the game forever. The null device takes it instead,
             // and never the server's own stdout, which is the MCP channel.
@@ -862,11 +887,19 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
         }
 
         execvp(godot_exe.c_str(), c_args.data());
+        if (detach) {
+            const int failure = errno;
+            ssize_t told;
+            do {
+                told = write(exec_status[1], &failure, sizeof(failure));
+            } while (told < 0 && errno == EINTR);
+        }
         _exit(127);
     }
 
     // Parent process
     close(pipefd[1]);
+    if (detach) close(exec_status[1]);
     if (detach) {
         // No kill and no wait on the game: it is running, it belongs to init
         // now, and this call is done with it. It is in its own process group,
@@ -884,6 +917,25 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
         } while (bytes < 0 && errno == EINTR);
         close(pipefd[0]);
         while (waitpid(pid, nullptr, 0) < 0 && errno == EINTR) {
+        }
+        // The game's exec closes its end of exec_status, and a failed one
+        // writes errno first. Bounded, because a process another thread forked
+        // before the close-on-exec flag was set holds a copy of the write end.
+        int exec_failure = 0;
+        ssize_t status_bytes = 0;
+        pollfd status{exec_status[0], POLLIN, 0};
+        if (bytes == static_cast<ssize_t>(sizeof(game)) && game > 0 && poll(&status, 1, 5000) > 0) {
+            do {
+                status_bytes = read(exec_status[0], &exec_failure, sizeof(exec_failure));
+            } while (status_bytes < 0 && errno == EINTR);
+        }
+        close(exec_status[0]);
+        if (status_bytes == static_cast<ssize_t>(sizeof(exec_failure))) {
+            result.success = false;
+            result.launch_failed = true;
+            result.launch_error = std::string("the process could not be started: ") + std::strerror(exec_failure);
+            result.summary = "Failed to start the detached game: " + result.launch_error;
+            return result;
         }
         if (bytes != static_cast<ssize_t>(sizeof(game)) || game <= 0) {
             result.success = false;
