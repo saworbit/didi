@@ -193,10 +193,19 @@ json notFoundRemedy(const Refusal& r) {
                         "List the project's autoloads before naming one.");
     }
     if (mentions(r.message, "Script resource not found") || mentions(r.message, "PackedScene not found") ||
-        mentions(r.message, "Autoload resource not found") || mentions(r.message, "No resource at")) {
+        mentions(r.message, "Autoload resource not found") || mentions(r.message, "No resource at") ||
+        mentions(r.message, "no resource could be loaded from")) {
         return nextCall("project_list_resources", json::object(),
                         "Find the file's res:// path before naming it.");
     }
+    // The node is there and what is missing is something an argument names,
+    // so reading the node paths again fixes nothing (#1184).
+    if (mentions(r.message, "is not a method this node's script declares")) return field("method_name");
+    if (r.tool == "project_verify_changes" && mentions(r.message, "run_scene names")) return field("run_scene");
+    if (r.tool == "scene_instantiate_node" && mentions(r.message, "Property not found on new")) {
+        return field("properties");
+    }
+    if (mentions(r.message, "there is no material to read")) return field("property_name");
     return discoverWhatIsThere(r.tool);
 }
 
@@ -429,9 +438,25 @@ const std::map<std::string, Rule>& rules() {
             if (r.data.contains("presets_file_exists")) {
                 return noRemedy("export_presets.cfg does not parse; fix the file by hand.");
             }
+            // A preset Godot will not detect, or cannot be asked for (#1184).
+            // One with a likely name carries did_you_mean, which is a fix
+            // already, so the floor does not reach here for it.
+            if (r.data.contains("detected_presets")) {
+                if (text(r.data, "reason") == "name_not_passable") {
+                    return noRemedy("Rename the preset in the editor's Export dialog; Godot's command "
+                                    "line cannot carry its name.");
+                }
+                return nextCall("project_list_export_presets", json::object(),
+                                "Name a preset Godot detects, or fix the numbering in "
+                                "export_presets.cfg by hand.");
+            }
             return noRemedy("The engine could not use what was sent; the message says what it could not use.");
         }},
         {"script_base_incompatible", [](const Refusal&) { return field("target_node"); }},
+        {"setting_not_found", [](const Refusal&) { return field("setting"); }},
+        {"runtime_route_request_failed", [](const Refusal& r) {
+            return attachAgain(r.data, "The route to the engine failed; check the session before sending again.");
+        }},
         {"node_has_no_script", [](const Refusal& r) {
             const auto tool = text(r.data, "use_tool");
             if (!tool.empty()) return nextCall(tool, json::object(), "This tool calls that engine method.");
@@ -536,6 +561,8 @@ const std::map<std::string, Rule>& rules() {
         }},
         {"forbidden", [](const Refusal& r) {
             if (r.tool == "eval_gdscript") return field("expression");
+            // A method the call refuses by its name, not a file (#1184).
+            if (r.tool == "scene_call_method") return field("method_name");
             if (isOneOf(r.tool, {"script_get_symbols", "script_check_syntax"})) return retryAfter(1000);
             return noRemedy("The file cannot be read by this process; its permissions need fixing.");
         }},
@@ -551,6 +578,9 @@ const std::map<std::string, Rule>& rules() {
                 return nextCall("runtime_list_sessions", json::object(),
                                 "Another client holds that session; pick one that is free.");
             }
+            // A result with no JSON form is the expression's to change; more
+            // time returns the same object (#1184).
+            if (r.tool == "eval_gdscript" && r.status == 415) return field("expression");
             if (r.tool == "eval_gdscript") return retryWith({{"timeout_ms", 5000}});
             return json::object();
         }},

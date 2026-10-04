@@ -116,6 +116,50 @@ static void test_a_422_names_its_own_fix() {
     ASSERT_TRUE(other["no_remedy"].get<std::string>().find("export_presets") == std::string::npos);
 }
 
+// A fix that applies. Each of these named another one: read the node paths for
+// a node that is there, fix a file's permissions for a method name, attach an
+// editor that was already attached (#1184).
+static void test_each_refusal_names_a_fix_that_applies() {
+    ASSERT_EQ(floored(403, "Refusing to call \"_private_helper\".", nullptr, "scene_call_method")["field"],
+              "method_name");
+    ASSERT_EQ(floored(404, "\"free\" is not a method this node's script declares.", nullptr,
+                      "scene_call_method")["field"],
+              "method_name");
+    ASSERT_EQ(floored(404, "run_scene names res://not_a_scene.tscn, which is not in the project", nullptr,
+                      "project_verify_changes")["field"],
+              "run_scene");
+    ASSERT_EQ(floored(404, "Property \"tile_set\": no resource could be loaded from res://nothing.tres, because "
+                           "there is no file there.", nullptr, "scene_set_property")["next_call"]["tool"],
+              "project_list_resources");
+    ASSERT_EQ(floored(404, "Property not found on new Node node: phase_one_typo", nullptr,
+                      "scene_instantiate_node")["field"],
+              "properties");
+    ASSERT_EQ(floored(404, "Property \"material_overlay\" on /root/A holds nothing; there is no material to read",
+                      nullptr, "shader_list_uniforms")["field"],
+              "property_name");
+    ASSERT_EQ(floored(415, "Expression returned an unsupported non-Node Object", nullptr, "eval_gdscript")["field"],
+              "expression");
+    ASSERT_EQ(floored(404, "Project setting not found: a/typo", {{"code", "setting_not_found"}},
+                      "project_set_setting")["field"],
+              "setting");
+    // Offline the answer still says an attached editor knows the defaults.
+    ASSERT_EQ(floored(404, "Project setting not found: a/b", nullptr, "project_get_setting")["next_call"]["tool"],
+              "runtime_list_sessions");
+    // A likely name is a fix of its own, and is left as it is.
+    const auto near_miss = floored(422, "Godot will not detect the export preset \"Win\".",
+                                   {{"code", "unprocessable"}, {"detected_presets", json::array({"Windows"})},
+                                    {"did_you_mean", "Windows"}}, "project_export");
+    ASSERT_EQ(near_miss["did_you_mean"], "Windows");
+    ASSERT_TRUE(!near_miss.contains("no_remedy"));
+    ASSERT_EQ(floored(422, "Godot will not detect the export preset \"Stranded\".",
+                      {{"code", "unprocessable"}, {"detected_presets", json::array()}}, "project_export")
+                  ["next_call"]["tool"],
+              "project_list_export_presets");
+    ASSERT_EQ(floored(503, "The route to the engine could not deliver this call: route failed",
+                      {{"code", "runtime_route_request_failed"}}, "signal_connect")["next_call"]["tool"],
+              "runtime_list_sessions");
+}
+
 // One code, different fixes, by the tool that refused.
 static void test_the_remedy_follows_the_tool() {
     ASSERT_EQ(floored(404, "No such node", nullptr, "scene_get_property")["next_call"]["tool"],
@@ -327,6 +371,7 @@ struct RegisterRefusalRemedyTests {
                      test_a_refusal_with_no_remedy_gets_the_one_its_code_carries);
         registerTest("RefusalRemedies.RemedyFollowsTheTool", test_the_remedy_follows_the_tool);
         registerTest("RefusalRemedies.A422NamesItsOwnFix", test_a_422_names_its_own_fix);
+        registerTest("RefusalRemedies.EachRefusalNamesAFixThatApplies", test_each_refusal_names_a_fix_that_applies);
         registerTest("RefusalRemedies.NotFoundNamesWhereItIsListed",
                      test_a_not_found_names_the_list_that_holds_what_was_missing);
         registerTest("RefusalRemedies.SiteRemedyLeftAlone", test_a_site_remedy_is_left_alone);

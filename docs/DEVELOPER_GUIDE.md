@@ -284,7 +284,10 @@ floor fills it from `src/mcp/refusal_remedies.cpp`, which is keyed by
 `data.code` and may look at the tool. A new code needs an entry there, or one in
 `refusalsWithoutRemedy` with the reason: `tests/test_refusal_remedies.py` scans
 the source for every code and fails on one the table does not cover, and the
-live harness fails a refusal that reaches a caller without a fix. Answer a
+live harness fails a refusal that reaches a caller without a fix. A fix that is
+present can still be the wrong one, so `tests/refusal_remedies.ps1` pins the fix
+for refusals that once named another, such as a node path read for a node that
+was there (#1184), and fails when the run stops meeting one of them. Answer a
 failure with `CallToolResult::errorJson`, `fromError` or `notConnected`, never
 plain text, which has no `error.data` to carry a remedy. The constructor that
 makes plain text is private, so a new one does not compile, and the harness

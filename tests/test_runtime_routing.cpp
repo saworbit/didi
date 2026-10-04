@@ -1780,7 +1780,8 @@ void test_every_live_route_reports_the_same_failure() {
     ASSERT_EQ(forwarded.content.size(), 1u);
     const auto phase7_error = didi::json::parse(forwarded.content.front().text)["error"];
     ASSERT_EQ(phase7_error["code"], 503);
-    ASSERT_EQ(phase7_error["message"], "runtime_route_request_failed");
+    ASSERT_TRUE(phase7_error["message"].get<std::string>().find("could not deliver") != std::string::npos);
+    ASSERT_EQ(phase7_error["data"]["code"], "runtime_route_request_failed");
     assert_owed(phase7_error["data"], "the Phase 7 route");
     // And what is genuinely this envelope's own is still there.
     ASSERT_TRUE(phase7_error["data"].contains("upstream_code"));

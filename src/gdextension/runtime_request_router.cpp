@@ -81,9 +81,14 @@ std::optional<json> rejectDisallowedSessionMethod(
         if (index > 0) allowed_text += " or ";
         allowed_text += allowed[index].get<std::string>();
     }
-    const std::string sentence = method + " needs " +
-                                 (allowed.size() == 1 ? "an " : "a ") + allowed_text +
-                                 " session, and a " + session.kind + " session is selected.";
+    // The article follows the word, not how many kinds are allowed: "an
+    // editor", "a game" (#1184).
+    const auto article = [](const std::string& word) {
+        return !word.empty() && std::string("aeiou").find(word.front()) != std::string::npos ? "an " : "a ";
+    };
+    const std::string sentence = method + " needs " + article(allowed_text) + allowed_text +
+                                 " session, and " + article(session.kind) + session.kind +
+                                 " session is selected.";
     return decorateRuntimeResponse(
         {{"error", {{"code", 409},
                     {"message", sentence},
