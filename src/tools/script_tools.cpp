@@ -91,6 +91,9 @@ struct ScriptEngineCheck {
     // tried. Empty when no editor was attached.
     std::string language_server_unavailable;
     bool truncated{false};
+    // Godot 4.5 only: why the file's own text could not be put back as the
+    // editor's view of it after a source_text check under its path (#1142).
+    std::string language_server_restore_failure;
 };
 
 // Where each editor session's language server listens, asked of its bridge
@@ -217,6 +220,72 @@ ScriptEngineCheck checkScriptFile(const std::string& res_path,
     return check;
 }
 
+// The path a source_text check is sent under when the caller names no file in
+// the project. Nothing is ever written there.
+constexpr const char* kSourceTextCheckPath = "res://.didi/source_text_check.gd";
+
+// Checks text the caller sent with the attached editor's language server
+// (#1142). Only Didi's lexical rules saw it before, so type errors, undeclared
+// identifiers and unknown base classes came back clean while the engine that
+// would find them was one request away. With no editor, or no usable server,
+// nothing is asked and the lexical answer stands as it always did.
+//
+// Sent under the file's own path when file_path names one in the project, so
+// its class_name and relative paths read as that file's, and under a path no
+// file has otherwise. 4.6 and 4.7 keep what a client opened per client and
+// drop it on didClose. 4.5's source keeps one parse of each path for every
+// client and does nothing on didClose, so there the file's own text is sent
+// after the check as well. tools/vibe/probes/lsp_source_text_view.py asks a
+// second client for the file's symbols afterwards, and on 4.5.1, 4.6.2 and
+// 4.7.2 they are the disk's; on none of them did a closed buffer show through.
+ScriptEngineCheck checkSourceText(const std::string& file_path, const std::string& source_text,
+                                  const std::shared_ptr<ipc::IIpcClient>& ipc) {
+    ScriptEngineCheck check;
+    const auto sessions = std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(ipc);
+    const auto editor = sessions ? sessions->observableSession()
+                                 : std::optional<runtime::SessionDescriptor>{};
+    if (!editor.has_value() || editor->kind != "editor") return check;
+    std::string res_path = kSourceTextCheckPath;
+    std::optional<std::string> on_disk;
+    if (!file_path.empty()) {
+        if (auto resolved = paths::resolveProjectFileForWrite(file_path); resolved.isOk()) {
+            res_path = paths::resourcePathOf(resolved.value());
+            std::ifstream input(resolved.value(), std::ios::binary);
+            if (input.is_open()) {
+                std::ostringstream contents;
+                contents << input.rdbuf();
+                on_disk = contents.str();
+            }
+        }
+    }
+    std::string unavailable;
+    const auto endpoint = editorLanguageServer(*sessions, *editor, unavailable);
+    if (!endpoint) {
+        check.language_server_unavailable = unavailable;
+        return check;
+    }
+    const auto answered = runtime::checkScriptWithLanguageServer(
+        *endpoint, editor->session_id, editor->project_path, res_path, source_text);
+    if (!answered.answered) {
+        std::lock_guard<std::mutex> lock(g_endpoint_mutex);
+        g_endpoints.erase(editor->session_id);
+        check.language_server_unavailable = answered.failure;
+        return check;
+    }
+    check.diagnostics = answered.diagnostics;
+    check.language_server = true;
+    check.truncated = answered.truncated;
+    check.engine.version = editor->engine_version;
+    check.engine.ran = true;
+    check.engine.duration_seconds = answered.seconds;
+    if (on_disk.has_value() && editor->engine_version.rfind("4.5", 0) == 0) {
+        const auto restored = runtime::checkScriptWithLanguageServer(
+            *endpoint, editor->session_id, editor->project_path, res_path, *on_disk);
+        if (!restored.answered) check.language_server_restore_failure = restored.failure;
+    }
+    return check;
+}
+
 } // namespace
 
 CallToolResult handleScriptCheckSyntax(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
@@ -260,13 +329,16 @@ CallToolResult handleScriptCheckSyntax(const json& args, std::shared_ptr<ipc::II
                                 {"line", 0},
                                 {"column", 0}});
     } else {
-        if (source_text.empty()) {
-            checked = checkScriptFile(analysis_path, ipc);
-            engine = checked.engine;
+        checked = source_text.empty() ? checkScriptFile(analysis_path, ipc)
+                                      : checkSourceText(file_path, source_text, ipc);
+        engine = checked.engine;
+        auto diags = source_text.empty()
+                         ? checked.diagnostics
+                         : offline::GDScriptDiagnostics::analyze(analysis_path, source_text);
+        // The language server's verdict on the text, after the lexical rules'.
+        if (!source_text.empty() && checked.language_server) {
+            diags.insert(diags.end(), checked.diagnostics.begin(), checked.diagnostics.end());
         }
-        const auto diags = source_text.empty()
-                               ? checked.diagnostics
-                               : offline::GDScriptDiagnostics::analyze(analysis_path, source_text);
         diagnostics_count = diags.size();
         for (const auto& d : diags) {
             if (d.severity == "error") has_error = true;
@@ -284,7 +356,7 @@ CallToolResult handleScriptCheckSyntax(const json& args, std::shared_ptr<ipc::II
     // nothing said the compiler had not run. shader_check_compile, the same
     // idea on the shader half, already refuses this; so does this now. A check
     // given source_text runs no engine by design and is left alone.
-    const bool engine_was_asked = source_text.empty() && !file_path.empty();
+    const bool engine_was_asked = (source_text.empty() && !file_path.empty()) || checked.language_server;
     // Only when an engine was actually there to be wrong about.
     //
     // A machine with no Godot installed falls through to the bare name
@@ -344,6 +416,16 @@ CallToolResult handleScriptCheckSyntax(const json& args, std::shared_ptr<ipc::II
             "absent methods or unknown base classes. For a compiler verdict on unsaved source, "
             "send it to project_verify_changes, which compiles it in an isolated copy of the "
             "project; for one on a file, write it with script_create and check it by file_path.";
+        if (!checked.language_server_unavailable.empty()) {
+            result["language_server_unavailable_reason"] = checked.language_server_unavailable;
+        }
+    }
+    if (!checked.language_server_restore_failure.empty()) {
+        result["limitation"] =
+            "On Godot 4.5 the editor's language server keeps the text it was sent as its view of " +
+            file_path + " for every client until it parses that file again, and sending the file's "
+            "own text back failed: " + checked.language_server_restore_failure +
+            ". Save the file in the editor, or call script_check_syntax with its file_path, to put it back.";
     }
     // Published so a caller can see whether the subprocess ran at all, which
     // is what the shader half already reports and this one did not. False is

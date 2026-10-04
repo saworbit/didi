@@ -2284,7 +2284,7 @@
           "openWorldHint": true,
           "readOnlyHint": true
         },
-        "description": "Checks GDScript with Didi's lexical rules and, for a file, the open editor's language server or a headless Godot compile. Legacy name for script_check_syntax, which is listed separately and is the same tool. Prefer the canonical name: it is what error data reports as canonical_tool.",
+        "description": "Checks GDScript with Didi's lexical rules and the open editor's language server, or for a file with no editor a headless Godot compile. Legacy name for script_check_syntax, which is listed separately and is the same tool. Prefer the canonical name: it is what error data reports as canonical_tool.",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {
@@ -2293,7 +2293,7 @@
               "type": "string"
             },
             "source_text": {
-              "description": "An unsaved buffer to check instead of a file. Only Didi's lexical rules run on it, so has_errors misses type errors and undeclared names; limitation says so. project_verify_changes compiles unsaved source.",
+              "description": "An unsaved buffer to check instead of the file at file_path. With no editor attached only the lexical rules run on it; limitation says so.",
               "type": "string"
             }
           },
@@ -10164,7 +10164,7 @@
           "openWorldHint": true,
           "readOnlyHint": true
         },
-        "description": "Checks GDScript with Didi's lexical rules and, for a file, the open editor's language server or a headless Godot compile.",
+        "description": "Checks GDScript with Didi's lexical rules and the open editor's language server, or for a file with no editor a headless Godot compile.",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {
@@ -10173,7 +10173,7 @@
               "type": "string"
             },
             "source_text": {
-              "description": "An unsaved buffer to check instead of a file. Only Didi's lexical rules run on it, so has_errors misses type errors and undeclared names; limitation says so. project_verify_changes compiles unsaved source.",
+              "description": "An unsaved buffer to check instead of the file at file_path. With no editor attached only the lexical rules run on it; limitation says so.",
               "type": "string"
             }
           },

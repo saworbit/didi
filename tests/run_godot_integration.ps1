@@ -2665,6 +2665,10 @@ try {
         # newest-first, not the one this session is attached to. Neither said
         # which engine answered (#617).
         (Tool-Request 517 "script_check_syntax" @{ file_path = "res://subject.gd" }),
+        # Text the caller sent goes to the language server too (#1142): with no
+        # file, and under subject.gd's path, which 4.5 then puts back.
+        (Tool-Request 521 "script_check_syntax" @{ source_text = "extends Node`n`nfunc probe() -> int:`n`treturn undeclared_in_buffer`n" }),
+        (Tool-Request 522 "script_check_syntax" @{ file_path = "res://subject.gd"; source_text = "extends Node`n`nfunc probe() -> int:`n`treturn undeclared_in_buffer`n" }),
         (Tool-Request 505 "project_export" @{ preset = "Phase5 Pack"; output_path = "res://phase5-output.pck"; mode = "pack"; timeout_seconds = 120 }),
         # Two presets Godot never detects (#921). The stranded one comes after a
         # gap in the numbering and is refused from the file before any Godot
@@ -3487,6 +3491,14 @@ try {
         # spawned that same line and must say so. Null would mean one of the two
         # versions was unknown, and both are known here.
         Assert-True ($checked.matches_attached_engine -eq $true) "Request $named ran $($checked.engine_version) against an attached $($checked.attached_engine_version) and reported matches_attached_engine=$($checked.matches_attached_engine)."
+    }
+
+    # A source_text check beside the editor is the language server's verdict
+    # on the text, not only the lexical rules', with or without a file (#1142).
+    foreach ($id in 521, 522) {
+        $sent = Tool-Payload $phase5ById[$id]
+        $undeclared = @($sent.diagnostics | Where-Object { $_.rule -eq "godot_language_server" -and $_.severity -eq "error" -and $_.message -match "undeclared_in_buffer" })
+        Assert-True ($sent.engine_backend -eq "language_server" -and $sent.engine_checked -eq $true -and $sent.has_errors -eq $true -and $undeclared.Count -ge 1 -and $sent.PSObject.Properties.Name -notcontains "limitation") "A source_text check beside the editor (request $id) was not the language server's verdict: $($phase5ById[$id].result.content[0].text)"
     }
 
     # The same two fields with nothing attached, which is the state every

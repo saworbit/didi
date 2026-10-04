@@ -51,6 +51,15 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Added
 
+- **A `source_text` check beside an open editor asks its language server
+  (#1142).** It ran Didi's lexical rules alone, so a draft with an undeclared
+  identifier or an unknown base class came back clean while the engine that
+  would find them was one request away. With an editor attached the text now
+  goes to its GDScript language server, under `file_path` when it names a file
+  in the project and under a path no file has otherwise, and the answer says
+  `engine_backend: "language_server"`. On Godot 4.5 the file's own text is sent
+  back after the check. With no editor the answer is unchanged.
+
 - **`editor_reload_project` runs as a job, so a slow scan can be waited out
   (#1157).** It answered within the twelve seconds one call can wait, so an
   editor that took longer to apply a scan of many new scripts answered `504` on
