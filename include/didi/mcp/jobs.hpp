@@ -118,6 +118,11 @@ public:
     size_t workingCount() const;
     const Limits& limits() const { return m_limits; }
 
+    // Cancels every running job, joins its thread, and refuses new ones. The
+    // destructor does the same; this is for a server about to leave by a way
+    // that runs no destructor (#1169). A second call finds nothing to join.
+    void shutdown();
+
 private:
     struct Entry {
         JobView view;

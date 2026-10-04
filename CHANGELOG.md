@@ -528,6 +528,25 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **A detached runtime_launch no longer takes another project's game
+  (#1167).** It waited for any game session that started after the call, from
+  any project, so a game started meanwhile on another project was reported as
+  this launch's and selected. It now takes only a session on this project, and
+  a game it found and could not select answers `success: false` with
+  `attach_error`, rather than success with the selection left elsewhere.
+
+- **A helper process can no longer hang between fork and exec (#1168).** On
+  Linux and macOS the child built its argument list after `fork`. That
+  allocates, and with another thread holding the allocator's lock the child
+  waited forever and the call ran out its timeout. The list is built before
+  the fork now, as the environment already was.
+
+- **Running jobs are cancelled and joined when the server stops (#1169).** The
+  server can leave through `_Exit`, which runs no destructor, so the job
+  store's own cleanup was skipped and a job could be killed half way through
+  writing a file. The end of the stdio loop, and `stop()`, now cancel and join
+  every job first.
+
 - **A project.godot the editor cannot write is the caller's to fix, not a
   server fault (#1153).** When the save failed, `project_set_setting`,
   `project_set_autoload` and `project_set_input_action` answered `500

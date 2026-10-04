@@ -155,6 +155,7 @@ std::shared_ptr<ipc::IIpcClient> McpServer::getIpcClient() const {
 // IPC, and logs. None of that is safe from a signal handler, so a handler
 // calls requestStop instead and this runs on the normal path afterwards.
 void McpServer::stop() {
+    m_jobs.shutdown();
     releaseRuntimeSession();
 }
 
@@ -1690,6 +1691,10 @@ void McpServer::runStdio() {
     }
 
     DIDI_LOG_INFO("MCP_SERVER", "Didi MCP stdio loop terminated");
+    // Before the route goes, since a job may hold it. main can leave by
+    // _Exit, which runs no destructor, so the store's own one cannot be what
+    // stops a job half way through writing a file (#1169).
+    m_jobs.shutdown();
     releaseRuntimeSession();
 }
 
