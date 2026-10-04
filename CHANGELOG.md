@@ -51,6 +51,16 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Added
 
+- **Nine more mutating tools say what they replaced (#1151).** Removing or
+  reparenting a node, attaching or detaching a script, adding or removing a
+  group, connecting or disconnecting a signal, and a live setting write
+  answered with the state after the call only, so their change journal
+  entries had no `before`. Each now reports what it read before the commit:
+  where the node was, the script it held, the membership, the connection and
+  its flags, and for `project_set_setting` the literal the file held. The
+  harness checks every such answer in a run. The signal handler also closes its
+  undo action when a registration fails, as #1152 did for three others.
+
 - **A path write says which other nodes share what it changes, and can write
   into copies instead (#1134).** A duplicated node shares its sub-resources
   with the original, so recolouring a copy's StyleBox recoloured both while

@@ -736,6 +736,53 @@ function Invoke-ObservedPostStateCases([string]$FixtureRoot, [string]$EditorSess
     Write-Output "Observed post-state: $($placed.Count) cases over $(@($placed | ForEach-Object { $_.Case.Tool } | Sort-Object -Unique).Count) tools agreed with the engine."
 }
 
+# The state each of these tools replaced, read before its commit, which the
+# change journal records as the entry's before (#1151). Checked over every
+# answer the run recorded, not one case each, and against what the call must
+# have found: a group add finds the node outside the group, a connect finds no
+# connection, and so on. project_set_setting uses previous_value, its offline
+# route's word, and only has one when the setting existed.
+function Assert-BeforeReported {
+    $expected = @{
+        "scene_remove_node" = { param($b) $b.parent -is [string] -and $b.path -is [string] -and $b.index -ge 0 -and $b.type -is [string] }
+        "scene_reparent_node" = { param($b) $b.parent -is [string] -and $b.path -is [string] }
+        "script_attach_to_node" = { param($b) $b.PSObject.Properties.Name -contains "script" }
+        "script_detach_from_node" = { param($b) $b.script -is [string] }
+        "scene_add_to_group" = { param($b) $b.in_group -eq $false }
+        "scene_remove_from_group" = { param($b) $b.in_group -eq $true -and $b.persistent -is [bool] }
+        "signal_connect" = { param($b) $b.connected -eq $false }
+        "signal_disconnect" = { param($b) $b.connected -eq $true -and $b.flags -ge 2 }
+    }
+    $missing = @()
+    $checked = 0
+    $seen = @{}
+    foreach ($exchange in $observedExchanges) {
+        if ($null -ne $exchange.Arguments.PSObject.Properties["dry_run"] -and $exchange.Arguments.dry_run) { continue }
+        $payload = Get-ObservedPayload $exchange.Response
+        if ($null -eq $payload) { continue }
+        if ($exchange.Tool -eq "project_set_setting") {
+            if ($payload.defined_by_engine -ne $true) { continue }
+            $checked++
+            $seen[$exchange.Tool] = $true
+            if ($payload.PSObject.Properties.Name -notcontains "previous_value") {
+                $missing += "project_set_setting answered request $($exchange.Response.id) for a setting that existed without previous_value"
+            }
+            continue
+        }
+        if (-not $expected.ContainsKey($exchange.Tool)) { continue }
+        $checked++
+        $seen[$exchange.Tool] = $true
+        if ($payload.PSObject.Properties.Name -notcontains "before" -or -not (& $expected[$exchange.Tool] $payload.before)) {
+            $missing += "$($exchange.Tool) answered request $($exchange.Response.id) with before $($payload.before | ConvertTo-Json -Compress -Depth 6)"
+        }
+    }
+    foreach ($tool in @($expected.Keys) + @("project_set_setting")) {
+        if (-not $seen.ContainsKey($tool)) { $missing += "$tool answered nothing this run checks" }
+    }
+    Assert-True ($missing.Count -eq 0) "Answers without the state they replaced ($checked checked):`n$($missing -join "`n")"
+    Write-Output "Before values: $checked answers said what they replaced."
+}
+
 # Presence, over every answer the run recorded.
 function Assert-ObservedAnswersRecorded {
     $missing = @()
