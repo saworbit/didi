@@ -3472,7 +3472,7 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "scene_set_property";
-        t.description = "Sets an existing scalar node property through UndoRedo with strict JSON/Godot type compatibility. The property is read back after the commit, so value is what it now holds. When applied is false a not_applied block says which of the two happened, the property not moving or the engine storing a value of its own, and carries the range or enum the engine declares for that property when it declares one. writes sets several, on any nodes, as one undo step.";
+        t.description = "Sets an existing scalar node property through UndoRedo with strict JSON/Godot type compatibility. The property is read back after the commit, so value is what it now holds. When applied is false, not_applied says why, with the range or enum the engine declares. writes sets several, on any nodes, as one undo step.";
         // The value spellings, shared by a single write and each batch item.
         const json value_types = json::array({"null", "boolean", "integer", "number", "string", "object"});
         t.inputSchema = {
@@ -3498,7 +3498,9 @@ void ToolRegistry::registerAllDefaultTools() {
                                                        {"value", {{"type", value_types}}}}},
                                        {"required", {"target_node", "property_name", "value"}},
                                        {"additionalProperties", false}}},
-                            {"description", "Instead of the three above: writes of the same shape, all checked first, then committed as one undo step. One that fails refuses the batch."}}}
+                            {"description", "Instead of the three above: writes of the same shape, all checked first, then committed as one undo step. One that fails refuses the batch."}}},
+                {"make_unique", {{"type", "boolean"}, {"default", false},
+                                 {"description", "Write into copies of the resources the path enters, as Make Unique does."}}}
             }}
         };
         t.handler = [this](const json& args) { return handleSceneSetProperty(args, m_ipcClient); };

@@ -3886,6 +3886,9 @@ struct ResolvedProperty {
     GDExtensionObjectPtr holder{nullptr};
     std::string leaf;
     std::vector<std::string> steps;
+    // Each resource the path entered, outermost first: resources[k] is what
+    // steps[k] holds. Empty for a property of the node itself.
+    std::vector<GDExtensionObjectPtr> resources;
     PropertyDescriptor descriptor;
     // Where a change to the holder is kept when the scene is saved. Always
     // the edited scene for a property of the node itself.
@@ -3971,11 +3974,104 @@ Result<ResolvedProperty> resolvePropertyPath(GDExtensionObjectPtr node, const st
                                      "target_node.");
         }
         holder = object.value();
+        resolved.resources.push_back(holder);
         // The last resource the path enters is the one the write changes, so
         // its file is the one the save has to keep.
         resolved.home = resourceHome(resourcePathOf(holder), edited_scene);
     }
     return std::move(resolved);
+}
+
+// Whether an object holds one of these resources in a property of its own,
+// one it stores. PROPERTY_USAGE_STORAGE is 2 and an Object-typed property is
+// type 24, on every supported line.
+bool holdsAnyOf(GDExtensionObjectPtr object, const std::vector<GDExtensionObjectPtr>& resources) {
+    auto properties = callObject(object, "Object", "get_property_list", 3995934104LL);
+    if (properties.isErr()) return false;
+    auto size_value = callVariant(properties.value(), "size");
+    if (size_value.isErr()) return false;
+    auto size = scalarFromVariant<int64_t>(size_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+    auto name_key = makeString("name");
+    auto type_key = makeString("type");
+    auto usage_key = makeString("usage");
+    if (size.isErr() || name_key.isErr() || type_key.isErr() || usage_key.isErr()) return false;
+    constexpr int64_t kStorage = 2;
+    for (int64_t i = 0; i < size.value(); ++i) {
+        auto index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, i);
+        if (index.isErr()) return false;
+        auto entry = callVariant(properties.value(), "get", {&index.value()});
+        if (entry.isErr()) continue;
+        auto type_value = callVariant(entry.value(), "get", {&type_key.value()});
+        auto usage_value = callVariant(entry.value(), "get", {&usage_key.value()});
+        if (type_value.isErr() || usage_value.isErr()) continue;
+        auto type = scalarFromVariant<int64_t>(type_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+        auto usage = scalarFromVariant<int64_t>(usage_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+        if (type.isErr() || usage.isErr() || type.value() != GDEXTENSION_VARIANT_TYPE_OBJECT ||
+            (usage.value() & kStorage) == 0) {
+            continue;
+        }
+        auto name_value = callVariant(entry.value(), "get", {&name_key.value()});
+        if (name_value.isErr()) continue;
+        const auto name_type = GodotApi::instance().variant_get_type(name_value.value().ptr());
+        if (name_type != GDEXTENSION_VARIANT_TYPE_STRING && name_type != GDEXTENSION_VARIANT_TYPE_STRING_NAME) {
+            continue;
+        }
+        auto name = stringFromVariant(name_value.value(), name_type);
+        if (name.isErr()) continue;
+        auto property = makeStringName(name.value());
+        if (property.isErr()) continue;
+        auto held = callObject(object, "Object", "get", 2760726917LL, {&property.value()});
+        if (held.isErr() || GodotApi::instance().variant_get_type(held.value().ptr()) != GDEXTENSION_VARIANT_TYPE_OBJECT) {
+            continue;
+        }
+        auto held_object = objectFromVariant(held.value());
+        if (held_object.isErr() || !held_object.value()) continue;
+        if (std::find(resources.begin(), resources.end(), held_object.value()) != resources.end()) return true;
+    }
+    return false;
+}
+
+// The other nodes of the edited scene that hold, in a property of their own,
+// one of the resources a path steps through (#1134). A write inside one
+// changes it for every node holding it, and Node.duplicate's default flags
+// share sub-resources rather than copy them, so a duplicated node shares all
+// of its. Bounded by the nodes walked and the names kept; either limit sets
+// shared_with_truncated. Nothing at all when the path enters no resource or
+// no other node holds one.
+constexpr size_t kMaxSharingWalk = 2048;
+constexpr size_t kMaxSharedWith = 16;
+
+json sharedWith(GDExtensionObjectPtr root, GDExtensionObjectPtr target,
+                const std::vector<GDExtensionObjectPtr>& resources) {
+    json found = json::object();
+    if (resources.empty() || !root) return found;
+    json names = json::array();
+    bool truncated = false;
+    std::vector<GDExtensionObjectPtr> pending{root};
+    size_t walked = 0;
+    while (!pending.empty()) {
+        if (walked == kMaxSharingWalk) {
+            truncated = true;
+            break;
+        }
+        GDExtensionObjectPtr node = pending.back();
+        pending.pop_back();
+        ++walked;
+        if (node != target && holdsAnyOf(node, resources)) {
+            if (names.size() == kMaxSharedWith) {
+                truncated = true;
+                break;
+            }
+            auto path = logicalPathFromEditedRoot(root, node);
+            if (path.isOk()) names.push_back(path.value());
+        }
+        auto children = childNodes(node);
+        if (children.isErr()) continue;
+        for (auto it = children.value().rbegin(); it != children.value().rend(); ++it) pending.push_back(*it);
+    }
+    if (!names.empty()) found["shared_with"] = std::move(names);
+    if (truncated) found["shared_with_truncated"] = true;
+    return found;
 }
 
 // One property's answer to a read: its value, and what its class declares
@@ -4019,6 +4115,8 @@ struct PreparedWrite {
     json requested;
     VariantValue old_value;
     VariantValue new_value;
+    // The steps given copies of their own by make_unique, outermost first.
+    json made_unique = json::array();
 };
 
 // Every check the write makes, short of making it. A dry run runs this too,
@@ -4118,6 +4216,9 @@ Result<std::vector<PreparedWrite>> prepareWrites(GDExtensionObjectPtr root,
                                                  const json& arguments, bool& batch) {
     std::vector<PreparedWrite> writes;
     batch = arguments.is_object() && arguments.contains("writes");
+    if (arguments.is_object() && arguments.contains("make_unique") && !arguments["make_unique"].is_boolean()) {
+        return Error(400, "make_unique must be a boolean.", {{"field", "make_unique"}});
+    }
     if (!batch) {
         auto write = prepareWrite(root, edited_scene, arguments);
         if (write.isErr()) return write.error();
@@ -4161,6 +4262,85 @@ Result<std::vector<PreparedWrite>> prepareWrites(GDExtensionObjectPtr root,
                              "property first.");
     }
     return std::move(writes);
+}
+
+// make_unique (#1134): every resource each write's path steps through, given to
+// its node as a copy of its own, the way the inspector's Make Unique does.
+// Shallow copies, linked along the path, so the write lands in copies and the
+// branches it does not touch stay shared. Two writes into the same resource on
+// the same node share its copy. The node takes its copy inside the write's own
+// UndoRedo action, so one undo reverts both. `kept` holds every copy until the
+// action holds it.
+struct UniqueAssignment {
+    GDExtensionObjectPtr node{nullptr};
+    std::string step;
+    GDExtensionObjectPtr original{nullptr};
+    GDExtensionObjectPtr copy{nullptr};
+};
+
+Result<std::vector<UniqueAssignment>> makeWritesUnique(std::vector<PreparedWrite>& writes,
+                                                       std::vector<VariantValue>& kept) {
+    std::vector<UniqueAssignment> assignments;
+    std::map<std::string, GDExtensionObjectPtr> copies;
+    auto shallow = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(0));
+    if (shallow.isErr()) return shallow.error();
+    for (auto& write : writes) {
+        auto& resolved = write.resolved;
+        if (resolved.resources.empty()) continue;
+        const auto node_key = std::to_string(reinterpret_cast<uintptr_t>(write.node)) + "|";
+        std::vector<GDExtensionObjectPtr> chain;
+        for (size_t k = 0; k < resolved.resources.size(); ++k) {
+            const auto prefix = joinSteps(resolved.steps, k + 1);
+            const auto found = copies.find(node_key + prefix);
+            GDExtensionObjectPtr copy = nullptr;
+            if (found != copies.end()) {
+                copy = found->second;
+            } else {
+                // Resource.duplicate is 482882304 on 4.5.1, 4.6.2 and 4.7.2.
+                auto duplicated = callObject(resolved.resources[k], "Resource", "duplicate", 482882304LL,
+                                             {&shallow.value()});
+                if (duplicated.isErr()) return duplicated.error();
+                auto object = objectFromVariant(duplicated.value());
+                if (object.isErr() || !object.value()) {
+                    return Error::internal("The engine returned no copy of " + prefix);
+                }
+                copy = object.value();
+                kept.push_back(std::move(duplicated.value()));
+                if (k == 0) {
+                    assignments.push_back({write.node, resolved.steps[0], resolved.resources[0], copy});
+                } else {
+                    auto step = makeStringName(resolved.steps[k]);
+                    auto value = makeObject(copy);
+                    if (step.isErr()) return step.error();
+                    if (value.isErr()) return value.error();
+                    auto linked = callObject(chain.back(), "Object", "set", 3776071444LL,
+                                             {&step.value(), &value.value()});
+                    if (linked.isErr()) return linked.error();
+                }
+                copies.emplace(node_key + prefix, copy);
+            }
+            chain.push_back(copy);
+            write.made_unique.push_back(prefix);
+        }
+        resolved.resources = chain;
+        resolved.holder = chain.back();
+        resolved.home = ResourceHomeVerdict{};
+    }
+    return assignments;
+}
+
+// The node taking its copy, or its original back. One per node and outermost
+// step, before every write on the do side and after every write on the undo.
+Result<void> recordAssignment(GDExtensionObjectPtr manager, const UniqueAssignment& assignment, bool undo) {
+    auto node = makeObject(assignment.node);
+    auto name = makeStringName(assignment.step);
+    auto value = makeObject(undo ? assignment.original : assignment.copy);
+    if (node.isErr()) return node.error();
+    if (name.isErr()) return name.error();
+    if (value.isErr()) return value.error();
+    auto recorded = callObject(manager, "EditorUndoRedoManager", undo ? "add_undo_property" : "add_do_property",
+                               1017172818LL, {&node.value(), &name.value(), &value.value()});
+    return recorded.isOk() ? Result<void>::ok() : Result<void>(recorded.error());
 }
 
 // Adds one prepared write to the open action. A property of the node itself is
@@ -4234,6 +4414,7 @@ Result<json> observeWrite(PreparedWrite& write) {
     if (write.resolved.home.home == ResourceHome::ResourceFile) {
         result["resource_file"] = write.resolved.home.file;
     }
+    if (!write.made_unique.empty()) result["made_unique"] = write.made_unique;
     return std::move(result);
 }
 
@@ -4247,6 +4428,17 @@ json setSceneProperties(GDExtensionObjectPtr editor, GDExtensionObjectPtr root, 
     if (manager.isErr()) return errorJson(manager.error().code, manager.error().message);
     auto preflight = preflightUndoManagerBindings();
     if (preflight.isErr()) return errorJson(preflight.error().code, preflight.error().message);
+    std::vector<VariantValue> kept_copies;
+    std::vector<UniqueAssignment> assignments;
+    if (params.value("make_unique", false)) {
+        if (requireMethodBind("Resource", "duplicate", 482882304LL).isErr() ||
+            requireMethodBind("Object", "set", 3776071444LL).isErr()) {
+            return bridgeError(501, "required_bind_unavailable");
+        }
+        auto made = makeWritesUnique(writes, kept_copies);
+        if (made.isErr()) return errorJson(made.error().code, made.error().message);
+        assignments = std::move(made.value());
+    }
     // A batch is recorded against the scene root, which puts the action in the
     // edited scene's history whichever node comes first.
     auto action = batch
@@ -4254,8 +4446,24 @@ json setSceneProperties(GDExtensionObjectPtr editor, GDExtensionObjectPtr root, 
                        root)
         : createAction(manager.value(), "Didi: set " + writes.front().property, writes.front().node);
     if (action.isErr()) return errorJson(action.error().code, action.error().message);
+    for (const auto& assignment : assignments) {
+        auto recorded = recordAssignment(manager.value(), assignment, false);
+        if (recorded.isErr()) {
+            abandonAction(manager.value());
+            return errorJson(recorded.error().code, recorded.error().message);
+        }
+    }
     for (auto& write : writes) {
         auto recorded = recordWrite(manager.value(), write);
+        if (recorded.isErr()) {
+            abandonAction(manager.value());
+            return errorJson(recorded.error().code, recorded.error().message);
+        }
+    }
+    // Undo puts each write's old value into the copy first, then the original
+    // back in place of the copy, so the node ends as it started.
+    for (const auto& assignment : assignments) {
+        auto recorded = recordAssignment(manager.value(), assignment, true);
         if (recorded.isErr()) {
             abandonAction(manager.value());
             return errorJson(recorded.error().code, recorded.error().message);
@@ -4270,6 +4478,9 @@ json setSceneProperties(GDExtensionObjectPtr editor, GDExtensionObjectPtr root, 
         auto observed = observeWrite(write);
         if (observed.isErr()) return errorJson(observed.error().code, observed.error().message);
         all_applied = all_applied && observed.value().value("applied", false);
+        // Who else the write reached: every other node holding what it changed.
+        auto shared = sharedWith(root, write.node, write.resolved.resources);
+        for (auto& [key, field] : shared.items()) observed.value()[key] = std::move(field);
         results.push_back(std::move(observed.value()));
     }
     json result = {{"status", "success"}};
@@ -4349,6 +4560,9 @@ json getSceneProperties(GDExtensionObjectPtr root, const json& params) {
         if (described.isErr()) return fail(described.error());
         json answer = {{"target_node", target}, {"property_name", property}};
         for (auto& [key, field] : described.value().items()) answer[key] = std::move(field);
+        // Named, so the object items() walks outlives the loop.
+        auto shared = sharedWith(root, node.value(), resolved.value().resources);
+        for (auto& [key, field] : shared.items()) answer[key] = std::move(field);
         answers.push_back(std::move(answer));
     }
     json result = {{"status", "success"}};
