@@ -3,6 +3,7 @@
 #include "didi/mcp/mutation_safety.hpp"
 #include "didi/common/ipc_channel.hpp"
 #include "didi/common/engine_version.hpp"
+#include "didi/common/project_path.hpp"
 #include "didi/common/logger.hpp"
 #include "didi/common/version.hpp"
 #include "didi/gdextension/expression_sandbox.hpp"
@@ -13,6 +14,7 @@
 // over through another header and libc++ does not, so a clean Windows build
 // says nothing about this: the macOS clang job is where it shows up.
 #include <chrono>
+#include <filesystem>
 #include <thread>
 
 namespace didi {
@@ -514,14 +516,24 @@ CallToolResult handleExecuteTestSession(const json& args, std::shared_ptr<ipc::I
     if (detach && session_res.pid != 0) {
         const auto deadline =
             std::chrono::steady_clock::now() + std::chrono::seconds(timeout_sec);
+        // The project the game was started on, spelled the way a session
+        // descriptor spells its project_path. A game from another project that
+        // happened to start after this call did is not the one it started, and
+        // matching on time alone took it (#1167).
+        std::error_code canonical_error;
+        auto project_root = std::filesystem::weakly_canonical(std::filesystem::current_path(), canonical_error);
+        if (canonical_error) project_root = std::filesystem::current_path().lexically_normal();
+        const auto this_project = paths::nativePathToUtf8(project_root);
         json published;
+        std::string attach_error;
         while (std::chrono::steady_clock::now() < deadline) {
             if (sessions_for_detach) {
-                auto listed = sessions_for_detach->listSessions(std::nullopt);
+                auto listed = sessions_for_detach->listSessions(this_project);
                 if (listed.isOk() && listed.value().is_object() &&
                     listed.value()["sessions"].is_array()) {
                     for (const auto& entry : listed.value()["sessions"]) {
                         if (entry.value("kind", std::string()) != "game") continue;
+                        if (entry.value("project_path", std::string()) != this_project) continue;
                         // The pid when it is ours, which it is for a direct
                         // launch. It is not for a Godot that launches the
                         // engine and waits -- a godot.cmd wrapper, or Godot's
@@ -553,12 +565,16 @@ CallToolResult handleExecuteTestSession(const json& args, std::shared_ptr<ipc::I
             // selected session kind" on a game that was running and reachable.
             const auto session_id = published.value("session_id", std::string());
             if (sessions_for_detach && !session_id.empty()) {
-                sessions_for_detach->attachSession(session_id);
+                // A selection that failed leaves the calls after this one
+                // going elsewhere, so it is not a launch that is ready (#1167).
+                auto attached = sessions_for_detach->attachSession(session_id);
+                if (attached.isErr()) attach_error = attached.error().message;
             }
         }
         result["session_published"] = !published.is_null();
         result["game_session"] = published.is_null() ? json(nullptr) : published;
-        result["success"] = !published.is_null();
+        result["success"] = !published.is_null() && attach_error.empty();
+        if (!attach_error.empty()) result["attach_error"] = attach_error;
         result["limitation"] =
             "This game is running and this call is not watching it. Nothing was captured, so "
             "logs, errors and exit_code are empty: read a running game with runtime_read_output, "
@@ -585,6 +601,12 @@ CallToolResult handleExecuteTestSession(const json& args, std::shared_ptr<ipc::I
             result["summary"] = "The game is running as process " +
                                 std::to_string(published.value("pid", session_res.pid)) +
                                 " and has published a session to attach to.";
+            if (!attach_error.empty()) {
+                result["summary"] = result["summary"].get<std::string>() +
+                                    " It could not be selected, so the calls after this one do "
+                                    "not go to it: " + attach_error +
+                                    ". Call runtime_attach_session with its session_id.";
+            }
         }
     } else if (detach) {
         result["session_published"] = false;

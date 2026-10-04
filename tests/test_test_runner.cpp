@@ -1,3 +1,4 @@
+#include "didi/common/project_path.hpp"
 #include "didi/mcp/tool_registry.hpp"
 #include "didi/offline/test_runner.hpp"
 #include "didi/runtime/session_client.hpp"
@@ -367,11 +368,14 @@ public:
                                          int) override {
         return didi::json{{"status", "ok"}, {"method", method}};
     }
+    // Ignores the project it is asked about, so the launch's own check is
+    // what keeps the other project's game out.
     didi::Result<didi::json> listSessions(const std::optional<std::string>&) override {
-        return didi::json{{"sessions", didi::json::array({game})},
+        return didi::json{{"sessions", didi::json::array({foreign, game})},
                           {"diagnostics", didi::json::array()}};
     }
     didi::Result<didi::json> attachSession(const std::string& session_id) override {
+        if (refuse_attach) return didi::Error(409, "The session is held by another client");
         attached = session_id;
         return didi::json::object();
     }
@@ -388,8 +392,24 @@ public:
     didi::json game{{"kind", "game"},
                     {"pid", 4242},
                     {"session_id", "aaaabbbbccccddddeeeeffff00001111"},
+                    {"project_path", thisProject()},
                     {"started_at_ms", int64_t{4102444800000}}};
+    // Another project's game, started later still and listed first (#1167).
+    didi::json foreign{{"kind", "game"},
+                       {"pid", 5353},
+                       {"session_id", "ffffeeeeddddccccbbbbaaaa99998888"},
+                       {"project_path", thisProject() + "-elsewhere"},
+                       {"started_at_ms", int64_t{4102444900000}}};
     std::string attached;
+    bool refuse_attach = false;
+
+    // The project a launch runs, spelled as a descriptor spells it.
+    static std::string thisProject() {
+        std::error_code error;
+        auto root = std::filesystem::weakly_canonical(std::filesystem::current_path(), error);
+        if (error) root = std::filesystem::current_path().lexically_normal();
+        return didi::paths::nativePathToUtf8(root);
+    }
 };
 
 void test_detached_launch_selects_the_game_it_started() {
@@ -422,6 +442,27 @@ void test_detached_launch_selects_the_game_it_started() {
     registry.setIpcClient(nullptr);
     ASSERT_TRUE(!result.isError);
     ASSERT_EQ(fake->attached, std::string("aaaabbbbccccddddeeeeffff00001111"));
+    const auto answer = didi::json::parse(result.content[0].text);
+    ASSERT_EQ(answer["game_session"]["session_id"], "aaaabbbbccccddddeeeeffff00001111");
+    ASSERT_EQ(answer["success"], true);
+    ASSERT_TRUE(!answer.contains("attach_error"));
+
+    // A game it found and could not select is not a launch that is ready.
+    fake->refuse_attach = true;
+    registry.setIpcClient(fake);
+    const auto refused = registry.callTool(
+        "runtime_launch",
+        {{"scene_path", "res://none.tscn"},
+         {"timeout_seconds", 2},
+         {"headless", false},
+         {"detach", true},
+         {"extra_args", successfulShellArguments()}});
+    registry.setIpcClient(nullptr);
+    const auto refused_answer = didi::json::parse(refused.content[0].text);
+    ASSERT_EQ(refused_answer["session_published"], true);
+    ASSERT_EQ(refused_answer["success"], false);
+    ASSERT_TRUE(refused_answer["attach_error"].get<std::string>().find("held by another client") !=
+                std::string::npos);
 }
 
 void test_an_engine_that_will_not_start_is_engine_unavailable() {

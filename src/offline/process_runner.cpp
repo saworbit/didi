@@ -361,6 +361,18 @@ Result<ProcessResult> runProcess(const ProcessRequest& request) {
         for (auto& entry : environment_storage) environment_pointers.push_back(entry.data());
         environment_pointers.push_back(nullptr);
     }
+    // The argument list too. The child built it after the fork, and a vector
+    // allocates: with another thread holding the allocator's lock at the fork,
+    // the child waits on a lock nobody in it will release, never reaches
+    // execvp, and the call runs out its timeout (#1168).
+    std::vector<std::string> argument_storage;
+    argument_storage.reserve(request.arguments.size() + 1);
+    argument_storage.push_back(request.executable);
+    argument_storage.insert(argument_storage.end(), request.arguments.begin(), request.arguments.end());
+    std::vector<char*> argument_pointers;
+    argument_pointers.reserve(argument_storage.size() + 1);
+    for (auto& argument : argument_storage) argument_pointers.push_back(argument.data());
+    argument_pointers.push_back(nullptr);
     int output_pipe[2];
     if (pipe(output_pipe) != 0) return Error::internal("Failed to create process output pipe");
     const pid_t child = fork();
@@ -385,18 +397,10 @@ Result<ProcessResult> runProcess(const ProcessRequest& request) {
         if (dup2(null_input, STDIN_FILENO) < 0) _exit(126);
         if (null_input != STDIN_FILENO) close(null_input);
         if (chdir(request.working_directory.c_str()) != 0) _exit(126);
-        std::vector<std::string> storage;
-        storage.reserve(request.arguments.size() + 1);
-        storage.push_back(request.executable);
-        storage.insert(storage.end(), request.arguments.begin(), request.arguments.end());
-        std::vector<char*> argv;
-        argv.reserve(storage.size() + 1);
-        for (auto& argument : storage) argv.push_back(argument.data());
-        argv.push_back(nullptr);
         // execvp hands the child this process's environ, and searches the PATH
         // in it, so the child's own environment is put there first.
         if (!environment_pointers.empty()) processEnvironment() = environment_pointers.data();
-        execvp(request.executable.c_str(), argv.data());
+        execvp(request.executable.c_str(), argument_pointers.data());
         _exit(127);
     }
     close(output_pipe[1]);

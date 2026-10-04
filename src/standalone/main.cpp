@@ -405,9 +405,10 @@ static int runDidi(const std::vector<std::string>& arguments) {
 
     // The session ended while a read of stdin was still outstanding, so the
     // reader thread is parked inside std::cin. Returning from main would run
-    // static destruction and take std::cin away underneath it. The runtime
-    // session is already handed back, the session lock is released, and every
-    // write flushed as it was made, so there is nothing left for exit to do.
+    // static destruction and take std::cin away underneath it. Every job is
+    // already cancelled and joined, the runtime session handed back, the
+    // session lock released, and every write flushed as it was made, so there
+    // is nothing left for exit to do.
     if (server.stdinReaderStillParked()) {
         std::_Exit(0);
     }

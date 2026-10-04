@@ -27,7 +27,9 @@ JobStore::JobStore() : JobStore(Limits{}) {}
 JobStore::JobStore(Limits limits, Clock wall_clock)
     : m_limits(limits), m_clock(std::move(wall_clock)) {}
 
-JobStore::~JobStore() {
+JobStore::~JobStore() { shutdown(); }
+
+void JobStore::shutdown() {
     std::vector<std::thread> threads;
     {
         std::lock_guard<std::mutex> lock(m_mutex);

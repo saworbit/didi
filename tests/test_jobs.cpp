@@ -461,6 +461,37 @@ void test_a_request_id_makes_a_job_that_answers_its_repeat_without_running_again
     ASSERT_EQ(textPayload(malformed)["error"]["data"]["field"], "request_id");
 }
 
+// A server that stops cancels and joins the jobs it is running. main can
+// leave by _Exit, which runs no destructor, so the store's own one could not
+// be relied on, and a job writing a file was killed half way (#1169).
+void test_a_stopping_server_cancels_and_joins_its_jobs() {
+    ScopedJobProject project("stop");
+    ScopedSlowBuild dotnet(project.root);
+    didi::mcp::McpServer server;
+    startLegacy(server);
+    server.setJobWaitsForTesting(200ms, 50ms);
+
+    const auto first = callTool(server, 30, "csharp_check_build",
+                                {{"timeout_seconds", 60}, {"request_id", "stop-0001"}});
+    const auto working = textPayload(first);
+    ASSERT_EQ(working["job"]["state"], "working");
+    const auto id = working["job"]["job_id"].get<std::string>();
+
+    const auto before = std::chrono::steady_clock::now();
+    server.stop();
+    // The build takes about three seconds, and the cancel kills it.
+    ASSERT_TRUE(std::chrono::steady_clock::now() - before < 2500ms);
+    ASSERT_EQ(server.jobsForTesting().workingCount(), 0u);
+    const auto settled = server.jobsForTesting().find(id);
+    ASSERT_TRUE(settled.has_value());
+    ASSERT_EQ(settled->state, JobState::Cancelled);
+
+    // Nothing new starts once it has stopped.
+    const auto after = callTool(server, 31, "csharp_check_build",
+                                {{"timeout_seconds", 60}, {"request_id", "stop-0002"}});
+    ASSERT_TRUE(after.result.value("isError", false));
+}
+
 void test_without_a_request_id_or_the_extension_a_call_runs_as_before() {
     ScopedJobProject project("synchronous");
     ScopedSlowBuild dotnet(project.root);
@@ -558,6 +589,8 @@ struct RegisterJobTests {
                      test_two_launches_with_different_environments_run_at_once);
         registerTest("Jobs.RequestIdRepeatDoesNotRunAgain",
                      test_a_request_id_makes_a_job_that_answers_its_repeat_without_running_again);
+        registerTest("Jobs.StoppingServerCancelsAndJoinsJobs",
+                     test_a_stopping_server_cancels_and_joins_its_jobs);
         registerTest("Jobs.WithoutEitherTheCallRunsAsBefore",
                      test_without_a_request_id_or_the_extension_a_call_runs_as_before);
         registerTest("Jobs.TasksExtensionReadAndCancel",
