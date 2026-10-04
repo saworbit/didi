@@ -12636,6 +12636,8 @@ json GodotBridge::execute(const std::string& method, const json& params,
                      &flags_value.value()});
             }
             if (do_method.isErr() || undo_method.isErr()) {
+                // Closed, so the next mutation does not merge into it (#1152).
+                abandonAction(manager.value());
                 return bridgeError(500, "signal_undo_redo_registration_failed");
             }
             auto committed = commitAction(manager.value());
@@ -12708,12 +12710,18 @@ json GodotBridge::execute(const std::string& method, const json& params,
             // The flags the connection now has, not the flags this tool used to
             // be able to write. A caller that asked for a deferred connection
             // and was told `flags: 2` could not tell whether it got one.
+            // The connection as it stood before the commit (#1151): a connect
+            // is refused when one exists, and a disconnect removes the one it
+            // found, with the flags it had.
             if (is_connect) {
                 return liveSceneMutation({{"connected", true}, {"flags", applied_flags},
+                                          {"before", {{"connected", false}}},
                                           {"undo_redo_registered", true},
                                           {"outcome", "completed"}, {"rollback", "undo_redo"}});
             }
             return liveSceneMutation({{"disconnected", true}, {"flags", applied_flags},
+                                      {"before", {{"connected", true},
+                                                  {"flags", matches.value().front().flags}}},
                                       {"undo_redo_registered", true},
                                       {"outcome", "completed"}, {"rollback", "undo_redo"}});
         }
@@ -13171,6 +13179,9 @@ json GodotBridge::execute(const std::string& method, const json& params,
             }
         }
 
+        // What the file held for it before the write, read the way value_written
+        // is read after it: the literal, or null for no line (#1151).
+        auto literal_before = projectFileSettingLiteral(setting);
         auto applied = callObject(project_settings.value(), "ProjectSettings", "set_setting", 402577236LL,
                                   {&name.value(), &replacement.value()});
         if (applied.isErr()) return errorJson(applied.error().code, applied.error().message);
@@ -13205,6 +13216,10 @@ json GodotBridge::execute(const std::string& method, const json& params,
                        // caller that passed create: true gets to see which of the
                        // two things it did.
                        {"defined_by_engine", static_cast<bool>(exists.value())}};
+        // The literal it replaced, under the name the offline route already
+        // uses (#1151): null when the file had no line, an engine default.
+        // Absent for a setting the engine did not have.
+        if (exists.value() && literal_before.isOk()) result["previous_value"] = literal_before.value();
         // The editor's Audio panel read this setting when it was built and saves
         // the bus layout to that file until the editor restarts. Moving it here
         // left the editor writing the old file while the next start loaded the
@@ -13742,8 +13757,12 @@ json GodotBridge::execute(const std::string& method, const json& params,
                              {{"code", "script_assignment_rejected"},
                               {"outcome", "rolled_back"}, {"rolled_back", true}});
         }
+        // The script the node held before, read before the commit, so the
+        // change journal can say what was replaced (#1151).
+        const json before_script = old_object ? json(resourcePathOf(old_object)) : json(nullptr);
         return liveSceneMutation({{"status", "success"}, {"target_node", params.value("target_node", "")},
                                   {"script_path", script_path}, {"attached", attaching}, {"detached", !attaching},
+                                  {"before", {{"script", before_script}}},
                                   {"undo_redo_registered", true}});
     }
 
@@ -14342,9 +14361,15 @@ json GodotBridge::execute(const std::string& method, const json& params,
                                       (in_group.value() ? "still" : "not") + " in group " + group +
                                       " afterwards");
         }
+        // Membership as it was read before the commit (#1151). A removal also
+        // says whether the scene file kept the membership, which its undo
+        // puts back.
+        json before_group = {{"in_group", static_cast<bool>(membership.value())}};
+        if (!adding) before_group["persistent"] = original_persistent;
         return liveSceneMutation({{"status", "success"}, {"target_node", params.value("target_node", "")},
                                   {"group", group}, {"in_group", static_cast<bool>(in_group.value())},
                                   {"added", adding}, {"removed", !adding},
+                                  {"before", std::move(before_group)},
                                   {"undo_redo_registered", true}});
     }
 
@@ -15834,6 +15859,19 @@ json GodotBridge::execute(const std::string& method, const json& params,
         if (include_internal.isErr()) return errorJson(include_internal.error().code, include_internal.error().message);
         auto old_index = callObject(node.value(), "Node", "get_index", 894402480LL, {&include_internal.value()});
         if (old_index.isErr()) return errorJson(old_index.error().code, old_index.error().message);
+        // Where the node was, read before anything moves it, so the change
+        // journal can say what a removal or a reparent replaced (#1151).
+        json before_node = json::object();
+        if (auto path = logicalPathFromEditedRoot(root.value(), node.value()); path.isOk()) {
+            before_node["path"] = path.value();
+        }
+        if (auto path = logicalPathFromEditedRoot(root.value(), parent.value()); path.isOk()) {
+            before_node["parent"] = path.value();
+        }
+        if (auto index = scalarFromVariant<int64_t>(old_index.value(), GDEXTENSION_VARIANT_TYPE_INT); index.isOk()) {
+            before_node["index"] = index.value();
+        }
+        before_node["type"] = nodeClassName(node.value());
         auto manager = undoManager(editor);
         if (manager.isErr()) return errorJson(manager.error().code, manager.error().message);
         auto child = makeObject(node.value());
@@ -15887,6 +15925,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 return errorJson(500, "The remove was committed and " + target + " still resolves");
             }
             return liveSceneMutation({{"status", "success"}, {"action", "remove_node"}, {"exists", false},
+                                      {"before", std::move(before_node)},
                                       {"undo_redo_registered", true}});
         }
 
@@ -15966,6 +16005,9 @@ json GodotBridge::execute(const std::string& method, const json& params,
             if (moved_path.isErr()) return errorJson(moved_path.error().code, moved_path.error().message);
             json result = {{"status", "success"}, {"action", "reparent_node"},
                            {"node_path", moved_path.value()}, {"undo_redo_registered", true}};
+            before_node.erase("index");
+            before_node.erase("type");
+            result["before"] = std::move(before_node);
             // In scene_instantiate_node's words, so a caller building its next
             // path from the old name learns why it no longer resolves.
             auto moved_name = nodeString(node.value(), "get_name", 2002593661LL);

@@ -5970,6 +5970,7 @@ text = "Not a key"
     })
     Assert-True ($unexpectedSourceArtifacts.Count -eq 0) "Integration generated artifacts in the checked-in source fixture."
     Assert-ObservedAnswersRecorded
+    Assert-BeforeReported
     Assert-BoundedAnswersSayWhetherComplete
     Assert-RefusalsNameTheirFix ((& $didiExecutable --dump-tool-manifest) -join "`n")
     Assert-MutationsNameTheirFollowUps ((& $didiExecutable --dump-tool-manifest) -join "`n")

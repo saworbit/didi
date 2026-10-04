@@ -145,12 +145,15 @@ class Phase7SchemaContractTests(unittest.TestCase):
             (SCHEMA_DIR / "signal_disconnect.schema.json").read_text())["$defs"]["success"]
         self.assertEqual(disconnect_success["properties"]["flags"],
                          {"type": "integer", "minimum": 2})
-        for success_key, success, accepted, rejected in (
-                ("connected", connect_success, (2, 3, 6, 7), (0, 1, 4, 5, 8, 10, 16, 18, 34)),
-                ("disconnected", disconnect_success, (2, 3, 6, 7, 10, 34, 39), (0, 1))):
+        # Each also says what it found before the commit (#1151).
+        for success_key, success, before, accepted, rejected in (
+                ("connected", connect_success, {"connected": False},
+                 (2, 3, 6, 7), (0, 1, 4, 5, 8, 10, 16, 18, 34)),
+                ("disconnected", disconnect_success, {"connected": True, "flags": 2},
+                 (2, 3, 6, 7, 10, 34, 39), (0, 1))):
             validator = Draft202012Validator(success)
             base = {success_key: True, "undo_redo_registered": True,
-                    "outcome": "completed", "rollback": "undo_redo"}
+                    "outcome": "completed", "rollback": "undo_redo", "before": before}
             for flags in accepted:
                 validator.validate(dict(base, flags=flags))
             for flags in rejected:

@@ -160,6 +160,40 @@ void test_an_entry_holds_the_target_the_values_the_files_and_the_undo_step() {
     ASSERT_FALSE(entry.contains("undo_note"));
 }
 
+// The nine tools that answered with no value before the change now say what
+// they replaced, each in the shape its bridge handler answers, and every
+// entry records it (#1151).
+void test_every_replacing_tool_gives_its_entry_a_before() {
+    const std::vector<std::pair<std::string, json>> answers = {
+        {"scene_remove_node", {{"exists", false},
+                               {"before", {{"path", "/root/Main/Old"}, {"parent", "/root/Main"},
+                                           {"index", 2}, {"type", "Sprite2D"}}}}},
+        {"scene_reparent_node", {{"node_path", "/root/Main/B/Old"},
+                                 {"before", {{"path", "/root/Main/Old"}, {"parent", "/root/Main"}}}}},
+        {"script_attach_to_node", {{"attached", true}, {"before", {{"script", nullptr}}}}},
+        {"script_detach_from_node", {{"detached", true}, {"before", {{"script", "res://old.gd"}}}}},
+        {"scene_add_to_group", {{"in_group", true}, {"before", {{"in_group", false}}}}},
+        {"scene_remove_from_group", {{"in_group", false},
+                                     {"before", {{"in_group", true}, {"persistent", true}}}}},
+        {"signal_connect", {{"connected", true}, {"flags", 2}, {"before", {{"connected", false}}}}},
+        {"signal_disconnect", {{"disconnected", true}, {"flags", 3},
+                               {"before", {{"connected", true}, {"flags", 3}}}}},
+        {"project_set_setting", {{"setting", "application/config/name"}, {"value_written", "\"New\""},
+                                 {"previous_value", "Old"}}},
+    };
+    for (const auto& [tool, answer] : answers) {
+        journal::Call call;
+        call.tool = tool;
+        call.arguments = {{"target_node", "Old"}};
+        call.answer = answer;
+        const auto entry = journal::entryFor(call);
+        const auto& expected = answer.contains("before") ? answer["before"] : answer["previous_value"];
+        if (entry.value("before", json()) != expected) {
+            throw std::runtime_error(tool + "'s entry did not record what it replaced: " + entry.dump());
+        }
+    }
+}
+
 void test_files_come_from_what_the_answer_says_it_wrote() {
     journal::Call call;
     call.tool = "project_rename_symbol";
@@ -434,6 +468,8 @@ struct RegisterChangeJournalTests {
                      test_a_large_value_becomes_a_preview_cut_on_a_character);
         registerTest("ChangeJournal.EntryHoldsTargetValuesFilesUndo",
                      test_an_entry_holds_the_target_the_values_the_files_and_the_undo_step);
+        registerTest("ChangeJournal.EveryReplacingToolGivesABefore",
+                     test_every_replacing_tool_gives_its_entry_a_before);
         registerTest("ChangeJournal.FilesFromWhatTheAnswerWrote",
                      test_files_come_from_what_the_answer_says_it_wrote);
         registerTest("ChangeJournal.FailedCallAndUndoByEntry",
