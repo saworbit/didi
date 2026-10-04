@@ -3024,11 +3024,17 @@ try {
         @{ Id = 2410; What = "an engine method"; Match = "script declares" },
         @{ Id = 2411; What = "the wrong argument count"; Match = "argument" },
         @{ Id = 2412; What = "an argument of the wrong type"; Match = "parameter type" },
-        @{ Id = 2415; What = "a script that is not a @tool script"; Match = "@tool" },
-        @{ Id = 2416; What = "a node with no script"; Match = "no script" })) {
+        @{ Id = 2415; What = "a script that is not a @tool script"; Match = "@tool"; Code = "script_not_tool" },
+        @{ Id = 2416; What = "a node with no script"; Match = "no script"; Code = "node_has_no_script" })) {
         Assert-True $callById[$refusal.Id].result.isError "scene_call_method accepted $($refusal.What)."
         $refusalText = ($callById[$refusal.Id].result.content | Where-Object { $_.type -eq "text" } | Select-Object -First 1).text
         Assert-True ($refusalText -match $refusal.Match) "The refusal of $($refusal.What) did not say why: $refusalText"
+        # Its own code and fix, not the floor's unprocessable and its advice
+        # about export_presets.cfg (#1181).
+        if ($refusal.Code) {
+            $refusalData = ($refusalText | ConvertFrom-Json).error.data
+            Assert-True ($refusalData.code -eq $refusal.Code -and $refusalText -notmatch "export_presets") "The refusal of $($refusal.What) did not carry its own code and fix: $refusalText"
+        }
     }
 
     # The editor's InputMap after an input action was written, and after it was

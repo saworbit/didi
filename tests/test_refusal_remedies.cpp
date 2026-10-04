@@ -94,6 +94,28 @@ static void test_a_refusal_with_no_remedy_gets_the_one_its_code_carries() {
     ASSERT_EQ(missing["field"], "target_node");
 }
 
+// A 422 names its own fix. Three refusals had no code, reached the floor as
+// unprocessable, and were told to fix export_presets.cfg (#1181).
+static void test_a_422_names_its_own_fix() {
+    ASSERT_EQ(floored(422, "Script base type Node3D is incompatible with the target node",
+                      {{"code", "script_base_incompatible"}}, "script_attach_to_node")["field"],
+              "target_node");
+    ASSERT_EQ(floored(422, "The node has no script",
+                      {{"code", "node_has_no_script"}, {"use_tool", "anim_play_track"}}, "scene_call_method")
+                  ["next_call"]["tool"],
+              "anim_play_track");
+    ASSERT_TRUE(floored(422, "The node has no script", {{"code", "node_has_no_script"}}, "scene_call_method")
+                    .contains("no_remedy"));
+    ASSERT_TRUE(floored(422, "not a @tool script", {{"code", "script_not_tool"}}, "scene_call_method")
+                    ["no_remedy"].get<std::string>().find("@tool") != std::string::npos);
+    const auto presets = floored(422, "export_presets.cfg does not parse",
+                                 {{"code", "unprocessable"}, {"presets_file_exists", true}}, "project_export");
+    ASSERT_TRUE(presets["no_remedy"].get<std::string>().find("export_presets.cfg") != std::string::npos);
+    const auto other = floored(422, "Something else", nullptr, "scene_get_property");
+    ASSERT_EQ(other["code"], "unprocessable");
+    ASSERT_TRUE(other["no_remedy"].get<std::string>().find("export_presets") == std::string::npos);
+}
+
 // One code, different fixes, by the tool that refused.
 static void test_the_remedy_follows_the_tool() {
     ASSERT_EQ(floored(404, "No such node", nullptr, "scene_get_property")["next_call"]["tool"],
@@ -304,6 +326,7 @@ struct RegisterRefusalRemedyTests {
         registerTest("RefusalRemedies.CodeCarriesItsRemedy",
                      test_a_refusal_with_no_remedy_gets_the_one_its_code_carries);
         registerTest("RefusalRemedies.RemedyFollowsTheTool", test_the_remedy_follows_the_tool);
+        registerTest("RefusalRemedies.A422NamesItsOwnFix", test_a_422_names_its_own_fix);
         registerTest("RefusalRemedies.NotFoundNamesWhereItIsListed",
                      test_a_not_found_names_the_list_that_holds_what_was_missing);
         registerTest("RefusalRemedies.SiteRemedyLeftAlone", test_a_site_remedy_is_left_alone);

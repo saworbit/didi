@@ -3051,8 +3051,15 @@ Result<AttachableScript> loadAttachableScript(GDExtensionObjectPtr node,
                                                          GDEXTENSION_VARIANT_TYPE_BOOL);
     if (compatible.isErr()) return compatible.error();
     if (!compatible.value()) {
-        return Error(422, "Script base type " + base_type.value() +
-                              " is incompatible with the target node");
+        // Its own code, so the remedy is the node to attach it to (#1181).
+        const auto node_class = nodeClassName(node);
+        return Error(422,
+                     "Script base type " + base_type.value() + " is incompatible with the target node" +
+                         (node_class.empty() ? std::string() : ", a " + node_class) +
+                         ". Attach it to a " + base_type.value() + " or a node that inherits from one.",
+                     {{"code", "script_base_incompatible"},
+                      {"base_type", base_type.value()},
+                      {"node_class", node_class}});
     }
     AttachableScript attachable;
     attachable.object = resource.value();
@@ -3201,7 +3208,9 @@ std::optional<json> previewMutationPreconditions(GDExtensionObjectPtr root, GDEx
             if (auto script_path = string_argument("script_path")) {
                 auto attachable = loadAttachableScript(node, *script_path);
                 if (attachable.isErr()) {
-                    return errorJson(attachable.error().code, attachable.error().message);
+                    const auto& failure = attachable.error();
+                    return failure.data.is_object() ? errorJson(failure.code, failure.message, failure.data)
+                                                    : errorJson(failure.code, failure.message);
                 }
             }
         }
@@ -6463,11 +6472,13 @@ json GodotBridge::callScriptMethod(const json& params,
     auto script = objectFromVariant(script_value.value());
     if (script.isErr() || !script.value()) {
         const auto typed = typedToolForEngineMethod(method_name);
-        return fail(422,
-                    "The node has no script, so it declares no methods to call. Engine methods "
-                    "are deliberately out of reach here; the typed tools cover those." +
-                        (typed.empty() ? std::string()
-                                       : " For " + method_name + ", use " + typed + "."));
+        return errorJson(422,
+                         "The node has no script, so it declares no methods to call. Engine methods "
+                         "are deliberately out of reach here; the typed tools cover those." +
+                             (typed.empty() ? std::string()
+                                            : " For " + method_name + ", use " + typed + "."),
+                         typed.empty() ? json{{"code", "node_has_no_script"}}
+                                       : json{{"code", "node_has_no_script"}, {"use_tool", typed}});
     }
     // The editor only creates a script instance for a @tool script. Without
     // one the node carries the script resource, has_method answers true, and
@@ -6479,11 +6490,12 @@ json GodotBridge::callScriptMethod(const json& params,
                                                       GDEXTENSION_VARIANT_TYPE_BOOL);
     if (is_tool.isErr()) return fail(500, is_tool.error().message);
     if (is_tool.value() == 0) {
-        return fail(422,
-                    "The node's script is not a @tool script, so the editor has not created an "
-                    "instance of it and there is nothing to run. Calling it would return nothing "
-                    "having done nothing. Add @tool to the script if it is meant to act in the "
-                    "editor, or run the project and drive it there.");
+        return errorJson(422,
+                         "The node's script is not a @tool script, so the editor has not created an "
+                         "instance of it and there is nothing to run. Calling it would return nothing "
+                         "having done nothing. Add @tool to the script if it is meant to act in the "
+                         "editor, or run the project and drive it there.",
+                         {{"code", "script_not_tool"}});
     }
 
     // The leaf script's list already carries methods it inherits from a base
@@ -13992,7 +14004,9 @@ json GodotBridge::execute(const std::string& method, const json& params,
             script_path = params.value("script_path", "");
             auto attachable = loadAttachableScript(node.value(), script_path);
             if (attachable.isErr()) {
-                return errorJson(attachable.error().code, attachable.error().message);
+                const auto& failure = attachable.error();
+                return failure.data.is_object() ? errorJson(failure.code, failure.message, failure.data)
+                                                : errorJson(failure.code, failure.message);
             }
             requested_script_object = attachable.value().object;
             new_script = std::move(attachable.value().script);

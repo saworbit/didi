@@ -423,7 +423,23 @@ const std::map<std::string, Rule>& rules() {
                 return nextCall("project_list_export_presets", json::object(),
                                 "Read the preset's configuration errors.");
             }
-            return noRemedy("export_presets.cfg does not parse; fix the file by hand.");
+            // A malformed export_presets.cfg is the one refusal that sets this
+            // code itself. Any other 422 reaches it through the floor, and was
+            // told to fix that file whatever it was about (#1181).
+            if (r.data.contains("presets_file_exists")) {
+                return noRemedy("export_presets.cfg does not parse; fix the file by hand.");
+            }
+            return noRemedy("The engine could not use what was sent; the message says what it could not use.");
+        }},
+        {"script_base_incompatible", [](const Refusal&) { return field("target_node"); }},
+        {"node_has_no_script", [](const Refusal& r) {
+            const auto tool = text(r.data, "use_tool");
+            if (!tool.empty()) return nextCall(tool, json::object(), "This tool calls that engine method.");
+            return noRemedy("Only methods the node's script declares can be called here.");
+        }},
+        {"script_not_tool", [](const Refusal&) {
+            return noRemedy("Add @tool to the script for it to act in the editor, or run the project and "
+                            "call it in the game.");
         }},
         {"unparseable_import_metadata", [](const Refusal&) {
             return noRemedy("The .import file does not parse at the line named; fix it by hand, "
