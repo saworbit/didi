@@ -191,6 +191,7 @@ set(CORE_SOURCES
     src/gdextension/session_host.cpp
     src/gdextension/runtime_log.cpp
     src/gdextension/engine_output_logger.cpp
+    src/gdextension/godot_object.cpp
     src/gdextension/engine_diagnostics.cpp
     src/gdextension/protocol_servers.cpp
     src/gdextension/runtime_request_router.cpp
@@ -420,6 +421,7 @@ set(TEST_SOURCES
     tests/test_segmentation.cpp
     tests/test_runtime_output.cpp
     tests/test_expression_sandbox.cpp
+    tests/test_godot_object.cpp
     tests/test_tools.cpp
     tests/test_script_patch.cpp
     tests/test_autoload_diagnostics.cpp
