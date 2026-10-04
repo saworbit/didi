@@ -154,7 +154,9 @@ CallToolResult sendPhase7LiveRequest(const ResolvedToolBinding& binding,
                 runtime::annotateLiveRouteFailure(stopped, lease->descriptor, quarantined);
                 data = stopped.data.is_object() ? stopped.data : data;
                 if (data.value("incident", std::string{}) == "game_stopped") {
-                    return phase7Error(binding, 503, "runtime_route_request_failed",
+                    if (!data.contains("code")) data["code"] = "runtime_route_request_failed";
+                    return phase7Error(binding, 503,
+                                       "The game stopped, so the route to it failed: " + failure.message,
                                        std::move(data));
                 }
                 if (!data.contains("code")) data["code"] = "engine_refused";
@@ -177,7 +179,10 @@ CallToolResult sendPhase7LiveRequest(const ResolvedToolBinding& binding,
         data["route_quarantine"] = quarantined;
         data["upstream_code"] = failure.code;
         data["upstream_message"] = failure.message;
-        return phase7Error(binding, 503, "runtime_route_request_failed", std::move(data));
+        if (!data.contains("code")) data["code"] = "runtime_route_request_failed";
+        return phase7Error(binding, 503,
+                           "The route to the engine could not deliver this call: " + failure.message,
+                           std::move(data));
     }
 
     json payload = response.value();

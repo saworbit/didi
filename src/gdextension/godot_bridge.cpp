@@ -13384,7 +13384,11 @@ json GodotBridge::execute(const std::string& method, const json& params,
         if (exists.isErr()) return errorJson(exists.error().code, exists.error().message);
 
         if (method == "project.getSetting") {
-            if (!exists.value()) return errorJson(404, "Project setting not found: " + setting);
+            if (!exists.value()) {
+                return errorJson(404, "Project setting not found: " + setting +
+                                          ". The attached editor does not define it.",
+                                 {{"code", "setting_not_found"}});
+            }
             VariantValue default_value;
             auto current = callObject(project_settings.value(), "ProjectSettings", "get_setting", 223050753LL,
                                       {&name.value(), &default_value});
@@ -13401,7 +13405,10 @@ json GodotBridge::execute(const std::string& method, const json& params,
         if (!remove && !params.contains("value")) {
             return errorJson(400, "value is required unless remove is true");
         }
-        if (remove && !exists.value()) return errorJson(404, "Project setting not found: " + setting);
+        if (remove && !exists.value()) {
+            return errorJson(404, "Project setting not found: " + setting + ". There is nothing to remove.",
+                             {{"code", "setting_not_found"}});
+        }
 
         // Godot does support custom project settings, so writing a name the
         // engine does not define is a legitimate mode. It is also
@@ -13421,7 +13428,8 @@ json GodotBridge::execute(const std::string& method, const json& params,
                     ". The engine does not define this name, so writing it would add a key "
                     "nothing reads and report it as persisted. Check the spelling against "
                     "project_get_setting. To add a custom setting on purpose, pass "
-                    "create: true.");
+                    "create: true.",
+                {{"code", "setting_not_found"}});
         }
 
         VariantValue default_value;

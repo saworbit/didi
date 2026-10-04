@@ -126,7 +126,9 @@ TEST_CASE(phase7_signal_forwarder_post_dispatch_contract) {
     ASSERT_EQ(failure->calls, 1);
     ASSERT_EQ(failure->quarantines, 1);
     ASSERT_EQ(connect_error.at("code"), 503);
-    ASSERT_EQ(connect_error.at("message"), "runtime_route_request_failed");
+    // A sentence, with the identifier in data.code (#1184).
+    ASSERT_TRUE(connect_error.at("message").get<std::string>().find("could not deliver") != std::string::npos);
+    ASSERT_EQ(connect_error.at("data").at("code"), "runtime_route_request_failed");
     ASSERT_EQ(connect_error.at("data").at("retryable"), false);
     ASSERT_EQ(connect_error.at("data").at("route_quarantine"), false);
 }
@@ -199,9 +201,10 @@ TEST_CASE(phase7_application_error_does_not_quarantine_the_route) {
     const auto unreachable_error = errorPayload(
         didi::mcp::sendPhase7LiveRequest(connect, didi::json::object(), unreachable));
     ASSERT_EQ(unreachable_error.at("code"), 503);
-    ASSERT_EQ(unreachable_error.at("message"), "runtime_route_request_failed");
-    // data.code comes from the status floor the registry applies on the way
-    // out, so 503 here is what makes it not_connected there.
+    ASSERT_TRUE(unreachable_error.at("message").get<std::string>().find("closed the IPC pipe") != std::string::npos);
+    // The route failure names itself in data.code rather than leaving the
+    // status floor to call it not_connected (#1184).
+    ASSERT_EQ(unreachable_error.at("data").at("code"), "runtime_route_request_failed");
 }
 
 // Loses its connection on the first request the way a pipe that went away does,

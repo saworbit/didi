@@ -2526,7 +2526,8 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
                 const std::string sentence =
                     std::string(name) + " needs " +
                     (policy == runtime::LiveSessionKindPolicy::editor_only ? "an editor" : "a game") +
-                    " session, and a " + selected->kind + " session is selected.";
+                    " session, and " + (selected->kind == "editor" ? "an " : "a ") + selected->kind +
+                    " session is selected.";
                 json envelope = {
                     {"execution_mode", "live"},
                     {"session", selected->toProvenanceJson()},
