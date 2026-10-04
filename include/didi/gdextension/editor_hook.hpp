@@ -77,9 +77,15 @@ private:
 // every queued command while its progress dialog is open, and the dialog is
 // open for the whole of the work a detached reimport exists to wait out, so a
 // read through the queue would have waited for the very thing it asks about.
+//
+// editor_reload_project waits for the same thing, a scan applied, and keeps
+// its detached answers in a second store read with editor.reloadStatus
+// (#1157). `id_key` is what each store calls its ids in a read.
 class DetachedReimports {
 public:
     using Clock = std::chrono::steady_clock;
+
+    explicit DetachedReimports(std::string id_key = "reimport_id") : m_idKey(std::move(id_key)) {}
 
     // How long a working reimport is waited for with nobody reading it. A
     // server that exits stops reading, and the wait it left would hold the one
@@ -109,6 +115,7 @@ private:
     };
     // Its own lock, never the reimport mutex: the main thread holds that one
     // across reimport_files, which runs frames.
+    std::string m_idKey;
     mutable std::mutex m_mutex;
     std::vector<Entry> m_entries;
 };
@@ -213,6 +220,8 @@ public:
     // asset.reimportStatus, answered on the calling thread: see
     // DetachedReimports for why it never waits for the main one.
     json readDetachedReimport(const json& params);
+    // editor.reloadStatus, the same way (#1157).
+    json readDetachedReload(const json& params);
     // Starts a callback-driven Performance sample window. The command returns
     // on the callback that collects the last sample; nothing blocks the main
     // thread, and only one collector runs per session.
@@ -395,6 +404,9 @@ private:
         std::chrono::steady_clock::time_point deadline;
         std::shared_ptr<std::promise<json>> response_promise;
         std::shared_ptr<CommandControl> control;
+        // Set when the command was answered at once with this id, and the
+        // answer goes to m_detachedReloads instead (#1157).
+        std::string detached_id;
     };
 
     // A scene_create whose uid the engine could not index yet. Its answer
@@ -454,6 +466,7 @@ private:
     std::optional<PendingMainScreenCapture> m_pendingMainScreenCapture;
     std::optional<PendingAssetReimport> m_pendingAssetReimport;
     DetachedReimports m_detachedReimports;
+    DetachedReimports m_detachedReloads{"reload_id"};
     std::mutex m_profilerMutex;
     std::optional<PendingProfilerRead> m_pendingProfilerRead;
     std::mutex m_invariantMutex;
@@ -501,6 +514,7 @@ public:
     // Runs one reimport frame, so a test can drive the lease without an engine.
     static void processAssetReimportFrame(EditorHook& hook);
     static DetachedReimports& detachedReimports(EditorHook& hook);
+    static DetachedReimports& detachedReloads(EditorHook& hook);
     // A detached reimport as the frame loop would find it, begun at `started`.
     static void plantDetachedReimport(EditorHook& hook, const std::string& id,
                                       std::chrono::steady_clock::time_point started);

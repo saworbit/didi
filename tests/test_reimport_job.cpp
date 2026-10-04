@@ -427,8 +427,118 @@ void test_a_refused_reimport_is_the_jobs_refusal() {
     ASSERT_EQ(error["data"]["reimport_id"], "0123456789abcdef");
 }
 
+// --- editor_reload_project as a job (#1157) ---------------------------------
+
+// The reload store is the reimport store under its own id name.
+void test_a_detached_reload_reads_under_its_own_id() {
+    DetachedReimports store("reload_id");
+    const auto start = DetachedReimports::Clock::now();
+    store.begin("s1", start);
+    const auto working = store.read("s1", start + 200ms);
+    ASSERT_TRUE(working.has_value());
+    ASSERT_EQ((*working)["reload_id"], "s1");
+    ASSERT_FALSE(working->contains("reimport_id"));
+    ASSERT_EQ((*working)["state"], "working");
+    store.finish("s1", {{"status", "reloaded"}, {"scan_applied", true}});
+    ASSERT_EQ((*store.read("s1", start + 400ms))["answer"]["scan_applied"], true);
+}
+
+// Read off the main thread, as the reimport's is: a scan being applied holds
+// the queue for exactly as long as a reader has to wait.
+void test_the_reload_status_is_answered_without_the_main_thread() {
+    auto& hook = EditorHook::instance();
+    const auto depth = EditorHookTestAccess::queueDepth(hook);
+    EditorHookTestAccess::detachedReloads(hook).begin("reload-off-thread", std::chrono::steady_clock::now());
+    didi::runtime::SessionDescriptor session{1,           std::string(32, 'b'), std::string(64, 'c'),
+                                             42,          "editor",             "C:/project",
+                                             "endpoint",  123456789,            "1.3"};
+    const auto answered = didi::godot::answerOffMainThread(
+        "editor.reloadStatus", {{"reload_id", "reload-off-thread"}}, session);
+    ASSERT_TRUE(answered.has_value());
+    ASSERT_EQ((*answered)["state"], "working");
+    ASSERT_EQ((*answered)["reload_id"], "reload-off-thread");
+    ASSERT_EQ(EditorHookTestAccess::queueDepth(hook), depth);
+    const auto unknown = didi::godot::answerOffMainThread(
+        "editor.reloadStatus", {{"reload_id", "never-started"}}, session);
+    ASSERT_EQ((*unknown)["error"]["data"]["code"], "reload_not_found");
+    ASSERT_EQ((*didi::godot::answerOffMainThread("editor.reloadStatus", json::object(), session))["error"]["code"],
+              400);
+    // The reimport's own read is unchanged.
+    ASSERT_FALSE(didi::godot::answerOffMainThread("editor.reloadProject", json::object(), session).has_value());
+}
+
+didi::mcp::JsonRpcResponse callReload(didi::mcp::McpServer& server, int id, json arguments) {
+    didi::mcp::JsonRpcRequest call;
+    call.id = id;
+    call.method = "tools/call";
+    call.params = {{"name", "editor_reload_project"}, {"arguments", std::move(arguments)}};
+    return server.handleRequest(call);
+}
+
+// A scan the editor applies after three reads, past what one call could wait:
+// the job reads it to the end, a repeat reads the job and asks for no second
+// scan, and a call without request_id is answered as it always was.
+void test_a_reload_job_waits_for_the_scan_and_answers_its_repeat() {
+    ScopedReimportProject project;
+    auto editor = std::make_shared<ScriptedEditor>();
+    auto reads = std::make_shared<std::atomic<int>>(0);
+    const json reloaded = {{"status", "reloaded"}, {"scan_applied", true},
+                           {"execution_mode", "live"}, {"is_live_engine", true}};
+    editor->answer = [reads, reloaded](const std::string& method, const json& params) -> didi::Result<json> {
+        if (method == "editor.reloadProject") {
+            if (params.contains("detach_timeout_ms")) {
+                return json{{"status", "accepted"}, {"reload_id", "fedcba9876543210"}};
+            }
+            return reloaded;
+        }
+        if (method == "editor.reloadStatus") {
+            if (reads->fetch_add(1) < 3) return json{{"reload_id", "fedcba9876543210"}, {"state", "working"}};
+            return json{{"reload_id", "fedcba9876543210"}, {"state", "finished"}, {"answer", reloaded}};
+        }
+        return didi::Error(501, "not scripted: " + method);
+    };
+    didi::mcp::McpServer server;
+    startWith(server, editor);
+    server.setJobWaitsForTesting(100ms, 50ms);
+    // A reload with an editor attached is a confirmed mutation; --yolo is how
+    // the harness sends it, and the confirmation is not what this tests.
+    server.setConfirmationsSkipped(true);
+    struct Restore {
+        didi::mcp::McpServer& server;
+        ~Restore() { server.setConfirmationsSkipped(false); }  // the registry behind it is shared
+    } restore{server};
+
+    const json call = {{"request_id", "reload-0001"}};
+    const auto first = callReload(server, 20, call);
+    ASSERT_FALSE(first.result.value("isError", false));
+    const auto working = textPayload(first);
+    ASSERT_EQ(working["status"], "working");
+    const auto job_id = working["job"]["job_id"].get<std::string>();
+    ASSERT_EQ(server.jobsForTesting().waitFor(job_id, 30s)->state, JobState::Completed);
+    ASSERT_EQ(editor->firstParams("editor.reloadProject")["detach_timeout_ms"], 300000);
+    ASSERT_EQ(editor->count("editor.reloadStatus"), 4u);
+
+    const auto repeat = callReload(server, 21, call);
+    const auto answer = textPayload(repeat);
+    ASSERT_EQ(answer["scan_applied"], true);
+    ASSERT_EQ(answer["reload_id"], "fedcba9876543210");
+    ASSERT_EQ(repeat.result["_meta"]["didi"]["job"]["job_id"], job_id);
+    ASSERT_EQ(editor->count("editor.reloadProject"), 1u);
+
+    const auto plain = callReload(server, 22, json::object());
+    ASSERT_FALSE(plain.result.value("isError", false));
+    ASSERT_EQ(textPayload(plain)["scan_applied"], true);
+    ASSERT_EQ(editor->count("editor.reloadProject"), 2u);
+    ASSERT_EQ(editor->count("editor.reloadStatus"), 4u);
+}
+
 struct RegisterReimportJobTests {
     RegisterReimportJobTests() {
+        registerTest("ReimportJob.ReloadReadsUnderItsOwnId", test_a_detached_reload_reads_under_its_own_id);
+        registerTest("ReimportJob.ReloadStatusOffMainThread",
+                     test_the_reload_status_is_answered_without_the_main_thread);
+        registerTest("ReimportJob.ReloadJobWaitsForTheScan",
+                     test_a_reload_job_waits_for_the_scan_and_answers_its_repeat);
         registerTest("ReimportJob.DetachedReadsWorkingThenItsAnswer",
                      test_a_detached_reimport_reads_working_then_its_answer);
         registerTest("ReimportJob.LeaseRunsFromTheLastRead",

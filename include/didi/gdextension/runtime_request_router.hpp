@@ -15,9 +15,10 @@ std::optional<json> rejectDisallowedSessionMethod(
     const std::string& method, const runtime::SessionDescriptor& session);
 
 // The answer to a method this thread answers itself instead of queueing it for
-// Godot's main thread, or nothing for any other method. asset.reimportStatus is
-// the one: the editor holds every queued command while it applies a scan, and a
-// read of a detached reimport has to answer during exactly that (Q8).
+// Godot's main thread, or nothing for any other method. asset.reimportStatus and
+// editor.reloadStatus are the two: the editor holds every queued command while
+// it applies a scan, and a read of a detached reimport or reload has to answer
+// during exactly that (Q8, #1157).
 std::optional<json> answerOffMainThread(const std::string& method, const json& params,
                                         const runtime::SessionDescriptor& session);
 

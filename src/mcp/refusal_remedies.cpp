@@ -673,6 +673,10 @@ const std::map<std::string, Rule>& rules() {
         {"reimport_unread", [](const Refusal&) { return field("request_id"); }},
         {"reimport_not_found", [](const Refusal&) { return field("request_id"); }},
         {"reimport_status_unanswered", [](const Refusal&) { return field("request_id"); }},
+        // editor_reload_project as a job, the same way (#1157).
+        {"reload_unread", [](const Refusal&) { return field("request_id"); }},
+        {"reload_not_found", [](const Refusal&) { return field("request_id"); }},
+        {"reload_status_unanswered", [](const Refusal&) { return field("request_id"); }},
         {"animation_library_unloadable", [](const Refusal&) { return field("library_path"); }},
         {"not_an_animation_library", [](const Refusal&) { return field("library_path"); }},
         {"library_path_case_mismatch", [](const Refusal&) { return field("library_path"); }},

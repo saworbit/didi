@@ -251,11 +251,11 @@ constexpr const char* kTasksExtension = "io.modelcontextprotocol/tasks";
 
 // The tools that run as a job when asked to. Two run an offline helper that
 // can take minutes, during which the stdio loop answered nothing else. The
-// third waits for the editor to apply a scan, which a slow editor can take
+// other two wait for the editor to apply a scan, which a slow editor can take
 // minutes over, past the bridge's fifteen-second wait for any one command.
 bool runsAsJob(const std::string& canonical) {
     return canonical == "project_export" || canonical == "csharp_check_build" ||
-           canonical == "asset_reimport";
+           canonical == "asset_reimport" || canonical == "editor_reload_project";
 }
 
 // Whether this request declared the tasks extension in its own capabilities.

@@ -117,7 +117,7 @@ std::optional<json> DetachedReimports::read(const std::string& id, Clock::time_p
     for (auto& entry : m_entries) {
         if (entry.id != id) continue;
         entry.last_read = now;
-        json status = {{"reimport_id", id},
+        json status = {{m_idKey, id},
                        {"state", entry.answer.has_value() ? "finished" : "working"},
                        {"elapsed_ms", std::chrono::duration_cast<std::chrono::milliseconds>(
                                           now - entry.started).count()}};
@@ -309,6 +309,36 @@ void EditorHook::processQueue() {
                 // It answers once the editor has applied a full scan, well
                 // inside the server's wait, counted from when it was queued.
                 constexpr auto kProjectScanAnswerBy = std::chrono::seconds(12);
+                // A detached reload answers now with an id and is waited for up
+                // to detach_timeout_ms instead, past any one command's wait, for
+                // editor_reload_project run as a job (#1157). A bridge older
+                // than this ignores the field and answers as it always has.
+                const auto& reload = cmd.params;
+                const bool detached = reload.is_object() && reload.contains("detach_timeout_ms");
+                if (detached && (!reload["detach_timeout_ms"].is_number_integer() ||
+                                 reload["detach_timeout_ms"].get<int64_t>() < 1 ||
+                                 reload["detach_timeout_ms"].get<int64_t>() > kMaxDetachedReimportMs)) {
+                    cmd.control->markCompleted();
+                    fulfillCommand(cmd.response_promise, cmd.control,
+                                   {{"error", {{"code", 400},
+                                                {"message", "detach_timeout_ms must be an integer from 1 to " +
+                                                                std::to_string(kMaxDetachedReimportMs)}}}});
+                    continue;
+                }
+                std::string detached_id;
+                if (detached) {
+                    auto id = security::secureRandomHex(16);
+                    if (id.isErr()) {
+                        cmd.control->markCompleted();
+                        fulfillCommand(cmd.response_promise, cmd.control,
+                                       {{"error", {{"code", 500},
+                                                    {"message", id.error().message},
+                                                    {"data", {{"code", "internal_error"},
+                                                              {"retryable", true}}}}}});
+                        continue;
+                    }
+                    detached_id = id.value();
+                }
                 auto wait = GodotBridge::instance().beginProjectScan();
                 if (wait.isErr()) {
                     cmd.control->markCompleted();
@@ -317,10 +347,27 @@ void EditorHook::processQueue() {
                                                 {"message", wait.error().message}}}});
                     continue;
                 }
-                std::lock_guard<std::mutex> lock(m_projectScanMutex);
-                m_pendingProjectScans.push_back(PendingProjectScan{
-                    wait.value(), cmd.queued_at + kProjectScanAnswerBy, cmd.response_promise,
-                    cmd.control});
+                const auto deadline = detached
+                    ? std::chrono::steady_clock::now() +
+                          std::chrono::milliseconds(reload["detach_timeout_ms"].get<int64_t>())
+                    : cmd.queued_at + kProjectScanAnswerBy;
+                {
+                    std::lock_guard<std::mutex> lock(m_projectScanMutex);
+                    m_pendingProjectScans.push_back(PendingProjectScan{
+                        wait.value(), deadline, cmd.response_promise, cmd.control, detached_id});
+                }
+                if (detached) {
+                    m_detachedReloads.begin(detached_id, std::chrono::steady_clock::now());
+                    // Accepted, not done, in words a reader that knows nothing
+                    // of detaching cannot take for a finished reload.
+                    cmd.control->markCompleted();
+                    fulfillCommand(cmd.response_promise, cmd.control,
+                                   {{"status", "accepted"},
+                                    {"reload_id", detached_id},
+                                    {"detach_timeout_ms", reload["detach_timeout_ms"]},
+                                    {"message", "The scan has started and is not applied yet. Read its "
+                                                "answer with editor.reloadStatus."}});
+                }
                 continue;
             }
             if (cmd.method == "runtime.readProfiler") {
@@ -1210,6 +1257,25 @@ json EditorHook::readDetachedReimport(const json& params) {
     return std::move(*status);
 }
 
+json EditorHook::readDetachedReload(const json& params) {
+    if (!params.is_object() || !params.contains("reload_id") || !params["reload_id"].is_string()) {
+        return {{"error", {{"code", 400}, {"message", "reload_id must be the string editor.reloadProject "
+                                                       "answered with"}}}};
+    }
+    const auto id = params["reload_id"].get<std::string>();
+    auto status = m_detachedReloads.read(id, DetachedReimports::Clock::now());
+    if (!status.has_value()) {
+        return {{"error", {{"code", 404},
+                            {"message", "This editor keeps no reload " + id + ". It was started in an "
+                                        "editor process that has since stopped, or it finished long "
+                                        "enough ago to have been dropped."},
+                            {"data", {{"code", "reload_not_found"},
+                                      {"outcome", "unknown_outcome"},
+                                      {"retryable", false}}}}}};
+    }
+    return std::move(*status);
+}
+
 void EditorHook::answerAssetReimport(PendingAssetReimport& completed, json response) {
     completed.control->markCompleted();
     if (completed.detached_id.empty()) {
@@ -1520,6 +1586,23 @@ void EditorHook::processProjectScanFrame() {
     std::vector<PendingProjectScan> waiting;
     for (auto& scan : pending) {
         json answer;
+        // A server that stopped reading leaves nobody to answer. The scan is
+        // the editor's and carries on; only the wait for it ends.
+        if (!scan.detached_id.empty() && m_detachedReloads.unread(scan.detached_id, now)) {
+            DIDI_LOG_WARN("EDITOR_HOOK", "Stopped waiting for detached reload ", scan.detached_id,
+                          ": nobody read it for the lease");
+            m_detachedReloads.finish(
+                scan.detached_id,
+                {{"error", {{"code", 504},
+                            {"message", "Nobody read this reload for " +
+                                            std::to_string(DetachedReimports::kReaderLease.count()) +
+                                            " seconds, so the bridge stopped waiting for its scan."},
+                            {"data", {{"code", "reload_unread"},
+                                      {"outcome", "pending"},
+                                      {"retryable", true},
+                                      {"route_quarantine", false}}}}}});
+            continue;
+        }
         auto step = bridge.projectScanStepNow(scan.wait);
         if (step.isOk() && step.value() == ProjectScanStep::Scan) {
             auto started = bridge.startProjectScan(scan.wait);
@@ -1553,6 +1636,10 @@ void EditorHook::processProjectScanFrame() {
                                             {"route_quarantine", false}}}}}};
         } else {
             waiting.push_back(std::move(scan));
+            continue;
+        }
+        if (!scan.detached_id.empty()) {
+            m_detachedReloads.finish(scan.detached_id, std::move(answer));
             continue;
         }
         scan.control->markCompleted();
@@ -1978,6 +2065,14 @@ void EditorHook::cancelPendingCommands(const std::string& reason) {
         project_scans.swap(m_pendingProjectScans);
     }
     for (auto& scan : project_scans) {
+        if (!scan.detached_id.empty()) {
+            m_detachedReloads.finish(scan.detached_id,
+                                     {{"error", {{"code", 503},
+                                                  {"message", reason},
+                                                  {"data", {{"code", "live_session_ended"},
+                                                            {"retryable", false}}}}}});
+            continue;
+        }
         if (scan.control && scan.control->tryCancelRunning()) {
             fulfillCommand(scan.response_promise, scan.control,
                            {{"error", {{"code", 503},
@@ -2356,6 +2451,10 @@ bool EditorHookTestAccess::hasPendingAssetReimport(EditorHook& hook) {
 
 void EditorHookTestAccess::processAssetReimportFrame(EditorHook& hook) {
     hook.processAssetReimportFrame();
+}
+
+DetachedReimports& EditorHookTestAccess::detachedReloads(EditorHook& hook) {
+    return hook.m_detachedReloads;
 }
 
 DetachedReimports& EditorHookTestAccess::detachedReimports(EditorHook& hook) {

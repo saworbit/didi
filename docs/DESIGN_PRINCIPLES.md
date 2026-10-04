@@ -228,7 +228,8 @@ pass is only true for the files it ran against.
   a write twice.
 
 **Enforced by.** [Q8](BUILD_QUEUE.md#q8-long-work-as-jobs), which runs
-`project_export`, `csharp_check_build` and `asset_reimport` as jobs: a
+`project_export`, `csharp_check_build`, `asset_reimport` and
+`editor_reload_project` as jobs: a
 `request_id` repeated after a client timeout reads the job instead of running
 the work again, a native test counts the runs, and the live harness checks that
 a repeated reimport job reimports nothing. [Q9](BUILD_QUEUE.md#q9-proof-in-one-call) is the rest.

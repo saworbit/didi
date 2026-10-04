@@ -486,12 +486,13 @@ by the schema. A read shaped as one list, such as `project_list_resources` or
 Q8 in the [Build Queue](BUILD_QUEUE.md#q8-long-work-as-jobs). The server answers
 one request at a time, and `project_export` and `csharp_check_build` run a
 helper process that can take minutes, during which nothing else was answered.
-`asset_reimport` waits for the editor to apply a scan, which can take minutes on
-a slow editor, past the fifteen seconds the bridge waits for any one command.
+`asset_reimport` and `editor_reload_project` wait for the editor to apply a
+scan, which can take minutes on a slow editor, past the fifteen seconds the
+bridge waits for any one command.
 Each can now run as a **job**: the same tool call, through the same pipeline,
 on a thread of its own, with its answer kept.
 
-**`request_id`.** All three tools take an optional `request_id`, 8 to 64 letters,
+**`request_id`.** All four tools take an optional `request_id`, 8 to 64 letters,
 digits, `.`, `_`, `:` or `-`, chosen by the caller. A call that carries one runs
 as a job and waits up to about ten seconds for it:
 
