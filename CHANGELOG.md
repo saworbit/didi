@@ -559,6 +559,16 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **A rolled-back write no longer steps the scene's history behind the editor
+  (#1152, part 2).** When a postcondition failed after the commit, the
+  rollback used the editor's own Undo only while the global history was empty,
+  and otherwise undid the scene's history directly. The editor's own stacks
+  then still held the step, so the next Undo took the wrong one. The rollback
+  now always goes through the editor's Undo and checks which history moved. If
+  that was the global one, the editor's Redo puts it back before the direct
+  fallback. The signal bridge probe holds this with an action in the global
+  history, on 4.5.1, 4.6.2 and 4.7.2.
+
 - **Every Godot object Didi constructs is finished or not handed back
   (#1166).** The bridge, the expression sandbox and the engine output logger
   each had their own copy of the construction that sends

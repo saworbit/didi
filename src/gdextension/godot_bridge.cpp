@@ -3451,15 +3451,16 @@ Result<HistoryMoved> runEditorHistoryCommand(GDExtensionObjectPtr editor,
 // postcondition fails after the commit, so the tool does not report failure
 // while the scene and the undo stack already carry the change.
 //
-// Through the editor's own Undo where that is certain to take this action, so
-// the manager's history stays true (#913). The editor's command undoes the
-// newer of the scene's history and the global one. With nothing in the global
-// one, that is the action just committed. With something there, the command
-// could take that instead, so the scene is put back directly, as it is when
-// the editor cannot be asked or runs the command and moves nothing, which it
-// does while a mouse button is held. A scene still holding a change the tool
-// is about to call failed is worse than a history the editor calls
-// inconsistent.
+// Through the editor's own Undo, so the manager's history stays true (#913).
+// The editor's command undoes the newer of the scene's history and the global
+// one, and the action just committed is the newest there is, so it is almost
+// always the one taken. Which history moved says whether it was (#1152). When
+// the command took the global history's action instead, which two actions in
+// one tick of the clock it compares can do, the editor's own Redo puts that
+// back, and the scene is put back directly. So it is too when the editor
+// cannot be asked or moves nothing, as it does while a mouse button is held. A
+// scene still holding a change the tool is about to call failed is worse than
+// a history the editor calls inconsistent.
 Result<void> undoLastAction(GDExtensionObjectPtr manager, GDExtensionObjectPtr root) {
     auto root_value = makeObject(root);
     if (root_value.isErr()) return root_value.error();
@@ -3478,14 +3479,20 @@ Result<void> undoLastAction(GDExtensionObjectPtr manager, GDExtensionObjectPtr r
     auto scene_has = has_undo(undo_redo.value());
     if (scene_has.isErr()) return scene_has.error();
     if (!scene_has.value()) return Error(409, "Nothing to undo");
-    auto global_id = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(0));
-    auto global = global_id.isOk() ? historyUndoRedo(manager, global_id.value())
-                                   : Result<GDExtensionObjectPtr>(global_id.error());
-    auto global_has = global.isOk() ? has_undo(global.value()) : Result<bool>(true);
     auto editor = editorInterface();
-    if (global_has.isOk() && !global_has.value() && editor.isOk()) {
+    if (editor.isOk()) {
         auto moved = runEditorHistoryCommand(editor.value(), manager, undo_redo.value(), true);
         if (moved.isOk() && moved.value() == HistoryMoved::Scene) return Result<void>::ok();
+        if (moved.isOk() && moved.value() == HistoryMoved::Global) {
+            // Our commit emptied the scene's redo stack, so the editor's Redo
+            // takes the global action it just undid.
+            auto restored = runEditorHistoryCommand(editor.value(), manager, undo_redo.value(), false);
+            if (restored.isErr() || restored.value() != HistoryMoved::Global) {
+                return Error::internal("The editor's Undo took an action from the global history in "
+                                       "place of the one just committed, and its Redo did not put "
+                                       "that back");
+            }
+        }
     }
     auto executed = callObject(undo_redo.value(), "UndoRedo", "undo", 2240911060LL);
     return executed.isOk() ? Result<void>::ok() : Result<void>(executed.error());

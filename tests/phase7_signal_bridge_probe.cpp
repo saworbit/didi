@@ -261,6 +261,26 @@ void runSeamScenarios(Probe& probe) {
     Probe::success(probe.request("scene.addToGroup", {{"target_node", "Receiver"}, {"group", "seam_probe"}}));
     Probe::success(probe.request("scene.removeFromGroup", {{"target_node", "Receiver"}, {"group", "seam_probe"}}));
 
+    // A rollback with an action in the editor's global history (#1152). A write
+    // into a material kept in its own file goes there. The rollback used to
+    // undo the scene's history directly whenever the global one was not empty,
+    // behind the editor's back, and the next Undo then took the wrong step. It
+    // goes through the editor's own Undo now, so the next one takes the
+    // material write, from the global history, and the engine says nothing.
+    Probe::success(probe.request("shader.setUniform", {{"target_node", "Tinted"},
+        {"property_name", "material_override"}, {"uniform_name", "tint"},
+        {"value", {{"r", 0}, {"g", 1}, {"b", 0}}}}));
+    configure("connect_postcondition_mismatch");
+    auto over_global = probe.request("signal.connect", relation("mismatch_connect", "receive_basic"));
+    Probe::error(over_global, 500, "signal_postcondition_mismatch");
+    Probe::require(over_global["error"]["data"].at("rollback") == "completed", over_global.dump());
+    Probe::require(!Probe::connection(probe.list("BasicEmitter"), "mismatch_connect", "Receiver", "receive_basic", 2),
+                   "a rollback over a global action did not restore pre-state");
+    auto next_undo = probe.request("editor.undo");
+    Probe::success(next_undo);
+    Probe::require(next_undo.at("history") == "global" && !next_undo.contains("engine_diagnostics"),
+                   "the Undo after a rollback did not take the global action cleanly: " + next_undo.dump());
+
     configure("connect_postcondition_mismatch_rollback_failure");
     auto unknown = probe.request("signal.connect", relation("mismatch_connect", "receive_basic"));
     Probe::error(unknown, 500, "signal_postcondition_mismatch");
