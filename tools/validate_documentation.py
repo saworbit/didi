@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 from pathlib import Path
 import re
@@ -1411,6 +1412,170 @@ def _current_changelog_section(text: str) -> str:
     return remainder[:end.start()] if end is not None else remainder
 
 
+# The changelog is read to see what moved and when, so a change is one dated
+# line and every release has a row in the glance table at the top. It grew to
+# 6,500 lines of undated paragraphs in no particular order before this was
+# checked; the reasoning behind a change belongs in its pull request.
+CHANGELOG_SECTIONS = ("Breaking", "Added", "Changed", "Deprecated", "Removed", "Fixed", "Security")
+# Breaking keeps its paragraphs: it is what a person upgrading has to read, and
+# release.yml puts it in the release notes.
+CHANGELOG_LINE_SECTIONS = CHANGELOG_SECTIONS[1:]
+CHANGELOG_GLANCE_COUNTS = ("Added", "Changed", "Fixed", "Breaking")
+CHANGELOG_SUMMARY_LIMIT = 160
+_CHANGELOG_REFERENCE = (
+    r"\[(?:#\d+|PR #\d+|[0-9a-f]{7})\]"
+    r"\(https://github\.com/saworbit/didi/(?:issues/\d+|pull/\d+|commit/[0-9a-f]{40})\)"
+)
+CHANGELOG_ENTRY_PATTERN = re.compile(
+    r"^- `(?P<date>\d{4}-\d{2}-\d{2})` (?P<summary>\S.*?) "
+    rf"(?P<references>{_CHANGELOG_REFERENCE}(?: · {_CHANGELOG_REFERENCE})*)$"
+)
+CHANGELOG_ENTRY_SHAPE = (
+    "- `YYYY-MM-DD` What changed, in one sentence. "
+    "[#123](https://github.com/saworbit/didi/issues/123) · "
+    "[PR #456](https://github.com/saworbit/didi/pull/456)"
+)
+CHANGELOG_VERSION_HEADING = re.compile(
+    r"^## \[(?P<version>Unreleased|\d+\.\d+\.\d+)\](?: - (?P<date>\d{4}-\d{2}-\d{2}))?\s*$"
+)
+CHANGELOG_GLANCE_ROW = re.compile(
+    r"^\| \[(?P<version>[^\]]+)\]\(#[^)]+\) \| (?P<released>[^|]*?) \| [^|]+ \| "
+    r"(?P<added>[^|]*?) \| (?P<changed>[^|]*?) \| (?P<fixed>[^|]*?) \| "
+    r"(?P<breaking>[^|]*?) \| (?P<tools>[^|]*?) \|$"
+)
+
+
+def validate_changelog(
+    text: str, expected: tuple[int, int, int] = CANONICAL_IMPLEMENTATION_COUNTS
+) -> list[str]:
+    """Hold CHANGELOG.md to dated one-line entries and a glance table that adds up."""
+    errors: list[str] = []
+    lines = text.splitlines()
+    versions: list[dict] = []
+    version: dict | None = None
+    section: str | None = None
+    previous_date: str | None = None
+    for number, line in enumerate(lines, start=1):
+        if line.startswith("## "):
+            match = CHANGELOG_VERSION_HEADING.match(line)
+            version = None
+            section = None
+            if match is not None:
+                version = {
+                    "version": match.group("version"),
+                    "date": match.group("date"),
+                    "counts": {name: 0 for name in CHANGELOG_SECTIONS},
+                    "sections": set(),
+                }
+                versions.append(version)
+                if (match.group("version") == "Unreleased") != (match.group("date") is None):
+                    errors.append(
+                        f"CHANGELOG.md:{number}: a release heading is '## [x.y.z] - YYYY-MM-DD', "
+                        "and only [Unreleased] goes without a date"
+                    )
+            continue
+        if version is None:
+            continue
+        if line.startswith("### "):
+            section = line[4:].strip()
+            previous_date = None
+            if section not in CHANGELOG_SECTIONS:
+                errors.append(
+                    f"CHANGELOG.md:{number}: '### {section}' is not a changelog section; "
+                    f"use one of {', '.join(CHANGELOG_SECTIONS)}"
+                )
+            elif section in version["sections"]:
+                errors.append(
+                    f"CHANGELOG.md:{number}: [{version['version']}] has a second "
+                    f"'### {section}'; add the entry to the first one"
+                )
+            version["sections"].add(section)
+            continue
+        if section is None or not line.strip() or line.strip() == "---":
+            continue
+        if section == "Breaking":
+            if line.startswith("- "):
+                version["counts"]["Breaking"] += 1
+            continue
+        if section not in CHANGELOG_LINE_SECTIONS:
+            continue
+        match = CHANGELOG_ENTRY_PATTERN.match(line)
+        if match is None:
+            errors.append(
+                f"CHANGELOG.md:{number}: an entry under '### {section}' is one line "
+                f"shaped like: {CHANGELOG_ENTRY_SHAPE} (a pull request link alone is "
+                "fine when there is no issue; the explanation goes in the pull request)"
+            )
+            continue
+        version["counts"][section] += 1
+        date = match.group("date")
+        try:
+            datetime.date.fromisoformat(date)
+        except ValueError:
+            errors.append(f"CHANGELOG.md:{number}: {date} is not a date")
+            continue
+        visible = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", match.group("summary"))
+        if len(visible) > CHANGELOG_SUMMARY_LIMIT:
+            errors.append(
+                f"CHANGELOG.md:{number}: the entry is {len(visible)} characters; keep it "
+                f"to {CHANGELOG_SUMMARY_LIMIT} and put the detail in the pull request"
+            )
+        if previous_date is not None and date > previous_date:
+            errors.append(
+                f"CHANGELOG.md:{number}: {date} sits below {previous_date}; each section "
+                "runs newest first"
+            )
+        previous_date = date
+
+    if not versions or versions[0]["version"] != "Unreleased":
+        errors.append("CHANGELOG.md: the first version section must be '## [Unreleased]'")
+
+    rows: list[re.Match[str]] = []
+    in_glance = False
+    for line in lines:
+        if line.startswith("## "):
+            in_glance = line.strip() == "## Releases at a glance"
+            continue
+        if in_glance and line.startswith("| ["):
+            row = CHANGELOG_GLANCE_ROW.match(line)
+            if row is None:
+                errors.append(
+                    "CHANGELOG.md: a 'Releases at a glance' row has the wrong number of "
+                    f"columns: {line}"
+                )
+            else:
+                rows.append(row)
+    listed = [row.group("version") for row in rows]
+    headed = [entry["version"] for entry in versions]
+    if listed != headed:
+        errors.append(
+            "CHANGELOG.md: the 'Releases at a glance' table must list every version "
+            f"section in order; it lists {listed or 'none'} and the sections are {headed}"
+        )
+    for row, entry in zip(rows, versions):
+        if entry["version"] == "Unreleased":
+            canonical, implemented, _ = expected
+            if row.group("tools").strip() != f"{implemented} of {canonical}":
+                errors.append(
+                    "CHANGELOG.md: the [Unreleased] glance row must say "
+                    f"'{implemented} of {canonical}' tools implemented"
+                )
+            continue
+        if row.group("released").strip() != entry["date"]:
+            errors.append(
+                f"CHANGELOG.md: the {entry['version']} glance row must say it was "
+                f"released {entry['date']}"
+            )
+        for name in CHANGELOG_GLANCE_COUNTS:
+            cell = row.group(name.lower()).strip()
+            if cell != str(entry["counts"][name]):
+                errors.append(
+                    f"CHANGELOG.md: the {entry['version']} glance row says {cell or 'nothing'} "
+                    f"for {name}; the section has {entry['counts'][name]}"
+                )
+    return errors
+
+
 def _without_phase7_excluded_contexts(text: str) -> str:
     clean = strip_fenced_code_blocks(text)
     lines: list[str] = []
@@ -2122,6 +2287,8 @@ def validate_repository(root: Path, tool_manifest: Path | None = None) -> list[s
     errors.extend(validate_current_surface_heading(texts, expected_counts[0]))
     errors.extend(validate_managed_recovery_contract(texts))
     errors.extend(validate_canonical_implementation_counts(texts, expected_counts))
+    if "CHANGELOG.md" in texts:
+        errors.extend(validate_changelog(texts["CHANGELOG.md"], expected_counts))
     errors.extend(validate_phase7_reconciliation(texts, expected_counts))
     errors.extend(validate_addon_copies_match(root))
     errors.extend(validate_python_tests_are_registered(root))
