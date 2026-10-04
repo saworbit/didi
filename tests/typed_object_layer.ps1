@@ -76,6 +76,16 @@ function Invoke-TypedObjectLayerBlock {
         # A member of a value is not a step into a resource.
         (Tool-Request 7119 "scene_get_property" @{ target_node = "$root/Mover"; property_name = "position:x" }),
         (Tool-Request 7120 "editor_save_scene" @{}),
+        # After the save, so nothing below reaches the file; the close discards
+        # it. A duplicate shares its StyleBox with the original (#1134).
+        (Tool-Request 7130 "scene_duplicate_node" @{ target_node = "$root/Embedded" }),
+        (Tool-Request 7131 "scene_get_property" @{ target_node = "$root/EmbeddedCopy"; property_name = $box }),
+        (Tool-Request 7132 "scene_set_property" @{ target_node = "$root/EmbeddedCopy"; property_name = $box; value = "#0000ff" }),
+        (Tool-Request 7133 "scene_get_property" @{ target_node = "$root/Embedded"; property_name = $box }),
+        (Tool-Request 7134 "scene_set_property" @{ target_node = "$root/EmbeddedCopy"; property_name = $box; value = "#ffff00"; make_unique = $true }),
+        (Tool-Request 7135 "scene_get_property" @{ reads = @(@{ target_node = "$root/Embedded"; property_name = $box }, @{ target_node = "$root/EmbeddedCopy"; property_name = $box }) }),
+        (Tool-Request 7136 "editor_undo" @{}),
+        (Tool-Request 7137 "scene_get_property" @{ reads = @(@{ target_node = "$root/Embedded"; property_name = $box }, @{ target_node = "$root/EmbeddedCopy"; property_name = $box }) }),
         # Saved by the request before, so nothing is discarded; before 4.7 the
         # engine cannot report that, and a close without the flag is refused.
         (Tool-Request 7121 "scene_close" @{ discard_unsaved = $true }),
@@ -104,6 +114,7 @@ function Invoke-TypedObjectLayerBlock {
     Assert-True ($before[1].type -eq "Color") "A shader parameter reached by path did not report its declared type: $(& $text 7103)"
     Assert-True ($before[2].type -eq "Vector2" -and $before[2].engine_constraint.kind -eq "range") "A Node2D position did not carry the range the engine declares: $(& $text 7103)"
     Assert-True ($before[3].type -eq "Object" -and $before[3].holds -eq "StyleBoxFlat" -and $before[3].engine_constraint.kind -eq "resource_type" -and $before[3].engine_constraint.hint_string -eq "StyleBox") "A theme override slot did not say what it holds and what it takes: $(& $text 7103)"
+    Assert-True (@($before | Where-Object { $_.PSObject.Properties.Name -contains "shared_with" }).Count -eq 0) "A read of resources no other node holds named a node sharing them: $(& $text 7103)"
 
     # The dry run read every target through the batch's own checks.
     $preview = Tool-Payload $typedById[7104]
@@ -162,6 +173,23 @@ function Invoke-TypedObjectLayerBlock {
     Assert-True ($sharedText -match 'bg_color = Color\(0, 1, 0, 1\)') "Saving the scene did not rewrite the resource file the write named:`n$sharedText"
     $childText = Get-Content -LiteralPath (Join-Path $FixtureRoot "typed_child.tscn") -Raw
     Assert-True ($childText -match 'bg_color = Color\(0\.2, 0\.2, 0\.2, 1\)') "The refused write reached the instanced scene's file:`n$childText"
+
+    # A duplicate shares the original's StyleBox, so a path write into the
+    # copy changes both, and the read and the write name the original (#1134).
+    Assert-True ((Tool-Payload $typedById[7130]).duplicated_node -eq "$root/EmbeddedCopy") "The Embedded panel was not duplicated where the sharing case expects: $(& $text 7130)"
+    Assert-True (@((Tool-Payload $typedById[7131]).shared_with) -contains "$root/Embedded") "A read into a StyleBox a duplicate shares did not name the node it shares it with: $(& $text 7131)"
+    $sharedWrite = Tool-Payload $typedById[7132]
+    $original = Tool-Payload $typedById[7133]
+    Assert-True ($sharedWrite.applied -eq $true -and @($sharedWrite.shared_with) -contains "$root/Embedded" -and (& $near $original.value.b 1) -and (& $near $original.value.r 0)) "A write into a shared StyleBox did not name, and reach, the node it shares it with: $(& $text 7132) then $(& $text 7133)"
+    $unique = Tool-Payload $typedById[7134]
+    Assert-True ($unique.applied -eq $true -and @($unique.made_unique) -contains "theme_override_styles/panel" -and $unique.PSObject.Properties.Name -notcontains "shared_with") "make_unique did not give the copy a StyleBox of its own: $(& $text 7134)"
+    $apart = @((Tool-Payload $typedById[7135]).reads)
+    Assert-True ((& $near $apart[0].value.b 1) -and (& $near $apart[0].value.g 0) -and (& $near $apart[1].value.r 1) -and (& $near $apart[1].value.g 1) -and (& $near $apart[1].value.b 0)) "A write with make_unique reached the original, or missed the copy: $(& $text 7135)"
+    # One undo takes back the write and the copy together.
+    [void](Tool-Payload $typedById[7136])
+    $rejoined = @((Tool-Payload $typedById[7137]).reads)
+    Assert-True ((& $near $rejoined[1].value.b 1) -and (& $near $rejoined[1].value.r 0) -and @($rejoined[1].shared_with) -contains "$root/Embedded") "One editor_undo did not put the shared StyleBox back on the copy: $(& $text 7137)"
+
     foreach ($id in 7121, 7122) { [void](Tool-Payload $typedById[$id]) }
     Write-Output "Typed object layer: a batch over three nodes undid and redid as one step, and the save kept what the answers said."
 }

@@ -51,6 +51,16 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Added
 
+- **A path write says which other nodes share what it changes, and can write
+  into copies instead (#1134).** A duplicated node shares its sub-resources
+  with the original, so recolouring a copy's StyleBox recoloured both while
+  the answer named one node. `scene_set_property` and `scene_get_property` now
+  list the other holders under `shared_with`, bounded, and only when there are
+  any. `make_unique: true` gives the node its own copies of the resources the
+  path enters, as the inspector's Make Unique does, in the write's own undo
+  step. The tool description is shorter by the same amount, so `tools/list`
+  stays within its budgets.
+
 - **A long export no longer makes every other helper launch wait (#1137, Q8
   part 3).** A Godot Didi starts to answer a question is told not to publish a
   runtime session by `DIDI_OFFLINE_HELPER`, which was set on the server process

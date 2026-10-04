@@ -9995,13 +9995,18 @@
           "openWorldHint": false,
           "readOnlyHint": false
         },
-        "description": "Sets an existing scalar node property through UndoRedo with strict JSON/Godot type compatibility. The property is read back after the commit, so value is what it now holds. When applied is false a not_applied block says which of the two happened, the property not moving or the engine storing a value of its own, and carries the range or enum the engine declares for that property when it declares one. writes sets several, on any nodes, as one undo step.",
+        "description": "Sets an existing scalar node property through UndoRedo with strict JSON/Godot type compatibility. The property is read back after the commit, so value is what it now holds. When applied is false, not_applied says why, with the range or enum the engine declares. writes sets several, on any nodes, as one undo step.",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {
             "dry_run": {
               "default": false,
               "description": "Return a non-mutating change preview instead of executing.",
+              "type": "boolean"
+            },
+            "make_unique": {
+              "default": false,
+              "description": "Write into copies of the resources the path enters, as Make Unique does.",
               "type": "boolean"
             },
             "property_name": {

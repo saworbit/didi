@@ -243,6 +243,7 @@ Non-finite numbers read back as the strings `"inf"`, `"-inf"` and `"nan"` rather
 - `property_name` (`string`, at most 1024 characters): required unless `writes` is given. A property of the node, or a path into a resource it holds.
 - `value`: required unless `writes` is given. The JSON form of the property's Godot type, from the table above.
 - `writes` (`array` of 1 to 64): instead of the three above, several writes, each an object with exactly `target_node`, `property_name` and `value`.
+- `make_unique` (`boolean`, default `false`): write into copies of the resources each path enters, as Make Unique does. See below.
 
 The property is read back after the commit, and the result reports what it now holds rather than what was requested. `value` is that observed state, `old_value` is what it held before, `requested_value` is the argument, and `applied` says whether the two now agree. A committed UndoRedo action is not a changed property: Godot discards some writes, such as `anchors_preset` on a Control still in `layout_mode` 0, and those return `applied: false` with `value` unchanged. Numbers are compared by value, so writing an integer to a float property is `applied: true`.
 
@@ -285,7 +286,7 @@ A write is kept by whatever file keeps the resource it changes. Measured on 4.5.
 
 The editor's inspector writes an external resource the same way, and says so by showing its path. `resource_file` is how this answer says so.
 
-A resource can also be held by more than one node in the scene, and a write inside it changes all of them. `scene_duplicate_node` makes that case without saying so: Godot's duplicate shares the original's sub-resources rather than copying them, so recolouring a copy's StyleBox recolours the original's too. The answer names only the node the call targeted; #1134 tracks saying which others hold it.
+A resource can also be held by more than one node in the scene, and a write inside it changes all of them. `scene_duplicate_node` makes that case without saying so: Godot's duplicate shares the original's sub-resources rather than copying them, so recolouring a copy's StyleBox recolours the original's too. A path read or write now says so: `shared_with` lists the other nodes of the edited scene that hold, in a property of their own, a resource the path steps through, at most 16 of them over a walk of at most 2048 nodes, with `shared_with_truncated` when either limit was reached. It is absent when no other node holds one. `make_unique: true` writes into copies instead, the way the inspector's Make Unique does: each resource the path enters is copied, shallowly, the copies are linked along the path, and the node takes its copy inside the write's own undo step, so one `editor_undo` reverts both. Two writes into the same resource on one node share its copy. The answer lists the copied steps in `made_unique`. A resource built into another scene is still refused as `subresource_not_saved`. Measured on 4.5.1, 4.6.2 and 4.7.2 (#1134).
 
 Some writes are refused whatever the path, because each changes what the scene file is rather than what one of its values is. They are `400 property_write_excluded`, with the tool that makes the change properly in `use_tool` where there is one:
 
