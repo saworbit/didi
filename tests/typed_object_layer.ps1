@@ -86,6 +86,18 @@ function Invoke-TypedObjectLayerBlock {
         (Tool-Request 7135 "scene_get_property" @{ reads = @(@{ target_node = "$root/Embedded"; property_name = $box }, @{ target_node = "$root/EmbeddedCopy"; property_name = $box }) }),
         (Tool-Request 7136 "editor_undo" @{}),
         (Tool-Request 7137 "scene_get_property" @{ reads = @(@{ target_node = "$root/Embedded"; property_name = $box }, @{ target_node = "$root/EmbeddedCopy"; property_name = $box }) }),
+        # Wider values (Q7 part 2), after the save so the close discards them.
+        # A transform reads, and the near misses each value can be are refused
+        # with what to send.
+        (Tool-Request 7138 "scene_get_property" @{ target_node = "$root/Mesh"; property_name = "transform" }),
+        (Tool-Request 7139 "script_create" @{ script_path = "res://typed_values.gd"; source_text = "extends Node`n`n@export var tags: Array = []`n@export var bytes: PackedByteArray`n"; overwrite = $true }),
+        (Tool-Request 7140 "scene_instantiate_node" @{ node_type = "Node"; parent_path = $root; name = "Valued" }),
+        (Tool-Request 7141 "script_attach_to_node" @{ target_node = "$root/Valued"; script_path = "res://typed_values.gd" }),
+        (Tool-Request 7142 "scene_set_property" @{ target_node = "$root/Valued"; property_name = "tags"; value = @(@{ x = 1; y = 2 }) }),
+        (Tool-Request 7143 "scene_set_property" @{ target_node = "$root/Valued"; property_name = "bytes"; value = @(1, 256) }),
+        (Tool-Request 7144 "scene_set_property" @{ target_node = "$root/Mesh"; property_name = "custom_aabb"; value = @{ position = @{ x = 0; y = 0; z = 0 } } }),
+        (Tool-Request 7145 "scene_set_property" @{ target_node = "$root/Valued"; property_name = "tags"; value = @("a", 1, $true, $null) }),
+        (Tool-Request 7146 "scene_set_property" @{ target_node = "$root/Mover"; property_name = "transform"; value = @{ x = @{ x = 1; y = 0 }; y = @{ x = 0; y = 1 }; origin = @{ x = 3.4e39; y = 0 } } }),
         # Saved by the request before, so nothing is discarded; before 4.7 the
         # engine cannot report that, and a close without the flag is refused.
         (Tool-Request 7121 "scene_close" @{ discard_unsaved = $true }),
@@ -189,6 +201,21 @@ function Invoke-TypedObjectLayerBlock {
     [void](Tool-Payload $typedById[7136])
     $rejoined = @((Tool-Payload $typedById[7137]).reads)
     Assert-True ((& $near $rejoined[1].value.b 1) -and (& $near $rejoined[1].value.r 0) -and @($rejoined[1].shared_with) -contains "$root/Embedded") "One editor_undo did not put the shared StyleBox back on the copy: $(& $text 7137)"
+
+    # Wider values (Q7 part 2). A transform had no JSON form to read in.
+    $read = Tool-Payload $typedById[7138]
+    Assert-True ($read.type -eq "Transform3D" -and $null -ne $read.value.basis.x -and $null -ne $read.value.origin) "A Transform3D did not read as {basis, origin}: $(& $text 7138)"
+    foreach ($id in 7139, 7140, 7141) { [void](Tool-Payload $typedById[$id]) }
+    $untyped = & $refusal 7142
+    Assert-True ($typedById[7142].result.isError -and $untyped.error.message -match "untyped Array" -and $untyped.error.message -match "Array\[Vector2\]") "An object written into an untyped Array was not refused for having no element type: $(& $text 7142)"
+    $byte = & $refusal 7143
+    Assert-True ($typedById[7143].result.isError -and $byte.error.message -match "PackedByteArray" -and $byte.error.message -match "0 to 255") "A byte that does not fit was not refused: $(& $text 7143)"
+    $box3 = & $refusal 7144
+    Assert-True ($typedById[7144].result.isError -and $box3.error.message -match "AABB" -and $box3.error.message -match "position and size") "An AABB with no size was not refused naming both members: $(& $text 7144)"
+    $tags = Tool-Payload $typedById[7145]
+    Assert-True ($tags.applied -eq $true -and @($tags.value).Count -eq 4 -and $tags.value[0] -eq "a") "Scalars written into an untyped Array did not land: $(& $text 7145)"
+    $huge = & $refusal 7146
+    Assert-True ($typedById[7146].result.isError -and $huge.error.message -match '"origin\.x"') "A transform component no 32-bit real holds was not refused naming it: $(& $text 7146)"
 
     foreach ($id in 7121, 7122) { [void](Tool-Payload $typedById[$id]) }
     Write-Output "Typed object layer: a batch over three nodes undid and redid as one step, and the save kept what the answers said."

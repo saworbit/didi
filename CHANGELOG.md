@@ -57,6 +57,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Added
 
+- `2026-10-04` Transforms, rectangles, packed arrays and typed arrays can be read and written as JSON, so none of them is patched into scene text. [#1133](https://github.com/saworbit/didi/issues/1133) · [PR #1182](https://github.com/saworbit/didi/pull/1182)
 - `2026-10-04` A `source_text` check beside an open editor asks its language server. [#1142](https://github.com/saworbit/didi/issues/1142) · [PR #1176](https://github.com/saworbit/didi/pull/1176)
 - `2026-10-04` `editor_reload_project` runs as a job, so a slow scan can be waited out. [#1157](https://github.com/saworbit/didi/issues/1157) · [PR #1174](https://github.com/saworbit/didi/pull/1174)
 - `2026-10-04` Nine more mutating tools say what they replaced. [#1151](https://github.com/saworbit/didi/issues/1151) · [PR #1173](https://github.com/saworbit/didi/pull/1173)
@@ -107,6 +108,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Fixed
 
+- `2026-10-04` A Godot that cannot be run is reported at once on Linux and macOS, and CI runs the live `didi setup` test on each engine line. [#1144](https://github.com/saworbit/didi/issues/1144) · [PR #1180](https://github.com/saworbit/didi/pull/1180)
 - `2026-10-04` A `class_name` written into a new folder is known to the next check, because the writer waits for the editor to list it. [#1177](https://github.com/saworbit/didi/issues/1177) · [PR #1179](https://github.com/saworbit/didi/pull/1179)
 - `2026-10-04` A rolled-back write no longer steps the scene's history behind the editor (part 2). [#1152](https://github.com/saworbit/didi/issues/1152) · [PR #1175](https://github.com/saworbit/didi/pull/1175)
 - `2026-10-04` Every Godot object Didi constructs is finished or not handed back. [#1166](https://github.com/saworbit/didi/issues/1166) · [PR #1171](https://github.com/saworbit/didi/pull/1171)

@@ -155,6 +155,22 @@ class SetupFixture(unittest.TestCase):
 
 
 class SetupOffline(SetupFixture):
+    def test_a_godot_that_cannot_start_is_reported_at_once(self):
+        # On POSIX the detached launch returned before exec, so a --godot that
+        # could not be executed showed only as the wait running out, which then
+        # named three possible causes instead of the one (#1144).
+        not_godot = self.root / "not_godot.txt"
+        not_godot.write_text("not an executable\n", encoding="utf-8")
+        started = time.monotonic()
+        result = self.run_didi("setup", "--project", str(self.project), "--client", "claude-code",
+                               "--godot", str(not_godot), "--headless", "--timeout", "90", "--json")
+        elapsed = time.monotonic() - started
+        editor = self.steps(json.loads(result.stdout))["editor"]
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(editor["state"], "fail", editor)
+        self.assertIn("could not be started", editor["detail"])
+        self.assertLess(elapsed, 45, editor)
+
     def test_bare_project_gets_a_working_session_in_each_client(self):
         report = self.setup_json("--client", "all")
         self.assertTrue(report["ok"])
@@ -361,6 +377,17 @@ class SetupOffline(SetupFixture):
             self.assertIn(f"didi {command}", result.stdout)
 
 
+# Prints the arguments the dock's Connect page would write, from its own code.
+# Outside the editor its settings read as their defaults.
+DOCK_ARGUMENTS = """extends SceneTree
+
+func _init() -> void:
+\tvar config = load("res://addons/didi/didi_client_config.gd")
+\tprint("DIDI_DOCK_ARGS " + JSON.stringify(Array(config.arguments())))
+\tquit()
+"""
+
+
 def editors_to_check() -> list[str]:
     value = os.environ.get("DIDI_SETUP_GODOT", "")
     return [path for path in value.split(os.pathsep) if path]
@@ -386,6 +413,32 @@ class SetupLive(SetupFixture):
         # The engine keeps a copy of a reloadable library open for a moment
         # after it has gone.
         time.sleep(2)
+
+    def test_the_dock_writes_the_arguments_setup_writes(self):
+        # The dock's Connect page and didi setup each build the server's
+        # arguments, and each names the other (#1148), but a change to one
+        # alone still passed CI (#1144). The dock's own code, run by each
+        # engine, has to give what setup wrote.
+        self.setup_json("--client", "claude-code")
+        _, written = configured_server(self.project, "claude-code")
+        script = self.root / "dock_args.gd"
+        script.write_text(DOCK_ARGUMENTS, encoding="utf-8", newline="\n")
+        for godot in editors_to_check():
+            with self.subTest(godot=Path(godot).name):
+                result = subprocess.run([godot, "--headless", "--path", str(self.project), "--script", str(script)],
+                                        capture_output=True, text=True, encoding="utf-8", errors="replace",
+                                        timeout=180, env=self.env)
+                printed = [line for line in result.stdout.splitlines() if line.startswith("DIDI_DOCK_ARGS ")]
+                self.assertTrue(printed, result.stdout + result.stderr)
+                dock = json.loads(printed[0][len("DIDI_DOCK_ARGS "):])
+                # The project is named as Godot was opened on it, and setup
+                # names it by its long path. On a host whose temp folder has
+                # an 8.3 name (C:/Users/RUNNER~1 on the CI runners) the two
+                # spell one folder differently, so it is compared as a folder
+                # and everything else as written.
+                dock_root, setup_root = dock[dock.index("--project") + 1], written[written.index("--project") + 1]
+                self.assertTrue(os.path.samefile(dock_root, setup_root), (dock_root, setup_root))
+                self.assertEqual([a for a in dock if a != dock_root], [a for a in written if a != setup_root])
 
     def test_one_command_gives_a_working_session(self):
         for godot in editors_to_check():

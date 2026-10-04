@@ -3164,7 +3164,7 @@ void ToolRegistry::registerAllDefaultTools() {
                 // `value`, one level down, so they carry the same type contract.
                 {"properties", {{"type", "object"},
                                 {"additionalProperties",
-                                 {{"type", json::array({"null", "boolean", "integer", "number", "string", "object"})}}},
+                                 {{"type", json::array({"null", "boolean", "integer", "number", "string", "object", "array"})}}},
                                 {"examples", json::array({json::object({{"position", json{{"x", 480}, {"y", 270}}},
                                                                         {"visible", true},
                                                                         {"text", "Score"}})})},
@@ -3472,9 +3472,9 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "scene_set_property";
-        t.description = "Sets an existing scalar node property through UndoRedo with strict JSON/Godot type compatibility. The property is read back after the commit, so value is what it now holds. When applied is false, not_applied says why, with the range or enum the engine declares. writes sets several, on any nodes, as one undo step.";
+        t.description = "Sets an existing node property through UndoRedo with strict JSON/Godot type compatibility. The property is read back after the commit, so value is what it now holds. When applied is false, not_applied says why, with the range or enum the engine declares. writes sets several, on any nodes, as one undo step.";
         // The value spellings, shared by a single write and each batch item.
-        const json value_types = json::array({"null", "boolean", "integer", "number", "string", "object"});
+        const json value_types = json::array({"null", "boolean", "integer", "number", "string", "object", "array"});
         t.inputSchema = {
             {"type", "object"},
             {"properties", {
@@ -3490,7 +3490,7 @@ void ToolRegistry::registerAllDefaultTools() {
                                                      json{{"x", 480}, {"y", 270}},
                                                      json{{"r", 1}, {"g", 0.5}, {"b", 0}},
                                                      "res://tiles/arena_tileset.tres"})},
-                           {"description", "New property value, as the JSON type matching the Godot property: number for float (1.0, not \"1.0\"), integer for int, boolean for bool, string for String/StringName/NodePath, null for nil, {x,y} or {x,y,z} for Vector2/Vector2i/Vector3/Vector3i (whole numbers for the integer ones), {r,g,b} with optional a or a \"#rrggbb\"/\"#rrggbbaa\" string for Color, and a res:// path for a Resource slot (null clears it). Arrays are rejected, and so is an object with a member the target type does not have."}}},
+                           {"description", "New property value, as the JSON type matching the Godot property: number for float (1.0, not \"1.0\"), integer for int, boolean for bool, string for String/StringName/NodePath, null for nil, {x,y} or {x,y,z} for vectors (whole numbers for the integer ones), {r,g,b} with optional a or \"#rrggbb\" for Color, Godot's own members for the rest (Rect2 {position,size}, Transform3D {basis,origin}), an array for an Array or packed array, and a res:// path for a Resource slot (null clears it). A member the type does not have is refused."}}},
                 {"writes", {{"type", "array"}, {"minItems", 1}, {"maxItems", 64},
                             {"items", {{"type", "object"},
                                        {"properties", {{"target_node", {{"type", "string"}}},
@@ -3912,7 +3912,7 @@ void ToolRegistry::registerAllDefaultTools() {
                                    {"description", "The property the ShaderMaterial sits in, such as material_override."}}},
                 {"uniform_name", {{"type", "string"}, {"minLength", 1}, {"maxLength", 256},
                                   {"description", "Must be a uniform the shader declares. A name it does not know is refused rather than written and ignored."}}},
-                {"value", {{"type", json::array({"null", "boolean", "integer", "number", "string", "object"})},
+                {"value", {{"type", json::array({"null", "boolean", "integer", "number", "string", "object", "array"})},
                            {"description", "The new value, in the same JSON spelling scene_set_property takes for that Godot type: a number for float, {x,y} or {x,y,z} for a vector, {r,g,b} with optional a or a \"#rrggbb\" string for a colour, and a res:// path for a texture or other resource uniform."}}}
             }},
             {"required", json::array({"target_node", "property_name", "uniform_name", "value"})},

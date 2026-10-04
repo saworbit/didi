@@ -734,6 +734,23 @@ jobs:
           $env:PYTHONPATH = Join-Path $PWD 'tests'
           python -m unittest tests.test_editor_startup_live -v
 
+      # One command gives a working session (Q12, #1144): didi setup installs
+      # the addon this build laid out, starts this line's editor headless, and
+      # the server a client would start reaches it. The dock's own code, run
+      # by the same engine, has to write the arguments setup wrote.
+      - name: Verify didi setup gives a working session
+        shell: pwsh
+        env:
+          GODOT_VERSION: ${{ matrix.godot-version }}
+        run: |
+          $godot = Get-ChildItem -Path godot-bin -Filter "Godot_v${env:GODOT_VERSION}-stable_win64_console.exe" |
+                   Select-Object -First 1
+          if (-not $godot) { throw "Godot console executable not found under godot-bin" }
+          $env:DIDI_TEST_BINARY = (Resolve-Path build/didi.exe).Path
+          $env:DIDI_SETUP_GODOT = $godot.FullName
+          $env:PYTHONPATH = Join-Path $PWD 'tests'
+          python -m unittest tests.test_didi_setup.SetupLive -v
+
       # tests/contract_snapshots/live-<line>.json: the listings once an editor
       # on this line is attached, and the answers to the read-only calls in
       # calls.json against tests/contract_fixture (Q3). It runs whenever the

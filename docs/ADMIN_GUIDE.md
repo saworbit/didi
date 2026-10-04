@@ -133,7 +133,8 @@ What `setup` does, in order, and what stops it:
    mark and line endings.
 7. With `--godot`, starts the editor and waits for it to publish a session,
    accept a handshake and answer one request on its main thread, then lets go
-   of the session so the server a client starts next can take it.
+   of the session so the server a client starts next can take it. A file there
+   that cannot be run fails the step at once, naming why, on every platform.
 
 `didi doctor` reports what the dock's Diagnostics page reports, under the same
 names, plus what only a command outside the editor can compare: the addon's

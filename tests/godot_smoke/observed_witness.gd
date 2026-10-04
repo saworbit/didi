@@ -55,6 +55,19 @@ func property(path: String, property_name: String) -> Variant:
 	return _plain(node.get(property_name)) if node != null else null
 
 
+## The element type of an Array property: the Variant type, and the class for
+## an array of objects. A typed array keeps what it holds when handed an
+## untyped one, so a write that landed has to leave it typed (Q7).
+func array_type(path: String, property_name: String) -> Variant:
+	var node := _node(path)
+	if node == null:
+		return null
+	var held: Variant = node.get(property_name)
+	if typeof(held) != TYPE_ARRAY:
+		return null
+	return {"builtin": held.get_typed_builtin(), "class": String(held.get_typed_class_name())}
+
+
 ## A property reached by path, through get_indexed rather than through any
 ## code Didi shares (Q7).
 func property_path(path: String, indexed: String) -> Variant:
@@ -348,8 +361,29 @@ func _plain(value: Variant) -> Variant:
 			return {"x": value.x, "y": value.y}
 		TYPE_VECTOR3, TYPE_VECTOR3I:
 			return {"x": value.x, "y": value.y, "z": value.z}
+		TYPE_VECTOR4, TYPE_VECTOR4I, TYPE_QUATERNION:
+			return {"x": value.x, "y": value.y, "z": value.z, "w": value.w}
 		TYPE_COLOR:
 			return {"r": value.r, "g": value.g, "b": value.b, "a": value.a}
+		# Q7 part 2: each built-in made of others by Godot's own member names,
+		# read here by the engine rather than through anything Didi shares.
+		TYPE_RECT2, TYPE_RECT2I, TYPE_AABB:
+			return {"position": _plain(value.position), "size": _plain(value.size)}
+		TYPE_PLANE:
+			return {"normal": _plain(value.normal), "d": value.d}
+		TYPE_TRANSFORM2D:
+			return {"x": _plain(value.x), "y": _plain(value.y), "origin": _plain(value.origin)}
+		TYPE_BASIS:
+			return {"x": _plain(value.x), "y": _plain(value.y), "z": _plain(value.z)}
+		TYPE_TRANSFORM3D:
+			return {"basis": _plain(value.basis), "origin": _plain(value.origin)}
+		TYPE_PROJECTION:
+			return {"x": _plain(value.x), "y": _plain(value.y), "z": _plain(value.z), "w": _plain(value.w)}
+		TYPE_ARRAY, TYPE_PACKED_BYTE_ARRAY, TYPE_PACKED_INT32_ARRAY, TYPE_PACKED_INT64_ARRAY, TYPE_PACKED_FLOAT32_ARRAY, TYPE_PACKED_FLOAT64_ARRAY, TYPE_PACKED_STRING_ARRAY, TYPE_PACKED_VECTOR2_ARRAY, TYPE_PACKED_VECTOR3_ARRAY, TYPE_PACKED_COLOR_ARRAY, TYPE_PACKED_VECTOR4_ARRAY:
+			var items := []
+			for item in value:
+				items.append(_plain(item))
+			return items
 		TYPE_STRING_NAME, TYPE_NODE_PATH:
 			return String(value)
 		TYPE_OBJECT:

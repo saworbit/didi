@@ -643,6 +643,93 @@ std::vector<const char*> realMembersOfPropertyType(GDExtensionVariantType type) 
     }
 }
 
+// One member of the JSON object a built-in is spelled as, and its type.
+struct BuiltinMember {
+    const char* name;
+    GDExtensionVariantType type;
+};
+
+// The members of each built-in made of other values (Q7), named as Godot names
+// them and in the order its constructor takes them, so a Transform3D is
+// {"basis": {"x", "y", "z"}, "origin"} and a Rect2 {"position", "size"}. A
+// Basis and a Projection are their columns, which is what Godot's x, y and z
+// are. The vectors and Color keep their own rules above; these are made of
+// them.
+const std::vector<BuiltinMember>* compoundMembers(GDExtensionVariantType type) {
+    constexpr auto kFloat = GDEXTENSION_VARIANT_TYPE_FLOAT;
+    constexpr auto kInt = GDEXTENSION_VARIANT_TYPE_INT;
+    static const std::vector<BuiltinMember> vector4 = {{"x", kFloat}, {"y", kFloat}, {"z", kFloat}, {"w", kFloat}};
+    static const std::vector<BuiltinMember> vector4i = {{"x", kInt}, {"y", kInt}, {"z", kInt}, {"w", kInt}};
+    static const std::vector<BuiltinMember> rect2 = {{"position", GDEXTENSION_VARIANT_TYPE_VECTOR2},
+                                                     {"size", GDEXTENSION_VARIANT_TYPE_VECTOR2}};
+    static const std::vector<BuiltinMember> rect2i = {{"position", GDEXTENSION_VARIANT_TYPE_VECTOR2I},
+                                                      {"size", GDEXTENSION_VARIANT_TYPE_VECTOR2I}};
+    static const std::vector<BuiltinMember> aabb = {{"position", GDEXTENSION_VARIANT_TYPE_VECTOR3},
+                                                    {"size", GDEXTENSION_VARIANT_TYPE_VECTOR3}};
+    static const std::vector<BuiltinMember> plane = {{"normal", GDEXTENSION_VARIANT_TYPE_VECTOR3}, {"d", kFloat}};
+    static const std::vector<BuiltinMember> transform2d = {{"x", GDEXTENSION_VARIANT_TYPE_VECTOR2},
+                                                           {"y", GDEXTENSION_VARIANT_TYPE_VECTOR2},
+                                                           {"origin", GDEXTENSION_VARIANT_TYPE_VECTOR2}};
+    static const std::vector<BuiltinMember> basis = {{"x", GDEXTENSION_VARIANT_TYPE_VECTOR3},
+                                                     {"y", GDEXTENSION_VARIANT_TYPE_VECTOR3},
+                                                     {"z", GDEXTENSION_VARIANT_TYPE_VECTOR3}};
+    static const std::vector<BuiltinMember> transform3d = {{"basis", GDEXTENSION_VARIANT_TYPE_BASIS},
+                                                           {"origin", GDEXTENSION_VARIANT_TYPE_VECTOR3}};
+    static const std::vector<BuiltinMember> projection = {{"x", GDEXTENSION_VARIANT_TYPE_VECTOR4},
+                                                          {"y", GDEXTENSION_VARIANT_TYPE_VECTOR4},
+                                                          {"z", GDEXTENSION_VARIANT_TYPE_VECTOR4},
+                                                          {"w", GDEXTENSION_VARIANT_TYPE_VECTOR4}};
+    switch (type) {
+        case GDEXTENSION_VARIANT_TYPE_VECTOR4: return &vector4;
+        case GDEXTENSION_VARIANT_TYPE_VECTOR4I: return &vector4i;
+        case GDEXTENSION_VARIANT_TYPE_QUATERNION: return &vector4;
+        case GDEXTENSION_VARIANT_TYPE_RECT2: return &rect2;
+        case GDEXTENSION_VARIANT_TYPE_RECT2I: return &rect2i;
+        case GDEXTENSION_VARIANT_TYPE_AABB: return &aabb;
+        case GDEXTENSION_VARIANT_TYPE_PLANE: return &plane;
+        case GDEXTENSION_VARIANT_TYPE_TRANSFORM2D: return &transform2d;
+        case GDEXTENSION_VARIANT_TYPE_BASIS: return &basis;
+        case GDEXTENSION_VARIANT_TYPE_TRANSFORM3D: return &transform3d;
+        case GDEXTENSION_VARIANT_TYPE_PROJECTION: return &projection;
+        default: return nullptr;
+    }
+}
+
+// What each element of a packed array is, or NIL for any other type.
+GDExtensionVariantType packedElementType(GDExtensionVariantType type) {
+    switch (type) {
+        case GDEXTENSION_VARIANT_TYPE_PACKED_BYTE_ARRAY:
+        case GDEXTENSION_VARIANT_TYPE_PACKED_INT32_ARRAY:
+        case GDEXTENSION_VARIANT_TYPE_PACKED_INT64_ARRAY: return GDEXTENSION_VARIANT_TYPE_INT;
+        case GDEXTENSION_VARIANT_TYPE_PACKED_FLOAT32_ARRAY:
+        case GDEXTENSION_VARIANT_TYPE_PACKED_FLOAT64_ARRAY: return GDEXTENSION_VARIANT_TYPE_FLOAT;
+        case GDEXTENSION_VARIANT_TYPE_PACKED_STRING_ARRAY: return GDEXTENSION_VARIANT_TYPE_STRING;
+        case GDEXTENSION_VARIANT_TYPE_PACKED_VECTOR2_ARRAY: return GDEXTENSION_VARIANT_TYPE_VECTOR2;
+        case GDEXTENSION_VARIANT_TYPE_PACKED_VECTOR3_ARRAY: return GDEXTENSION_VARIANT_TYPE_VECTOR3;
+        case GDEXTENSION_VARIANT_TYPE_PACKED_COLOR_ARRAY: return GDEXTENSION_VARIANT_TYPE_COLOR;
+        case GDEXTENSION_VARIANT_TYPE_PACKED_VECTOR4_ARRAY: return GDEXTENSION_VARIANT_TYPE_VECTOR4;
+        default: return GDEXTENSION_VARIANT_TYPE_NIL;
+    }
+}
+
+bool propertyTypeAcceptsJson(const json& value, GDExtensionVariantType type);
+
+// A byte array and a 32-bit one wrap a number they cannot hold rather than
+// refuse it, so 256 would land as 0 with nothing said.
+bool packedElementAcceptsJson(const json& item, GDExtensionVariantType packed,
+                              GDExtensionVariantType element) {
+    if (!propertyTypeAcceptsJson(item, element)) return false;
+    if (packed == GDEXTENSION_VARIANT_TYPE_PACKED_BYTE_ARRAY) {
+        const double number = item.get<double>();
+        return number >= 0 && number <= 255;
+    }
+    if (packed == GDEXTENSION_VARIANT_TYPE_PACKED_INT32_ARRAY) {
+        const double number = item.get<double>();
+        return number >= -2147483648.0 && number <= 2147483647.0;
+    }
+    return true;
+}
+
 bool propertyTypeAcceptsJson(const json& value, GDExtensionVariantType type) {
     switch (type) {
         case GDEXTENSION_VARIANT_TYPE_NIL:
@@ -675,9 +762,27 @@ bool propertyTypeAcceptsJson(const json& value, GDExtensionVariantType type) {
         case GDEXTENSION_VARIANT_TYPE_OBJECT:
             // null clears the slot, which is the only way to empty one.
             return value.is_null() || isResourcePathString(value);
+        case GDEXTENSION_VARIANT_TYPE_ARRAY:
+            // What its elements may be depends on the array the property holds
+            // now, typed or not, so they are checked when the value is built.
+            return value.is_array();
         default:
-            return false;
+            break;
     }
+    if (const auto* members = compoundMembers(type)) {
+        if (!value.is_object() || value.size() != members->size()) return false;
+        for (const auto& member : *members) {
+            const auto found = value.find(member.name);
+            if (found == value.end() || !propertyTypeAcceptsJson(*found, member.type)) return false;
+        }
+        return true;
+    }
+    const auto element = packedElementType(type);
+    if (element == GDEXTENSION_VARIANT_TYPE_NIL || !value.is_array()) return false;
+    for (const auto& item : value) {
+        if (!packedElementAcceptsJson(item, type, element)) return false;
+    }
+    return true;
 }
 
 // Whether the property contract has a JSON spelling for this Godot type at all.
@@ -946,8 +1051,72 @@ Result<VariantValue> makeResourceForProperty(const std::string& property_name,
 // Godot narrows a real to an int on assignment, but converting the whole
 // number here keeps the value that reaches the property the one the caller
 // named rather than one the engine derived.
+// A built-in made by the engine's own constructor for these arguments.
+// variant_construct picks the constructor whose parameter types the arguments
+// have, so a Transform2D made from three Vector2s is Transform2D(x, y, origin)
+// on every line, with no constructor index to keep in step with the engine.
+Result<VariantValue> constructBuiltin(GDExtensionVariantType type,
+                                      const std::vector<const VariantValue*>& arguments) {
+    auto& api = GodotApi::instance();
+    if (!api.variant_construct) return Error::internal("Godot's Variant constructor is unavailable");
+    std::vector<GDExtensionConstVariantPtr> pointers;
+    for (const auto* argument : arguments) pointers.push_back(argument->ptr());
+    VariantValue built(VariantValue::Uninitialized{});
+    GDExtensionCallError error{};
+    api.variant_construct(type, built.ptr(), pointers.empty() ? nullptr : pointers.data(),
+                          static_cast<int32_t>(pointers.size()), &error);
+    built.markInitialized();
+    if (error.error != GDEXTENSION_CALL_OK) {
+        return Error::internal("Godot could not make a " + godotVariantTypeName(static_cast<int>(type)) +
+                               " from " + std::to_string(arguments.size()) + " values (call error " +
+                               std::to_string(error.error) + ")");
+    }
+    return std::move(built);
+}
+
+Result<VariantValue> makeJsonVariantForProperty(const json& value, GDExtensionVariantType type);
+
+// An untyped Array of each element made as the given type.
+Result<VariantValue> makeArrayOfType(const json& value, GDExtensionVariantType element) {
+    auto items = makeJsonVariant(json::array());
+    if (items.isErr()) return items.error();
+    for (const auto& item : value) {
+        auto built = makeJsonVariantForProperty(item, element);
+        if (built.isErr()) return built.error();
+        auto appended = callVariant(items.value(), "append", {&built.value()});
+        if (appended.isErr()) return appended.error();
+    }
+    return std::move(items.value());
+}
+
 Result<VariantValue> makeJsonVariantForProperty(const json& value, GDExtensionVariantType type) {
+    if (const auto* members = compoundMembers(type)) {
+        std::vector<VariantValue> built;
+        built.reserve(members->size());
+        for (const auto& member : *members) {
+            auto part = makeJsonVariantForProperty(value[member.name], member.type);
+            if (part.isErr()) return part.error();
+            built.push_back(std::move(part.value()));
+        }
+        std::vector<const VariantValue*> arguments;
+        for (const auto& part : built) arguments.push_back(&part);
+        return constructBuiltin(type, arguments);
+    }
+    if (const auto element = packedElementType(type); element != GDEXTENSION_VARIANT_TYPE_NIL) {
+        // Through an Array of elements already the packed type's own, because
+        // Godot converts a Dictionary element to a zero vector and says
+        // nothing (measured on 4.5.1, 4.6.2 and 4.7.2).
+        auto items = makeArrayOfType(value, element);
+        if (items.isErr()) return items.error();
+        return constructBuiltin(type, {&items.value()});
+    }
     switch (type) {
+        case GDEXTENSION_VARIANT_TYPE_ARRAY:
+            // An Array property is built by makeArrayForProperty, which knows
+            // the array it replaces. One with nothing to take a type from, an
+            // Array inside a typed Array, is refused rather than guessed at.
+            return Error::invalidArgument(
+                "An Array inside an Array has no element type this can take its values from.");
         case GDEXTENSION_VARIANT_TYPE_INT:
             if (isWholeNumberJsonReal(value)) {
                 return makeScalar(GDEXTENSION_VARIANT_TYPE_INT,
@@ -1094,6 +1263,73 @@ Result<json> wholeVectorToJson(VariantValue& value, int dimensions);
 Result<json> colorToJson(VariantValue& value);
 Result<json> resourcePathToJson(VariantValue& value);
 
+// An Array property's new value. A typed one, Array[Vector2] or
+// Array[Texture2D], keeps what it holds when handed an untyped array, with no
+// error, and an element of another type is dropped the same way (measured on
+// 4.5.1, 4.6.2 and 4.7.2). So the new array is made with the type, class and
+// script of the one the property holds now, each element built as that type.
+// An untyped one has no element type to turn a JSON object or list into: a
+// vector sent there would land as a Dictionary that reads back the same. It
+// takes scalars only.
+Result<VariantValue> makeArrayForProperty(const std::string& property_name, const json& value,
+                                          VariantValue& current) {
+    if (GodotApi::instance().variant_get_type(current.ptr()) != GDEXTENSION_VARIANT_TYPE_ARRAY) {
+        return Error::invalidArgument("Property \"" + property_name +
+                                      "\" holds no Array to take an element type from.");
+    }
+    auto builtin = callVariant(current, "get_typed_builtin");
+    if (builtin.isErr()) return builtin.error();
+    auto element_type = scalarFromVariant<int64_t>(builtin.value(), GDEXTENSION_VARIANT_TYPE_INT);
+    if (element_type.isErr()) return element_type.error();
+    const auto element = static_cast<GDExtensionVariantType>(element_type.value());
+    std::string class_text;
+    if (element == GDEXTENSION_VARIANT_TYPE_OBJECT) {
+        auto class_name = callVariant(current, "get_typed_class_name");
+        if (class_name.isErr()) return class_name.error();
+        auto text = stringFromVariant(class_name.value(), GDEXTENSION_VARIANT_TYPE_STRING_NAME);
+        if (text.isErr()) return text.error();
+        class_text = text.value();
+    }
+    auto items = makeJsonVariant(json::array());
+    if (items.isErr()) return items.error();
+    for (size_t index = 0; index < value.size(); ++index) {
+        const auto& item = value[index];
+        const auto name = property_name + "[" + std::to_string(index) + "]";
+        auto built = [&]() -> Result<VariantValue> {
+            if (element == GDEXTENSION_VARIANT_TYPE_NIL) {
+                if (!item.is_null() && !item.is_boolean() && !item.is_number() && !item.is_string()) {
+                    return Error::invalidArgument(
+                        "Property \"" + property_name + "\" is an untyped Array, so it has no element type "
+                        "to turn the JSON " + jsonValueTypeName(item) + " at index " + std::to_string(index) +
+                        " into, and Godot would keep it as a Dictionary or a nested Array rather than the "
+                        "vector or colour it may stand for. Send numbers, strings, booleans or null, or "
+                        "declare the property as a typed array such as Array[Vector2].");
+                }
+                return makeJsonVariant(item);
+            }
+            if (element == GDEXTENSION_VARIANT_TYPE_OBJECT) {
+                if (!propertyTypeAcceptsJson(item, element)) {
+                    return Error::invalidArgument(describePropertyTypeMismatch(name, item, element));
+                }
+                return makeResourceForProperty(name, item, class_text);
+            }
+            auto fits = validateJsonForPropertyType(name, item, element);
+            if (fits.isErr()) return fits.error();
+            return makeJsonVariantForProperty(item, element);
+        }();
+        if (built.isErr()) return built.error();
+        auto appended = callVariant(items.value(), "append", {&built.value()});
+        if (appended.isErr()) return appended.error();
+    }
+    if (element == GDEXTENSION_VARIANT_TYPE_NIL) return std::move(items.value());
+    auto class_name = callVariant(current, "get_typed_class_name");
+    auto script = callVariant(current, "get_typed_script");
+    if (class_name.isErr()) return class_name.error();
+    if (script.isErr()) return script.error();
+    return constructBuiltin(GDEXTENSION_VARIANT_TYPE_ARRAY,
+                            {&items.value(), &builtin.value(), &class_name.value(), &script.value()});
+}
+
 Result<json> variantToJson(VariantValue& value, int depth = 0, bool lenient = false) {
     if (depth > 16) return Error::invalidArgument("Godot Variant is nested more than 16 levels deep");
     auto& api = GodotApi::instance();
@@ -1177,6 +1413,33 @@ Result<json> variantToJson(VariantValue& value, int depth = 0, bool lenient = fa
             // an object slot, a Node for instance, has no path to give.
             return resourcePathToJson(value);
         default:
+            // The shapes a write takes, read member by member (Q7).
+            if (const auto* members = compoundMembers(type)) {
+                if (!api.variant_get_named) return Error::internal("Godot's Variant member read is unavailable");
+                json output = json::object();
+                for (const auto& member : *members) {
+                    NativeName key(member.name);
+                    VariantValue part(VariantValue::Uninitialized{});
+                    GDExtensionBool valid = false;
+                    api.variant_get_named(value.ptr(), key.ptr(), part.ptr(), &valid);
+                    part.markInitialized();
+                    if (!valid) {
+                        return Error::internal("Godot gave no " + std::string(member.name) + " for a " +
+                                               godotVariantTypeName(static_cast<int>(type)));
+                    }
+                    auto converted = variantToJson(part, depth + 1, lenient);
+                    if (converted.isErr()) return converted.error();
+                    output[member.name] = std::move(converted.value());
+                }
+                return output;
+            }
+            // A packed array through Array(from), the engine's own conversion,
+            // so each element reads as it would in an Array.
+            if (packedElementType(type) != GDEXTENSION_VARIANT_TYPE_NIL) {
+                auto as_array = constructBuiltin(GDEXTENSION_VARIANT_TYPE_ARRAY, {&value});
+                if (as_array.isErr()) return as_array.error();
+                return variantToJson(as_array.value(), depth, lenient);
+            }
             if (lenient) return json(nullptr);
             return Error::invalidArgument("Godot Variant type " + std::to_string(type) + " is not JSON-coercible");
     }
@@ -4214,6 +4477,8 @@ Result<PreparedWrite> prepareWrite(GDExtensionObjectPtr root, const std::string&
     if (compatible.isErr()) return compatible.error();
     auto new_value = property_type == GDEXTENSION_VARIANT_TYPE_OBJECT
         ? makeResourceForProperty(write.property, value, write.resolved.descriptor.class_name)
+        : property_type == GDEXTENSION_VARIANT_TYPE_ARRAY
+        ? makeArrayForProperty(write.property, value, old_value.value())
         : makeJsonVariantForProperty(value, property_type);
     if (new_value.isErr()) return new_value.error();
     write.requested = value;
@@ -15732,6 +15997,8 @@ json GodotBridge::execute(const std::string& method, const json& params,
             }
             auto property_value = property_type == GDEXTENSION_VARIANT_TYPE_OBJECT
                 ? makeResourceForProperty(it.key(), it.value(), declared_class)
+                : property_type == GDEXTENSION_VARIANT_TYPE_ARRAY
+                ? makeArrayForProperty(it.key(), it.value(), current_value.value())
                 : makeJsonVariantForProperty(it.value(), property_type);
             if (property_value.isErr()) {
                 GodotApi::instance().object_destroy(node);
@@ -16953,17 +17220,49 @@ std::optional<std::string> describeRealRangeRefusal(const std::string& property_
                "becomes inf, which would propagate through the scene and read back as a "
                "value JSON cannot spell.";
     };
-    if (type == GDEXTENSION_VARIANT_TYPE_FLOAT && out_of_range(value)) {
-        return refuse("", value);
-    }
-    if (!value.is_object()) return std::nullopt;
-    for (const auto* member : realMembersOfPropertyType(type)) {
-        const auto found = value.find(member);
-        if (found != value.end() && out_of_range(*found)) {
-            return refuse(std::string(" component \"") + member + "\"", *found);
+    // The first real too big for the slot it lands in, and where it is: a
+    // member name, a path of them through a compound value such as
+    // basis.x.y, or an index into a packed array. A PackedFloat64Array holds
+    // doubles, and is the one place a real is not real_t.
+    std::function<std::optional<std::pair<std::string, json>>(const json&, GDExtensionVariantType,
+                                                              const std::string&)>
+        first_out_of_range = [&](const json& at, GDExtensionVariantType at_type,
+                                 const std::string& where) -> std::optional<std::pair<std::string, json>> {
+        const auto named = [&](const std::string& member) {
+            return where.empty() ? member : where + "." + member;
+        };
+        if (at_type == GDEXTENSION_VARIANT_TYPE_FLOAT) {
+            if (out_of_range(at)) return std::make_pair(where, at);
+            return std::nullopt;
         }
-    }
-    return std::nullopt;
+        if (at.is_object()) {
+            for (const auto* member : realMembersOfPropertyType(at_type)) {
+                const auto found = at.find(member);
+                if (found != at.end() && out_of_range(*found)) return std::make_pair(named(member), *found);
+            }
+            if (const auto* members = compoundMembers(at_type)) {
+                for (const auto& member : *members) {
+                    const auto found = at.find(member.name);
+                    if (found == at.end()) continue;
+                    if (auto inside = first_out_of_range(*found, member.type, named(member.name))) return inside;
+                }
+            }
+        }
+        const auto element = packedElementType(at_type);
+        if (at.is_array() && element != GDEXTENSION_VARIANT_TYPE_NIL &&
+            at_type != GDEXTENSION_VARIANT_TYPE_PACKED_FLOAT64_ARRAY) {
+            for (size_t index = 0; index < at.size(); ++index) {
+                if (auto inside = first_out_of_range(at[index], element, where + "[" + std::to_string(index) + "]")) {
+                    return inside;
+                }
+            }
+        }
+        return std::nullopt;
+    };
+    const auto found = first_out_of_range(value, type, "");
+    if (!found.has_value()) return std::nullopt;
+    if (found->first.empty()) return refuse("", found->second);
+    return refuse(" component \"" + found->first + "\"", found->second);
 }
 
 const std::map<std::string, std::string>& bridgeErrorSentenceTable() {
@@ -16992,9 +17291,15 @@ PropertyTypeMatch matchJsonToPropertyType(const json& value, int godot_type) {
         case GDEXTENSION_VARIANT_TYPE_VECTOR3I:
         case GDEXTENSION_VARIANT_TYPE_COLOR:
         case GDEXTENSION_VARIANT_TYPE_OBJECT:
+        case GDEXTENSION_VARIANT_TYPE_ARRAY:
             break;
         default:
-            return PropertyTypeMatch::UnsupportedPropertyType;
+            if (compoundMembers(static_cast<GDExtensionVariantType>(godot_type)) == nullptr &&
+                packedElementType(static_cast<GDExtensionVariantType>(godot_type)) ==
+                    GDEXTENSION_VARIANT_TYPE_NIL) {
+                return PropertyTypeMatch::UnsupportedPropertyType;
+            }
+            break;
     }
     return propertyTypeAcceptsJson(value, static_cast<GDExtensionVariantType>(godot_type))
                ? PropertyTypeMatch::Compatible
@@ -17105,6 +17410,78 @@ std::string describePropertyTypeMismatch(const std::string& property_name, const
         case GDEXTENSION_VARIANT_TYPE_OBJECT:
             remedy = "Send a res:// path to the resource, for example "
                      "\"res://tiles/arena_tileset.tres\", or null to clear the slot.";
+            break;
+        case GDEXTENSION_VARIANT_TYPE_VECTOR4:
+        case GDEXTENSION_VARIANT_TYPE_QUATERNION:
+            remedy = "Send an object with x, y, z and w numbers, for example "
+                     "{\"x\": 0, \"y\": 0, \"z\": 0, \"w\": 1}.";
+            break;
+        case GDEXTENSION_VARIANT_TYPE_VECTOR4I:
+            remedy = "Send an object with whole-number x, y, z and w, for example "
+                     "{\"x\": 1, \"y\": 2, \"z\": 3, \"w\": 4}.";
+            break;
+        case GDEXTENSION_VARIANT_TYPE_RECT2:
+        case GDEXTENSION_VARIANT_TYPE_RECT2I:
+            remedy = "Send an object with position and size, each an x and y, for example "
+                     "{\"position\": {\"x\": 0, \"y\": 0}, \"size\": {\"x\": 64, \"y\": 32}}.";
+            break;
+        case GDEXTENSION_VARIANT_TYPE_AABB:
+            remedy = "Send an object with position and size, each an x, y and z, for example "
+                     "{\"position\": {\"x\": 0, \"y\": 0, \"z\": 0}, \"size\": {\"x\": 1, \"y\": 1, \"z\": 1}}.";
+            break;
+        case GDEXTENSION_VARIANT_TYPE_PLANE:
+            remedy = "Send an object with a normal and a distance, for example "
+                     "{\"normal\": {\"x\": 0, \"y\": 1, \"z\": 0}, \"d\": 0}.";
+            break;
+        case GDEXTENSION_VARIANT_TYPE_TRANSFORM2D:
+            remedy = "Send an object with the axes x and y and the origin, each an x and y. The "
+                     "identity is {\"x\": {\"x\": 1, \"y\": 0}, \"y\": {\"x\": 0, \"y\": 1}, "
+                     "\"origin\": {\"x\": 0, \"y\": 0}}.";
+            break;
+        case GDEXTENSION_VARIANT_TYPE_BASIS:
+            remedy = "Send an object with the columns x, y and z, each an x, y and z. The identity is "
+                     "{\"x\": {\"x\": 1, \"y\": 0, \"z\": 0}, \"y\": {\"x\": 0, \"y\": 1, \"z\": 0}, "
+                     "\"z\": {\"x\": 0, \"y\": 0, \"z\": 1}}.";
+            break;
+        case GDEXTENSION_VARIANT_TYPE_TRANSFORM3D:
+            remedy = "Send an object with a basis, its columns x, y and z each an x, y and z, and an "
+                     "origin with x, y and z: the shape scene_get_property reads it in.";
+            break;
+        case GDEXTENSION_VARIANT_TYPE_PROJECTION:
+            remedy = "Send an object with the columns x, y, z and w, each an x, y, z and w.";
+            break;
+        case GDEXTENSION_VARIANT_TYPE_ARRAY:
+            remedy = "Send a JSON array.";
+            break;
+        case GDEXTENSION_VARIANT_TYPE_PACKED_BYTE_ARRAY:
+            remedy = "Send an array of whole numbers from 0 to 255.";
+            break;
+        case GDEXTENSION_VARIANT_TYPE_PACKED_INT32_ARRAY:
+            remedy = "Send an array of whole numbers that fit in 32 bits.";
+            break;
+        case GDEXTENSION_VARIANT_TYPE_PACKED_INT64_ARRAY:
+            remedy = "Send an array of whole numbers.";
+            break;
+        case GDEXTENSION_VARIANT_TYPE_PACKED_FLOAT32_ARRAY:
+        case GDEXTENSION_VARIANT_TYPE_PACKED_FLOAT64_ARRAY:
+            remedy = "Send an array of numbers.";
+            break;
+        case GDEXTENSION_VARIANT_TYPE_PACKED_STRING_ARRAY:
+            remedy = "Send an array of strings.";
+            break;
+        case GDEXTENSION_VARIANT_TYPE_PACKED_VECTOR2_ARRAY:
+            remedy = "Send an array of objects with x and y numbers, for example "
+                     "[{\"x\": 0, \"y\": 0}, {\"x\": 32, \"y\": 0}].";
+            break;
+        case GDEXTENSION_VARIANT_TYPE_PACKED_VECTOR3_ARRAY:
+            remedy = "Send an array of objects with x, y and z numbers.";
+            break;
+        case GDEXTENSION_VARIANT_TYPE_PACKED_VECTOR4_ARRAY:
+            remedy = "Send an array of objects with x, y, z and w numbers.";
+            break;
+        case GDEXTENSION_VARIANT_TYPE_PACKED_COLOR_ARRAY:
+            remedy = "Send an array of colours, each an object with r, g and b numbers and an "
+                     "optional a, or a \"#rrggbb\" string.";
             break;
         default:
             remedy = "Send a value of that type.";

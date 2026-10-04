@@ -370,7 +370,7 @@ $env:DIDI_STARTUP_GODOT = "C:/Godot/Godot_v4.6.2-stable_win64_console.exe"
 python -m unittest tests.test_editor_startup_live -v
 ```
 
-`tests/test_didi_setup.py` drives `didi setup` and `didi doctor` (Q12). Its offline half runs on every CI platform: from a directory holding only `project.godot`, each client file setup writes has to start a server that answers, and a rerun has to leave every file byte-identical. Its live half is opt-in. Set `DIDI_SETUP_GODOT` to one or more editor executables, separated by the platform's path separator, and each one is started by `setup --godot ... --headless` on a fresh project; the server the written `.mcp.json` starts then has to reach that editor. CI does not run the live half yet.
+`tests/test_didi_setup.py` drives `didi setup` and `didi doctor` (Q12). Its offline half runs on every CI platform: from a directory holding only `project.godot`, each client file setup writes has to start a server that answers, and a rerun has to leave every file byte-identical. Its live half is opt-in. Set `DIDI_SETUP_GODOT` to one or more editor executables, separated by the platform's path separator, and each one is started by `setup --godot ... --headless` on a fresh project; the server the written `.mcp.json` starts then has to reach that editor, and the dock's own `arguments()`, run by that engine, has to give the arguments setup wrote. CI runs the live half in each Live Godot Integration job, against that job's engine line.
 
 ```powershell
 $env:DIDI_SETUP_GODOT = "C:/Godot/Godot_v4.5.1-stable_win64_console.exe;C:/Godot/Godot_v4.7.2-stable_win64_console.exe"
