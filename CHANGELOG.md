@@ -97,7 +97,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Changed
 
-- `2026-10-05` The tool reference says when `resource_create` and `project_apply_changes` answer `editor_index_pending`, as it already did for `script_create`. [#1177](https://github.com/saworbit/didi/issues/1177)
+- `2026-10-05` The tool reference says when `resource_create` and `project_apply_changes` answer `editor_index_pending`, as it already did for `script_create`. [#1177](https://github.com/saworbit/didi/issues/1177) · [PR #1192](https://github.com/saworbit/didi/pull/1192)
 - `2026-10-05` The live harness compares `project_rename_references`' `updated_files` with the scene file it rewrote, so ten mutating tools are left unchecked, not eleven. [#1020](https://github.com/saworbit/didi/issues/1020) · [PR #1187](https://github.com/saworbit/didi/pull/1187)
 - `2026-10-04` The changelog is one dated line per change, newest first, with a table of every release at the top. [PR #1178](https://github.com/saworbit/didi/pull/1178)
 - `2026-10-01` project_list_input_actions lists the project's own actions by default. [#1108](https://github.com/saworbit/didi/issues/1108) · [PR #1112](https://github.com/saworbit/didi/pull/1112)
