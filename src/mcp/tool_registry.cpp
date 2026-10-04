@@ -4916,8 +4916,7 @@ void ToolRegistry::registerAllDefaultTools() {
                              "Start the game and leave it running instead of watching it to "
                              "completion. The call returns once the game has published a session, "
                              "which is what runtime_attach_session and the rest of the runtime "
-                             "tools route through, so an author can write code, run it, look at "
-                             "it and fix it without asking a person to press F5. Nothing is "
+                             "tools route through. Nothing is "
                              "captured: read a running game with runtime_read_output and end it "
                              "with runtime_stop. Without this the call blocks, terminates the game "
                              "at the timeout, and reports what it saw."}}}
@@ -5117,8 +5116,10 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "editor_reload_project";
-        t.description = "Runs a full EditorFileSystem.scan in the connected editor and answers once the editor has applied it; this is not a project restart, and it does not reload a resource the editor has already loaded.";
-        t.inputSchema = {{"type", "object"}};
+        t.description = "Runs a full EditorFileSystem.scan in the connected editor and answers once it is applied; request_id waits as a job. Not a restart: a resource the editor has loaded is not reloaded.";
+        t.inputSchema = {{"type", "object"}, {"properties", {
+            {"request_id", {{"type", "string"}, {"minLength", 8}}}
+        }}};
         t.handler = [this](const json& args) { return handleEditorReloadProject(args, m_ipcClient); };
         registerTool(std::move(t));
     }

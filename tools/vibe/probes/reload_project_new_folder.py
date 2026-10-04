@@ -6,6 +6,13 @@ folder made in the same second as the last scan was missed in most rounds on
 every line (`scan_sources_new_folder.py` asks the engine alone). The call now
 asks for a full `scan` and answers once the editor has applied it.
 
+With `--job` each round runs the call as a job (#1157): a `request_id`, read
+again with the same id until it answers, through a server started with
+`--yolo`. The round is clean only if the answer came from the detached path,
+which names the bridge's `reload_id`; a scan applied inside one call's wait
+would answer without it. Fill the project with `--fillers` to push a scan past
+the twelve seconds one call can wait.
+
 A windowed editor (or `--headless`) opens a sandbox, filled with `--fillers`
 scripts when a scan should take longer. Each round, back to back,
 writes a new folder with one script behind the editor, calls
@@ -54,13 +61,26 @@ def reload_project(s: Session) -> tuple[dict, bool]:
     return s.call("editor_reload_project", {"confirmation_token": token})
 
 
-def one_round(s: Session, project: Path, index: int) -> bool:
+def reload_as_job(s: Session, index: int) -> tuple[dict, bool]:
+    """Starts the reload as a job and reads it with the same request_id until it answers."""
+    arguments = {"request_id": f"probe-reload-{index:04d}"}
+    deadline = time.monotonic() + 330
+    while True:
+        payload, errored = s.call("editor_reload_project", arguments)
+        if errored or not isinstance(payload, dict) or payload.get("status") != "working":
+            return payload, errored
+        if time.monotonic() > deadline:
+            return {"still_working": payload}, True
+        time.sleep(1)
+
+
+def one_round(s: Session, project: Path, index: int, job: bool = False) -> bool:
     folder = project / f"reload_{index:02d}"
     folder.mkdir(exist_ok=True)
     script = folder / "data.gd"
     script.write_text(f"extends Node\n\nfunc value() -> int:\n\treturn {index}\n", encoding="utf-8", newline="\n")
     started = time.monotonic()
-    payload, errored = reload_project(s)
+    payload, errored = reload_as_job(s, index) if job else reload_project(s)
     elapsed = time.monotonic() - started
     sidecar = Path(str(script) + ".uid").exists()
     resource = f"res://{folder.name}/data.gd"
@@ -69,6 +89,8 @@ def one_round(s: Session, project: Path, index: int) -> bool:
     found = bool(entries) and entries[0].get("found") is True and entries[0].get("source") == "engine"
     body = payload if isinstance(payload, dict) else {}
     applied = not errored and body.get("scan_applied") is True
+    if job:
+        applied = applied and isinstance(body.get("reload_id"), str)
     clean = applied and sidecar and found
     answer = "REFUSED " + json.dumps(body)[:200] if errored else f"scan_applied {body.get('scan_applied')}"
     print(f"  round {index}: answered in {elapsed:.2f} s, {answer}, sidecar {sidecar}, "
@@ -83,6 +105,8 @@ def main() -> int:
     parser.add_argument("--godot", required=True, help="a Godot console binary")
     parser.add_argument("--rounds", type=int, default=8)
     parser.add_argument("--headless", action="store_true")
+    parser.add_argument("--job", action="store_true",
+                        help="run each reload as a job with a request_id (#1157)")
     parser.add_argument("--fillers", type=int, default=0,
                         help="scripts to fill the project with first, so each scan takes longer")
     args = parser.parse_args()
@@ -114,9 +138,9 @@ def main() -> int:
             print("the editor published no session in 180 s")
             return 1
         time.sleep(3)
-        with Session(project) as s:
+        with Session(project, extra_args=["--yolo"] if args.job else ()) as s:
             s.call("runtime_attach_session", {"session_id": editor})
-            clean = sum(one_round(s, project, index) for index in range(args.rounds))
+            clean = sum(one_round(s, project, index, args.job) for index in range(args.rounds))
             print(f"\n  clean in {clean} of {args.rounds} rounds")
             print()
             print(s.engine_summary())

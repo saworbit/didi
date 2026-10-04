@@ -51,6 +51,17 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Added
 
+- **`editor_reload_project` runs as a job, so a slow scan can be waited out
+  (#1157).** It answered within the twelve seconds one call can wait, so an
+  editor that took longer to apply a scan of many new scripts answered `504` on
+  every call. With a `request_id` the bridge answers at once with a
+  `reload_id`, keeps the scan's answer, and the job reads it with
+  `editor.reloadStatus`, answered off the editor's main thread, the way
+  `asset_reimport`'s job does. A repeat reads the same answer and asks for no
+  second scan. Without a `request_id` the call is unchanged. The
+  `runtime_launch` `detach` description lost a sentence of motivation so
+  `tools/list` stays within its budgets.
+
 - **Nine more mutating tools say what they replaced (#1151).** Removing or
   reparenting a node, attaching or detaching a script, adding or removing a
   group, connecting or disconnecting a signal, and a live setting write

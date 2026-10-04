@@ -4168,7 +4168,7 @@
           "openWorldHint": false,
           "readOnlyHint": false
         },
-        "description": "Runs a full EditorFileSystem.scan in the connected editor and answers once the editor has applied it; this is not a project restart, and it does not reload a resource the editor has already loaded.",
+        "description": "Runs a full EditorFileSystem.scan in the connected editor and answers once it is applied; request_id waits as a job. Not a restart: a resource the editor has loaded is not reloaded.",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {
@@ -4183,6 +4183,11 @@
               "default": false,
               "description": "Return a non-mutating change preview instead of executing.",
               "type": "boolean"
+            },
+            "request_id": {
+              "description": "Runs the call as a job; repeating it with this request_id reads the result.",
+              "minLength": 8,
+              "type": "string"
             }
           },
           "type": "object"
@@ -4434,7 +4439,7 @@
             },
             "detach": {
               "default": false,
-              "description": "Start the game and leave it running instead of watching it to completion. The call returns once the game has published a session, which is what runtime_attach_session and the rest of the runtime tools route through, so an author can write code, run it, look at it and fix it without asking a person to press F5. Nothing is captured: read a running game with runtime_read_output and end it with runtime_stop. Without this the call blocks, terminates the game at the timeout, and reports what it saw.",
+              "description": "Start the game and leave it running instead of watching it to completion. The call returns once the game has published a session, which is what runtime_attach_session and the rest of the runtime tools route through. Nothing is captured: read a running game with runtime_read_output and end it with runtime_stop. Without this the call blocks, terminates the game at the timeout, and reports what it saw.",
               "type": "boolean"
             },
             "dry_run": {
@@ -8452,7 +8457,7 @@
             },
             "detach": {
               "default": false,
-              "description": "Start the game and leave it running instead of watching it to completion. The call returns once the game has published a session, which is what runtime_attach_session and the rest of the runtime tools route through, so an author can write code, run it, look at it and fix it without asking a person to press F5. Nothing is captured: read a running game with runtime_read_output and end it with runtime_stop. Without this the call blocks, terminates the game at the timeout, and reports what it saw.",
+              "description": "Start the game and leave it running instead of watching it to completion. The call returns once the game has published a session, which is what runtime_attach_session and the rest of the runtime tools route through. Nothing is captured: read a running game with runtime_read_output and end it with runtime_stop. Without this the call blocks, terminates the game at the timeout, and reports what it saw.",
               "type": "boolean"
             },
             "dry_run": {
