@@ -215,6 +215,46 @@ function Get-ObservedPostStateCases {
                Agree "writes[0].value" $s.call.writes[0].value $s.tint.returned
                Agree "writes[1].value" $s.call.writes[1].value $s.priority.returned
                Agree "applied" $s.call.applied (([Math]::Abs([double]$s.tint.returned.r - 0.8) -lt 0.002) -and $s.priority.returned -eq 13) } },
+        # Built-ins made of other values, and arrays (Q7 part 2). The witness
+        # spells each from the engine's own members, so an answer in any other
+        # shape disagrees. The basis is a quarter turn, not the identity, and
+        # 8.5 is a point that is not whole.
+        @{ Tool = "scene_set_property"; Session = "editor"; Steps = @(
+            (Step "sprite" "scene_instantiate_node" @{ node_type = "Sprite2D"; parent_path = $observedRoot; name = "Regioned" }),
+            (Step "call" "scene_set_property" @{ target_node = "$observedRoot/Regioned"; property_name = "region_rect"; value = @{ position = @{ x = 1; y = 2 }; size = @{ x = 30; y = 40 } } }),
+            (Witness "witness" "property" @("Regioned", "region_rect")))
+           Agree = { param($s)
+               Agree "value" $s.call.value $s.witness.returned
+               Agree "applied" $s.call.applied ([double]$s.witness.returned.size.y -eq 40) } },
+        @{ Tool = "scene_set_property"; Session = "editor"; Steps = @(
+            (Step "turned" "scene_instantiate_node" @{ node_type = "Node3D"; parent_path = $observedRoot; name = "Turned" }),
+            (Step "call" "scene_set_property" @{ target_node = "$observedRoot/Turned"; property_name = "transform"; value = @{ basis = @{ x = @{ x = 0; y = 0; z = -1 }; y = @{ x = 0; y = 1; z = 0 }; z = @{ x = 1; y = 0; z = 0 } }; origin = @{ x = 1; y = 2; z = 3 } } }),
+            (Witness "witness" "property" @("Turned", "transform")))
+           Agree = { param($s)
+               Agree "value" $s.call.value $s.witness.returned
+               Agree "applied" $s.call.applied ([double]$s.witness.returned.basis.x.z -eq -1) } },
+        @{ Tool = "scene_set_property"; Session = "editor"; Steps = @(
+            (Step "stroke" "scene_instantiate_node" @{ node_type = "Line2D"; parent_path = $observedRoot; name = "Stroke" }),
+            (Step "call" "scene_set_property" @{ target_node = "$observedRoot/Stroke"; property_name = "points"; value = @(@{ x = 0; y = 0 }, @{ x = 32; y = 8.5 }) }),
+            (Witness "witness" "property" @("Stroke", "points")))
+           Agree = { param($s)
+               Agree "value" $s.call.value $s.witness.returned
+               Agree "applied" $s.call.applied (@($s.witness.returned).Count -eq 2) } },
+        # A typed array on a script that is not a tool, which is most of them:
+        # the editor holds a placeholder for it. A typed array keeps what it
+        # holds when handed an untyped one, with no error, so the witness reads
+        # the element type as well as the values.
+        @{ Tool = "scene_set_property"; Session = "editor"; Steps = @(
+            (Step "script" "script_create" @{ script_path = "res://observed_points.gd"; source_text = "extends Node`n`n@export var points: Array[Vector2] = []`n"; overwrite = $true }),
+            (Step "pointed" "scene_instantiate_node" @{ node_type = "Node"; parent_path = $observedRoot; name = "Pointed" }),
+            (Step "attach" "script_attach_to_node" @{ target_node = "$observedRoot/Pointed"; script_path = "res://observed_points.gd" }),
+            (Step "call" "scene_set_property" @{ target_node = "$observedRoot/Pointed"; property_name = "points"; value = @(@{ x = 1; y = 1 }, @{ x = 2; y = 3 }) }),
+            (Witness "witness" "property" @("Pointed", "points")),
+            (Witness "typed" "array_type" @("Pointed", "points")))
+           Agree = { param($s)
+               Agree "value" $s.call.value $s.witness.returned
+               Agree "applied" $s.call.applied (@($s.witness.returned).Count -eq 2) }
+           Expect = { param($s) Expect "typed" 5 $s.typed.returned.builtin } },
         @{ Tool = "scene_instantiate_node"; Session = "editor"; Steps = @(
             (Witness "before" "children" @(".")),
             (Step "call" "scene_instantiate_node" @{ node_type = "Node3D"; parent_path = $observedRoot; name = "Spawned" }),

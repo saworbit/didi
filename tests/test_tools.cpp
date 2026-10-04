@@ -8180,10 +8180,13 @@ static void test_property_type_acceptance_set_is_unchanged() {
                 PropertyTypeMatch::Compatible);
 
     // Outside the contract, which is a different rejection from a type mismatch
-    // and stays that way.
-    ASSERT_TRUE(matchJsonToPropertyType(didi::json::array(), GDEXTENSION_VARIANT_TYPE_ARRAY) ==
+    // and stays that way. Arrays and Rect2 were the examples here until Q7
+    // part 2 brought them in.
+    ASSERT_TRUE(matchJsonToPropertyType(didi::json::object(), GDEXTENSION_VARIANT_TYPE_DICTIONARY) ==
                 PropertyTypeMatch::UnsupportedPropertyType);
-    ASSERT_TRUE(matchJsonToPropertyType(didi::json::object(), GDEXTENSION_VARIANT_TYPE_RECT2) ==
+    ASSERT_TRUE(matchJsonToPropertyType(didi::json(nullptr), GDEXTENSION_VARIANT_TYPE_CALLABLE) ==
+                PropertyTypeMatch::UnsupportedPropertyType);
+    ASSERT_TRUE(matchJsonToPropertyType(didi::json(1), GDEXTENSION_VARIANT_TYPE_RID) ==
                 PropertyTypeMatch::UnsupportedPropertyType);
 
     // Vector2 is inside it now, and an array is the wrong shape for one rather
@@ -8197,6 +8200,76 @@ static void test_property_type_acceptance_set_is_unchanged() {
 // because the contract stopped at scalars. These are the shapes it takes now,
 // and the near misses it still refuses, which is the half that matters: a
 // silently dropped "z" is a position nobody asked for.
+// Q7 part 2: the built-ins made of other values, and the packed arrays, are
+// spelled as JSON objects named by Godot's own members and as JSON arrays.
+// Each shape is pinned with the near misses it refuses, because a member left
+// out or a byte that does not fit is a value nobody asked for.
+static void test_property_contract_takes_compound_values_and_arrays() {
+    using didi::godot::PropertyTypeMatch;
+    using didi::godot::matchJsonToPropertyType;
+    using didi::godot::describeRealRangeRefusal;
+    const auto fits = [](const didi::json& value, int type) {
+        return matchJsonToPropertyType(value, type) == PropertyTypeMatch::Compatible;
+    };
+    const didi::json xy = {{"x", 1}, {"y", 2}};
+    const didi::json xyz = {{"x", 1}, {"y", 0}, {"z", 0}};
+    const didi::json rect = {{"position", xy}, {"size", {{"x", 30}, {"y", 40}}}};
+    ASSERT_TRUE(fits(rect, GDEXTENSION_VARIANT_TYPE_RECT2));
+    ASSERT_TRUE(fits(rect, GDEXTENSION_VARIANT_TYPE_RECT2I));
+    ASSERT_TRUE(!fits({{"position", xy}}, GDEXTENSION_VARIANT_TYPE_RECT2));
+    ASSERT_TRUE(!fits({{"position", xy}, {"size", xy}, {"end", xy}}, GDEXTENSION_VARIANT_TYPE_RECT2));
+    ASSERT_TRUE(!fits({{"position", {{"x", 0.5}, {"y", 0}}}, {"size", xy}}, GDEXTENSION_VARIANT_TYPE_RECT2I));
+    ASSERT_TRUE(fits({{"x", 0}, {"y", 0}, {"z", 0}, {"w", 1}}, GDEXTENSION_VARIANT_TYPE_QUATERNION));
+    ASSERT_TRUE(fits({{"normal", xyz}, {"d", 2}}, GDEXTENSION_VARIANT_TYPE_PLANE));
+    ASSERT_TRUE(fits({{"x", xy}, {"y", xy}, {"origin", xy}}, GDEXTENSION_VARIANT_TYPE_TRANSFORM2D));
+    const didi::json basis = {{"x", xyz}, {"y", xyz}, {"z", xyz}};
+    const didi::json transform = {{"basis", basis}, {"origin", xyz}};
+    ASSERT_TRUE(fits(transform, GDEXTENSION_VARIANT_TYPE_TRANSFORM3D));
+    ASSERT_TRUE(!fits({{"basis", {{"x", xyz}, {"y", xyz}}}, {"origin", xyz}},
+                      GDEXTENSION_VARIANT_TYPE_TRANSFORM3D));
+    ASSERT_TRUE(!fits(basis, GDEXTENSION_VARIANT_TYPE_TRANSFORM3D));
+
+    // Packed arrays, each element by its own rule, and the two that would wrap
+    // a number they cannot hold.
+    ASSERT_TRUE(fits(didi::json::array({xy, xy}), GDEXTENSION_VARIANT_TYPE_PACKED_VECTOR2_ARRAY));
+    ASSERT_TRUE(fits(didi::json::array(), GDEXTENSION_VARIANT_TYPE_PACKED_VECTOR2_ARRAY));
+    ASSERT_TRUE(!fits(didi::json::array({didi::json::array({1, 2})}), GDEXTENSION_VARIANT_TYPE_PACKED_VECTOR2_ARRAY));
+    ASSERT_TRUE(fits(didi::json::array({0, 255}), GDEXTENSION_VARIANT_TYPE_PACKED_BYTE_ARRAY));
+    ASSERT_TRUE(!fits(didi::json::array({256}), GDEXTENSION_VARIANT_TYPE_PACKED_BYTE_ARRAY));
+    ASSERT_TRUE(!fits(didi::json::array({-1}), GDEXTENSION_VARIANT_TYPE_PACKED_BYTE_ARRAY));
+    ASSERT_TRUE(!fits(didi::json::array({2147483648LL}), GDEXTENSION_VARIANT_TYPE_PACKED_INT32_ARRAY));
+    ASSERT_TRUE(fits(didi::json::array({2147483648LL}), GDEXTENSION_VARIANT_TYPE_PACKED_INT64_ARRAY));
+    ASSERT_TRUE(fits(didi::json::array({"#ff0000", {{"r", 0}, {"g", 1}, {"b", 0}}}),
+                     GDEXTENSION_VARIANT_TYPE_PACKED_COLOR_ARRAY));
+    ASSERT_TRUE(!fits(didi::json::array({1}), GDEXTENSION_VARIANT_TYPE_PACKED_STRING_ARRAY));
+    ASSERT_TRUE(!fits(xy, GDEXTENSION_VARIANT_TYPE_PACKED_VECTOR2_ARRAY));
+
+    // An Array takes any JSON array here; what its elements may be is decided
+    // by the array the property holds, when the value is built.
+    ASSERT_TRUE(fits(didi::json::array({1, "two", nullptr}), GDEXTENSION_VARIANT_TYPE_ARRAY));
+    ASSERT_TRUE(!fits(didi::json::object(), GDEXTENSION_VARIANT_TYPE_ARRAY));
+
+    // The range check reaches every real, and says where it is.
+    didi::json huge = transform;
+    huge["basis"]["y"]["z"] = 1e39;
+    const auto in_basis = describeRealRangeRefusal("transform", huge, GDEXTENSION_VARIANT_TYPE_TRANSFORM3D);
+    ASSERT_TRUE(in_basis.has_value() && in_basis->find("\"basis.y.z\"") != std::string::npos);
+    const auto in_points = describeRealRangeRefusal(
+        "points", didi::json::array({xy, {{"x", 1e39}, {"y", 0}}}), GDEXTENSION_VARIANT_TYPE_PACKED_VECTOR2_ARRAY);
+    ASSERT_TRUE(in_points.has_value() && in_points->find("\"[1].x\"") != std::string::npos);
+    ASSERT_TRUE(describeRealRangeRefusal("values", didi::json::array({1e39}),
+                                         GDEXTENSION_VARIANT_TYPE_PACKED_FLOAT32_ARRAY).has_value());
+    // A PackedFloat64Array holds doubles, and an int vector holds no reals.
+    ASSERT_TRUE(!describeRealRangeRefusal("values", didi::json::array({1e39}),
+                                          GDEXTENSION_VARIANT_TYPE_PACKED_FLOAT64_ARRAY).has_value());
+    ASSERT_TRUE(!describeRealRangeRefusal("region", rect, GDEXTENSION_VARIANT_TYPE_RECT2I).has_value());
+
+    // A refusal says what to send in the shape the read gives.
+    const auto advice = didi::godot::describePropertyTypeMismatch("transform", didi::json(1),
+                                                                  GDEXTENSION_VARIANT_TYPE_TRANSFORM3D);
+    ASSERT_TRUE(advice.find("basis") != std::string::npos && advice.find("origin") != std::string::npos);
+}
+
 static void test_property_contract_takes_vectors_colors_and_resource_paths() {
     using didi::godot::PropertyTypeMatch;
     using didi::godot::matchJsonToPropertyType;
@@ -10041,6 +10114,8 @@ struct RegisterToolTests {
                      test_a_number_no_float_property_can_hold_is_refused);
         registerTest("Tools.PropertyContractVectorsColorsResources",
                      test_property_contract_takes_vectors_colors_and_resource_paths);
+        registerTest("Tools.PropertyContractCompoundValuesAndArrays",
+                     test_property_contract_takes_compound_values_and_arrays);
         registerTest("Tools.DefaultRegistration", test_tool_registry_default_tools);
         registerTest("Tools.Phase7InputAliasPublicContract",
                      test_phase7_input_alias_keeps_invoked_entry_with_canonical_contract);

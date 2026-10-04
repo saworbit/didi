@@ -485,10 +485,10 @@ static void test_output_schemas_are_declared_for_the_observed_tools() {
 // validateJsonForPropertyType in src/gdextension/godot_bridge.cpp: null for
 // NIL and for clearing a resource slot, boolean for BOOL, integer for INT, any
 // number for FLOAT, string for STRING/STRING_NAME/NODE_PATH, a hex Color or a
-// res:// resource path, and an object for a Vector or a Color. Arrays are
-// refused outright.
+// res:// resource path, an object for a vector, a Color or one of the built-ins
+// made of them, and an array for an Array or a packed array (Q7 part 2).
 static const std::vector<std::string> kScalarPropertyJsonTypes = {
-    "null", "boolean", "integer", "number", "string", "object"};
+    "null", "boolean", "integer", "number", "string", "object", "array"};
 
 // The schema is the only description of a parameter a client ever sees. An
 // untyped `value` leaves it guessing between 1.0 and "1.0", and a client that

@@ -187,7 +187,7 @@ Creates a built-in ClassDB node, or an instance of a packed scene, under the act
 - `node_type` (`string`). One of `node_type` or `scene_path` is required; there is no default, because an empty request must not add a node. Ignored when `scene_path` is given.
 - `parent_path` (`string`, default `"/root"`).
 - `name` (`string`, optional). Godot forbids `.`, `:`, `@`, `/`, `%` and `"` in a node name and substitutes rather than refusing, and it uniquifies a name a sibling already has. When a name was given, the result reports `node_name`, the name the engine used; when that is not the name asked for, it also reports `requested_name` and `name_substituted: true`, so a caller building its next `NodePath` from the name it chose finds out here rather than from the `404` four calls later. Omitting `name`, or passing an empty one, asks the engine to name the node after its class and is not a substitution.
-- `properties` (`object`, optional): Initial property values. Each value is a JSON null, boolean, signed integer, real, string, or a vector/colour object compatible with that property's Godot type, the same contract as `scene_set_property`'s `value`. Each is read back once the node is in the tree, and one the engine did not keep is listed under `properties_not_applied`, with `property_name`, `requested_value`, `value` and the `outcome`, `detail` and `engine_constraint` `scene_set_property` reports in `not_applied`. An `AudioStreamPlayer` created with a `bus` no bus has is the common case: the engine reads it back as `Master`, the scene saves no `bus` line, and the constraint lists the buses there are. The key is absent when every value landed.
+- `properties` (`object`, optional): Initial property values. Each value is the JSON form the table under `scene_set_property` lists for that property's Godot type, the same contract as `scene_set_property`'s `value`. Each is read back once the node is in the tree, and one the engine did not keep is listed under `properties_not_applied`, with `property_name`, `requested_value`, `value` and the `outcome`, `detail` and `engine_constraint` `scene_set_property` reports in `not_applied`. An `AudioStreamPlayer` created with a `bus` no bus has is the common case: the engine reads it back as `Master`, the scene saves no `bus` line, and the constraint lists the buses there are. The key is absent when every value landed.
 - `scene_path` (`string`, optional): a `res://` `.tscn` to instance rather than a type to construct. The instance is made with `GEN_EDIT_STATE_INSTANCE`, which is what the editor's own scene drop uses, so the scene file records an instance of that scene and not a copy of its nodes. `properties` still applies, to the instance root. The result reports the instance's own class in `node_type` and echoes `scene_path`. A missing scene is `404`, a resource that is not a PackedScene is `422`, and so is one whose dependencies did not load, because instantiating that returns nothing and puts the reason in a console the caller cannot read.
 
 A `parent_path` inside an instanced sub-scene the edited scene has not marked editable is refused with `409` and `data.code: "node_not_owned"`, because the packer drops such a node together with its parent on save. A `scene_path` naming the edited scene, or any scene whose PackedScene dependencies reach it, is refused with `409` and `data.code: "cyclic_instance"`, with the chain of scene files under `data.chain`. That is the check the editor's own scene drop makes: Godot accepts the recursive tree and then refuses to save it in a dialog, while `EditorInterface.save_scene` still returns OK. Both refusals also answer the dry run, which previews against the parent.
@@ -228,8 +228,21 @@ The accepted JSON for each Godot type:
 | `Vector2`, `Vector3` | `{"x": .., "y": ..}` / `{"x": .., "y": .., "z": ..}` |
 | `Vector2i`, `Vector3i` | the same objects with whole numbers |
 | `Color` | `{"r": .., "g": .., "b": ..}` with an optional `a`, or a `"#rrggbb"` / `"#rrggbbaa"` string |
+| `Vector4`, `Vector4i`, `Quaternion` | `{"x": .., "y": .., "z": .., "w": ..}` |
+| `Rect2`, `Rect2i`, `AABB` | `{"position": .., "size": ..}`, each a vector of the same kind |
+| `Plane` | `{"normal": {"x", "y", "z"}, "d": ..}` |
+| `Transform2D` | `{"x": .., "y": .., "origin": ..}`: the two axes and the origin, each a `Vector2` |
+| `Basis` | `{"x": .., "y": .., "z": ..}`: its columns, each a `Vector3` |
+| `Transform3D` | `{"basis": .., "origin": ..}` |
+| `Projection` | `{"x": .., "y": .., "z": .., "w": ..}`: its columns, each a `Vector4` |
+| Packed arrays | a JSON array of the element's form: numbers, strings, vectors or colours. A `PackedByteArray` takes 0 to 255 and a `PackedInt32Array` what fits in 32 bits |
+| `Array` | a JSON array. A typed one, `Array[Vector2]` or `Array[Texture2D]`, takes elements of its type by the rules above; an untyped one takes numbers, strings, booleans and null |
 | Resource slots | a `res://` path, loaded and refused if the loaded type is not one the property takes; `null` clears the slot |
 | nil | `null` |
+
+Every member and element is checked the way a value of its own type is, so a `Rect2` missing its `size`, or a point in a `PackedVector2Array` with a `z`, is refused naming the property. The compound forms use Godot's own member names, and are what `scene_get_property` reads them as (Q7, #1133).
+
+An array is built as the type the property holds, because Godot does not convert one for you and does not say so. Measured on 4.5.1, 4.6.2 and 4.7.2: a packed array handed `{"x", "y"}` dictionaries holds zero vectors, and a typed array handed an untyped one keeps what it held, or, on a script that is not a tool, becomes untyped. So each element is made as the element type first, and a typed array is made with the element type, class and script of the one the property holds now. An untyped array has no element type to turn a JSON object or list into, so one there is refused rather than stored as a Dictionary that reads back the same. A `Dictionary` property is still refused as outside the contract.
 
 An object with a member the target type does not have is refused rather than dropped, because a `z` written to a `Vector2` is a position nobody asked for. Every write is reread, so `value` is what the property now holds and `applied` says whether it changed.
 
@@ -304,7 +317,7 @@ A dry run checks every write the way the real call would, the type of its value 
 
 ### `scene_get_property` — Live
 
-Returns an existing property, in the JSON forms the table under `scene_set_property` lists, plus arrays and dictionaries of them nested up to 16 levels. A resource comes back as its `res://` path, which is what a write takes, and an object with no path to give, a Node for instance, as `null`. A type with no JSON form, such as `Transform3D`, is refused as `400 property_type_unsupported`. `property_name` takes the same paths `scene_set_property` does, and is refused the same ways.
+Returns an existing property, in the JSON forms the table under `scene_set_property` lists, plus arrays and dictionaries of them nested up to 16 levels. A resource comes back as its `res://` path, which is what a write takes, and an object with no path to give, a Node for instance, as `null`. A type with no JSON form, such as a `Callable` or a `Dictionary` whose keys are not strings, is refused as `400 property_type_unsupported`. A transform, a `Rect2` and the packed arrays read in the forms the table lists; before #1133's second part a `Transform3D` was refused here. `property_name` takes the same paths `scene_set_property` does, and is refused the same ways.
 
 Each answer also says what the class declares about the property:
 
@@ -1814,7 +1827,7 @@ Sets one uniform on a `ShaderMaterial` held by a node in the edited scene.
 
 - `target_node`, `property_name` (`string`, required): the same pair `shader_list_uniforms` takes, resolved by the same rules.
 - `uniform_name` (`string`, required): must be a uniform the shader declares.
-- `value` (required): the same JSON spelling `scene_set_property` takes for that Godot type, including `{x,y,z}` for a vector, `{r,g,b}` or `"#rrggbb"` for a colour, and a `res://` path for a texture or other resource uniform, loaded and refused if it is not one of the classes the uniform declares.
+- `value` (required): the same JSON spelling `scene_set_property` takes for that Godot type, including `{x,y,z}` for a vector, `{r,g,b}` or `"#rrggbb"` for a colour, the column objects for a `mat3` or `mat4`, a JSON array for a uniform array, and a `res://` path for a texture or other resource uniform, loaded and refused if it is not one of the classes the uniform declares.
 
 A uniform name the shader does not declare is refused. `set_shader_parameter` accepts any name and does nothing with one it does not know, so a typo would otherwise be reported as a write that worked.
 

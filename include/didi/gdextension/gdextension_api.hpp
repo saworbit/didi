@@ -81,6 +81,8 @@ public:
             variant_new_nil = (GDExtensionInterfaceVariantNewNil)p_get_proc_address("variant_new_nil");
             variant_new_copy = (GDExtensionInterfaceVariantNewCopy)p_get_proc_address("variant_new_copy");
             variant_call = (GDExtensionInterfaceVariantCall)p_get_proc_address("variant_call");
+            variant_construct = (GDExtensionInterfaceVariantConstruct)p_get_proc_address("variant_construct");
+            variant_get_named = (GDExtensionInterfaceVariantGetNamed)p_get_proc_address("variant_get_named");
             get_variant_from_type_constructor = (GDExtensionInterfaceGetVariantFromTypeConstructor)p_get_proc_address("get_variant_from_type_constructor");
             get_variant_to_type_constructor = (GDExtensionInterfaceGetVariantToTypeConstructor)p_get_proc_address("get_variant_to_type_constructor");
             variant_get_ptr_constructor = (GDExtensionInterfaceVariantGetPtrConstructor)p_get_proc_address("variant_get_ptr_constructor");
@@ -153,6 +155,8 @@ public:
     GDExtensionInterfaceVariantNewNil variant_new_nil{nullptr};
     GDExtensionInterfaceVariantNewCopy variant_new_copy{nullptr};
     GDExtensionInterfaceVariantCall variant_call{nullptr};
+    GDExtensionInterfaceVariantConstruct variant_construct{nullptr};
+    GDExtensionInterfaceVariantGetNamed variant_get_named{nullptr};
     GDExtensionInterfaceGetVariantFromTypeConstructor get_variant_from_type_constructor{nullptr};
     GDExtensionInterfaceGetVariantToTypeConstructor get_variant_to_type_constructor{nullptr};
     GDExtensionInterfaceVariantGetPtrConstructor variant_get_ptr_constructor{nullptr};
