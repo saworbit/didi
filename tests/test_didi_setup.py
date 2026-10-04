@@ -430,7 +430,15 @@ class SetupLive(SetupFixture):
                                         timeout=180, env=self.env)
                 printed = [line for line in result.stdout.splitlines() if line.startswith("DIDI_DOCK_ARGS ")]
                 self.assertTrue(printed, result.stdout + result.stderr)
-                self.assertEqual(json.loads(printed[0][len("DIDI_DOCK_ARGS "):]), written)
+                dock = json.loads(printed[0][len("DIDI_DOCK_ARGS "):])
+                # The project is named as Godot was opened on it, and setup
+                # names it by its long path. On a host whose temp folder has
+                # an 8.3 name (C:/Users/RUNNER~1 on the CI runners) the two
+                # spell one folder differently, so it is compared as a folder
+                # and everything else as written.
+                dock_root, setup_root = dock[dock.index("--project") + 1], written[written.index("--project") + 1]
+                self.assertTrue(os.path.samefile(dock_root, setup_root), (dock_root, setup_root))
+                self.assertEqual([a for a in dock if a != dock_root], [a for a in written if a != setup_root])
 
     def test_one_command_gives_a_working_session(self):
         for godot in editors_to_check():
