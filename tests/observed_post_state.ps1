@@ -38,6 +38,9 @@ foreach ($entry in $observedRegistry.tools.PSObject.Properties) {
 }
 $observedExchanges = New-Object System.Collections.ArrayList
 $observedScenePath = "res://observed_post_state.tscn"
+# The script the rename case's scene carries, declaring the handler under both
+# of the names project_rename_references moves between (#1020).
+$observedRenameScript = "extends Node`n`nfunc observed_rename_handler() -> void:`n`tpass`n`nfunc observed_rename_renamed() -> void:`n`tpass`n"
 $observedRoot = "/root/ObservedRoot"
 
 # Called by Invoke-Didi with each batch and what came back. Only the checked
@@ -562,6 +565,25 @@ function Get-ObservedPostStateCases {
             (Step "return" "scene_open" @{ scene_path = $observedScenePath }),
             (Witness "witness" "scene_open" @("res://observed_created.tscn")))
            Agree = { param($s) Agree "still_open" $s.call.still_open $s.witness.returned } },
+        # The rename's own count of the lines it changed, against the scene
+        # file's [connection] lines, and none left naming the old method
+        # (#1020). The scene is made, saved and closed first, so no tab holds
+        # it, and its script declares the method under both names, so it loads
+        # before and after the rename.
+        @{ Tool = "project_rename_references"; Session = "editor"; Steps = @(
+            (Step "script" "script_create" @{ script_path = "res://observed_rename.gd"; source_text = $observedRenameScript; overwrite = $true }),
+            (Step "scene" "scene_create" @{ scene_path = "res://observed_rename.tscn"; root_type = "Node"; root_name = "ObservedRename"; overwrite = $true }),
+            (Step "attach" "script_attach_to_node" @{ target_node = "/root/ObservedRename"; script_path = "res://observed_rename.gd" }),
+            (Step "ready" "signal_connect" @{ emitter_node = "/root/ObservedRename"; signal_name = "ready"; target_node = "/root/ObservedRename"; target_method = "observed_rename_handler" }),
+            (Step "entered" "signal_connect" @{ emitter_node = "/root/ObservedRename"; signal_name = "tree_entered"; target_node = "/root/ObservedRename"; target_method = "observed_rename_handler" }),
+            (Step "save" "editor_save_scene" @{}),
+            (Step "close" "scene_close" @{ discard_unsaved = $true }),
+            (Step "return" "scene_open" @{ scene_path = $observedScenePath }),
+            (Step "call" "project_rename_references" @{ target = "observed_rename_handler"; new_name = "observed_rename_renamed" }),
+            (Witness "witness" "connection_lines" @("res://observed_rename.tscn", "observed_rename_renamed")),
+            (Witness "old" "connection_lines" @("res://observed_rename.tscn", "observed_rename_handler")))
+           Agree = { param($s) Agree "updated_files" $s.call.updated_files @($s.witness.returned) }
+           Expect = { param($s) Expect "old connections" 0 $s.old.returned.changed_lines } },
         # Membership read back after the commit, not the constant the answer
         # used to carry (#1019). in_group has no counterpart in the request.
         @{ Tool = "scene_add_to_group"; Session = "editor"; Steps = @(

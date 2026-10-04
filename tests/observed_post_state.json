@@ -122,7 +122,7 @@
       "witness": "export_presets.cfg parsed by Godot's ConfigFile through observed_witness.gd"
     },
     "project_apply_changes": {
-      "exempt": "The editor copy block drives it in the fixture's own git work tree, and no case compares its answer with the files it wrote.",
+      "exempt": "Its verification runs in a git worktree of the fixture, and by the observed block the fixture holds uncommitted changes git cannot carry into one, so the call is refused before it writes. The editor copy block drives it earlier, and no case compares its answer with the files it wrote.",
       "issue": 1020
     },
     "project_export": {
@@ -144,8 +144,10 @@
       "witness": "ConfigFile reads the input section of project.godot through observed_witness.gd"
     },
     "project_rename_references": {
-      "exempt": "The editor copy block drives it and checks the editor's copy of a scene it rewrote, and no case compares its updated_files with the files on disk.",
-      "issue": 1020
+      "observed": [
+        "updated_files"
+      ],
+      "witness": "FileAccess counts the scene file's [connection] lines naming the new method through observed_witness.gd, and none left naming the old one"
     },
     "project_set_autoload": {
       "observed": [
