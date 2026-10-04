@@ -55,6 +55,16 @@ func property(path: String, property_name: String) -> Variant:
 	return _plain(node.get(property_name)) if node != null else null
 
 
+## How many of a scene file's [connection] lines name a method, in the shape
+## project_rename_references reports a file it rewrote (#1020).
+func connection_lines(path: String, method_name: String) -> Dictionary:
+	var count := 0
+	for line in FileAccess.get_file_as_string(path).split("\n"):
+		if line.begins_with("[connection ") and line.contains('method="%s"' % method_name):
+			count += 1
+	return {"path": path, "changed_lines": count}
+
+
 ## The element type of an Array property: the Variant type, and the class for
 ## an array of objects. A typed array keeps what it holds when handed an
 ## untyped one, so a write that landed has to leave it typed (Q7).
