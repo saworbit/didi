@@ -98,6 +98,9 @@ function Invoke-TypedObjectLayerBlock {
         (Tool-Request 7144 "scene_set_property" @{ target_node = "$root/Mesh"; property_name = "custom_aabb"; value = @{ position = @{ x = 0; y = 0; z = 0 } } }),
         (Tool-Request 7145 "scene_set_property" @{ target_node = "$root/Valued"; property_name = "tags"; value = @("a", 1, $true, $null) }),
         (Tool-Request 7146 "scene_set_property" @{ target_node = "$root/Mover"; property_name = "transform"; value = @{ x = @{ x = 1; y = 0 }; y = @{ x = 0; y = 1 }; origin = @{ x = 3.4e39; y = 0 } } }),
+        # A script on a node its base class is not (#1181).
+        (Tool-Request 7147 "script_create" @{ script_path = "res://typed_spatial.gd"; source_text = "extends Node3D`n"; overwrite = $true }),
+        (Tool-Request 7148 "script_attach_to_node" @{ target_node = "$root/Mover"; script_path = "res://typed_spatial.gd" }),
         # Saved by the request before, so nothing is discarded; before 4.7 the
         # engine cannot report that, and a close without the flag is refused.
         (Tool-Request 7121 "scene_close" @{ discard_unsaved = $true }),
@@ -216,6 +219,10 @@ function Invoke-TypedObjectLayerBlock {
     Assert-True ($tags.applied -eq $true -and @($tags.value).Count -eq 4 -and $tags.value[0] -eq "a") "Scalars written into an untyped Array did not land: $(& $text 7145)"
     $huge = & $refusal 7146
     Assert-True ($typedById[7146].result.isError -and $huge.error.message -match '"origin\.x"') "A transform component no 32-bit real holds was not refused naming it: $(& $text 7146)"
+
+    [void](Tool-Payload $typedById[7147])
+    $base = & $refusal 7148
+    Assert-True ($typedById[7148].result.isError -and $base.error.code -eq 422 -and $base.error.data.code -eq "script_base_incompatible" -and $base.error.data.base_type -eq "Node3D" -and $base.error.data.field -eq "target_node" -and (& $text 7148) -notmatch "export_presets") "A script attached to a node its base class is not was not refused with its own code and fix: $(& $text 7148)"
 
     foreach ($id in 7121, 7122) { [void](Tool-Payload $typedById[$id]) }
     Write-Output "Typed object layer: a batch over three nodes undid and redid as one step, and the save kept what the answers said."

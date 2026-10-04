@@ -343,7 +343,7 @@ Calls a method the target node's own script declares, and returns what it return
 
 **What it will call, and what it will not.** The allowlist is the node's own script, read from `Script.get_script_method_list()`. That list already contains methods inherited from a base script, so a project that splits behaviour across scripts works without naming each one. Everything else is out of reach by construction rather than by a denylist: `free`, `queue_free`, `set_script`, `set`, `call`, `connect`, `add_child` and every other engine method is declared by ClassDB, not by the project, so none of them is in the list. The operations Didi should perform on the engine already have typed tools with their own guards. Names beginning with `_` are refused whatever the script declares, because that prefix is Godot's mark for an engine callback or a private helper and calling one by hand corrupts node state.
 
-**The script must be a `@tool` script.** The editor creates a script instance only for those. Without one the node carries the script, `has_method` answers true, and a call returns nothing having run nothing. That silence is refused with `422` naming the cause, rather than reported as a result.
+**The script must be a `@tool` script.** The editor creates a script instance only for those. Without one the node carries the script, `has_method` answers true, and a call returns nothing having run nothing. That silence is refused with `422` and `data.code: "script_not_tool"` naming the cause, rather than reported as a result. A node with no script at all is `422` `node_has_no_script`, with `use_tool` naming the typed tool when the method is an engine method one covers (#1181).
 
 **Arity and types are checked before anything runs.** The count must match, and each argument must fit the parameter type the script declares, checked against the method list the same way `signal_emit` checks against the signal list. Arguments are JSON null, booleans, integers, finite reals, strings, arrays and string-keyed dictionaries, nested at most 4 levels and 8 KiB in total.
 
@@ -1544,7 +1544,7 @@ All Phase 2 tools are live-only and execute on Godot's main thread. They do not 
 
 ### Scripts
 
-- `script_attach_to_node`: requires `target_node` and a normalized existing `script_path` ending in `.gd`. It loads a real `Script`, rejects nodes that already have one, and attaches it through UndoRedo.
+- `script_attach_to_node`: requires `target_node` and a normalized existing `script_path` ending in `.gd`. It loads a real `Script`, rejects nodes that already have one, and attaches it through UndoRedo. A script whose base class the node is not is refused `422` with `data.code: "script_base_incompatible"`, the script's `base_type` and the node's `node_class`, and `field: "target_node"`; it used to reach the caller as the generic `unprocessable`, whose remedy was about `export_presets.cfg` (#1181).
 - `script_detach_from_node`: requires `target_node`, rejects nodes without a script, and detaches through UndoRedo.
 
 ### Autoloads
