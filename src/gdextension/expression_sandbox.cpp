@@ -1,4 +1,5 @@
 #include "didi/gdextension/expression_sandbox.hpp"
+#include "didi/gdextension/godot_object.hpp"
 
 #include "didi/gdextension/gdextension_api.hpp"
 
@@ -833,27 +834,6 @@ private:
     alignas(16) Opaque m_storage{};
     bool m_initialized{false};
 };
-
-// See the twin in godot_bridge.cpp. Objects from classdb_construct_object2 have
-// not been post-initialized; the engine implements it as
-// ClassDB::instantiate_without_postinitialization.
-GDExtensionObjectPtr constructObject(GDExtensionConstStringNamePtr class_name) {
-    auto& api = GodotApi::instance();
-    if (!api.classdb_construct_object) return nullptr;
-    auto object = api.classdb_construct_object(class_name);
-    if (!object) return nullptr;
-    NativeName object_class("Object");
-    NativeName notification("notification");
-    if (!object_class.valid() || !notification.valid()) return object;
-    auto bind = api.classdb_get_method_bind(object_class.ptr(), notification.ptr(),
-                                            kObjectNotificationHash);
-    if (!bind) return object;
-    int64_t what = kNotificationPostInitialize;
-    GDExtensionBool reversed = 0;
-    const void* arguments[] = {&what, &reversed};
-    api.object_method_bind_ptrcall(bind, object, arguments, nullptr);
-    return object;
-}
 
 class OwnedObject {
 public:

@@ -6,6 +6,7 @@
 #include "didi/gdextension/protocol_servers.hpp"
 #include "didi/gdextension/runtime_bridge.hpp"
 #include "didi/gdextension/undo_ledger.hpp"
+#include "didi/gdextension/godot_object.hpp"
 #include "didi/gdextension/viewport_renderer.hpp"
 #include "didi/common/logger.hpp"
 #include "didi/common/config_file_syntax.hpp"
@@ -1009,60 +1010,6 @@ Result<VariantValue> callObject(GDExtensionObjectPtr object, const char* class_n
                                " (call error " + std::to_string(error.error) + ")");
     }
     return std::move(result);
-}
-
-// Construct a Godot object and finish constructing it.
-//
-// `GodotApi::classdb_construct_object` is bound to the interface entry point
-// `classdb_construct_object2`, which the engine implements as
-// `ClassDB::instantiate_without_postinitialization`. The name is the whole
-// story: the object comes back before NOTIFICATION_POSTINITIALIZE has been
-// sent. Godot's own `memnew` path sends it for built-in classes, so a class
-// that does real work there, a themed Control resolving theme items being the
-// case that found this, is otherwise handed back half-built. Constructing
-// a Label that way segfaults the editor.
-//
-// Every construction goes through here so a new call site cannot reintroduce
-// the omission. `classdb_construct_object3` carries the same requirement, so
-// this stays correct across that migration.
-GDExtensionObjectPtr constructObject(GDExtensionConstStringNamePtr class_name) {
-    auto& api = GodotApi::instance();
-    if (!api.classdb_construct_object) return nullptr;
-    auto object = api.classdb_construct_object(class_name);
-    if (!object) return nullptr;
-
-    // A missing bind fails the construction rather than handing the caller the
-    // object anyway.
-    //
-    // This used to return the object, on the reasoning that it left things
-    // exactly as they were before this function existed. That reasoning is
-    // wrong here: what it was before is the half-built object the paragraph
-    // above describes, and the case that found this took the editor down with
-    // it. A construction that cannot finish is a construction that failed, and
-    // every caller already reports that. Handing back something documented to
-    // segfault the editor is not the survivable option.
-    //
-    // The hash is 4023243586 on Godot 4.5.1, 4.6.2 and 4.7.2, checked by
-    // dumping the extension API from each, so this is a guard against a future
-    // engine rather than a live condition.
-    NativeName object_class("Object");
-    NativeName notification("notification");
-    if (!object_class.valid() || !notification.valid()) {
-        api.object_destroy(object);
-        return nullptr;
-    }
-    auto bind = api.classdb_get_method_bind(object_class.ptr(), notification.ptr(),
-                                            kObjectNotificationHash);
-    if (!bind) {
-        api.object_destroy(object);
-        return nullptr;
-    }
-
-    int64_t what = kNotificationPostInitialize;
-    GDExtensionBool reversed = 0;
-    const void* arguments[] = {&what, &reversed};
-    api.object_method_bind_ptrcall(bind, object, arguments, nullptr);
-    return object;
 }
 
 Result<void> requireMethodBind(const char* class_name, const char* method_name, int64_t hash) {
@@ -10333,7 +10280,8 @@ json GodotBridge::execute(const std::string& method, const json& params,
             "malformed_metadata", "missing_required_api", "conversion_failure",
             "connect_postcondition_mismatch", "disconnect_postcondition_mismatch",
             "missing_destination_float_constructor",
-            "connect_postcondition_mismatch_rollback_failure"};
+            "connect_postcondition_mismatch_rollback_failure",
+            "group_undo_registration_failure"};
         if (!hasOnlyKeys(params, {"seam"}) || !params.contains("seam") ||
             !params["seam"].is_string() || !admitted.count(params["seam"].get<std::string>())) {
             return bridgeError(400, "invalid_phase7_signal_test_seam");
@@ -13545,7 +13493,11 @@ json GodotBridge::execute(const std::string& method, const json& params,
         if (action.isErr()) return errorJson(action.error().code, action.error().message);
         auto apply = managerMethod(manager.value(), "add_do_method", node.value(), "set_script", {&new_script});
         auto revert = managerMethod(manager.value(), "add_undo_method", node.value(), "set_script", {&old_script.value()});
-        if (apply.isErr() || revert.isErr()) return errorJson(500, "Failed to register script UndoRedo transaction");
+        if (apply.isErr() || revert.isErr()) {
+            // Closed, so the next mutation does not merge into it (#1152).
+            abandonAction(manager.value());
+            return errorJson(500, "Failed to register script UndoRedo transaction");
+        }
         auto committed = commitAction(manager.value());
         if (committed.isErr()) return errorJson(committed.error().code, committed.error().message);
         auto observed_script = callObject(node.value(), "Object", "get_script", 1214101251LL);
@@ -14151,7 +14103,16 @@ json GodotBridge::execute(const std::string& method, const json& params,
         auto revert = adding
             ? managerMethod(manager.value(), "add_undo_method", node.value(), "remove_from_group", {&group_name.value()})
             : managerMethod(manager.value(), "add_undo_method", node.value(), "add_to_group", {&group_name.value(), &persistent.value()});
-        if (apply.isErr() || revert.isErr()) return errorJson(500, "Failed to register group UndoRedo transaction");
+#if defined(DIDI_PHASE7_SIGNAL_TEST_SEAMS)
+        if (takePhase7SignalTestSeam("group_undo_registration_failure")) {
+            apply = Error::internal("The test seam failed the registration");
+        }
+#endif
+        if (apply.isErr() || revert.isErr()) {
+            // Closed, so the next mutation does not merge into it (#1152).
+            abandonAction(manager.value());
+            return errorJson(500, "Failed to register group UndoRedo transaction");
+        }
         auto committed = commitAction(manager.value());
         if (committed.isErr()) return errorJson(committed.error().code, committed.error().message);
         // Membership read again after the commit, and the answer built from
@@ -15161,8 +15122,11 @@ json GodotBridge::execute(const std::string& method, const json& params,
                                             1017172818LL,
                                             {&material_value.value(), &stored_name.value(),
                                              &old_value.value()});
-            if (do_property.isErr()) return errorJson(500, do_property.error().message);
-            if (undo_property.isErr()) return errorJson(500, undo_property.error().message);
+            if (do_property.isErr() || undo_property.isErr()) {
+                // Closed, so the next mutation does not merge into it (#1152).
+                abandonAction(manager.value());
+                return errorJson(500, (do_property.isErr() ? do_property : undo_property).error().message);
+            }
             auto committed = commitAction(manager.value());
             if (committed.isErr()) return errorJson(committed.error().code, committed.error().message);
 
