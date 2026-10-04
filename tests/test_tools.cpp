@@ -4615,6 +4615,7 @@ public:
             } else {
                 result = {{"path", path}, {"cached", true}, {"reloaded", true}};
             }
+            if (unlisted.count(path)) result["index_pending"] = true;
             if (!open.count(path)) return result;
             result["scene_open"] = true;
             result["scene_reloaded"] = false;
@@ -4643,6 +4644,9 @@ public:
 
     std::set<std::string> held;
     std::set<std::string> broken;
+    // Files the bridge says it still does not list after the scan it waited
+    // for (#1177).
+    std::set<std::string> unlisted;
     std::vector<std::string> asked;
     int requests{0};
     int answer_requests{1000};
@@ -4694,7 +4698,18 @@ static void test_script_writers_reload_the_editor_copy_they_replaced() {
     // A file the editor never loaded has nothing to reload, and says so.
     const auto fresh = didi::mcp::handleScriptCreate(
         {{"script_path", "res://unseen.gd"}, {"source_text", "extends Node\n"}}, editor);
-    ASSERT_EQ(didi::json::parse(fresh.content[0].text)["editor_copy_reloaded"], false);
+    const auto fresh_report = didi::json::parse(fresh.content[0].text);
+    ASSERT_EQ(fresh_report["editor_copy_reloaded"], false);
+    ASSERT_TRUE(!fresh_report.contains("editor_index_pending"));
+
+    // A file the editor still does not list once the bridge has waited for a
+    // scan says so, since a class_name it declares is unknown to every check
+    // until it does (#1177).
+    editor->unlisted.insert("res://ignored/unlisted.gd");
+    const auto unlisted = didi::mcp::handleScriptCreate(
+        {{"script_path", "res://ignored/unlisted.gd"}, {"source_text", "class_name Unlisted\nextends Node\n"}},
+        editor);
+    ASSERT_EQ(didi::json::parse(unlisted.content[0].text)["editor_index_pending"], true);
 
     // No editor: the offline answer it always was.
     const auto offline = didi::mcp::handleScriptCreate(
@@ -6741,6 +6756,47 @@ static void test_a_deferred_scene_create_still_answers_by_its_deadline() {
     const bool answered_when_due = ready(due) && due.response.get() == deferred;
     hook.cancelPendingCommands("session ended");
     const bool answered_when_ended = ready(waiting) && waiting.response.get() == deferred;
+    EditorHookTestAccess::setFilesystemSettling(hook, std::nullopt);
+    EditorHookTestAccess::setEditorStarting(hook, std::nullopt);
+    EditorHookTestAccess::setProgressTaskOpen(hook, std::nullopt);
+    EditorHookTestAccess::setImportPassOpen(hook, std::nullopt);
+    EditorHookTestAccess::setSessionKind(hook, std::nullopt);
+    ASSERT_TRUE(still_waiting);
+    ASSERT_TRUE(answered_when_due);
+    ASSERT_TRUE(answered_when_ended);
+}
+
+static void test_a_refresh_waiting_for_a_scan_still_answers_by_its_deadline() {
+    // A file written into a folder the editor does not list waits for the scan
+    // that lists it before the writer is answered (#1177). With nothing
+    // scanning, it answers by its deadline as it stands, index_pending and
+    // all, and a session that ends answers it the same way, because the file
+    // was written either way.
+    using didi::godot::EditorHookTestAccess;
+    auto& hook = didi::godot::EditorHook::instance();
+    const auto ready = [](auto& ticket) {
+        return ticket.response.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
+    };
+    hook.cancelPendingCommands("test reset");
+    EditorHookTestAccess::setSessionKind(hook, didi::runtime::SessionKind::editor);
+    EditorHookTestAccess::setImportPassOpen(hook, false);
+    EditorHookTestAccess::setProgressTaskOpen(hook, false);
+    EditorHookTestAccess::setEditorStarting(hook, false);
+    // The scan is asked for only once the editor's own is applied, so the
+    // engine is not asked.
+    EditorHookTestAccess::setFilesystemSettling(hook, true);
+    const didi::json pending = {{"path", "res://fresh/helper.gd"},
+                                {"cached", false},
+                                {"reloaded", false},
+                                {"index_pending", true}};
+    const auto now = std::chrono::steady_clock::now();
+    auto waiting = EditorHookTestAccess::parkRefresh(hook, pending, now + std::chrono::hours(1));
+    auto due = EditorHookTestAccess::parkRefresh(hook, pending, now - std::chrono::milliseconds(1));
+    hook.processQueue();
+    const bool still_waiting = !ready(waiting);
+    const bool answered_when_due = ready(due) && due.response.get() == pending;
+    hook.cancelPendingCommands("session ended");
+    const bool answered_when_ended = ready(waiting) && waiting.response.get() == pending;
     EditorHookTestAccess::setFilesystemSettling(hook, std::nullopt);
     EditorHookTestAccess::setEditorStarting(hook, std::nullopt);
     EditorHookTestAccess::setProgressTaskOpen(hook, std::nullopt);
@@ -10114,6 +10170,8 @@ struct RegisterToolTests {
                      test_a_scene_create_waits_for_the_editor_to_apply_its_scan);
         registerTest("EditorHook.DeferredSceneCreateAnswersByItsDeadline",
                      test_a_deferred_scene_create_still_answers_by_its_deadline);
+        registerTest("EditorHook.RefreshWaitingForAScanAnswersByItsDeadline",
+                     test_a_refresh_waiting_for_a_scan_still_answers_by_its_deadline);
         registerTest("Tools.ShaderWriteAppliedComparesMembers",
                      test_a_write_is_applied_when_every_member_landed);
         registerTest("Tools.WriteThatDidNotLandSaysWhichOfTheTwo",

@@ -2109,33 +2109,39 @@ Result<json> refreshCachedCopy(GDExtensionObjectPtr loader, const std::string& p
     return result;
 }
 
-// Whether the editor's file index lists a file, or nothing when it cannot say:
-// no editor, or a folder the index does not list yet, which update_file cannot
-// put a file in anyway.
-std::optional<bool> editorIndexListsFile(const std::string& resource_path) {
+// Where the editor's file index stands on a file.
+enum class IndexListing {
+    Unknown,          // no editor to ask, or it did not answer
+    Listed,
+    NotListed,        // its folder is listed and the file is not
+    FolderNotListed,  // its folder is not listed, which update_file cannot change
+};
+
+IndexListing editorIndexListing(const std::string& resource_path) {
     const auto slash = resource_path.find_last_of('/');
-    if (slash == std::string::npos || slash + 1 >= resource_path.size()) return std::nullopt;
+    if (slash == std::string::npos || slash + 1 >= resource_path.size()) return IndexListing::Unknown;
     auto editor = editorInterface();
-    if (editor.isErr()) return std::nullopt;
+    if (editor.isErr()) return IndexListing::Unknown;
     auto filesystem = callObject(editor.value(), "EditorInterface", "get_resource_filesystem", 780151678LL);
-    if (filesystem.isErr()) return std::nullopt;
+    if (filesystem.isErr()) return IndexListing::Unknown;
     auto filesystem_object = objectFromVariant(filesystem.value());
-    if (filesystem_object.isErr() || !filesystem_object.value()) return std::nullopt;
+    if (filesystem_object.isErr() || !filesystem_object.value()) return IndexListing::Unknown;
     auto directory_value = makeString(resource_path.substr(0, slash + 1));
-    if (directory_value.isErr()) return std::nullopt;
+    if (directory_value.isErr()) return IndexListing::Unknown;
     auto found = callObject(filesystem_object.value(), "EditorFileSystem", "get_filesystem_path",
                             3188521125LL, {&directory_value.value()});
-    if (found.isErr()) return std::nullopt;
+    if (found.isErr()) return IndexListing::Unknown;
     auto directory_object = objectFromVariant(found.value());
-    if (directory_object.isErr() || !directory_object.value()) return std::nullopt;
+    if (directory_object.isErr()) return IndexListing::Unknown;
+    if (!directory_object.value()) return IndexListing::FolderNotListed;
     auto file_value = makeString(resource_path.substr(slash + 1));
-    if (file_value.isErr()) return std::nullopt;
+    if (file_value.isErr()) return IndexListing::Unknown;
     auto index = callObject(directory_object.value(), "EditorFileSystemDirectory", "find_file_index",
                             1321353865LL, {&file_value.value()});
-    if (index.isErr()) return std::nullopt;
+    if (index.isErr()) return IndexListing::Unknown;
     auto position = scalarFromVariant<int64_t>(index.value(), GDEXTENSION_VARIANT_TYPE_INT);
-    if (position.isErr()) return std::nullopt;
-    return position.value() >= 0;
+    if (position.isErr()) return IndexListing::Unknown;
+    return position.value() >= 0 ? IndexListing::Listed : IndexListing::NotListed;
 }
 
 // Puts a file the server wrote into the editor's index when the index does not
@@ -2149,9 +2155,16 @@ std::optional<bool> editorIndexListsFile(const std::string& resource_path) {
 // Godot. Measured on 4.6.2 with script_create, a headless editor on the same
 // project, and scan_sources. A file no loader takes as it stands, an asset
 // waiting for its import, is the import pass's to index.
+//
+// update_file never adds a file in a folder the editor does not list, so a
+// script written into a new folder kept its class_name unknown to every check
+// until the editor next scanned, and a script using it read as an error
+// (#1177). Only a full scan lists a new folder (#1114). Such a file is marked
+// index_pending, and the editor hook holds the answer while it asks for that
+// scan and waits for it to be applied.
 void indexUnlistedWrite(GDExtensionObjectPtr loader, const std::string& path, json& result) {
-    const auto listed = editorIndexListsFile(path);
-    if (!listed.has_value() || listed.value()) return;
+    const auto listing = editorIndexListing(path);
+    if (listing == IndexListing::Unknown || listing == IndexListing::Listed) return;
     auto path_value = makeString(path);
     auto hint = makeString("");
     if (path_value.isErr() || hint.isErr()) return;
@@ -2160,6 +2173,10 @@ void indexUnlistedWrite(GDExtensionObjectPtr loader, const std::string& path, js
     if (loadable.isErr()) return;
     auto exists = scalarFromVariant<GDExtensionBool>(loadable.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
     if (exists.isErr() || !exists.value()) return;
+    if (listing == IndexListing::FolderNotListed) {
+        result["index_pending"] = true;
+        return;
+    }
     const auto indexed = GodotBridge::instance().indexWrittenResource(path);
     if (!indexed.has_value()) return;
     result["indexed"] = true;

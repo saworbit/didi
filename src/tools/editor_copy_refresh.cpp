@@ -75,6 +75,7 @@ void readResult(EditorCopyRefresh& refresh, const json& result, std::vector<std:
     const auto path = result["path"].get<std::string>();
     readTab(refresh, path, result, pending, restore);
     if (tab_only) return;
+    if (flag(result, "index_pending")) refresh.index_pending.push_back(path);
     if (flag(result, "reloaded")) {
         refresh.reloaded.push_back(path);
         return;
@@ -267,6 +268,7 @@ std::optional<Error> refuseUnsavedOpenScenes(const std::shared_ptr<ipc::IIpcClie
 void reportEditorCopy(json& payload, const EditorCopyRefresh& refresh) {
     if (!refresh.answered) return;
     payload["editor_copy_reloaded"] = !refresh.reloaded.empty();
+    if (!refresh.index_pending.empty()) payload["editor_index_pending"] = true;
     if (!refresh.scenes_reloaded.empty()) {
         payload["editor_scene_reloaded"] = true;
         // Only the writers that rebuild a tab whatever it holds get here with
@@ -284,6 +286,7 @@ void reportEditorCopies(json& payload, const EditorCopyRefresh& refresh) {
     if (!refresh.answered) return;
     payload["editor_copies_reloaded"] = refresh.reloaded;
     payload["editor_scenes_reloaded"] = refresh.scenes_reloaded;
+    if (!refresh.index_pending.empty()) payload["editor_index_pending"] = refresh.index_pending;
     if (!refresh.failed.empty()) payload["editor_copy_errors"] = refresh.failed;
 }
 

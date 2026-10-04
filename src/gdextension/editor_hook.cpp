@@ -51,6 +51,42 @@ void fulfillCommand(const std::shared_ptr<std::promise<json>>& promise,
 // may run: fifteen minutes, the longest wait any tool takes (project_export).
 constexpr int64_t kMaxDetachedReimportMs = 900000;
 
+// Calls `visit` on each path's result in a resource.refreshCached answer: the
+// answer itself for one path, each entry of `results` for several.
+template <typename Visit>
+void forEachRefreshResult(json& answer, Visit visit) {
+    if (!answer.is_object()) return;
+    const auto results = answer.find("results");
+    if (results != answer.end() && results->is_array()) {
+        for (auto& result : *results) {
+            if (result.is_object()) visit(result);
+        }
+        return;
+    }
+    visit(answer);
+}
+
+bool refreshIndexPending(json& answer) {
+    bool pending = false;
+    forEachRefreshResult(answer, [&](json& result) {
+        if (result.value("index_pending", false)) pending = true;
+    });
+    return pending;
+}
+
+// Each file the editor lists now is indexed. One it still does not list keeps
+// index_pending, which the writer's answer reports.
+void markListedRefreshes(json& answer) {
+    forEachRefreshResult(answer, [](json& result) {
+        if (!result.value("index_pending", false)) return;
+        const auto path = result.find("path");
+        if (path == result.end() || !path->is_string()) return;
+        if (!GodotBridge::instance().unindexedAssets({path->get<std::string>()}).empty()) return;
+        result.erase("index_pending");
+        result["indexed"] = true;
+    });
+}
+
 } // namespace
 
 std::optional<json> validateSessionKindForMethod(
@@ -455,6 +491,21 @@ void EditorHook::processQueue() {
                     cmd.response_promise, cmd.control});
                 continue;
             }
+            if (cmd.method == "resource.refreshCached" && refreshIndexPending(result)) {
+                // A file written into a folder the editor does not list. The
+                // answer waits for a full scan to list it (#1177), well inside
+                // the server's ten seconds for this request, counted from when
+                // the call was queued. Past that it answers as it stands.
+                constexpr auto kRefreshAnswerBy = std::chrono::seconds(8);
+                auto wait = GodotBridge::instance().beginProjectScan();
+                if (wait.isOk()) {
+                    std::lock_guard<std::mutex> lock(m_parkedRefreshMutex);
+                    m_parkedRefreshes.push_back(ParkedRefresh{
+                        std::move(result), wait.value(), cmd.queued_at + kRefreshAnswerBy,
+                        cmd.response_promise, cmd.control});
+                    continue;
+                }
+            }
             cmd.control->markCompleted();
             fulfillCommand(cmd.response_promise, cmd.control, std::move(result));
         } catch (const std::exception& e) {
@@ -478,6 +529,7 @@ void EditorHook::processQueue() {
     const bool filesystem_settled = !editorFilesystemSettling();
     if (filesystem_settled) GodotBridge::instance().processDeferredReindexFrame();
     processParkedSceneCreates(filesystem_settled);
+    processParkedRefreshes(filesystem_settled);
     processProjectScanFrame();
     processMainScreenCaptureFrame();
     processScriptCallFrame();
@@ -1572,6 +1624,44 @@ void EditorHook::processParkedSceneCreates(bool filesystem_settled) {
     }
 }
 
+void EditorHook::processParkedRefreshes(bool filesystem_settled) {
+    // Asking for a scan can apply one inside the call, which runs frames, so
+    // the engine is asked with the lock released and the work held here.
+    std::vector<ParkedRefresh> parked;
+    {
+        std::lock_guard<std::mutex> lock(m_parkedRefreshMutex);
+        if (m_parkedRefreshes.empty()) return;
+        parked.swap(m_parkedRefreshes);
+    }
+    auto& bridge = GodotBridge::instance();
+    const auto now = std::chrono::steady_clock::now();
+    std::vector<ParkedRefresh> waiting;
+    for (auto& refresh : parked) {
+        bool applied = false;
+        if (filesystem_settled) {
+            auto step = bridge.projectScanStepNow(refresh.scan);
+            if (step.isOk() && step.value() == ProjectScanStep::Scan) {
+                auto started = bridge.startProjectScan(refresh.scan);
+                step = started.isErr() ? Result<ProjectScanStep>(started.error())
+                                       : bridge.projectScanStepNow(refresh.scan);
+            }
+            // An editor that cannot be asked about a scan will not list the
+            // file either, so the answer goes as it stands.
+            applied = step.isErr() || step.value() == ProjectScanStep::Applied;
+        }
+        if (!applied && now < refresh.deadline) {
+            waiting.push_back(std::move(refresh));
+            continue;
+        }
+        markListedRefreshes(refresh.response);
+        refresh.control->markCompleted();
+        fulfillCommand(refresh.response_promise, refresh.control, std::move(refresh.response));
+    }
+    if (waiting.empty()) return;
+    std::lock_guard<std::mutex> lock(m_parkedRefreshMutex);
+    for (auto& refresh : waiting) m_parkedRefreshes.push_back(std::move(refresh));
+}
+
 void EditorHook::processProjectScanFrame() {
     // Asking for a scan can apply one inside the call, which runs frames, so
     // the engine is asked with the lock released and the work held here.
@@ -2091,6 +2181,17 @@ void EditorHook::cancelPendingCommands(const std::string& reason) {
         create.control->markCompleted();
         fulfillCommand(create.response_promise, create.control, std::move(create.response));
     }
+    // So were the files a parked refresh is about, and its index_pending says
+    // what is still unknown.
+    std::vector<ParkedRefresh> refreshes;
+    {
+        std::lock_guard<std::mutex> lock(m_parkedRefreshMutex);
+        refreshes.swap(m_parkedRefreshes);
+    }
+    for (auto& refresh : refreshes) {
+        refresh.control->markCompleted();
+        fulfillCommand(refresh.response_promise, refresh.control, std::move(refresh.response));
+    }
     std::optional<PendingAssetReimport> active_reimport;
     {
         std::lock_guard<std::recursive_mutex> lock(m_reimportMutex);
@@ -2513,6 +2614,20 @@ CommandTicket EditorHookTestAccess::parkSceneCreate(EditorHook& hook, const json
         std::lock_guard<std::mutex> lock(hook.m_parkedSceneCreateMutex);
         hook.m_parkedSceneCreates.push_back(EditorHook::ParkedSceneCreate{
             response, response.value("scene_path", ""), deadline, promise, control});
+    }
+    return {std::move(future), std::move(promise), std::move(control)};
+}
+
+CommandTicket EditorHookTestAccess::parkRefresh(EditorHook& hook, const json& response,
+                                                std::chrono::steady_clock::time_point deadline) {
+    auto promise = std::make_shared<std::promise<json>>();
+    auto future = promise->get_future();
+    auto control = std::make_shared<CommandControl>();
+    control->tryStart();
+    {
+        std::lock_guard<std::mutex> lock(hook.m_parkedRefreshMutex);
+        hook.m_parkedRefreshes.push_back(
+            EditorHook::ParkedRefresh{response, ProjectScanWait{}, deadline, promise, control});
     }
     return {std::move(future), std::move(promise), std::move(control)};
 }

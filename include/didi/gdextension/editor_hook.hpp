@@ -287,6 +287,10 @@ private:
     // Answers each parked scene_create whose uid is now indexed, or whose
     // deadline has passed. Indexing is tried only once the scan is applied.
     void processParkedSceneCreates(bool filesystem_settled);
+    // Asks for the scan each parked resource.refreshCached waits for once the
+    // editor is free to start one, and answers it once that scan is applied
+    // or its deadline has passed.
+    void processParkedRefreshes(bool filesystem_settled);
     // Asks for each pending editor_reload_project's scan once the editor is
     // free to start one, and answers it once the scan is applied or its
     // deadline has passed. Only from a frame that is not nested, because the
@@ -420,6 +424,18 @@ private:
         std::shared_ptr<CommandControl> control;
     };
 
+    // A resource.refreshCached for a file written into a folder the editor
+    // does not list (#1177). Its answer waits for a full scan, which is what
+    // lists a new folder, so a class_name the file declares is known to the
+    // caller's next check.
+    struct ParkedRefresh {
+        json response;
+        ProjectScanWait scan;
+        std::chrono::steady_clock::time_point deadline;
+        std::shared_ptr<std::promise<json>> response_promise;
+        std::shared_ptr<CommandControl> control;
+    };
+
     struct PendingProfilerRead {
         runtime::ProfilerCollector collector;
         std::chrono::steady_clock::time_point started_at;
@@ -487,6 +503,8 @@ private:
     std::optional<ScanSettle> m_filesystemSettle;
     std::mutex m_parkedSceneCreateMutex;
     std::vector<ParkedSceneCreate> m_parkedSceneCreates;
+    std::mutex m_parkedRefreshMutex;
+    std::vector<ParkedRefresh> m_parkedRefreshes;
     std::mutex m_projectScanMutex;
     std::vector<PendingProjectScan> m_pendingProjectScans;
     // Test seam for editorFilesystemSettling, which otherwise asks the engine.
@@ -527,6 +545,8 @@ public:
     static void setFilesystemSettling(EditorHook& hook, std::optional<bool> settling);
     static CommandTicket parkSceneCreate(EditorHook& hook, const json& response,
                                          std::chrono::steady_clock::time_point deadline);
+    static CommandTicket parkRefresh(EditorHook& hook, const json& response,
+                                     std::chrono::steady_clock::time_point deadline);
     static bool hasPendingQuit(const EditorHook& hook);
 };
 

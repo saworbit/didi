@@ -2669,6 +2669,10 @@ try {
         # file, and under subject.gd's path, which 4.5 then puts back.
         (Tool-Request 521 "script_check_syntax" @{ source_text = "extends Node`n`nfunc probe() -> int:`n`treturn undeclared_in_buffer`n" }),
         (Tool-Request 522 "script_check_syntax" @{ file_path = "res://subject.gd"; source_text = "extends Node`n`nfunc probe() -> int:`n`treturn undeclared_in_buffer`n" }),
+        # A class_name written into a folder the editor does not list is known
+        # to the next check (#1177). Only a scan lists a new folder.
+        (Tool-Request 523 "script_create" @{ script_path = "res://class_pair/pair_helper.gd"; source_text = "class_name PairHelper`nextends RefCounted`n`nstatic func h() -> int:`n`treturn 1`n" }),
+        (Tool-Request 524 "script_check_syntax" @{ source_text = "extends Node`n`nfunc probe() -> int:`n`treturn PairHelper.h()`n" }),
         (Tool-Request 505 "project_export" @{ preset = "Phase5 Pack"; output_path = "res://phase5-output.pck"; mode = "pack"; timeout_seconds = 120 }),
         # Two presets Godot never detects (#921). The stranded one comes after a
         # gap in the numbering and is refused from the file before any Godot
@@ -3500,6 +3504,13 @@ try {
         $undeclared = @($sent.diagnostics | Where-Object { $_.rule -eq "godot_language_server" -and $_.severity -eq "error" -and $_.message -match "undeclared_in_buffer" })
         Assert-True ($sent.engine_backend -eq "language_server" -and $sent.engine_checked -eq $true -and $sent.has_errors -eq $true -and $undeclared.Count -ge 1 -and $sent.PSObject.Properties.Name -notcontains "limitation") "A source_text check beside the editor (request $id) was not the language server's verdict: $($phase5ById[$id].result.content[0].text)"
     }
+
+    # A class_name script written into a new folder is listed before its
+    # writer answers, so a script that uses the class checks clean (#1177).
+    $pairHelper = Tool-Payload $phase5ById[523]
+    Assert-True (-not $phase5ById[523].result.isError -and $pairHelper.PSObject.Properties.Name -notcontains "editor_index_pending") "script_create into a new folder left it unlisted by the editor: $($phase5ById[523].result.content[0].text)"
+    $pairUser = Tool-Payload $phase5ById[524]
+    Assert-True ($pairUser.engine_backend -eq "language_server" -and $pairUser.has_errors -eq $false) "A script using a class_name just written into a new folder did not check clean: $($phase5ById[524].result.content[0].text)"
 
     # The same two fields with nothing attached, which is the state every
     # offline-only caller is in (#687). Request 518 runs before 501's attach.
