@@ -3661,15 +3661,14 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "script_check_syntax";
-        t.description = "Checks GDScript with Didi's lexical rules and, for a file, the open editor's language server or a headless Godot compile.";
+        t.description = "Checks GDScript with Didi's lexical rules and the open editor's language server, or for a file with no editor a headless Godot compile.";
         t.inputSchema = {
             {"type", "object"},
             {"properties", {
                 {"file_path", {{"type", "string"}, {"description", "Path to script file"}}},
                 {"source_text", {{"type", "string"}, {"description",
-                    "An unsaved buffer to check instead of a file. Only Didi's lexical rules run "
-                    "on it, so has_errors misses type errors and undeclared names; limitation "
-                    "says so. project_verify_changes compiles unsaved source."}}}
+                    "An unsaved buffer to check instead of the file at file_path. With no editor "
+                    "attached only the lexical rules run on it; limitation says so."}}}
             }}
         };
         // The source client, not the lease dispatch wrapper. This tool sends no
