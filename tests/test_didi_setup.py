@@ -224,8 +224,11 @@ class SetupOffline(SetupFixture):
             '    "zeta": true\n}\n', encoding="utf-8", newline="\n")
         (self.project / "AGENTS.md").write_bytes(b"# House rules\r\n\r\nUse tabs.\r\n")
         (self.project / ".codex").mkdir()
-        (self.project / ".codex" / "config.toml").write_text('model = "x"\n\n[mcp_servers.other]\ncommand = "o"\n',
-                                                              encoding="utf-8", newline="\n")
+        # A table a person added under the server Codex starts, as the JSON
+        # clients keep the env above (#1144).
+        (self.project / ".codex" / "config.toml").write_text(
+            'model = "x"\n\n[mcp_servers.other]\ncommand = "o"\n\n[mcp_servers.didi.env]\nKEEP = "1"\n',
+            encoding="utf-8", newline="\n")
         report = self.setup_json("--client", "claude-code", "--client", "codex")
         steps = self.steps(report)
         self.assertIn("old/didi", steps["client:claude-code"]["detail"])
@@ -248,6 +251,15 @@ class SetupOffline(SetupFixture):
         toml = (self.project / ".codex" / "config.toml").read_text(encoding="utf-8")
         self.assertTrue(toml.startswith('model = "x"\n\n[mcp_servers.other]\ncommand = "o"\n'))
         self.assertIn("# BEGIN didi\n[mcp_servers.didi]\n", toml)
+        self.assertIn('[mcp_servers.didi.env]\nKEEP = "1"\n', toml)
+        try:
+            import tomllib
+        except ImportError:  # Python before 3.11 has no TOML reader.
+            tomllib = None
+        if tomllib is not None:
+            server = tomllib.loads(toml)["mcp_servers"]["didi"]
+            self.assertEqual(server["env"], {"KEEP": "1"})
+            self.assertEqual(Path(server["command"]).resolve(), self.binary)
 
     def test_claude_md_takes_the_guide_when_the_project_has_one(self):
         (self.project / "CLAUDE.md").write_text("# Ours\n", encoding="utf-8", newline="\n")

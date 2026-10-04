@@ -211,7 +211,7 @@ void puts_the_guide_where_each_client_reads_it() {
 void refuses_a_codex_config_that_declares_didi_elsewhere() {
     Scratch scratch("codex");
     for (const char* foreign : {"[mcp_servers.didi]\ncommand = 'x'\n", "[mcp_servers . \"didi\" ]\ncommand = 'x'\n",
-                                "[mcp_servers.didi.env]\nA = '1'\n", "mcp_servers.didi.command = 'x'\n",
+                                "mcp_servers.didi.command = 'x'\n",
                                 "[mcp_servers]\ndidi = { command = 'x' }\n"}) {
         scratch.write(".codex/config.toml", foreign);
         ASSERT_TRUE(writeClientConfig(scratch.root(), Client::Codex, "D:/didi/didi.exe").isErr());
@@ -232,6 +232,33 @@ void refuses_a_codex_config_that_declares_didi_elsewhere() {
     written = writeClientConfig(scratch.root(), Client::Codex, "D:/new/didi.exe");
     ASSERT_TRUE(written.isOk() && written.value().previous_command.has_value());
     ASSERT_EQ(*written.value().previous_command, std::string("C:\\Program Files\\it's\\didi.exe"));
+    ASSERT_EQ(readClientConfig(scratch.root(), Client::Codex).command, std::string("D:/new/didi.exe"));
+}
+
+// A table under mcp_servers.didi is how a person gives the server Codex starts
+// an environment, and the JSON clients keep what a person adds to their entry.
+// Codex refused the whole file instead (#1144).
+void keeps_the_tables_a_person_adds_under_codex_didi() {
+    Scratch scratch("codex-keep");
+    const std::string env = "[mcp_servers.didi.env]" + std::string(1, 10) + "GODOT_BIN = 'C:/Godot/godot.exe'" + std::string(1, 10);
+    // Before the block exists.
+    scratch.write(".codex/config.toml", env);
+    auto written = writeClientConfig(scratch.root(), Client::Codex, "D:/didi/didi.exe");
+    ASSERT_TRUE(written.isOk());
+    const auto first = scratch.read(".codex/config.toml");
+    ASSERT_TRUE(first.find(env) != std::string::npos);
+    ASSERT_EQ(readClientConfig(scratch.root(), Client::Codex).command, std::string("D:/didi/didi.exe"));
+    // A rerun changes nothing.
+    written = writeClientConfig(scratch.root(), Client::Codex, "D:/didi/didi.exe");
+    ASSERT_TRUE(written.isOk() && written.value().action == FileAction::Unchanged);
+    // After the block, as the refusal advises, and kept through a rewrite of it.
+    scratch.write(".codex/config.toml", "");
+    ASSERT_TRUE(writeClientConfig(scratch.root(), Client::Codex, "D:/didi/didi.exe").isOk());
+    scratch.write(".codex/config.toml", scratch.read(".codex/config.toml") + env);
+    written = writeClientConfig(scratch.root(), Client::Codex, "D:/new/didi.exe");
+    ASSERT_TRUE(written.isOk() && written.value().action == FileAction::Updated);
+    const auto rewritten = scratch.read(".codex/config.toml");
+    ASSERT_TRUE(rewritten.find(env) != std::string::npos);
     ASSERT_EQ(readClientConfig(scratch.root(), Client::Codex).command, std::string("D:/new/didi.exe"));
 }
 
@@ -267,6 +294,7 @@ struct Registrar {
         registerTest("didi_setup.agent_guide_block", replaces_only_the_agent_guide_block);
         registerTest("didi_setup.agent_guide_files", puts_the_guide_where_each_client_reads_it);
         registerTest("didi_setup.codex_foreign_declaration", refuses_a_codex_config_that_declares_didi_elsewhere);
+        registerTest("didi_setup.codex_keeps_a_persons_tables", keeps_the_tables_a_person_adds_under_codex_didi);
         registerTest("didi_setup.json_merge", merges_json_configs_without_reformatting_them);
     }
 } registrar;

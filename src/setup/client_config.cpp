@@ -234,14 +234,15 @@ std::optional<std::string> parseTomlString(std::string_view text, size_t& at) {
 struct TomlBlock {
     std::optional<size_t> begin;
     std::optional<size_t> end;
-    // A line outside the block that declares mcp_servers.didi.
+    // A line outside the block that declares mcp_servers.didi itself, or a key
+    // of it, which would clash with the block's.
     std::optional<size_t> foreign;
     std::string problem;
 };
 
 TomlBlock findTomlBlock(const std::vector<std::string>& text) {
     static const std::regex header(R"re(^\s*\[\s*([^\]]+?)\s*\]\s*(#.*)?$)re");
-    static const std::regex didi_table(R"re(^mcp_servers\s*\.\s*("didi"|'didi'|didi)(\s*\..*)?$)re");
+    static const std::regex didi_table(R"re(^mcp_servers\s*\.\s*("didi"|'didi'|didi)$)re");
     static const std::regex didi_dotted(R"re(^\s*mcp_servers\s*\.\s*("didi"|'didi'|didi)\s*[.=])re");
     static const std::regex didi_key(R"re(^\s*("didi"|'didi'|didi)\s*[.=])re");
     static const std::regex space(R"(\s)");
@@ -263,6 +264,10 @@ TomlBlock findTomlBlock(const std::vector<std::string>& text) {
         std::smatch match;
         if (std::regex_match(text[i], match, header)) {
             table = match[1].str();
+            // Only the table itself clashes. A table under it, such as
+            // [mcp_servers.didi.env], is how a person adds to the server Codex
+            // starts, and TOML lets it sit anywhere in the file, so it is kept
+            // as written (#1144).
             if (!inside && std::regex_match(table, didi_table) && !block.foreign) block.foreign = i;
             continue;
         }
@@ -298,7 +303,8 @@ Result<ConfigWrite> writeTomlConfig(const std::filesystem::path& file, const std
         return Error::invalidArgument(utf8(file) + " declares mcp_servers.didi on line " +
                                       std::to_string(*located.foreign + 1) +
                                       ", outside the block setup writes. Remove that declaration, or keep it "
-                                      "and leave Codex out of --client.");
+                                      "and leave Codex out of --client. A table under it, such as "
+                                      "[mcp_servers.didi.env] after # END didi, is kept.");
     }
     if (located.begin) {
         const std::vector<std::string> current(text.begin() + static_cast<std::ptrdiff_t>(*located.begin),
