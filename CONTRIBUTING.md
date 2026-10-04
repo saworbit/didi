@@ -281,6 +281,35 @@ otherwise only show up as a red run.
 - Moving the pinned Godot version must refresh `resources/didi_class_reference.json`, which is what `script_reflect_class` answers from offline. Dump the API with `godot --headless --dump-extension-api --path .` and regenerate with `python tools/generate_class_reference.py --api extension_api.json --output resources/didi_class_reference.json`. The dump itself stays untracked; only the trimmed reference is committed.
 - Current-facing documentation must describe executable behavior. Do not commit agent-specific workflow reports, plans, or scratch artifacts; `.superpowers/` and `docs/superpowers/` are explicitly excluded from the project tree.
 
+### Changelog entries
+
+A pull request that changes what Didi does, how it is built, or what its
+documents promise adds one line to `CHANGELOG.md` under `## [Unreleased]`, in
+`### Added`, `### Changed` or `### Fixed`:
+
+```markdown
+- `2026-09-10` `asset_reimport` no longer reports success for a path Godot has no importer for. [#374](https://github.com/saworbit/didi/issues/374) · [PR #376](https://github.com/saworbit/didi/pull/376)
+```
+
+- **The date** is the day the change lands on `main`. Write today's, and change
+  it if the pull request merges on a later day.
+- **The sentence** says what someone using Didi can now see or rely on, in 160
+  characters at most. Why, how, and what was tested go in the pull request
+  description, which is where the line points.
+- **The links** are the issue the change settles, then the pull request. A pull
+  request link alone is fine when there is no issue; add it once the pull
+  request is open.
+- **A new line goes at the top of its section**, because each section runs
+  newest first. When a rebase puts two new lines side by side, keep both,
+  newest on top.
+- **`### Breaking` is the one section that takes paragraphs**, because a person
+  upgrading has to read it and the release notes quote it. Say what changed,
+  what a client sees now, and how to adapt.
+
+`tools/validate_documentation.py` holds every line to that shape and that
+order, and checks that the counts in the *Releases at a glance* table match the
+sections under each release.
+
 ### Cutting a release
 
 1. **Rehearse.** `gh workflow run release.yml --ref <branch>` builds, tests,
@@ -290,7 +319,8 @@ otherwise only show up as a red run.
    to `packaging/`.
 2. **Bump the version** in one pull request, following the release contract
    above, and give the new `## [x.y.z] - <date>` section in `CHANGELOG.md` a
-   short summary above its first `###` heading. That summary, and the
+   short summary above its first `###` heading and a row in the *Releases at a
+   glance* table, whose counts the validator checks. That summary, and the
    `### Breaking` list when there is one, lead the release notes, so write them
    for someone deciding whether to upgrade, with absolute links.
 3. **Tag the merge commit** on `main` as `vx.y.z` and push the tag. The

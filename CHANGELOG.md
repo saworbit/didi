@@ -1,40 +1,44 @@
 # Changelog
 
-All notable changes to **Didi** (`godot-mcp-native`) will be documented in this file.
+Every notable change to **Didi** (`godot-mcp-native`), newest first.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+- **One line per change.** Each starts with the day its pull request merged into
+  `main` and ends with the issue it settled and the pull request that made it.
+  The reasoning, the evidence and the tests behind a change are in that pull request.
+- **Grouped the way [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) groups them.**
+  Each release lists Breaking, Added, Changed and Fixed, each running newest first.
+  Read Breaking before upgrading a client.
+- **Entries merged before 4 October 2026 were full paragraphs.** Every word of them
+  is kept in [the changelog as it stood then](https://github.com/saworbit/didi/blob/fd9d0e5e8517143c0e892166c225485a840b2d87/CHANGELOG.md),
+  and each release below links to its own part of it.
 
-Historical entries describe the surface advertised by those releases. For the executable status of each current registration, use [docs/CAPABILITIES.md](docs/CAPABILITIES.md) or runtime `tools/list` metadata.
+Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html), and
+[Stability](#stability) says what a version number does and does not promise.
+Historical entries describe the surface advertised by those releases. For the
+executable status of each current registration, use
+[docs/CAPABILITIES.md](docs/CAPABILITIES.md) or runtime `tools/list` metadata.
+[CONTRIBUTING.md](CONTRIBUTING.md#changelog-entries) says how to add an entry.
 
-## Stability
+## Releases at a glance
 
-Didi follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html), and a
-major number is a statement about compatibility rather than about maturity. The
-two are worth separating, because this project is further along on the first
-than on the second.
-
-**What a version number promises.** The tool names, their arguments, and the
-shape of a successful answer are the public surface. A change that breaks one of
-them bumps the major, which is what 2.0.0 is: the release corrects error codes,
-handshake validation and schema strictness across the surface, and a client
-written against 1.8.0 can break on any of them.
-
-**What it does not promise.** Didi is not finished. Its own status block says
-`PARTIAL_DELIVERY`, three canonical tools are registered and unimplemented, and
-[the roadmap](docs/ROADMAP.md) has Phase 12, the phase that owns reproducible
-artifacts, supported platform matrices and compatibility guarantees across
-versions, barely started: `didi setup` and `didi doctor` are the whole of it so
-far. Until it lands there is no upgrade or rollback guarantee beyond the
-changelog, and no commitment to a support window for an older minor line.
-
-Read the version for what changed. Read this section and the roadmap for how
-much of the thing exists.
+| Version | Released | What it brought | Added | Changed | Fixed | Breaking | Tools implemented |
+| :--- | :--- | :--- | ---: | ---: | ---: | ---: | :--- |
+| [Unreleased](#unreleased) | not yet | Everything merged since 2.0.1 |  |  |  |  | 117 of 120 |
+| [2.0.1](#201---2026-09-23) | 2026-09-23 | Correctness fixes to 2.0.0, and release archives that stand on their own | 10 | 3 | 182 | 6 | 113 of 116 |
+| [2.0.0](#200---2026-09-13) | 2026-09-13 | Error codes, handshake checks and schema strictness corrected across the surface | 4 | 0 | 93 | 10 | 113 of 116 |
+| [1.8.0](#180---2026-09-10) | 2026-09-10 | Test and CI reliability, fuzz targets, and faster impact analysis | 4 | 7 | 13 | 0 | 112 of 115 |
+| [1.7.0](#170---2026-09-09) | 2026-09-09 | Signed releases, the Control Room and managed editor recovery | 6 | 6 | 14 | 0 | 112 of 115 |
+| [1.6.0](#160---2026-09-06) | 2026-09-06 | Editor console, change verification, spatial queries and shader tools | 24 | 0 | 29 | 0 | 106 of 109 |
+| [1.5.0](#150---2026-09-03) | 2026-09-03 | Phase 7 tools arrive, the shared blackboard, YOLO mode and MCP 2026-07-28 | 39 | 12 | 18 | 0 | 91 of 94 |
+| [1.4.0](#140---2026-08-28) | 2026-08-28 | Phase 4: project search, asset reimport, node isolation and visual diffs | 4 | 6 | 1 | 0 | 54 of 72 |
+| [1.3.0](#130---2026-08-27) | 2026-08-27 | Phase 3: sessions, runtime logs, game stepping and expression evaluation | 5 | 8 | 0 | 0 | 50 of 68 |
+| [1.2.0](#120---2026-08-27) | 2026-08-27 | The live engine: Phase 1 substrate and Phase 2 project wiring | 6 | 0 | 15 | 0 | 40 of 58 |
+| [1.1.0](#110---2026-08-26) | 2026-08-26 | The 40-tool canonical surface and IPC hardening | 4 | 0 | 7 | 0 | 40 named |
+| [1.0.0](#100---2026-08-26) | 2026-08-26 | First release: ten tools, the standalone server and the GDExtension | 10 | 0 | 0 | 0 | 10 |
 
 ---
 
 ## [Unreleased]
-
 
 The status block below states the current surface rather than anything this
 release changed, which is why it lives here and not in a version section.
@@ -49,1621 +53,179 @@ release changed, which is why it lives here and not in a version section.
 Discovery now exposes 120 canonical tools plus 10 legacy registrations (130 total). 117 canonical tools are implemented and 3 remain unimplemented.
 The three Phase 7 blockers are unchanged; the newest name is `asset_configure_import`, recorded in [Surface Amendments](docs/SURFACE_AMENDMENTS.md).
 
+Full write-ups for these entries: [as first written](https://github.com/saworbit/didi/blob/fd9d0e5e8517143c0e892166c225485a840b2d87/CHANGELOG.md#unreleased).
+
 ### Added
 
-- **A `source_text` check beside an open editor asks its language server
-  (#1142).** It ran Didi's lexical rules alone, so a draft with an undeclared
-  identifier or an unknown base class came back clean while the engine that
-  would find them was one request away. With an editor attached the text now
-  goes to its GDScript language server, under `file_path` when it names a file
-  in the project and under a path no file has otherwise, and the answer says
-  `engine_backend: "language_server"`. On Godot 4.5 the file's own text is sent
-  back after the check. With no editor the answer is unchanged.
-
-- **`editor_reload_project` runs as a job, so a slow scan can be waited out
-  (#1157).** It answered within the twelve seconds one call can wait, so an
-  editor that took longer to apply a scan of many new scripts answered `504` on
-  every call. With a `request_id` the bridge answers at once with a
-  `reload_id`, keeps the scan's answer, and the job reads it with
-  `editor.reloadStatus`, answered off the editor's main thread, the way
-  `asset_reimport`'s job does. A repeat reads the same answer and asks for no
-  second scan. Without a `request_id` the call is unchanged. The
-  `runtime_launch` `detach` description lost a sentence of motivation so
-  `tools/list` stays within its budgets.
-
-- **Nine more mutating tools say what they replaced (#1151).** Removing or
-  reparenting a node, attaching or detaching a script, adding or removing a
-  group, connecting or disconnecting a signal, and a live setting write
-  answered with the state after the call only, so their change journal
-  entries had no `before`. Each now reports what it read before the commit:
-  where the node was, the script it held, the membership, the connection and
-  its flags, and for `project_set_setting` the literal the file held. The
-  harness checks every such answer in a run. The signal handler also closes its
-  undo action when a registration fails, as #1152 did for three others.
-
-- **A path write says which other nodes share what it changes, and can write
-  into copies instead (#1134).** A duplicated node shares its sub-resources
-  with the original, so recolouring a copy's StyleBox recoloured both while
-  the answer named one node. `scene_set_property` and `scene_get_property` now
-  list the other holders under `shared_with`, bounded, and only when there are
-  any. `make_unique: true` gives the node its own copies of the resources the
-  path enters, as the inspector's Make Unique does, in the write's own undo
-  step. The tool description is shorter by the same amount, so `tools/list`
-  stays within its budgets.
-
-- **A long export no longer makes every other helper launch wait (#1137, Q8
-  part 3).** A Godot Didi starts to answer a question is told not to publish a
-  runtime session by `DIDI_OFFLINE_HELPER`, which was set on the server process
-  and held under a lock for the whole launch, so an export running as a job
-  held `project_verify_changes`, `shader_check_compile` and every other helper
-  launch for as long as the export ran. The variable is now set in the child's
-  own environment, built for that launch alone (`ProcessRequest::environment`:
-  a `CreateProcessW` environment block on Windows, the child's `environ`
-  before `execvp` on POSIX), and the lock is gone. A native test runs two
-  launches with different settings side by side and checks each saw its own.
-  With this, Q8 is complete.
-
-- **`asset_reimport` runs as a job, so a scan of many new scripts can be waited
-  out (#996, Q8 part 2).** A reimport that had to scan was answered within the
-  bridge's fifteen-second wait for one command or not at all, so `timeout_ms`
-  stopped at 10 seconds, which a software-rendered editor spends registering a
-  handful of new scripts. Given a `request_id`, `asset_reimport` runs as a job
-  like `project_export`: the bridge starts the reimport detached and answers at
-  once with an id, the server reads it with `asset.reimportStatus`, which the
-  bridge answers off the editor's main thread so it answers while the editor
-  applies the scan, and `timeout_ms` goes to 900000 (default 300000). The
-  answer is the reimport's own, with its `reimport_id`. A long `timeout_ms`
-  without a `request_id` is `400 reimport_needs_job`. A detached reimport no
-  server has read for a minute is let go, so a server that exited mid-job does
-  not hold the one reimport slot. The live harness keeps one server alive
-  across the reads, which `Invoke-Didi` cannot, and checks forty new classes
-  registered and the batch's SVG reimported once.
-
-- **A change journal, and undo of one change on its own (#1149, Q15 part 1).**
-  Nothing recorded what an agent changed: six trials on two vendors, and
-  `editor_undo` was never called, though every editor mutation answers
-  `undo_redo_registered: true`, and the person reviewing the work could not
-  tell which entries in the editor's history were the agent's. Every mutating
-  call is now journalled in the project's `.didi/journal.json`, recorded once in
-  dispatch rather than by each tool: the tool, its target, the value before
-  where the tool reports one and the answer it read back, the files it says it
-  wrote, and the steps the editor's undo history gained. Those steps come from
-  the bridge, which reads the edited scene's history and the global one around
-  every command it runs; they travel back with the answer and the server takes
-  them off before any caller sees it, so no tool's answer changed shape. The
-  journal keeps 200 entries, redacts by key name (a password, token, secret, API
-  or private key, and the value of a setting whose name is one), is written
-  atomically under a lock two servers share, and a journal that cannot be
-  written never fails the call; the answer says `journal.recorded: false` and
-  why. `godot://project/journal` reads it, newest first, and an attached editor
-  judges in one request whether each entry can still be undone on its own:
-  `available`, `later_history`, `blocked` when the editor's Undo would reach a
-  newer action in the other history first, `undone`, or `gone`.
-  `editor_undo` takes `journal_entry` and undoes exactly that entry or refuses
-  with the reason, without touching a history, and reads the histories again
-  afterwards to report the version it observed. Godot's undo version falls on
-  an undo and repeats after the next change, and its Undo takes the newer of
-  two histories; both were measured on 4.5.1, 4.6.2 and 4.7.2, and the judgement
-  allows for both. `didi_control_room` gains a `journal` section with the last
-  ten. The dock's journal tab and the Control Room page's undo buttons are
-  part 2.
-
-- **`didi setup` and `didi doctor` (#1144, Q12 part 1).** Getting Didi into a
-  project took five steps across two programs, and the ones trials lost most
-  time to were a stale addon beside a newer server (#325, #326), an addon an
-  agent could not enable (#382) and a client file written by hand. `didi setup
-  --project <dir>` installs the addon that came with the binary, after reading
-  the build id out of both libraries, so an addon from another build is never
-  installed and a newer one is never replaced without the answer naming both. It
-  enables the plugin in `project.godot` in the `PackedStringArray` form the
-  Plugins checkbox writes, writes the `didi` server into each named client's
-  project file (`--client claude-code`, `cursor`, `vscode`, `codex` or `all`)
-  without touching any other server or reformatting the file, and writes an
-  agent guide between `<!-- BEGIN didi -->` and `<!-- END didi -->` into the
-  instructions file each client reads: `AGENTS.md`, or `CLAUDE.md` when the
-  project has one, since Claude Code then reads only that. With `--godot <exe>`
-  it starts the editor and waits until it answers on the build just installed.
-  A rerun changes nothing, a file it cannot reproduce exactly (JSON with
-  comments, a TOML that declares `mcp_servers.didi` itself) is refused and left
-  alone, and an editor that has the project open stops it before it writes
-  anything. `didi doctor --project <dir>` runs the dock's Diagnostics checks
-  from the command line, and adds two the dock cannot: whether the addon and
-  each client's configured server are the same build, and whether each
-  configuration points at this project. Measured from a directory holding only
-  `project.godot` on 4.5.1, 4.6.2 and 4.7.2: one command to an editor that
-  answers. Claude Desktop and Windsurf, whose single user-level entry can point
-  at one project only, are part 2.
-
-- **Script diagnostics come from the open editor's GDScript language server
-  (#1139, Q11 part 1).** `script_check_syntax`, `script_create` and
-  `script_patch_method` compiled a file in a separate `godot --headless
-  --check-only`, which has no SceneTree and so no autoloads, and a script that
-  named one came back with a false error until a heuristic demoted it (#383).
-  With an editor open on the project they now ask that editor's language
-  server, which knows the project's autoloads and class names and is measured
-  to answer the same way on 4.5.1, 4.6.2 and 4.7.2; the answer says so in
-  `engine_backend`, and its diagnostics, the engine's own warnings included,
-  are under `rule: "godot_language_server"`. The editor's bridge reports the
-  port, from its settings or from `--lsp-port` on its own command line, which
-  the engine consumes and reports nowhere else. A server that answers for
-  another project's editor, two editors contending for one port, is named and
-  not used, and the headless check remains the fallback with
-  `language_server_unavailable_reason` saying why. The connection is kept
-  open between checks; the first one makes the editor parse every script once
-  and print an error for each that does not parse.
-
-- **`project_export` and `csharp_check_build` can run as jobs, and a retried call
-  no longer runs twice (#1137, Q8 part 1).** The server answers one request at
-  a time, and either tool held it for as long as its helper ran, up to 900
-  seconds for an export. Given a `request_id`, the call runs on a thread of its
-  own and answers within about ten seconds with its result or
-  `status: "working"`, and the same call with the same `request_id` reads the
-  kept answer rather than running the work again; different arguments under the
-  same id are `409 request_id_conflict`. A `2026-07-28` client that declares the
-  `io.modelcontextprotocol/tasks` extension gets a task instead, read with
-  `tasks/get` and stopped with `tasks/cancel`, which kills the helper and
-  everything under it. A call with neither runs as before. At most four jobs
-  run at once and each is kept an hour.
-
-- **A property inside a node's sub-resource can be read and written, several at
-  a time, as one undo step (#1133, Q7 part 1).** `property_name` on
-  `scene_get_property` and `scene_set_property` takes Godot's own property
-  paths, `theme_override_styles/panel:bg_color` or
-  `material:shader_parameter/tint`, so a theme override's StyleBox or a
-  node's material no longer has to be edited in scene text, which the open
-  editor writes over at its next save. Each step is checked against the
-  object's property list, because `get_indexed` and `set_indexed` do nothing
-  and say nothing about a step that names nothing; a miss answers with
-  `candidates`. `writes` commits up to 64 writes, on any nodes, as one
-  UndoRedo action, checked whole first, and `reads` answers up to 64 reads,
-  each with its declared `type` and `engine_constraint`. Measured on all
-  three engine lines, a save drops a change to a resource built into an
-  instanced or inherited scene after it read back as applied, so that write
-  is refused as `subresource_not_saved` with the scene to open; a write into
-  a resource kept in its own `.tres` names it in `resource_file`, because the
-  save rewrites that file for every scene using it. `owner`,
-  `scene_file_path` and `resource_path` are refused by name with a reason
-  each. A dry run now runs the write's whole check, value type included.
-
-- **The contract snapshots record four more shapes a client meets (#1025).**
-  `offline.json` now holds the answers to the call set with no engine, which
-  is where a first session often starts, `server/discover`, and what a
-  stateless `2026-07-28` `tools/list` changes about the listing. CI checks
-  them on all three build platforms. `runtime_get_tree` is recorded from the
-  fixture's main scene run headless, so a game-session read is in each live
-  snapshot. `script_check_syntax` and `shader_check_compile` stay out of the
-  offline answers, because they run whichever Godot the machine has. Live
-  snapshots stay Windows only; the Developer Guide says why.
-
-- **A research report on what Didi costs an agent in tokens (#1107).**
-  [docs/research/TOKEN_EFFICIENCY_EXPLORATION.md](docs/research/TOKEN_EFFICIENCY_EXPLORATION.md)
-  compares the tool list and answers with other ways of building a Godot
-  bridge. Its first section records which claims hold against the code and
-  which recommendations are tracked: R1 is already #1012's plan, R2 is #1108,
-  and R4 to R6 are not taken, with the reason for each.
-
-- **resource_create can name which number it writes (#1003).**
-  `{"type": "float", "value": 0}` is written `0.0` and `{"type": "int",
-  "value": 3}` is written `3`, so a JavaScript client that cannot send `0.0`
-  can still keep an Animation value track's keys as floats.
-
-- **A field trial can hold its findings for review (#1008).** With `--drafts`,
-  `trial.py` has the tester write each finding to `ISSUE_DRAFTS.md` instead of
-  filing it, puts a `gh` that refuses first on its `PATH` with the tokens
-  removed, and lists the drafts in `TRIAL.md` where filed issues go.
-
-- **A mutation that leaves work undone names it as a step (Q6 part 3, #1040).**
-  The answer carries `follow_up`, a list of `{work, tool, reason}`: a live edit
-  of the open scene names `editor_save_scene`, and a change the attached editor
-  cannot take until it restarts names a restart, which no tool can do for it.
-  Each step comes from a fact the answer already published and a person could
-  read but an agent could not act on: `scene_saved: false` on the 16 scene
-  edits, `requires_editor_restart: true` on a new or removed autoload and a
-  moved bus layout, `project.godot` written with no editor attached, and
-  `export_presets.cfg` written with `editor_reloaded: false`. A scene managed
-  recovery already saved names no save. `tests/follow_ups.json` accounts for all
-  63 mutating tools: 20 can leave work, 33 leave none and say why, and 10 are
-  exempt against the issue that tracks them. Six of those write files an
-  attached editor keeps an old copy of, which no rescan refreshes (#1047); the
-  other four are undo, redo and the two tools that run project code, whose
-  answers cannot yet say whether the scene is left unsaved (#1049). CI
-  fails a mutating tool with no entry, and the live harness fails a step a tool
-  did not declare and a fact that arrived without its step. On 4.7 the save step
-  is checked against the scene the editor itself lists as unsaved.
-
-- **No failure answers as a bare sentence (Q6 part 1, finished, #1040).** 199
-  failures answered as a bare sentence, with no `error.data`, so none could carry a code
-  to branch on or name its fix. The census that counted them matched only a
-  string literal as the argument and found 156. Each now answers with the
-  status its cause warrants: 400 for an argument, 503 for a missing editor, 504
-  for a helper Godot that ran out of time, and 500 or 502 for a fault in the
-  server or in what the engine sent back. A missing editor answers in the shape
-  the registry's own refusal of a live-only tool has, `retryable: true` and
-  `blocked_on: "no_live_session"`. A timeout names a longer `timeout_seconds`
-  until the tool's ceiling, and says at the ceiling that nothing more can be
-  sent. Thirty-five answered with another error's message and dropped its
-  status and data, so a 404 or a 409 from the engine reached the caller as
-  prose; they keep both now. The sentences are the ones they were.
-  `CallToolResult` keeps the constructor that made a bare failure private, so a
-  new one does not compile, and the live harness fails a plain-text failure it
-  sees. That check found one more: a `project_apply_changes` proposal that
-  failed verification answered with its report and `isError`, and no `error`
-  in it. The report stays, and beside it is a 422 `verification_failed`
-  naming `changes`. Offline, `scene_get_hierarchy` on a scene file it could
-  not open said the editor was offline; it answers 403 `unreadable`, as the
-  script tools do.
-
-- **The same call failing the same way twice says so (Q6 part 2, #1040).** The
-  second identical failure in a row carries `error.data.repeated`: `count`,
-  `follow`, naming the remedy field to act on, and a `note` saying the call
-  will fail again unchanged. The same call is the tool and the arguments as
-  sent, less `confirmation_token`, which is new on every attempt; the same way
-  is the refusal's `data.code`. A success, or a different failure, starts the
-  count again, and nothing is refused for being repeated, because polling is
-  legitimate. A `2024-11-05` client is counted across the process, a modern
-  request within the session it named, and what is remembered is bounded.
-
-- **Every refusal names what fixes it (Q6 part 1, #1040).** A refusal's
-  `error.data` now carries `retry_with` (the arguments to resend), `field` (the
-  argument at fault), `next_call` (`{tool, arguments, reason}`, a call to make
-  first), `restart_with`, `retry_after_ms` (the same call, later), or
-  `no_remedy` saying why nothing the caller sends can fix it. A site that knew
-  already said so and is left alone; for the rest the error floor fills the
-  remedy from `src/mcp/refusal_remedies.cpp`, keyed by the error code and, where
-  one code means different things, by the tool: a `not_found` from a scene tool
-  names `scene_get_hierarchy`, from a blackboard tool `blackboard_list_keys`, and
-  `not_connected` names `runtime_list_sessions`. The manifest publishes the
-  table as `refusals`, CI fails any of the 77 codes the source emits, or the 15
-  the floor derives from a status, that it does not cover, and the live harness
-  fails any refusal it sees without a fix: 262 live refusals on 4.5.1 and 4.6.2 and 260 on
-  4.7.2, each naming one. Failures still answered as plain text had no
-  `error.data` to carry a fix; the first entry above makes every one an
-  envelope.
-
-- **Every bounded read says whether it is complete, and the two largest take
-  `fields` (Q5 part 2, #776).** `tests/bounded_reads.json` classifies all 54
-  read-only tools: 31 bounded, naming what can cut their answer short, and 23
-  unbounded, saying why nothing can. Every successful answer from a bounded
-  read now carries a boolean `truncated`, on every path, true when a bound was
-  reached. Seventeen did not: some flagged only one of several cuts, some
-  only when set, and some not at all (see Fixed). A new read with neither
-  classification fails CI, and the live harness fails any bounded answer
-  without the flag on every engine line; 144 answers from 26 bounded tools
-  carried it on 4.6.2. `didi_control_room` and `script_reflect_class` take
-  `fields`, an enum of their sections, and name what they left out in
-  `omitted_fields`: the control room's tools array was 77% of its answer,
-  and `Node`'s reference entry is three quarters `methods`. A live
-  `resources/read` now shortens the session descriptor on the same terms as a
-  tool answer, against the same record of what was sent (#1033). The tool list
-  budgets rose in #1038 to carry the new schema fields.
-
-- **`--session-descriptor once` gives the session half of response economy to
-  hosts that cannot declare it (#1031).** None of the hosts the integration
-  guide documents has a setting for a client capability, so the
-  `didi/responseEconomy` saving reached none of them. The session descriptor is
-  safe to shorten for any client: the reference is valid in both halves of a
-  result, and `runtime_get_session` returns the rest. With the switch, every
-  request is answered as though it had declared `sessionDescriptor`: the whole
-  descriptor the first time a route answers, `{session_id, kind}` after that
-  until anything in it changes. The text copy is never left out by it, since
-  only a client knows which half it reads. `every` stays the default because
-  the API specification promises the endpoint on every successful result.
-  `initialize` and `server/discover` report the mode as
-  `_meta.didi.sessionDescriptor`. On #776's arc it cuts an undeclared client's
-  bytes to 54%, 11,933 to 6,453 in the local harness on 4.5.1, 4.6.2 and 4.7.2
-  alike, and the harness fails unless it is under three quarters. `--tools` joins the ADMIN_GUIDE options
-  table, where Q4 left it out.
-- **A client that reads `structuredContent` can decline what it already has
-  (Q5 part 1, #776).** Every tool answer carried its payload twice, in
-  `structuredContent` and again as `content[0].text`, and every live answer
-  restated the whole session descriptor. A client that declares the
-  `didi/responseEconomy` extension, with `omit: ["textCopy",
-  "sessionDescriptor"]`, gets the text item left out when it is byte for byte
-  the structured payload, and a live answer's `session` as `{session_id, kind}`
-  once it already holds that descriptor. The descriptor is sent whole again
-  when anything in it changes. A `2024-11-05` client declares it in
-  `initialize` or on a single request; a `2026-07-28` request declares it in its
-  own client capabilities and is answered from those alone.
-  `server/discover` and `initialize` declare what the server honours. Failures
-  and the `runtime_*_session` answers are never reshaped, and a client that
-  declares nothing gets the same bytes as before. The live harness runs #776's
-  seven-call authoring arc both ways on every engine line: 11,835 bytes
-  undeclared and 3,761 declared, 32%, on 4.5.1, 4.6.2 and 4.7.2 alike. It
-  fails unless the declared arc is under half. `fields` on the large reads and
-  `complete` or `truncated` on every bounded read are the second part (#776
-  stays open).
-- **`--tools core` lists under half the bytes, and both tool lists have a budget
-  (Q4, #1012).** An agent pays for all of `tools/list`, 203,634 bytes on main,
-  before it does anything. `didi --tools core` lists 60 tools in 94,746 bytes:
-  every tool the six field trials reached, recorded in
-  `tools/field-trial/reached_tools.json`, and every implemented tool the
-  handshake guide names, so a core session can follow its own guide. Its
-  listing states `confirmationsSkipped`, `editorConnected` and `sessionKind`
-  once, in the listing's own `_meta.didi`, instead of on each entry. A tool
-  outside the profile is refused with `-32602` and `restart_with: "--tools
-  full"`. `initialize` and `server/discover` report `_meta.didi.toolProfile`.
-  `full` stays the default and keeps its shape; fifteen parameter descriptions
-  lose sentences that repeated the `default` or bounds their schema declares,
-  so it is 272 bytes smaller. `tests/tool_list_budgets.json` budgets both, and
-  CI fails a listing over its budget; raising one takes its own pull request.
-  Turning legacy names off and moving the shared fields in `full` break hosts
-  that read them, so they wait for a major version (#1012 stays open).
-- **What a client is shown is committed, and CI fails when it moves (Q3, #1011).**
-  `tests/contract_snapshots/offline.json` records the handshake, every tool's
-  schema, description, annotations and `_meta`, and the resources and prompts,
-  from a server with no engine. `live-4.5.json`, `live-4.6.json` and
-  `live-4.7.json` record what attaching an editor on that line changes in those
-  listings, and the answers to 42 read-only calls against
-  `tests/contract_fixture`, a small project kept for them. Session ids, pids,
-  paths, the build id, durations and timestamps become placeholders. Identities
-  are replaced by value, so one is caught wherever it appears; the pid and start
-  time, short numbers that could match anything, are replaced by key. `python
-  tools/contract_snapshots.py --godot <exe> ...` regenerates them, recording
-  twice from fresh editors and writing nothing if the two disagree. CI checks
-  `offline.json` on all three build platforms and each live snapshot in its
-  Godot job, and a failed live check uploads what it recorded.
-  `tests/contract_snapshots/calls.json` must call every implemented read-only
-  tool or exclude it with a reason, so a new one fails the build until it does.
-  The recording already shows one engine difference reaching an answer: from
-  4.7, `signal_list_connections` on a `Button` lists two more signals. Q4 and
-  Q5 will change what the tools list and answer, and each of those changes now
-  arrives as a diff in its pull request.
-- **Every mutating tool is checked for what it observed (Q2, #1010).**
-  `tests/observed_post_state.json` gives each of the 63 mutating tools either
-  the answer fields that carry the state it read back after the write, or an
-  exemption with its reason and the issue that tracks it. The live harness
-  keeps every answer from a checked tool across the run and fails on one
-  without its fields. It also drives 25 tools against
-  `tests/godot_smoke/observed_post_state.tscn` and the attached game, and
-  compares each answer with the engine as read by `observed_witness.gd` or the
-  game's own tree. The witness loads files with `CACHE_MODE_IGNORE`, so it reads
-  what is on disk. One case sets a property the engine discards, so a tool that
-  repeated its request would fail there. `didi --dump-tool-manifest` lists the
-  mutating tools under `names.mutating`, and `tests/test_observed_post_state.py`
-  fails the build when one has neither a check nor an exemption. 22 tools answer
-  with the request or with state read before the write (#1019), and 16 have no
-  case yet (#1020).
-- **A field trial is scored on how it called tools, not only which.**
-  `tools/field-trial/guide_rules.py` reads the tester's transcript for every
-  failed call and the cause its answer gives, failing calls sent again
-  unchanged, `dry_run` previews and read-backs, which are the rules the
-  handshake guide gives a host. `transcripts.py` now keeps each call's
-  arguments and whether it failed, for both clients. Trial 06, the first run
-  with the guide, is recorded in
-  [Field Trial Results](docs/FIELD_TRIAL_RESULTS.md#trial-06-2026-09-27): 3.2%
-  of its calls failed, against 22.7% for trial 03.
-- **Operational guidance in the MCP handshake.** `InitializeResult.instructions`
-  now carries a compact guide to tool routing, schema inspection, node discovery,
-  mutation previews and unsupported workflows with file/headless fallbacks.
-  `server/discover` uses the same guide. Host integration is documented in the
-  [API specification](docs/API_SPECIFICATION.md#server-operational-instructions);
-  this adds no tools or availability guarantees.
-- **End-to-end protocol and normalization coverage.** Ten Python tests extend
-  handshake recovery, pipelining, concurrent-client isolation, routing, numeric
-  boundaries and harness cleanup. Existing CI steps run the new modules. The
-  [exploratory report](docs/EXPLORATORY_MCP_INSTRUCTIONS.md) records both build
-  profiles, Godot 4.5.1/4.7.2 integration, live recovery and existing limitations.
-
-- **`asset_configure_import` makes a track loop (#958).** Whether music loops is an import
-  option, `loop` for an OGG or MP3 and `edit/loop_mode` for a WAV, and nothing on the surface
-  could write one, so a menu's music played once and stopped, and the only way around it was a
-  script setting `stream.loop` in `_ready`. The new tool changes the loop options of one WAV,
-  OGG or MP3 import in its `.import` file, reimports the asset in the attached editor, and checks
-  the file and the stream loaded fresh from disk; if the change did not hold, it puts the previous
-  file back and reimports that. Godot checks none of these values: a loop mode of 5 loads as one
-  the engine has no name for, `loop="yes"` loads as true, and a loop window past the stream or
-  an offset past the end is stored as written, all without an error. So the tool refuses each of
-  them, and any importer or option it has no measurement for. `resource_inspect` now reports an
-  imported asset's options under `import`, so whether a track loops can be read without an
-  editor. Recorded in [Surface Amendments](docs/SURFACE_AMENDMENTS.md), with the engine probe
-  behind every rule in `tools/vibe/probes/import_config_engine.py`.
-- **Experimental argument normalization, disabled by default.** Builds with
-  `DIDI_ELASTIC_INGRESS=ON` let explicitly opted-in calls normalize selected
-  numeric limits and 2D coordinates on three existing read-only tools. Canonical
-  schemas and ordinary strict calls remain unchanged. Client support and practical
-  agent benefits remain to be demonstrated; reflection and script evaluation are
-  excluded. See the [decision record](docs/ELASTIC_INGRESS_DECISION.md).
-
-- **`audio_add_bus` gives a game its Music and SFX buses (#771).** Nothing
-  on the surface could add a bus, so `audio_configure_bus` could only ever
-  configure `Master`, and setting a player's `bus` to `Music` answered
-  `applied: false` because the engine reads a bus that does not exist back as
-  `Master`. The new tool appends one bus to the layout the attached editor
-  holds, names it and routes it, and the editor writes the project's layout
-  file itself a moment later; the tool waits up to five seconds, reads the
-  file back, and reports `layout_written`. Godot's `AudioServer` never
-  refuses a name or a send, so the tool refuses what the engine would
-  otherwise change without a word: a name in use (Godot would make it
-  `Music 2`), one differing only in letter case, a send to no bus or to
-  itself (Godot would route it to Master), an empty name, spaces at either
-  end and control characters, judged by what the Audio panel shows rather
-  than by ASCII, so a no-break space, a zero width space, a byte-order mark
-  and U+0085 are refused as their ASCII cousins are. On 4.5.1 and 4.6.2 the editor's Audio panel
-  does not follow a rename, so the new bus's strip said `New Bus`, and one
-  click into it renamed the bus back; the tool has the panel rebuild once the
-  bus is named. Editor sessions only, a dry run that asks the editor, and no
-  undo entry: the way back is the Audio panel. Recorded in
-  [Surface Amendments](docs/SURFACE_AMENDMENTS.md), with the engine probe
-  behind every rule in `tools/vibe/probes/audio_bus_engine.py`.
-- **`project_add_export_preset` makes a game shippable through the surface
-  (#779).** `project_export` needs an export preset, and nothing on the
-  surface could write one, so on a project nobody had exported by hand it
-  answered "Add one in the editor's Export dialog". The new tool adds one
-  preset to `export_presets.cfg`: the fewest keys that 4.5.1, 4.6.2 and 4.7.2
-  all load without an ERROR line, appended to whatever the file already holds
-  with every byte of it kept. It only adds, and refuses a name in the file, a
-  gap in the numbering and a file Godot cannot parse, at the dry run as well
-  as on the call. An open editor reads the file only when it starts and
-  writes its own list back over it the next time any preset changes, so with
-  an editor attached the tool also makes the editor read the file again, and
-  the live harness proves it by making the editor save and finding the
-  preset in what it wrote. `project_export`'s refusal for a project with no
-  presets now names the tool. The measurements are in the amendment in
-  [Surface Amendments](docs/SURFACE_AMENDMENTS.md) and in
-  `tools/vibe/probes/export_preset_engine.py`.
-- **Every live answer carries what the engine printed while it ran.** Godot
-  writes its ERROR and WARNING lines to its console, and until now nothing a
-  caller or a test received ever mentioned them, so a call could answer success
-  while the engine printed an error about the same work. The extension already
-  captured those lines; every live answer now carries the ones printed during
-  the call under `engine_diagnostics` (under `error.data` on a refusal), at most
-  eight with the rest counted. `editor_save_scene` did this for itself since
-  #683. Found in vibe session seventeen, when three defects turned up in a
-  console that had been pasted by hand.
-- **The live harness reads the engine's own log.** It had written the editor's
-  and the game's logs on every run and searched them only for a leaked token
-  and an ObjectDB leak. It now fails on any ERROR or WARNING line that no
-  request causes on purpose, and prints them all with a count. The first run of
-  it found the defects below, a fixture that had never tested what it said,
-  and #913 and #914.
-- **`anim_add_library` gives an AnimationPlayer an animation (#770).** Nothing
-  on the surface could, so `anim_list_tracks` answered an empty list and
-  `anim_play_track` had nothing to name on any player the surface built.
-  `resource_create` already wrote a correct `Animation` and `AnimationLibrary`,
-  and the last step had no route: `scene_set_property` refuses the `libraries`
-  Dictionary, `scene_call_method` only calls script methods, and the scene file
-  is held by the editor. The new tool loads an `AnimationLibrary` from a
-  `res://` file, adds it to a player in the edited scene through the UndoRedo
-  stack, reads the player back, and reports the names `anim_play_track` takes.
-  It only adds. A name already in use, the same library under a second name, a
-  name the engine refuses and a file that is not an `AnimationLibrary` are each
-  refused by name before the engine prints an error, and a dry run makes the
-  same checks. It is a live editor call rather than a file writer because the
-  engine saves a player's libraries in two shapes across the supported range:
-  4.5.1 writes one Dictionary, and 4.6.2 and 4.7.2 write one property per
-  library. The scene saved afterwards holds a reference to the library file in
-  whichever form the running engine uses. Recorded in
-  [Surface Amendments](docs/SURFACE_AMENDMENTS.md).
-
-  Vibe session seventeen then drove it with a real editor on 4.5.1 and
-  4.7.2, and four things came out of that before it shipped. A path in the
-  wrong letter case is refused with the on-disk spelling: Windows opened
-  it, the loader cached a second copy, and the saved scene referenced a
-  path 4.7.2's own log says an export cannot open. A library rewritten
-  after the editor loaded it is refused rather than added as the old copy,
-  because nothing an unattended editor does re-reads it, and
-  `reload_from_disk: true` takes the file's version. `scene_set_property`
-  on an AnimationPlayer's `libraries` gives one refusal on every engine
-  that names `anim_add_library`, where it was a Dictionary refusal on 4.5,
-  a missing property on 4.6 and later, and a clean preview on the 4.5 dry
-  run; `scene_call_method` names the typed tool for an engine method that
-  has one. And `anim_list_tracks` no longer says it reads an
-  `AnimationTree` or blend trees, which it never did.
-- **A release archive can be installed and checked in one command.** The
-  release workflow checks an archive's files, links and handshake, but no
-  runner has a Godot, and the live harness drives its own fixture addon rather
-  than the shipped one, so nothing opened the archive's addon in an editor the
-  way a user does. That is where v2.0.0 went wrong unseen: its extension
-  printed `ERROR: Attempt to get non-existent interface function` into every
-  4.5.1 editor that loaded it. `tools/check_release_archive.py` unpacks an
-  archive, holds it to the promised layout and version, asks its server for
-  its tools, then opens its addon in a fresh project on each editor it is given
-  and reports any ERROR or WARNING line, a plugin that never came up, or an
-  extension that never published a session. Run against the published
-  v2.0.0 Windows archive it reports three findings, and against v2.0.1 none.
-  An archive off the internet is untrusted until it is known to be a release,
-  so a tarball holding a link, a device, an absolute path or a `..` component
-  is refused before anything is unpacked. `CONTRIBUTING.md`'s release steps
-  use it on the draft.
-
-### Fixed
-
-- **A rolled-back write no longer steps the scene's history behind the editor
-  (#1152, part 2).** When a postcondition failed after the commit, the
-  rollback used the editor's own Undo only while the global history was empty,
-  and otherwise undid the scene's history directly. The editor's own stacks
-  then still held the step, so the next Undo took the wrong one. The rollback
-  now always goes through the editor's Undo and checks which history moved. If
-  that was the global one, the editor's Redo puts it back before the direct
-  fallback. The signal bridge probe holds this with an action in the global
-  history, on 4.5.1, 4.6.2 and 4.7.2.
-
-- **Every Godot object Didi constructs is finished or not handed back
-  (#1166).** The bridge, the expression sandbox and the engine output logger
-  each had their own copy of the construction that sends
-  `NOTIFICATION_POSTINITIALIZE`, and the two outside the bridge handed back the
-  half-built object when the notification could not be sent. There is one
-  copy now, which destroys such an object and fails.
-
-- **A failed undo registration no longer leaves the editor mid-action
-  (#1152, part 1).** Script attach and detach, group add and remove, and the
-  shader uniform write returned an error with the action still open when a do
-  or undo step failed to register, so the next mutation was nested inside it
-  and its commit executed nothing. They close it now, as every other handler
-  does. A test seam forces the failure in the signal bridge probe.
-
-- **A detached runtime_launch no longer takes another project's game
-  (#1167).** It waited for any game session that started after the call, from
-  any project, so a game started meanwhile on another project was reported as
-  this launch's and selected. It now takes only a session on this project, and
-  a game it found and could not select answers `success: false` with
-  `attach_error`, rather than success with the selection left elsewhere.
-
-- **A helper process can no longer hang between fork and exec (#1168).** On
-  Linux and macOS the child built its argument list after `fork`. That
-  allocates, and with another thread holding the allocator's lock the child
-  waited forever and the call ran out its timeout. The list is built before
-  the fork now, as the environment already was.
-
-- **Running jobs are cancelled and joined when the server stops (#1169).** The
-  server can leave through `_Exit`, which runs no destructor, so the job
-  store's own cleanup was skipped and a job could be killed half way through
-  writing a file. The end of the stdio loop, and `stop()`, now cancel and join
-  every job first.
-
-- **A project.godot the editor cannot write is the caller's to fix, not a
-  server fault (#1153).** When the save failed, `project_set_setting`,
-  `project_set_autoload` and `project_set_input_action` answered `500
-  internal_error`, which says the server broke and carries no remedy. They now
-  answer `409 project_file_not_writable` with the file, whether it exists and is
-  read-only, the engine's error, and a remedy that says to make the file
-  writable and send the call again. A rollback that also fails is still a 500.
-
-- **The visual test lab no longer carries a uid Godot cannot read (#1164).**
-  `viewport_create_test_lab` wrote `uid="uid://didi_test_lab_sandbox"`. A uid
-  is letters a to z and digits, so Godot dropped it without a line and every
-  lab had none. The header now carries no uid, as `resource_create`'s does not.
-  The answer adds `file_bytes`, read back from disk, and the observed check
-  compares it with the engine's own read and expects the editor to index the
-  lab.
-
-- **resource_create writes a class_name sub-resource the way Godot does
-  (#1131).** #1125 fixed this for the top-level type only. A `sub_resources`
-  entry of a project `class_name` type was refused as not a class, and with
-  `allow_unknown_type` written under its own name with no script, which Godot
-  loads as a `MissingResource`. It is now written as its engine base with
-  `script = ExtResource(..)` first, one `[ext_resource]` for the script however
-  many entries use it, and its names are checked against the base and the
-  script's vars. Neither refusal recommends `allow_unknown_type` for a
-  class_name script any more.
-
-- **The harness holds every writer to the editor's index (#1154).** Only
-  `script_create` was checked. Both `resource_create` cases and
-  `gridmap_export_mesh_library` now expect the editor to list the file they
-  wrote, and `scene_create` and `scene_pack_branch` expect the engine to know
-  the uid. Their files carry no uid, so the index is the fact to check there.
-  With the indexing call removed, all of them fail.
-
-- **No helper launch can forget to suppress its session (#1161).** Each of
-  the four places that start a helper Godot set `DIDI_OFFLINE_HELPER` itself,
-  and a new one that left it out would have published a runtime session with
-  nothing to catch it. `runProcess`, which starts every helper, now sets it on
-  every child, and a native test holds it there.
-
-- **The offline contract snapshot no longer fails beside an open editor
-  (#1145).** The recorder gave the server a private session directory, but the
-  server still reported on the machine's temporary directories, so an editor
-  open elsewhere, or a descriptor a killed one left, became part of the answer.
-  The recorder now points those variables at a directory of its own.
-
-- **A synchronous `asset_reimport` timeout no longer says to retry in five
-  seconds (#1159).** The retry landed inside the apply the timed-out call left
-  running. The refusal now names `request_id`, which runs the call as a job, and
-  says the editor is still working. A job's own timeout keeps `retry_after_ms`.
-
-- **A script Didi creates no longer draws `Unrecognized UID` on Godot 4.5 and
-  4.6 (#1150).** `script_create` wrote the file and never told the editor, which first
-  met it on its next scan, and the editor scans whenever its window takes
-  focus. If another Godot process had written the script's `.uid` sidecar in
-  the meantime, as `project_export` does, 4.5 and 4.6 looked the uid up before
-  checking they knew it and printed `ERROR: Unrecognized UID` once per script
-  as the user clicked back into Godot; 4.7 checks first. It failed the live
-  harness on both lines whenever its editor rescanned after the export case.
-  A file the server writes that the editor's index does not list is now put
-  in it with `EditorFileSystem.update_file`, which is what the editor does for
-  a file it saves itself, so the uid is registered when the call returns. Every
-  writer that refreshes the editor's copy after a write gets the same, and the
-  observed check holds both `script_create` cases to it.
-
-- **A refused project settings save says the rollback worked, and the engine
-  says the save failed once (#1150).** When `ProjectSettings.save` failed,
-  `project_set_setting`, `project_set_autoload` and `project_set_input_action`
-  put the old value back and then saved again into the file the engine had
-  just failed to write. That failed the same way: the engine printed
-  `Couldn't save project.godot` a second time, and the answer said "rollback
-  failed" while the setting was back and the file untouched. The second save
-  now runs only when the failed one moved the file.
-
-- **The harness editor says its red lines are meant (#1150).** Its Output panel opens
-  with a line saying the errors it shows are failures the harness causes on
-  purpose, each named in `tests/run_godot_integration.ps1`, which fails a run
-  on any other.
-
-- **project_export and gridmap_export_mesh_library are checked against the
-  engine (#1020).** Each starts a Godot of its own and answers with what it
-  read back from the file it wrote: `size_bytes` and `item_count`. The
-  observed check now runs each one and reads the same file through the
-  witness, so an answer that drifted from the file fails the harness. Three
-  exemptions said nothing in the live harness drives the tool, which had
-  stopped being true; they now say what is still missing.
-
-- **resource_create writes a class_name type the way Godot does (#1125).** A
-  type a project script declares with `class_name` was written into the header
-  under its own name, which Godot loads as a `MissingResource` and a game
-  cannot load at all, and the answer named the class as if it would load.
-  Writing it as a `Resource` with the script set was refused for the script's
-  own properties. The class is now found in the project's scripts, with no
-  `allow_unknown_type` needed, and written as its engine base with
-  `script_class` and the script, names checked against the engine base and
-  every `var` along the chain. The answer gives the class and its
-  `engine_type`. A type `allow_unknown_type` forces past an attached engine
-  that lacks it now carries a `limitation` saying it loads as a
-  `MissingResource`.
-
-- **scene_reparent_node gives a clashing node a readable name and says so
-  (#1126).** Moving a node into a parent that already had a child of its name
-  left it named like `@Node3D@20131`, and the answer did not mention the
-  rename. It now gets the readable name the editor's own reparent picks,
-  `Twin2` for `Twin`, the answer carries `node_name`, `requested_name` and
-  `name_substituted: true` as `scene_instantiate_node` does, and undo restores
-  the old name.
-
-- **scene_call_method and signal_emit are exempt for good from the observed
-  check (#1020).** Both run project code and claim no state after the call:
-  `returned`, `emitted` and `connection_count` describe the call. An exemption
-  can now be `"permanent": true` with its reason in place of an issue, and
-  `tests/test_observed_post_state.py` holds every other exemption to an issue.
-
-- **The observed post-state check sends inputs the engine stores differently
-  (#1022).** A tool that answered with its request would still have agreed
-  with the engine wherever the engine stores what it was sent, which was all
-  but one case. Seven new cases cross that: a node name already taken, a
-  second copy of one node, a move into a parent holding the same name, a
-  second animation library, a built-in setting at its default, a script that
-  does not compile and a loosely spelled export path. Making each of those
-  tools echo its request fails the harness on that case. Every other case
-  says why no such input exists. The `asset_configure_import` case names the
-  loop block it needs the OGG from, and fails there if that block did not
-  make it. Looking for inputs found #1125 and #1126.
-
-- **asset_reimport waits for a scan the editor started to be applied (#995).**
-  A scan clears its scanning flag before the editor applies what it found,
-  and an asset the editor already listed, named alone, was reimported in that
-  gap. On 4.7.2 the editor then applied the scan inside that reimport, and
-  applying it imports what the scan found by calling `reimport_files` again:
-  the engine refused that as recursive, the new asset stayed unimported, and
-  the call answered success. A reimport now waits for any scan Didi saw
-  running, its own or the editor's, until `sources_changed`. 4.5.1 and 4.6.2
-  did not show it. `tools/vibe/probes/reimport_in_scan_tail.py` holds that
-  gap open with a small editor plugin, `tools/vibe/editor_scan.py`, that
-  starts a scan Didi did not ask for.
-
-- **deferred_scene_uid.py creates scenes during a scan again (#1122).** Since
-  #1114 `editor_reload_project` answers once its scan is applied, and an
-  editor session takes one client, so the probe's scenes all came after the
-  scan. It now has the editor start the scan through `editor_scan.py` and
-  says, for each scene, whether it was sent before the scan was applied.
-
-- **project_list_resources answers in path order on every platform (#1121).**
-  The resource index kept the order the directory walk met files in, which
-  is name order on NTFS and not on ext4, so the same project was listed in a
-  different order on Linux. The index is sorted by path once it is built.
-
-- **The Phase 7 success contracts are checked against real answers (#861).**
-  `$defs.success` in each `schemas/phase7` file was compared with no answer,
-  and four had drifted from what their tools say: `signal_list_connections`
-  forbade `editor_connections`, `engine_connections` and each connection's
-  `origin`, and capped `flags` below `CONNECT_INHERITED`; `tilemap_set_cells`
-  and `gridmap_set_cells` forbade the `cells` they read back; `signal_emit`
-  allowed only `emitted: true` and forbade `connection_count` and `note`. Each
-  now says what the tool answers. The live harness checks every successful
-  Phase 7 answer it gets with `tools/phase7_success.py`, and the Python suite
-  checks the reads the contract snapshots recorded.
-
-- **A not_found names where the missing thing is listed (#1117).** Every
-  not_found outside the tools with a list of their own named
-  `scene_get_hierarchy`, so an evicted `viewport_diff_capture` baseline, a
-  missing script or scene file, an unknown autoload, animation or shader
-  uniform were all sent to read the open scene's node paths. Each now names
-  the call that helps: `viewport_capture_frame`, `project_list_resources`,
-  `project_list_autoloads`, `anim_list_tracks` or `shader_list_uniforms`.
-  `csharp_check_build` with no project file at the root names `project_file`,
-  and clearing a ghost preview that is gone says nothing will help.
-
-- **editor_reload_project answers once the editor has applied a full scan
-  (#1114).** It asked for `scan_sources` and answered at once. `scan_sources`
-  compares folder times in whole seconds, so a folder made moments after the
-  last scan was missed in most rounds on every line, and the caller had no way
-  to tell its files were still unknown to the editor. It now runs `scan`,
-  which walks every folder, waits out a scan already running first, and
-  answers with `scan_applied: true` once the editor has applied its own. A scan
-  not applied within 12 seconds answers `504 editor_scanning` with
-  `scan_applied: false`; the scan carries on.
-
-- **A field trial's brief names the checkout and Godot it was given (#1105).**
-  `TRIAL_BRIEF.md` said the repository was at `D:\didi` and Godot was 4.7.2,
-  whatever `trial.py` handed the tester, so a run from another checkout or
-  engine was told to read and launch something it did not have. The brief now
-  carries `{repository}` and `{godot_exe}`, `trial.py` fills them from its own
-  checkout and `--godot-exe`, and a brief that lost one or grew another is
-  refused before the run, dry runs included.
-
-- **runtime_inject_input answers with what Input holds (#1019).** It used to
-  count `parse_input_event` calls, which return nothing and only buffer the
-  event. It now flushes the batch with `Input.flush_buffered_events`, so the
-  game has handled every event before the answer, and `input_state` reads
-  back each control the batch named: an action's `pressed` and `strength`, a
-  key or button's `pressed`, a joypad axis's value. A held batch on a paused
-  game reads back unchanged. A live case compares it with what the game's own
-  `_input` reads. It was the last tool exempted under #1019.
-
-- **A new scene's uid is indexed before scene_create answers (#1004, #995).**
-  A scene written into a folder the editor did not list yet, or while it
-  scanned, answered `uid_registration_deferred: true`, and a game launched
-  next warned "invalid UID" for every reference to it. Godot cannot index a
-  file in a new folder without a scan, so Didi now asks for one, and both
-  `scene_create` and `scene_pack_branch` wait for a running scan to be applied
-  and then for the index before they answer. The re-index that runs after a
-  deferral no longer gives up after one try, and no longer runs inside the
-  work that applies a scan.
-
-- **scene_close answers with the tabs it left (#1019).** It reads the editor's
-  open scenes after the close and answers `still_open`, `null` for a scene
-  that was never saved. A live case compares it with the editor's own list.
-
-- **The project writers answer with what project.godot holds after the save
-  (#1019).** `project_set_setting` answers `value_written` read back from the
-  file, live and offline, and `null` when the file has no line for it. The
-  autoload writers answer `autoload`, the entry the file declares, and the
-  input action writers answer `defined_by_project`. Each has a live case that
-  reads the file with Godot's own ConfigFile and compares.
-
-- **resource_create answers with the file it wrote (#1019).** It reads the
-  file back after the write and answers `file_bytes` and the `resource_type`
-  its header declares. The live harness loads the file past the editor's cache
-  and compares both.
-
-- **An empty answer object no longer agrees with the engine in the observed
-  post-state check (#1097).** An answer object may say less than the witness,
-  so one with no fields agreed with anything, and a read-back that returned
-  nothing could pass. It now agrees only with an empty witness, and the
-  harness checks that rule before it starts an engine.
-
-- **The harness recognizes the #285 engine crash on Godot 4.6.2 too (#1098).**
-  Its crash classifier knew only the 4.7.2 stack, so the same documentation
-  thread crash on 4.6.2 failed a run instead of being retried. The 4.6.2
-  frames and image size, checked against the release binary, are now in its
-  table of verified builds.
-
-- **`tilemap_set_cells` and `gridmap_set_cells` answer with the cells they
-  read back (#1019).** They re-read every changed cell after the commit and
-  refused a mismatch, but answered only counts taken before the write. The
-  answer now carries `cells`, what each requested cell holds as the layer or
-  grid reports it.
-
-- **The editor startup test retries a held open and names the engine crash it
-  can meet (#1069, #285).** A `scene_open` held past the route deadline answers
-  a retryable `504`, which the test read wrongly and failed on. And the
-  editor's own documentation thread can crash a fresh project's startup on
-  Godot's bug, before Didi runs anything; the test now skips that one crash,
-  as the harness has since #292. The four second settle added after the open
-  was blamed for it is gone: the open was still held every time.
-
-- **`editor_save_scene` reads the file it saved (#1019).** Godot's `save_scene`
-  answers OK for a scene the editor then does not write, so a save into a
-  file the editor could not replace answered `saved`. The tool now checks the
-  file's modified time, refuses an unwritten save as `409 save_not_written`,
-  and answers `file_bytes` read back from disk.
-
-- **An offline `project_set_setting` says when text reads as another type
-  (#1016).** A `value` of `"1152"`, or a plugin list sent as text, was written as a
-  String and answered success, and only `value_written` showed the quotes. The
-  answer now carries `value_text_reads_as` and `retry_with` with the typed
-  value, and says so in `limitation`.
-
-- **The local CI lanes run from a git worktree (#1070).** A worktree's `.git`
-  is a file naming a directory the container cannot see, so every test that runs
-  git failed with 128. The lane now makes a repository of its own from the
-  synced tree there, and prints the commit the tree came from.
-
-- **Undo, redo and project code say whether they left the scene unsaved
-  (#1049).** `editor_undo`, `editor_redo`, `scene_call_method` and a delivered
-  `signal_emit` said nothing about it, so no save step followed them. On Godot
-  4.7 they now carry `scene_saved`, and a save step when it is `false`. Before
-  4.7 a `limitation` says the engine cannot tell.
-
-- **A writer that rebuilds an open tab says whether the tab had unsaved
-  changes (#1082).** `scene_create`, `scene_pack_branch` and
-  `viewport_create_test_lab` with `overwrite: true` rebuild a tab whatever it
-  holds, and the answer said only `editor_scene_reloaded: true`. It now carries
-  `editor_scene_discarded_unsaved`: `true` or `false` on Godot 4.7, `null`
-  before it.
-
-- **`runtime_launch` with a Godot that cannot be started says so (#1076).** It
-  answered `success: false` with `exit_code: 0`, which is what a game that ran
-  and failed looks like, and said to put godot on PATH whatever `GODOT_BIN`
-  named. It now answers `503 engine_unavailable`, like the other tools that
-  start their own Godot.
-
-- **`csharp_check_build` no longer calls a slow .NET SDK missing (#1078).**
-  Its `dotnet --version` probe stopped at a fixed 30 seconds, whatever
-  `timeout_seconds` said, and then told the caller to install the SDK. The
-  probe now runs under the call's `timeout_seconds`, and running out of it is
-  `504 timeout`, retryable.
-
-- **`scene_create` over a scene open in another tab opens it on Godot 4.5 and
-  4.6 (#1079, #1073).** It rebuilt the tab and then opened it in one request,
-  and the editor ignores a scene change for the rest of that frame, so it
-  answered `opened: false`. The tab is now brought to the front first and
-  rebuilt on a later request, through the reload the other writers use, and
-  the answer carries `editor_scene_reloaded`. `previous_scene_file_path` now
-  names the scene that was current before the call.
-
-- **A scene opened straight after an editor starts stays the edited scene
-  (#1069).** `scene_open` and `scene_create` now wait until the editor has
-  opened its startup scenes, which it does once its first scan is applied.
-  Before, the startup made the main scene current a moment after the answer.
-
-- **A pack over a scene open in another tab no longer comes undone on the next
-  save (#1072).** `scene_pack_branch` with `overwrite: true` left that tab
-  holding the old tree, and `editor_save_scene` wrote it back over the pack.
-  The tab is now rebuilt from the packed file, and the answer carries
-  `editor_scene_reloaded`. `overwrite: true` is the consent to lose the tab's
-  unsaved changes. On Godot 4.5 and 4.6, rebuilding a tab left of the current
-  last tab also made it the edited scene, for this and the #1068 writers, so
-  later scene calls acted on the wrong scene. The scene you were editing is now
-  made current again. `scene_create` over a scene no tab holds no longer asks
-  the editor to reload it, which printed `Can't reload scene` on Godot 4.7.
-- **A write to a scene open in the editor no longer comes undone on the next
-  save (#1068).** `project_rename_references` and `project_apply_changes`
-  reloaded only the editor's cached copies, and an open tab is not one, so
-  `editor_save_scene` wrote the old scene back over the file. The tab is now
-  rebuilt from the new file and named in `editor_scenes_reloaded`. A tab with
-  unsaved changes, or any open tab before Godot 4.7, stops the call before it
-  writes, unless `discard_unsaved: true` is passed. The rename's refusal of a
-  `new_name` already in use now names `new_name` as the field to change.
-- **Removing and moving a node answer with what the tree now holds (#1019, in
-  part).** `scene_remove_node` and `scene_reparent_node` answered `action`
-  alone, with nothing read after the commit, and the reparented node's new path
-  was not in the answer. A remove now answers `exists: false` once the path no
-  longer resolves, and a reparent answers `node_path`, read from the node where
-  it now is. Either refuses a change the tree does not reflect.
-- **Group edits answer with the membership they left (#1019, in part).**
-  `scene_add_to_group` and `scene_remove_from_group` answered `added` and
-  `removed` as constants, having read membership only before the write. Both
-  now read it again after the commit, answer `in_group`, and refuse a change the
-  node does not reflect. The live harness compares `in_group` with the node's
-  own `is_in_group`.
-- **The local clang lane builds main again (#1026).** It used Ubuntu 24.04's
-  default clang and libc++ 18, which has no floating-point `std::from_chars`,
-  so `argument_normalization.cpp` did not compile there while the macOS
-  runner's libc++ built it. The lane now uses clang and libc++ 20 from the same
-  archive, and a build volume configured with a compiler the image no longer
-  has is reconfigured on its own. `DIDI_LOCALCI_RECONFIGURE` was documented and
-  never passed into the container; `run.sh` passes it now.
-- **The live harness copies only the fixture it tracks (#1036).** It copied
-  `tests/godot_smoke` whole, including the `.didi/` runtime state the Python
-  suites leave there, so a local run started from that state, and a suite
-  running at the same time held a lock that failed the copy before the first
-  assertion. The copy now leaves out `.didi/` and `.godot/`, which a CI
-  checkout never has.
-- **The seven blackboard writers answer with what they saved (#1019, in
-  part).** `blackboard_write`, `blackboard_patch`, `blackboard_clear` and the
-  four task calls built their answers from the board in memory before it was
-  saved, and never read the saved board back. Each now reads the file back
-  after the save and answers from it; `blackboard_write` also returns the
-  `value` now stored. They move from exempt to observed in
-  `tests/observed_post_state.json`, and the live harness compares each answer
-  with the board file as Godot parses it. Fifteen tools remain on #1019.
-- **The local asan lane is no longer killed for memory (#1050).**
-  `tools/localci` built every lane with Ninja's default of CPUs + 2 jobs, and
-  ASan builds of the largest files need several GB each, so on a 16 GB Docker
-  VM the compiler was killed with a message that reads like a compile error.
-  The asan lane now runs one job per 2 GB of the container's memory, the lane
-  prints the count it chose, and `DIDI_LOCALCI_JOBS` overrides it.
-- **A field trial keeps its evidence and pins its tester (#1005, #1007).**
-  `trial.py` scored a Claude tester's transcript where the client filed it and
-  never copied it, so trial 05 can no longer be rescored. It now copies it into
-  the trial directory as `transcript.jsonl` and scores the copy. And its
-  `--allowed-tools` list restricted nothing under `bypassPermissions`: trial
-  06's tester also used `PowerShell`, and earlier ones met the host's skills.
-  The tester now runs with `--tools` naming seven built-in tools (including
-  `ToolSearch`, which Didi's deferred tools need), skills off, and only project
-  settings, and `trial.json` records that as `tester_environment`.
-- **Engine output and helper answers carry text, not terminal noise (#1028).**
-  `runtime_read_output` relayed Godot's colour escape codes in its records, 40
-  of a fresh headless editor's first 41, so a match against the visible text
-  failed. A record's message now has them taken out when it is captured. And
-  the offline helper Godot logged Didi's own INFO line before anything else,
-  so `shader_check_compile`'s `raw_output` began with it; that line is DEBUG
-  now, and the answer starts with the engine's own output on 4.5, 4.6 and 4.7.
-- **The advice for a new autoload no longer offers a rescan that does not work
-  (#1002).** `signal_connect`'s `target_script_not_compiled` note and
-  `LLM_INSTRUCTIONS` said to restart the editor or call
-  `editor_reload_project`. `project_set_autoload` says the rescan does not
-  register the singleton, and that is what the engine does: called after
-  `project_set_autoload` on 4.5.1, 4.6.2 and 4.7.2, the script still does not
-  compile. Both now say to restart.
-- **Two failures that skipped the error floor now name their fix (#1043).** A
-  confirmation the person declined or dismissed answered `403` with no code
-  and no remedy, so it read as any other 403. It now carries `data.code:
-  "not_approved"`, with `no_remedy` for a decline and `retry_after_ms: 0` for a
-  dismissal. And a managed-mode change that applied and then failed to save,
-  checkpoint or journal set `isError` with no `error` object. It now carries
-  one beside the tool's answer and the receipt, with the recovery outcome,
-  `retryable: false` and a `next_call` to `runtime_recovery_status`, because
-  sending it again would apply it twice.
-- **A harness run that fails reports the failure, not the teardown guard
-  (#1044).** The live harness stops its engines in a `finally` behind a guard
-  that refuses a reused process id, and that refusal threw over the failure the
-  run had just rethrown. A run that failed in the scenario and then tripped the
-  guard reported only the guard. With a failure already recorded, the refusal
-  is now a warning naming both, and the run still fails on the guard when
-  nothing else went wrong.
-- **A Godot that will not start reads as engine_unavailable, not a server fault
-  (#1045).** `shader_check_compile`, `project_export` and
-  `gridmap_export_mesh_library` answered a launch failure as `500
-  internal_error`, with no remedy. They now answer `503` with `data.code:
-  "engine_unavailable"`, `engine_executable` and `restart_with` naming
-  `GODOT_BIN`, as `script_check_syntax` does. Windows marks the failed launch
-  in the error's data; on POSIX it is the child's exit code 127.
-- **A command no longer runs inside the editor's own scan work (#995, part
-  one).** Applying a scan updates script classes and their documentation under
-  the editor's progress dialog, which runs the main loop on every step, and a
-  command queued for Didi was taken there. One that registered a uid or
-  reimported a new file ran the same update again inside it: the engine printed
-  "Task 'update_script_paths_documentation' already exists" and the file was
-  not reimported. Commands now wait while the progress dialog has a task open,
-  as they already did during an import pass.
-- **Six file writers no longer leave an attached editor holding the old copy
-  (#1047).** `script_create`, `script_patch_method`, `project_apply_changes`,
-  `project_rename_references`, `gridmap_export_mesh_library` and
-  `viewport_create_test_lab` wrote files and never told the editor, so every
-  live reader kept the old version until a restart. Each now reloads the
-  editor's copy of what it wrote and says so in `editor_copy_reloaded`, or
-  `editor_copies_reloaded` for the two that write several files. A script is
-  reloaded the way the Script editor reloads one, because a `CACHE_MODE_REPLACE`
-  load leaves a script's code unchanged on 4.5.1, 4.6.2 and 4.7.2. Other files
-  now reload with `CACHE_MODE_REPLACE` rather than `REPLACE_DEEP`, so a reload
-  no longer re-reads the files the written one depends on.
-- **A stopped game no longer counts against the eight held sessions (#1001).**
-  A route was released only when its connection said it was closed, and a
-  connection to a game that `runtime_stop` ended never says so. After enough
-  launch and stop cycles `runtime_attach_session` answered 429. A route is now
-  released when the process its session names has exited. An attach that fails
-  also no longer carries the selected session's incident as its own.
-- **`project_verify_changes` could pass a proposal whose errors it never
-  read.** It kept the first 32 engine error lines and only then subtracted the
-  lines the copy prints on its own, one `Unrecognized UID` per `uid://`
-  reference. A project with more than 32 of those filled the list with lines
-  that were all subtracted, and the proposal passed with `all_ok: true`; a
-  project with more than 32 had its later baseline lines counted against the
-  proposal instead. The baseline is subtracted before the limit now, and the
-  answer carries `truncated`.
-- **Seventeen reads that could be cut short said so partly or not at all
-  (Q5).**
-  - Silent caps: `project_get_uid_map`'s 20,000-file index,
-    `csharp_check_build` and `shader_check_compile`'s 1,000 diagnostics,
-    `audio_list_buses`' offline 512-bus cap, and `project_audit_assets`'
-    `max_findings` on each list.
-  - Partial flags: `didi_control_room`'s 50 sessions, `project_analyze_impact`'s
-    `declared_in`, and `anim_list_tracks`' track and key cuts, which the
-    top-level flag missed.
-  - Other names or partial presence: `runtime_read_logs` and
-    `runtime_read_output`, which cut a 16 KiB message silently;
-    `scene_get_hierarchy` and `project_list_resources`, which flagged only when
-    set; `scene_get_group_members` and `viewport_capture_passes`; and
-    `blackboard_read`, whose shallow markers were only nested. With
-    `project_verify_changes` above, that is the seventeen.
-  - Also `project_list_resources` after a directory walk that stopped on an
-    error, and `script_check_syntax` when its compiler pass hit the 5-second
-    limit, which now answers `engine_timed_out` and says `has_errors: false` is
-    not a verdict.
-  - `resource_inspect` names an unreadable import sidecar in `import_error`
-    rather than leaving `import` out.
-
-- **The phase design no longer calls Phase 13 planned while the roadmap says it
-  is in progress.** Delivering the first Build Queue item moved Phase 13 in
-  `docs/ROADMAP.md`, and `docs/FUTURE_PHASES_DESIGN.md` kept saying `PLANNED`,
-  because the queue's own steps named only the roadmap and nothing compared the
-  two. The steps in the queue, `AGENTS.md` and `CONTRIBUTING.md` now name both
-  files, and `tools/validate_documentation.py` fails when a phase's status
-  differs between them.
-
-- **Every argument declares a JSON type, so a Claude host can send an int, a
-  bool or an array (#1000).** `project_set_setting.value`, `blackboard_write.value`
-  and `blackboard_task_complete.artifacts` published no type at all, and Claude
-  Code sends a top-level argument like that as a string whatever the caller
-  meant. With an editor attached, no int, bool or array setting could be
-  written, and each was refused as a `String`; offline, the documented addon
-  bootstrap wrote `enabled="[\"res://addons/didi/plugin.cfg\"]"` and reported
-  success, so the plugin never loaded. The three now declare every JSON type,
-  and the same Claude Code build sends `1152`, `false`, `["a", "b"]` and
-  `{"slots": 3}` as typed values. Eleven more top-level arguments declared their
-  shape through `oneOf`, `$ref` or `const` with no `type` beside it:
-  `audio_configure_bus.bus`, `nav_query_path`'s two points,
-  `physics_raycast_query.from` and `to`, `resource_create.properties`,
-  `runtime_inject_input.target_context` and its legacy name,
-  `viewport_set_camera_transform`'s position and rotation, and
-  `viewport_toggle_debug_draw.wireframe`. Claude Code already sent those typed,
-  and they now say the type too, because another host need not read the rest
-  of the schema. A native check fails any tool, legacy names included, whose
-  top-level argument has no type or one that leaves out a value the rest of its
-  schema accepts, and the live harness writes an int, a bool and an array
-  setting on all three engine lines and reads each back from the engine.
-- **`asset_reimport` reimports an asset it batches with a new file.** A batch
-  that also named a file needing a scan -- a new script, an asset the editor
-  had never seen -- started `reimport_files` straight after `scan()`. While a
-  scan runs the editor cannot find any file, so the engine printed `Can't find
-  file ... during file reimport`, skipped the asset, and the call answered that
-  it was reimported. Asked of the engine alone with 800 scripts in the project,
-  a scan then a reimport at once failed every round on 4.5.1, 4.6.2 and 4.7.2;
-  through the tool every such batch left the texture as it was, and the editor
-  sometimes crashed. The live harness met it only on a loaded machine. The editor clears its scanning flag before it
-  applies what a scan found, and a reimport started between the two collided
-  with that work instead. The reimport is now held until the scan's results are
-  applied, which `didi_import_watch.gd` sees as `sources_changed`, until no
-  progress task is open, and until the editor lists every asset, and the frame
-  loop then starts it. A call that asked for a scan is answered only after that
-  too. A scan is asked for only when a path's import is outstanding or the
-  editor does not list it, so a script it already lists is refreshed without
-  one. When the wait ends without a reimport, the call says so: `409
-  asset_not_indexed` for an asset the editor never lists, and `504
-  editor_scanning`, retryable, for a scan that outlasts `timeout_ms`, both with
-  `outcome: not_imported`. A `504 reimport_idle_timeout` now says what the
-  call was still waiting for, as `editor_scanning` and, when it asked for a
-  scan, `scan_applied`. The harness writes nine scripts with a `class_name`,
-  three a call, and fails unless every class is registered when the call
-  answers, then pairs a fresh script with the SVG and fails unless the texture
-  is rewritten.
-  `scan_reimport_engine.py` and `mixed_reimport.py` join the vibe probes.
-  The tool's description and its `timeout_ms` description say so, as do the
-  agent instructions, the capability and roadmap entries, the README and the
-  architecture's main-thread guarantee. Two gaps are filed: the editor's own
-  scans still reach Didi's commands (#995), and `timeout_ms` stops at 10
-  seconds, which a software-rendered editor spends on a few new scripts (#996).
-
-- **`project_set_setting` checks the files an array names (#989).** A `res://`
-  value was checked for a file only when it was a single string, and only with
-  an editor attached. An array's paths were never checked, so
-  `internationalization/locale/translations` took a file that does not exist, a
-  JSON file and the CSV the translations were imported from. Each was reported
-  as written, and the game then loaded no translation. Every `res://` string in
-  an array now has to name a file in the project, and the refusal names its
-  `index`. The rule runs before the route is chosen, so an attached editor, the
-  offline route and a dry run refuse the same values; offline, a single string
-  is checked too, as it always was live. `locale/translations` takes only the
-  files Godot registers a translation from, measured on 4.5.1, 4.6.2 and 4.7.2:
-  a `.translation`, `.po`, `.mo` or `.res`. The CSV is refused with
-  `retry_with` holding the list with the CSV replaced by the `.translation`
-  files its import wrote, so the refusal carries the value that succeeds. A
-  `.tres` is refused even when it holds a Translation, because the engine loads
-  registered translations before it can read a text resource.
-
-- **`ui_list_controls` reports what a translated control draws (#988).** A
-  Control translates its text as it draws it. So in a localised game the
-  `text` property holds the key, and the tool reported `MENU_START` for a button
-  that says "Commencer la partie". An untranslated game answered the same, so
-  the answer could not tell a working localisation from a missing one. `text`
-  is unchanged, and each entry gains `displayed_text` when the control draws
-  something else: the control's own `atr(text)`, which follows its
-  auto-translate mode and translation domain. It is present only when it
-  differs, and `include_text: false` leaves it out. Only the classes that draw
-  their text translated carry it: Label, Button, CheckBox, CheckButton,
-  LinkButton, MenuButton, OptionButton and RichTextLabel. These were rendered on
-  4.5.1, 4.6.2 and 4.7.2 by `tools/vibe/probes/control_text_engine.py`. A
-  LineEdit, TextEdit or CodeEdit draws the key it holds, and a ColorPickerButton
-  draws no text, although `atr()` answers a translation for all four, so none of
-  them carries it. An editor draws keys, and an edited scene carries no field.
-
-- **Recovery test imports and stdio fixture cleanup.** The adversarial recovery
-  suite now works through both discovery and explicit `tests.<module>` invocation.
-  YOLO, elicitation and output-schema fixtures reap their owned subprocesses and
-  close pipes through bounded cleanup, eliminating the observed ResourceWarnings.
-
-- **A refusal for an argument under the wrong name carries the fix (#784).** When a call's only
-  problem is one argument this tool does not take, and its value fits the one required argument
-  that is missing, the refusal names both as `argument` and `did_you_mean` and carries the value
-  under the right name in `retry_with`. Every schema stays as it was; the retry is mechanical.
-
-- **`project_audit_assets` reports a scene connection to a method nothing declares (#781).**
-  `project_rename_references` leaves exactly that behind when it renames the method in a scene
-  and reports the script lines it did not change, and no check noticed. `broken_connections`
-  judges a connection only when the node, its script chain and the engine class all resolve,
-  so what it reports is certain.
-
-- **`project_list_input_actions` can ask for less (#775).** It took no arguments and answered
-  about 69 KB, 85 of 90 actions being the engine's own `ui_*` map. Each entry now says
-  `defined_by_project`, `include_engine_defaults: false` keeps only what `project.godot`
-  declares, and `action` reads one by name. The default answer is otherwise unchanged.
-
-- **An open code scanning alert is reported (#807).** Nothing read the tab back, so a CodeQL
-  finding dismissed once and raised again when its code moved sat open unannounced. A weekly job
-  in `supply-chain.yml` runs `tools/check_code_scanning.py` and keeps one tracking issue open
-  while any alert is, listing re-raises apart with the dismissal each most likely repeats. It
-  closes the issue once the tab is empty, and a tab it cannot read fails the job.
-
-- **`emitter_node` names the emitter on every signal tool (#769).** `signal_list_connections`
-  and `signal_emit` called it `target_node`, the word `signal_connect` and `signal_disconnect`
-  use for the receiver, so the spelling the siblings insist on was refused. Both now take
-  `emitter_node`, and `target_node` still works. The listing's description also claimed it
-  shows incoming connections. It shows only the ones going out, so passing the receiver
-  returned a plausible answer about the wrong node. It says so now.
-
-- **The Python suites that drive the server now run on the Windows CI leg.** `tests/didi_binary.py`
-  never looked at `build/didi.exe`, where CI's Ninja build puts it, so each of those suites
-  skipped and its step passed. Main's last run logged 67 skips, among them the YOLO,
-  elicitation, output schema and command line suites. A configured build tree with no binary
-  in it is now an error rather than a skip.
-
-- **`DIDI_TEST_BINARY` pointed at `didi_tests` is refused by name (#846).** The suites started
-  the test binary and failed with a JSON decode error per test. They now say which binary they
-  want, and the two recovery suites read the variable through the same resolver.
-
-- **The end to end MCP check runs before a push (#845).** It was 301 lines inside `ci.yml` that
-  drove `./build` by name. It is `tests/test_mcp_wire_contract.py` now, 15 named tests on the
-  binary `tests/didi_binary.py` picks. `tools/vibe/replay_ci_e2e.py` only existed to lift it
-  out of the workflow, so it is gone.
-
-- **A timed-out test session reports `tree_exited` again when one of its processes had already
-  finished (#859).** The kill wait counted every process the job had ever held, so a wrapper's
-  first command or anything the game ran turned a clean kill into `query_failed`. The tree kill
-  tests also stop failing about one run in twenty on Linux: they read a process that was being
-  reaped as still running. A failure now names `contained`, `kill_wait` and the pid.
-
-- **Three more refusals carry the argument that fixes them in `retry_with` (#902).** The check
-  added in #901 read one phrasing, `pass <argument>: true`, and the surface also says
-  `pass <argument> to ...` and `set <argument>=true`. `script_patch_method`'s preview and its
-  patcher now answer a symbol the script does not declare with
-  `retry_with: {"create_if_missing": true}`, and `runtime_checkpoint` answers an operation that
-  needs reconciliation with `retry_with: {"accept_current_files": true}` under a code of its
-  own, `needs_reconciliation`, rather than `conflict`. The check reads all three phrasings.
-
-- **`audio_list_buses` reads a quoted or boolean `volume_db` the way Godot does (#907).**
-  Offline it read `volume_db` with `std::atof`, so `"-6"` and `true` came back as 0 dB while
-  the game played them at -6 dB and 1 dB, and a generator that writes every value as a string
-  got a layout that read as 0 dB on every bus. There is now one float rule beside
-  `config_file::booleanize`, measured on 4.5.1, 4.6.2 and 4.7.2: a quoted value goes through
-  Godot's string-to-float, which reads a decimal prefix and ignores the rest, `true` is 1, and
-  `false`, `null`, a StringName and any container are 0.
-
-- **`project_add_export_preset` says when the preset's export folder does not exist (#932).**
-  Godot does not create a missing folder when it exports a preset to its own `export_path`, on
-  4.5.1, 4.6.2 and 4.7.2: the export fails with `Can't open file for writing`, naming the file
-  rather than the folder, and the add had said nothing. The result now reports
-  `export_path_folder_exists` and, when the folder is missing, an `export_path_note` naming it.
-  The tool still creates no folder, since adding a preset should not change anything else.
-
-- **`audio_add_bus` refuses a bad argument before it asks for an editor (#949).** With no
-  editor attached, the registry's live-route check answered `503 not_connected` before the
-  tool's own argument rules ran, so `{"name": " Music"}` sent the caller off to open an editor
-  and only then said the name was refused. A tool can now declare the argument rules that need
-  no engine, and the registry checks them before a route is chosen, in the call and its dry run.
-  `audio_add_bus` declares its name, send and value rules. `AudioAddBus.Gated` claimed this order
-  already, and passed only because it ran with no managed route; it now runs through one.
-
-- **`project_export` and `gridmap_export_mesh_library` refuse control characters in
-  `output_path` (#939).** Their path resolver checked the scheme and the project bounds but not
-  the control characters every other writer refuses, so a newline, a tab or a NUL reached
-  Godot's command line after a directory had been created for the path. Both now refuse one
-  with `400`, in the call and its dry run alike, before anything is created.
-
-- **`project_list_export_presets` reads the runnable preset a Godot 4.7 editor saved (#922).**
-  A 4.7 editor keeps the flag in a `[runnable_presets]` section that names one preset per
-  platform, and writes no `runnable` key in the preset, so every preset it had saved read
-  `runnable: false`, including the one the editor runs. The section is read now, in the order
-  4.7.2's own loader uses: the named preset is runnable unless a later preset on the same
-  platform carries `runnable=true`. A file without the section, which is what 4.5 and 4.6
-  write, is read as before.
-
-- **`runtime_*` control tools and the live runtime-log resource share one deadline rule
-  (#856).** Each kept its own copy of a guard that treated a 500 as a transport failure when
-  its message began with one of two texts. Nothing in the product writes the first, and the
-  second always arrives with transport state, so the match could never decide anything; its
-  test built a 500 by hand that no layer produces. The part that does matter, a 504 the
-  extension reports with no transport state and no outcome, is now one function beside
-  `annotateLiveRouteFailure`, and the test uses the two shapes a deadline really arrives in.
-
-- **A string sent to the engine keeps a leading byte-order mark, and one holding a NUL is
-  refused (#948).** The bridge built every Godot string with the engine's UTF-8 reader,
-  which drops a leading U+FEFF, and from a C string, which ends at a NUL. So a value like
-  `"\ufeffnote"` arrived as `note`, and `scene_set_property` called the write applied
-  because it compared the property with the same shortened value. The engine keeps the
-  mark in a String, a StringName, a NodePath and a node name on 4.5.1, 4.6.2 and 4.7.2, so
-  that text now goes in as UTF-32. A NUL cannot survive Godot's own conversions, so a live
-  tool now refuses it with `400 invalid_arguments`, naming where it is, before any route is
-  chosen.
-
-- **Two `script_patch_method` calls on one script no longer lose a method (#954).** The
-  tool read the script, spliced the method in and wrote the whole file back with nothing held
-  in between, so two agents patching different methods at once both read the old text and the
-  second write replaced the first while both reported success. It now holds the script's lock
-  under `.didi/locks` from the read to the write, the one `project.godot` and
-  `export_presets.cfg` take since #953, and refuses `409 project_file_busy` with
-  `retryable: true` when another write holds it for the whole wait.
-
-- **A checkpoint or a file write no longer fails on Windows because something held a file for
-  a moment (#937).** Checkpoint publication renamed the finished snapshot once, and a scanner
-  or indexer holding a file it had just copied failed it with `Access is denied`, about one
-  run in twenty in a test that did nothing else. Every staged write replaced its destination
-  once too, so a reader with the file open, `project_list_export_presets` during a
-  `project_add_export_preset` say, made the write a 500. Both now use the bounded retry the
-  managed restore already had, which retries only while Windows says the file is in use. A
-  snapshot that fails to publish is removed rather than left to count against the store's
-  limit.
-
-- **`editor_undo` and `editor_redo` no longer leave the editor's history inconsistent
-  (#913).** They stepped the scene's `UndoRedo` directly, which moved it under the
-  stacks `EditorUndoRedoManager` keeps beside it. The editor printed
-  `Inconsistent redo history` four times a harness run, and on 4.7 a scene undone
-  past its save read as saved, which is what `scene_close` asks before it decides
-  whether a close needs `discard_unsaved`. Both now run the editor's own Undo and
-  Redo from its Scene menu, as Ctrl+Z does, and say which history moved in
-  `history`. The rollback a failed postcondition makes goes the same way.
-
-- **A board subscribed while the watcher already ran is no longer announced as changed
-  (#139).** The watcher kept one "primed" flag for every board, so a second board's
-  existing file read as a change on the next tick, and a board dropped and subscribed again
-  replayed a write made while nobody watched it. Each board now gets its baseline when it is
-  first subscribed and loses it with its last subscription, which also means a write between
-  subscribing and the next tick is announced rather than recorded as the starting state.
-
-- **Windows test-session timeout completion.** Require verified captured process
-  handles to signal before reporting `TreeExited`; job accounting alone can reach
-  zero before child teardown finishes. Report uncertainty when full lifetime
-  coverage cannot be established. This fix is independent of the normalization
-  build option. See the [verification record](docs/ELASTIC_INGRESS_VALIDATION.md).
-
-- **`asset_reimport` no longer answers, or starts, inside the editor's own
-  import pass (#914).** The editor runs its main loop from inside an import
-  pass, because its progress dialog does, so Didi's frame callback ran in the
-  middle of one. A reimport that asked for a scan was answered there, once the
-  sidecars were on disk but before the editor had emitted
-  `resources_reimported`, and the caller's next `asset_reimport` then started
-  inside the pass. Godot opened a second "reimport" progress task over the
-  first and printed three errors, on every live harness run on all three
-  engines. `is_importing()` could not have caught it: the editor clears that
-  flag and then opens a second progress task, and on Godot 4.7.2 it reads
-  `false` in exactly those frames. `resources_reimporting` and
-  `resources_reimported` bracket the whole pass, so the addon's new
-  `didi_import_watch.gd` counts them, because an extension cannot receive a
-  signal. While a pass is open Didi takes nothing new off its queue, and a
-  pending reimport is answered only once the pass has closed; a timeout still
-  ends one. If Godot refuses a reimport because the editor is already
-  importing, it now answers `409` with `editor_import_busy` and
-  `retryable: true`. It used to report the paths reimported and idle.
-  `tools/vibe/probes/import_config_engine.py` reproduces all of this from
-  GDScript alone in a windowed editor. A headless one cannot show it, because
-  it pumps nothing inside the pass. A project whose copy of the addon
-  predates the file logs one warning and keeps the old behaviour, so copy the
-  built addon folder in again.
-
-- **Two servers writing one project file could lose an update (#929).**
-  `project_set_setting` offline and `project_add_export_preset` read
-  `project.godot` or `export_presets.cfg`, changed it and wrote it back with
-  no lock, so two agents on one project could interleave: a setting or a
-  preset was reported written and was not in the file, and on Windows most
-  of the overlapping calls failed instead, as a bare string or as a `404`
-  for a file that was there. Each now holds a lock under `.didi/locks` from
-  its read to its write, the way the blackboard holds a board, and a call
-  held off for five seconds is refused `409` with `project_file_busy` and
-  `retryable: true`. A write that fails on the replace now keeps its status
-  code rather than arriving as a bare string.
-
-- **A blackboard resource could say a board did not exist while showing its
-  state (#514).** `exists` was asked before the board's lock was taken, so a
-  read that waited on a writer creating the board came back with the new
-  state and `exists: false`. It is asked under the lock now.
-
-- **Three refusals said something other than what they meant.** A
-  `dry_run` of the wrong type, such as `"true"`, was read with a type that
-  threw before any tool code ran, so every mutation on the surface answered
-  JSON-RPC `-32602` "Invalid JSON parameter types", naming no argument, while
-  the safety gate's own `400` for it never ran; it runs now and names
-  `dry_run`. A live-only tool refused because another MCP client holds the
-  bridge carried that in its data, with a recovery saying not to fall back to
-  offline edits, under a sentence saying no editor was attached, to open one,
-  and where the offline alternative is; the sentence now says what the data
-  says and the offline alternative is gone from it. And an empty required
-  string was "at least 1 characters long", which is now "must not be
-  empty", and an empty list "at least 1 entries". Found by vibe session
-  nineteen.
-
-- **`scene_instantiate_node` did not say when an initial property failed to
-  land.** Its `properties` are documented as the same contract as
-  `scene_set_property`'s `value`, which reads its write back and answers
-  `applied: false` with the engine's constraint. This path never read back, so
-  an `AudioStreamPlayer` created with a `bus` that does not exist reported
-  success, and the saved scene had no `bus` line at all. Each initial
-  property is now read back once the node is in the tree, and one that did
-  not land is listed under `properties_not_applied`. Found by vibe session
-  nineteen.
-
-- **`audio_list_buses` could not ask a running game about its own mix.**
-  It is the tool that answers why a game is silent, and a bus a script
-  muted while the game runs is muted in the game, but both audio reads were
-  editor only: a game session got "Tool is unavailable for the selected
-  session kind" while the tool's own documentation described that case and
-  `audio_configure_bus` carried a sentence for a game session nothing could
-  reach. Both answer a game now: the two methods also had to move ahead of
-  the bridge's `EditorInterface` lookup, which a game does not have.
-  `audio_list_buses` had hidden that failure by answering from the layout
-  file, and an attached engine whose read fails now puts `live_error` on
-  that answer. `audio_add_bus` stays editor only, and the refusal for a tool
-  asked of the wrong kind of session now says which kind it needs. Found by
-  vibe session nineteen.
-
-- **A bus layout the editor could not write was reported as one it would.**
-  The editor's Audio panel reads `audio/buses/default_bus_layout` once and
-  saves every bus change to that file until it restarts. After the setting
-  moved underneath it, `audio_add_bus` read the file the setting named and
-  reported `layout_written: false` for a bus the editor had written, and
-  both audio writers named the wrong `layout_path`; the next start loaded
-  the new, empty file and every bus was gone. The bridge now remembers the
-  setting as the engine started, both tools name the file the editor writes
-  with `project_layout_path` beside it when the two differ, and
-  `project_set_setting` answers `requires_editor_restart: true` when it moves
-  the setting away from it. A read-only layout file, where the editor prints
-  "Safe save failed", is named as the reason with `layout_read_only`, and on
-  Windows `audio_configure_bus` no longer says the change reaches disk. Both
-  found by vibe session nineteen on 4.7.2.
-
-- **Four handlers counted a published length bound in bytes.** JSON Schema
-  counts `maxLength` in characters, and #663 moved `project_search_text` and
-  the blackboard's tool readers to characters for that reason. The same bound
-  was written in bytes again afterwards: `project_add_export_preset`'s `name`,
-  `project_analyze_impact`'s `target`, the blackboard's own path check under
-  its readers, which answered first, and `audio_add_bus`'s `name` and `send`.
-  A client that validated against the schema sent 86 CJK characters and was
-  refused as over 256 bytes, in a unit the schema never stated. All five count
-  characters now, and `tools/vibe/probes/max_length_units.py` asks every
-  offline string bound the same question at once.
-
-- **The bus layout setting was followed only when it was a `res://` path.**
-  Godot 4.6.2 and 4.7.2 hold `audio/buses/default_bus_layout` as a `uid://`
-  once the layout file exists, and the next save of the project settings
-  writes it to `project.godot` that way; 4.5.1 keeps the path. The live
-  harness met it on 4.7.2 after its own project-setting requests.
-  `audio_list_buses` read any other value as the default path, which is the
-  wrong file for a project that moved its layout, and now follows the uid to
-  the resource that carries it, or answers Master alone for a uid no file
-  carries, which is what the engine does.
-  `audio_configure_bus` named `res://default_bus_layout.tres` as the file its
-  change would reach whatever the project said (#935); `layout_path` and its
-  `limitation` now name the file the project names, with a uid resolved
-  through the editor.
-
-- **A bus name with a quote, a backslash or a control character came back
-  with Godot's escapes still in it (#934).** The engine keeps any bus name
-  it is given and saves it with the string escapes, so `Say "hi"` is written
-  `&"Say \"hi\""`. `audio_list_buses` read offline by stripping the quotes and
-  kept the rest, so it published `Say \"hi\"`, a literal `\t` for a tab and a
-  literal `\n` for a line break: names `audio_configure_bus` answers 404 for,
-  and that set an `AudioStreamPlayer` back to Master. The same was true of a
-  send naming one of them. Every quoted value is now read with one rule, the
-  parser's, measured on 4.5.1, 4.6.2 and 4.7.2 through `ConfigFile` and
-  through a `.tres` loaded into `AudioServer`: `\b`, `\t`, `\n`, `\f` and
-  `\r` are control characters and any other character after a backslash is
-  itself; a `\u` or `\U` escape is one byte of what the string is decoded as
-  when it closes, not one character, so a lone escape above ASCII is U+FFFD
-  or a space; and a `\u` without its four hex digits, or half a surrogate
-  pair, makes the whole file fail to load, which the readers now report as a
-  file that does not load. The export preset reader, which undid `\"` and
-  `\\` and nothing else, and the offline autoload list, which undid nothing,
-  read with the same rule.
-- **`user://` and `RES://` were read as folders inside the project.** Every
-  writer stripped `res://` and took whatever else it was given as a path
-  relative to the project, so `user://save.gd` named a directory `user:`.
-  On Windows that failed with the operating system's "The filename,
-  directory name, or volume label syntax is incorrect", and on macOS and
-  Linux it would have created the directory. `project_add_export_preset`
-  stored `user:/game.x86_64` and `RES:/builds/game.x86_64` as export paths.
-  A path naming any scheme other than `res://` is refused now, saying
-  which: `user://` is the running game's data directory, outside the
-  project, and Godot's scheme is `res://` in lower case.
-- **`runtime_inject_input` reported an action the game never declared as
-  pressed.** Godot dispatches an `InputEventAction` for an unknown action
-  without complaint and nothing reacts to it, so a misspelled action came
-  back `outcome: "completed"` with `dispatched_event_count: 1`, exactly like
-  a real one, while `runtime_explore_scene` refused the same batch for that
-  reason. It is refused now with `reason: "undefined_input_action"` and
-  `undefined_actions`, and nothing in the batch is sent. It is also the
-  state of a game started before `project_set_input_action` wrote the
-  action, which the refusal names, since #925 made that the documented
-  way an action takes effect.
-- **`project_export` lost a preset name with a space at either end.** Godot
-  trims every argument on its command line and then turns each `%20` back into
-  a space, on 4.5.1, 4.6.2 and 4.7.2. So `" Padded "` reached it as `Padded`,
-  which it did not detect, and a name of spaces alone reached it empty, which
-  started an editor that ran until the export's five-minute timeout. Both
-  names were accepted by `project_add_export_preset` and listed as detected.
-  The name is now sent with each space as `%20`, which Godot decodes back. A
-  name that holds `%20` itself cannot be sent at all and is refused before
-  Godot starts, with `reason: "name_not_passable"`, and
-  `project_add_export_preset` refuses it, and a name starting with `-`, which
-  Godot reads as one of its own options when it has one by that name
-  (`--headless` made the export look for a preset named after its output
-  path). When Godot does look for a different name, the refusal now says so
-  and carries `engine_looked_for`, where it used to say the file had changed
-  while the export ran.
-- **A release build with no export templates was a `500 internal_error`.**
-  `project_add_export_preset`'s `next_step` promised that `project_export`
-  "says so when they are missing", and it answered "Godot refused the export"
-  with the cause left in `engine_output`. Godot's block of configuration
-  errors is now read into `configuration_errors`, and missing templates are
-  `503 toolchain_unavailable` with `reason: "export_templates_missing"`, the
-  paths Godot looked in, the one this build needed named in the message, and
-  `retry_with: {mode: "pack"}`, the same code `csharp_check_build` gives for a
-  missing .NET SDK. Any other configuration error is `422` with
-  `reason: "export_configuration_errors"`.
-- **`project_add_export_preset`'s `did_you_mean` never reached a caller.** The
-  schema's enum check refused `HTML5`, `Windows` or `Linux/X11` first, with
-  the list of seven, so the refusal that names `Web`, `Windows Desktop` or
-  `Linux` with `retry_with` was unreachable. The tool's own refusal now
-  answers first, on the call and the dry run.
-- **A presets file with a byte-order mark was blamed on a key nobody could
-  see.** Godot does not skip the mark in `export_presets.cfg` and detects no
-  presets, and the reader said so as `key_before_section`, quoting a key that
-  started with the invisible mark. It is `reason: "byte_order_mark"` on line 1
-  now, with the remedy. PowerShell 5.1's `Set-Content` writes one.
-- **`project_add_export_preset` stored a directory as `export_path`.**
-  `builds/` was stored as sent when the directory did not exist yet, and the
-  Export dialog then offered to write a file with no name. A path ending in a
-  separator is refused.
-- **Writing an input action broke navigation in the editor's 3D view (#925).**
-  `project_set_input_action` and `project_remove_input_action` finished by
-  reloading the attached editor's whole `InputMap` from the project. An
-  editor never loads a project's actions into its own map, and the reload
-  did the wrong thing on every supported line. On 4.5.1 it erased the 3D
-  viewport's navigation actions, so every mouse move over the viewport
-  printed `The InputMap action "spatial_editor/viewport_pan_modifier_1"
-  doesn't exist` and Shift-pan stopped working until the editor restarted.
-  On 4.6.2 and 4.7.2 it kept those and pulled the project's twenty actions,
-  its `ui_*` overrides included, into the editor's map. The editor's map is
-  now left alone, the way Godot's own Project Settings dialog leaves it,
-  and the result says the change takes effect when a game starts.
-  `runtime_reloaded` is kept and is always `false`. Measured with
-  `tools/vibe/probes/input_map_reload.py`, and the live harness now reads the
-  editor's map after a write and after a removal.
-- **`project_list_export_presets` listed presets Godot never loads, and
-  `project_export` tried to export them (#921).** Godot reads `[preset.0]`,
-  `[preset.1]` and so on and stops at the first number that is missing, and it
-  skips a preset whose platform it does not know without printing anything. A
-  preset after a gap, in a section spelled `[preset.01]`, or on a misspelled
-  platform such as `windows desktop`, `Windows` or `HTML5` was listed as an
-  ordinary preset, the dry run previewed an export of it, and the real call
-  ended in a `500 internal_error` carrying Godot's `Invalid export preset name`.
-  Each preset now says whether Godot will detect it (`detected`), and why not
-  (`not_detected`, with the missing number or the platform it meant), and the
-  list carries `detected_count`. `project_export` and its dry run refuse those
-  presets with `422` before any Godot starts. A platform Godot does not ship is
-  still handed to Godot, because an editor plugin or a GDExtension can register
-  one, and when Godot does not detect it the refusal is `404` with
-  `reason: "not_detected_by_engine"` and the presets Godot printed as
-  `detected_presets`. Measured on 4.5.1, 4.6.2 and 4.7.2 with
-  `tools/vibe/probes/export_preset_engine.py`.
-- **Upgrading the addon printed ten "Missing .uid file" warnings.** Godot 4.4
-  and later keeps a `.uid` sidecar beside each script and the `.gdextension`,
-  and the addon shipped none, so replacing the `addons/didi` folder to upgrade
-  -- the way the README says to install it -- took away the ones the engine
-  had written, and the next editor start warned about every one. Measured on
-  4.5.1, 4.6.2 and 4.7.2: none on a fresh install, ten on an upgrade, and none
-  on either once the sidecars ship, including a project whose sidecars the
-  engine had minted before. The release check now opens each archive a second
-  time as an upgrade, so this cannot come back unseen.
-- **`resource_create` wrote `.res` files Godot cannot load.** `.res` is
-  Godot's binary format and the loader reads it as binary whatever it holds,
-  so every `.res` this tool wrote was refused with "Unrecognized binary
-  resource file", and the editor's filesystem scan repeated that error on
-  every start. It is refused now, with the `.tres` spelling in `retry_with`.
-  Found in an editor console pasted into vibe session seventeen.
-- **An overwrite left the editor answering from its old copy.** The editor
-  keeps every resource it has loaded and does not re-read a file that changed
-  underneath it, not on `editor_reload_project` and not on its own filesystem
-  scan. So after `resource_create` overwrote a file, every live reader went on
-  reporting the old contents. With an editor attached the overwrite now
-  reloads the editor's copy in place, the way the editor does itself when it
-  notices a change, and says so with `editor_copy_reloaded`.
-- **`asset_reimport` reported a failed import as imported.** Godot writes the
-  `.import` sidecar whether or not the import worked and records a failure as
-  `valid=false`; a sidecar on disk was taken as success. It now answers
-  `422 asset_import_failed` naming the failed paths, with the engine's reason
-  attached. The harness's fresh-asset PNG had a wrong CRC on every chunk and
-  passed its import test for as long as it existed; it is a valid image now,
-  and the old bytes are the fixture for the refusal.
-- **Refusals no longer let the engine print first.** `scene_create` and
-  `scene_instantiate_node` with a class the engine does not have, and
-  `script_attach_to_node` and `scene_set_property` with a `res://` path that has
-  no file behind it, each put two or three ERROR lines in the editor's log
-  before Didi refused. They check first now, so the refusal is the only thing
-  said.
+- `2026-10-04` A `source_text` check beside an open editor asks its language server. [#1142](https://github.com/saworbit/didi/issues/1142) · [PR #1176](https://github.com/saworbit/didi/pull/1176)
+- `2026-10-04` `editor_reload_project` runs as a job, so a slow scan can be waited out. [#1157](https://github.com/saworbit/didi/issues/1157) · [PR #1174](https://github.com/saworbit/didi/pull/1174)
+- `2026-10-04` Nine more mutating tools say what they replaced. [#1151](https://github.com/saworbit/didi/issues/1151) · [PR #1173](https://github.com/saworbit/didi/pull/1173)
+- `2026-10-04` A path write says which other nodes share what it changes, and can write into copies instead. [#1134](https://github.com/saworbit/didi/issues/1134) · [PR #1172](https://github.com/saworbit/didi/pull/1172)
+- `2026-10-03` A long export no longer makes every other helper launch wait (Q8 part 3). [#1137](https://github.com/saworbit/didi/issues/1137) · [PR #1158](https://github.com/saworbit/didi/pull/1158)
+- `2026-10-03` `asset_reimport` runs as a job, so a scan of many new scripts can be waited out (Q8 part 2). [#996](https://github.com/saworbit/didi/issues/996) · [PR #1156](https://github.com/saworbit/didi/pull/1156)
+- `2026-10-03` A change journal, and undo of one change on its own (Q15 part 1). [#1149](https://github.com/saworbit/didi/issues/1149) · [PR #1155](https://github.com/saworbit/didi/pull/1155)
+- `2026-10-02` `didi setup` and `didi doctor` (Q12 part 1). [#1144](https://github.com/saworbit/didi/issues/1144) · [PR #1147](https://github.com/saworbit/didi/pull/1147)
+- `2026-10-02` Script diagnostics come from the open editor's GDScript language server (Q11 part 1). [#1139](https://github.com/saworbit/didi/issues/1139) · [PR #1140](https://github.com/saworbit/didi/pull/1140)
+- `2026-10-02` `project_export` and `csharp_check_build` can run as jobs, and a retried call no longer runs twice (Q8 part 1). [#1137](https://github.com/saworbit/didi/issues/1137) · [PR #1138](https://github.com/saworbit/didi/pull/1138)
+- `2026-10-02` A property inside a node's sub-resource can be read and written, several at a time, as one undo step (Q7 part 1). [#1133](https://github.com/saworbit/didi/issues/1133) · [PR #1136](https://github.com/saworbit/didi/pull/1136)
+- `2026-10-01` The contract snapshots record four more shapes a client meets. [#1025](https://github.com/saworbit/didi/issues/1025) · [PR #1119](https://github.com/saworbit/didi/pull/1119)
+- `2026-10-01` A research report on what Didi costs an agent in tokens. [#1107](https://github.com/saworbit/didi/issues/1107) · [PR #1109](https://github.com/saworbit/didi/pull/1109)
+- `2026-10-01` resource_create can name which number it writes. [#1003](https://github.com/saworbit/didi/issues/1003) · [PR #1102](https://github.com/saworbit/didi/pull/1102)
+- `2026-10-01` A field trial can hold its findings for review. [#1008](https://github.com/saworbit/didi/issues/1008) · [PR #1101](https://github.com/saworbit/didi/pull/1101)
+- `2026-09-29` A mutation that leaves work undone names it as a step (Q6 part 3). [#1040](https://github.com/saworbit/didi/issues/1040) · [PR #1048](https://github.com/saworbit/didi/pull/1048)
+- `2026-09-29` No failure answers as a bare sentence (Q6 part 1, finished). [#1040](https://github.com/saworbit/didi/issues/1040) · [PR #1046](https://github.com/saworbit/didi/pull/1046)
+- `2026-09-28` The same call failing the same way twice says so (Q6 part 2). [#1040](https://github.com/saworbit/didi/issues/1040) · [PR #1042](https://github.com/saworbit/didi/pull/1042)
+- `2026-09-28` Every refusal names what fixes it (Q6 part 1). [#1040](https://github.com/saworbit/didi/issues/1040) · [PR #1041](https://github.com/saworbit/didi/pull/1041)
+- `2026-09-28` Every bounded read says whether it is complete, and the two largest take `fields` (Q5 part 2). [#776](https://github.com/saworbit/didi/issues/776) · [PR #1039](https://github.com/saworbit/didi/pull/1039)
+- `2026-09-28` `--session-descriptor once` gives the session half of response economy to hosts that cannot declare it. [#1031](https://github.com/saworbit/didi/issues/1031) · [PR #1034](https://github.com/saworbit/didi/pull/1034)
+- `2026-09-28` A client that reads `structuredContent` can decline what it already has (Q5 part 1). [#776](https://github.com/saworbit/didi/issues/776) · [PR #1030](https://github.com/saworbit/didi/pull/1030)
+- `2026-09-28` `--tools core` lists under half the bytes, and both tool lists have a budget (Q4). [#1012](https://github.com/saworbit/didi/issues/1012) · [PR #1029](https://github.com/saworbit/didi/pull/1029)
+- `2026-09-28` What a client is shown is committed, and CI fails when it moves (Q3). [#1011](https://github.com/saworbit/didi/issues/1011) · [PR #1024](https://github.com/saworbit/didi/pull/1024)
+- `2026-09-28` Every mutating tool is checked for what it observed (Q2). [#1010](https://github.com/saworbit/didi/issues/1010) · [PR #1021](https://github.com/saworbit/didi/pull/1021)
+- `2026-09-27` A field trial is scored on how it called tools, not only which. [PR #1006](https://github.com/saworbit/didi/pull/1006)
+- `2026-09-26` Operational guidance in the MCP handshake. [PR #962](https://github.com/saworbit/didi/pull/962)
+- `2026-09-26` End-to-end protocol and normalization coverage. [PR #962](https://github.com/saworbit/didi/pull/962)
+- `2026-09-25` `asset_configure_import` makes a track loop. [#958](https://github.com/saworbit/didi/issues/958) · [PR #963](https://github.com/saworbit/didi/pull/963)
+- `2026-09-25` Experimental argument normalization, disabled by default. [PR #960](https://github.com/saworbit/didi/pull/960)
+- `2026-09-24` `audio_add_bus` gives a game its Music and SFX buses. [#771](https://github.com/saworbit/didi/issues/771) · [PR #942](https://github.com/saworbit/didi/pull/942)
+- `2026-09-24` `project_add_export_preset` makes a game shippable through the surface. [#779](https://github.com/saworbit/didi/issues/779) · [PR #926](https://github.com/saworbit/didi/pull/926)
+- `2026-09-24` Every live answer carries what the engine printed while it ran. [PR #915](https://github.com/saworbit/didi/pull/915)
+- `2026-09-24` The live harness reads the engine's own log. [PR #915](https://github.com/saworbit/didi/pull/915)
+- `2026-09-24` `anim_add_library` gives an AnimationPlayer an animation. [#770](https://github.com/saworbit/didi/issues/770) · [PR #912](https://github.com/saworbit/didi/pull/912)
+- `2026-09-23` A release archive can be installed and checked in one command. [PR #911](https://github.com/saworbit/didi/pull/911)
 
 ### Changed
 
-- **project_list_input_actions lists the project's own actions by default
-  (#1108).** A call with no arguments returned the engine's whole `ui_*` map,
-  about 85 of 90 actions, against P4's rule of the project's own data with
-  built-ins on request. It now lists what `project.godot` declares and says
-  how many it left out. `include_engine_defaults: true` gives the old listing,
-  and an action named with `action` is found either way.
+- `2026-10-04` The changelog is one dated line per change, newest first, with a table of every release at the top. [PR #1178](https://github.com/saworbit/didi/pull/1178)
+- `2026-10-01` project_list_input_actions lists the project's own actions by default. [#1108](https://github.com/saworbit/didi/issues/1108) · [PR #1112](https://github.com/saworbit/didi/pull/1112)
+- `2026-10-01` The argument validation paragraphs sit with the schema rules. [#1037](https://github.com/saworbit/didi/issues/1037) · [PR #1101](https://github.com/saworbit/didi/pull/1101)
+- `2026-09-27` The roadmap says what to build next, and why. [PR #1013](https://github.com/saworbit/didi/pull/1013)
+- `2026-09-26` The roadmap and the amendment log describe the surface as it stands. [#990](https://github.com/saworbit/didi/issues/990) · [PR #991](https://github.com/saworbit/didi/pull/991)
+- `2026-09-26` The vendored JSON parser is nlohmann/json 3.12.0. [#796](https://github.com/saworbit/didi/issues/796) · [PR #985](https://github.com/saworbit/didi/pull/985)
+- `2026-09-25` The README and the website list every tool. [PR #965](https://github.com/saworbit/didi/pull/965)
+- `2026-09-23` The website and the quickstart start from the download. [PR #910](https://github.com/saworbit/didi/pull/910)
 
-- **The argument validation paragraphs sit with the schema rules (#1037).** In
-  `docs/API_SPECIFICATION.md` they moved beside the `inputSchema` paragraph, and
-  the mutation safety section now starts at `dry_run`.
+### Fixed
 
-- **The roadmap says what to build next, and why.** `docs/BUILD_QUEUE.md`
-  is the ordered list of the next sixteen capabilities. Each item carries the
-  evidence for it, what it delivers, how to build it and when it is done, and
-  the first `PLANNED` item whose dependencies are complete is the next piece of
-  work. `docs/DESIGN_PRINCIPLES.md` records the rules the tool surface
-  follows, the trial evidence behind each, and what Didi will not build.
-  Phases 13 (Surface Contracts) and 14 (Reach and Proof) are defined, Gogo and
-  further coordination work are paused, and `tools/validate_documentation.py`
-  checks the queue's numbering, statuses, dependencies, phases and item fields.
-  The contributor contract, the pull request template, the developer guide and
-  the website point at the queue, and the developer guide now says a new tool
-  name needs an accepted Surface Amendment first.
+- `2026-10-04` A rolled-back write no longer steps the scene's history behind the editor (part 2). [#1152](https://github.com/saworbit/didi/issues/1152) · [PR #1175](https://github.com/saworbit/didi/pull/1175)
+- `2026-10-04` Every Godot object Didi constructs is finished or not handed back. [#1166](https://github.com/saworbit/didi/issues/1166) · [PR #1171](https://github.com/saworbit/didi/pull/1171)
+- `2026-10-04` A failed undo registration no longer leaves the editor mid-action (part 1). [#1152](https://github.com/saworbit/didi/issues/1152) · [PR #1171](https://github.com/saworbit/didi/pull/1171)
+- `2026-10-04` A detached runtime_launch no longer takes another project's game. [#1167](https://github.com/saworbit/didi/issues/1167) · [PR #1170](https://github.com/saworbit/didi/pull/1170)
+- `2026-10-04` A helper process can no longer hang between fork and exec. [#1168](https://github.com/saworbit/didi/issues/1168) · [PR #1170](https://github.com/saworbit/didi/pull/1170)
+- `2026-10-04` Running jobs are cancelled and joined when the server stops. [#1169](https://github.com/saworbit/didi/issues/1169) · [PR #1170](https://github.com/saworbit/didi/pull/1170)
+- `2026-10-04` The visual test lab no longer carries a uid Godot cannot read. [#1164](https://github.com/saworbit/didi/issues/1164) · [PR #1165](https://github.com/saworbit/didi/pull/1165)
+- `2026-10-04` resource_create writes a class_name sub-resource the way Godot does. [#1131](https://github.com/saworbit/didi/issues/1131) · [PR #1165](https://github.com/saworbit/didi/pull/1165)
+- `2026-10-04` The harness holds every writer to the editor's index. [#1154](https://github.com/saworbit/didi/issues/1154) · [PR #1165](https://github.com/saworbit/didi/pull/1165)
+- `2026-10-04` No helper launch can forget to suppress its session. [#1161](https://github.com/saworbit/didi/issues/1161) · [PR #1163](https://github.com/saworbit/didi/pull/1163)
+- `2026-10-04` The offline contract snapshot no longer fails beside an open editor. [#1145](https://github.com/saworbit/didi/issues/1145) · [PR #1163](https://github.com/saworbit/didi/pull/1163)
+- `2026-10-04` A project.godot the editor cannot write is the caller's to fix, not a server fault. [#1153](https://github.com/saworbit/didi/issues/1153) · [PR #1162](https://github.com/saworbit/didi/pull/1162)
+- `2026-10-04` A synchronous `asset_reimport` timeout no longer says to retry in five seconds. [#1159](https://github.com/saworbit/didi/issues/1159) · [PR #1162](https://github.com/saworbit/didi/pull/1162)
+- `2026-10-03` A script Didi creates no longer draws `Unrecognized UID` on Godot 4.5 and 4.6. [PR #1150](https://github.com/saworbit/didi/pull/1150)
+- `2026-10-03` A refused project settings save says the rollback worked, and the engine says the save failed once. [PR #1150](https://github.com/saworbit/didi/pull/1150)
+- `2026-10-03` The harness editor says its red lines are meant. [PR #1150](https://github.com/saworbit/didi/pull/1150)
+- `2026-10-01` project_export and gridmap_export_mesh_library are checked against the engine. [#1020](https://github.com/saworbit/didi/issues/1020) · [PR #1129](https://github.com/saworbit/didi/pull/1129)
+- `2026-10-01` resource_create writes a class_name type the way Godot does. [#1125](https://github.com/saworbit/didi/issues/1125) · [PR #1128](https://github.com/saworbit/didi/pull/1128)
+- `2026-10-01` scene_reparent_node gives a clashing node a readable name and says so. [#1126](https://github.com/saworbit/didi/issues/1126) · [PR #1128](https://github.com/saworbit/didi/pull/1128)
+- `2026-10-01` scene_call_method and signal_emit are exempt for good from the observed check. [#1020](https://github.com/saworbit/didi/issues/1020) · [PR #1127](https://github.com/saworbit/didi/pull/1127)
+- `2026-10-01` The observed post-state check sends inputs the engine stores differently. [#1022](https://github.com/saworbit/didi/issues/1022) · [PR #1127](https://github.com/saworbit/didi/pull/1127)
+- `2026-10-01` asset_reimport waits for a scan the editor started to be applied. [#995](https://github.com/saworbit/didi/issues/995) · [PR #1124](https://github.com/saworbit/didi/pull/1124)
+- `2026-10-01` deferred_scene_uid.py creates scenes during a scan again. [#1122](https://github.com/saworbit/didi/issues/1122) · [PR #1124](https://github.com/saworbit/didi/pull/1124)
+- `2026-10-01` The Phase 7 success contracts are checked against real answers. [#861](https://github.com/saworbit/didi/issues/861) · [PR #1120](https://github.com/saworbit/didi/pull/1120)
+- `2026-10-01` project_list_resources answers in path order on every platform. [#1121](https://github.com/saworbit/didi/issues/1121) · [PR #1119](https://github.com/saworbit/didi/pull/1119)
+- `2026-10-01` A not_found names where the missing thing is listed. [#1117](https://github.com/saworbit/didi/issues/1117) · [PR #1118](https://github.com/saworbit/didi/pull/1118)
+- `2026-10-01` editor_reload_project answers once the editor has applied a full scan. [#1114](https://github.com/saworbit/didi/issues/1114) · [PR #1116](https://github.com/saworbit/didi/pull/1116)
+- `2026-10-01` A field trial's brief names the checkout and Godot it was given. [#1105](https://github.com/saworbit/didi/issues/1105) · [PR #1113](https://github.com/saworbit/didi/pull/1113)
+- `2026-10-01` runtime_inject_input answers with what Input holds. [#1019](https://github.com/saworbit/didi/issues/1019) · [PR #1111](https://github.com/saworbit/didi/pull/1111)
+- `2026-10-01` A new scene's uid is indexed before scene_create answers. [#1004](https://github.com/saworbit/didi/issues/1004) · [#995](https://github.com/saworbit/didi/issues/995) · [PR #1110](https://github.com/saworbit/didi/pull/1110)
+- `2026-10-01` scene_close answers with the tabs it left. [#1019](https://github.com/saworbit/didi/issues/1019) · [PR #1104](https://github.com/saworbit/didi/pull/1104)
+- `2026-10-01` The project writers answer with what project.godot holds after the save. [#1019](https://github.com/saworbit/didi/issues/1019) · [PR #1103](https://github.com/saworbit/didi/pull/1103)
+- `2026-10-01` resource_create answers with the file it wrote. [#1019](https://github.com/saworbit/didi/issues/1019) · [PR #1102](https://github.com/saworbit/didi/pull/1102)
+- `2026-10-01` An empty answer object no longer agrees with the engine in the observed post-state check. [#1097](https://github.com/saworbit/didi/issues/1097) · [PR #1100](https://github.com/saworbit/didi/pull/1100)
+- `2026-09-30` The harness recognizes the [#285](https://github.com/saworbit/didi/issues/285) engine crash on Godot 4.6.2 too. [#1098](https://github.com/saworbit/didi/issues/1098) · [PR #1099](https://github.com/saworbit/didi/pull/1099)
+- `2026-09-30` The editor startup test retries a held open and names the engine crash it can meet. [#1069](https://github.com/saworbit/didi/issues/1069) · [#285](https://github.com/saworbit/didi/issues/285) · [PR #1094](https://github.com/saworbit/didi/pull/1094)
+- `2026-09-30` `tilemap_set_cells` and `gridmap_set_cells` answer with the cells they read back. [#1019](https://github.com/saworbit/didi/issues/1019) · [PR #1093](https://github.com/saworbit/didi/pull/1093)
+- `2026-09-30` `editor_save_scene` reads the file it saved. [#1019](https://github.com/saworbit/didi/issues/1019) · [PR #1092](https://github.com/saworbit/didi/pull/1092)
+- `2026-09-30` An offline `project_set_setting` says when text reads as another type. [#1016](https://github.com/saworbit/didi/issues/1016) · [PR #1091](https://github.com/saworbit/didi/pull/1091)
+- `2026-09-30` The local CI lanes run from a git worktree. [#1070](https://github.com/saworbit/didi/issues/1070) · [PR #1090](https://github.com/saworbit/didi/pull/1090)
+- `2026-09-30` Undo, redo and project code say whether they left the scene unsaved. [#1049](https://github.com/saworbit/didi/issues/1049) · [PR #1088](https://github.com/saworbit/didi/pull/1088)
+- `2026-09-30` A writer that rebuilds an open tab says whether the tab had unsaved changes. [#1082](https://github.com/saworbit/didi/issues/1082) · [PR #1087](https://github.com/saworbit/didi/pull/1087)
+- `2026-09-30` `runtime_launch` with a Godot that cannot be started says so. [#1076](https://github.com/saworbit/didi/issues/1076) · [PR #1086](https://github.com/saworbit/didi/pull/1086)
+- `2026-09-30` `csharp_check_build` no longer calls a slow .NET SDK missing. [#1078](https://github.com/saworbit/didi/issues/1078) · [PR #1085](https://github.com/saworbit/didi/pull/1085)
+- `2026-09-30` `scene_create` over a scene open in another tab opens it on Godot 4.5 and 4.6. [#1079](https://github.com/saworbit/didi/issues/1079) · [#1073](https://github.com/saworbit/didi/issues/1073) · [PR #1084](https://github.com/saworbit/didi/pull/1084)
+- `2026-09-30` A scene opened straight after an editor starts stays the edited scene. [#1069](https://github.com/saworbit/didi/issues/1069) · [PR #1083](https://github.com/saworbit/didi/pull/1083)
+- `2026-09-30` A pack over a scene open in another tab no longer comes undone on the next save. [#1072](https://github.com/saworbit/didi/issues/1072) · [PR #1080](https://github.com/saworbit/didi/pull/1080)
+- `2026-09-30` A write to a scene open in the editor no longer comes undone on the next save. [#1068](https://github.com/saworbit/didi/issues/1068) · [PR #1071](https://github.com/saworbit/didi/pull/1071)
+- `2026-09-30` Removing and moving a node answer with what the tree now holds (in part). [#1019](https://github.com/saworbit/didi/issues/1019) · [PR #1066](https://github.com/saworbit/didi/pull/1066)
+- `2026-09-30` Group edits answer with the membership they left (in part). [#1019](https://github.com/saworbit/didi/issues/1019) · [PR #1065](https://github.com/saworbit/didi/pull/1065)
+- `2026-09-29` The local clang lane builds main again. [#1026](https://github.com/saworbit/didi/issues/1026) · [PR #1064](https://github.com/saworbit/didi/pull/1064)
+- `2026-09-29` The live harness copies only the fixture it tracks. [#1036](https://github.com/saworbit/didi/issues/1036) · [PR #1063](https://github.com/saworbit/didi/pull/1063)
+- `2026-09-29` The seven blackboard writers answer with what they saved (in part). [#1019](https://github.com/saworbit/didi/issues/1019) · [PR #1062](https://github.com/saworbit/didi/pull/1062)
+- `2026-09-29` The local asan lane is no longer killed for memory. [#1050](https://github.com/saworbit/didi/issues/1050) · [PR #1061](https://github.com/saworbit/didi/pull/1061)
+- `2026-09-29` A field trial keeps its evidence and pins its tester. [#1005](https://github.com/saworbit/didi/issues/1005) · [#1007](https://github.com/saworbit/didi/issues/1007) · [PR #1060](https://github.com/saworbit/didi/pull/1060)
+- `2026-09-29` Engine output and helper answers carry text, not terminal noise. [#1028](https://github.com/saworbit/didi/issues/1028) · [PR #1059](https://github.com/saworbit/didi/pull/1059)
+- `2026-09-29` The advice for a new autoload no longer offers a rescan that does not work. [#1002](https://github.com/saworbit/didi/issues/1002) · [PR #1058](https://github.com/saworbit/didi/pull/1058)
+- `2026-09-29` Two failures that skipped the error floor now name their fix. [#1043](https://github.com/saworbit/didi/issues/1043) · [PR #1057](https://github.com/saworbit/didi/pull/1057)
+- `2026-09-29` A harness run that fails reports the failure, not the teardown guard. [#1044](https://github.com/saworbit/didi/issues/1044) · [PR #1056](https://github.com/saworbit/didi/pull/1056)
+- `2026-09-29` A Godot that will not start reads as engine_unavailable, not a server fault. [#1045](https://github.com/saworbit/didi/issues/1045) · [PR #1055](https://github.com/saworbit/didi/pull/1055)
+- `2026-09-29` A command no longer runs inside the editor's own scan work (part one). [#995](https://github.com/saworbit/didi/issues/995) · [PR #1054](https://github.com/saworbit/didi/pull/1054)
+- `2026-09-29` Six file writers no longer leave an attached editor holding the old copy. [#1047](https://github.com/saworbit/didi/issues/1047) · [PR #1053](https://github.com/saworbit/didi/pull/1053)
+- `2026-09-29` A stopped game no longer counts against the eight held sessions. [#1001](https://github.com/saworbit/didi/issues/1001) · [PR #1052](https://github.com/saworbit/didi/pull/1052)
+- `2026-09-28` `project_verify_changes` could pass a proposal whose errors it never read. [PR #1039](https://github.com/saworbit/didi/pull/1039)
+- `2026-09-28` Seventeen reads that could be cut short said so partly or not at all (Q5). [PR #1039](https://github.com/saworbit/didi/pull/1039)
+- `2026-09-27` The phase design no longer calls Phase 13 planned while the roadmap says it is in progress. [PR #1018](https://github.com/saworbit/didi/pull/1018)
+- `2026-09-27` Every argument declares a JSON type, so a Claude host can send an int, a bool or an array. [#1000](https://github.com/saworbit/didi/issues/1000) · [PR #1015](https://github.com/saworbit/didi/pull/1015)
+- `2026-09-26` `asset_reimport` reimports an asset it batches with a new file. [PR #994](https://github.com/saworbit/didi/pull/994)
+- `2026-09-26` `project_set_setting` checks the files an array names. [#989](https://github.com/saworbit/didi/issues/989) · [PR #993](https://github.com/saworbit/didi/pull/993)
+- `2026-09-26` `ui_list_controls` reports what a translated control draws. [#988](https://github.com/saworbit/didi/issues/988) · [PR #992](https://github.com/saworbit/didi/pull/992)
+- `2026-09-26` A refusal for an argument under the wrong name carries the fix. [#784](https://github.com/saworbit/didi/issues/784) · [PR #986](https://github.com/saworbit/didi/pull/986)
+- `2026-09-26` `project_audit_assets` reports a scene connection to a method nothing declares. [#781](https://github.com/saworbit/didi/issues/781) · [PR #984](https://github.com/saworbit/didi/pull/984)
+- `2026-09-26` `project_list_input_actions` can ask for less. [#775](https://github.com/saworbit/didi/issues/775) · [PR #983](https://github.com/saworbit/didi/pull/983)
+- `2026-09-26` An open code scanning alert is reported. [#807](https://github.com/saworbit/didi/issues/807) · [PR #982](https://github.com/saworbit/didi/pull/982)
+- `2026-09-26` `emitter_node` names the emitter on every signal tool. [#769](https://github.com/saworbit/didi/issues/769) · [PR #981](https://github.com/saworbit/didi/pull/981)
+- `2026-09-26` The Python suites that drive the server now run on the Windows CI leg. [PR #980](https://github.com/saworbit/didi/pull/980)
+- `2026-09-26` `DIDI_TEST_BINARY` pointed at `didi_tests` is refused by name. [#846](https://github.com/saworbit/didi/issues/846) · [PR #980](https://github.com/saworbit/didi/pull/980)
+- `2026-09-26` The end to end MCP check runs before a push. [#845](https://github.com/saworbit/didi/issues/845) · [PR #980](https://github.com/saworbit/didi/pull/980)
+- `2026-09-26` A timed-out test session reports `tree_exited` again when one of its processes had already finished. [#859](https://github.com/saworbit/didi/issues/859) · [PR #979](https://github.com/saworbit/didi/pull/979)
+- `2026-09-26` Recovery test imports and stdio fixture cleanup. [PR #962](https://github.com/saworbit/didi/pull/962)
+- `2026-09-25` Three more refusals carry the argument that fixes them in `retry_with`. [#902](https://github.com/saworbit/didi/issues/902) · [PR #977](https://github.com/saworbit/didi/pull/977)
+- `2026-09-25` `audio_list_buses` reads a quoted or boolean `volume_db` the way Godot does. [#907](https://github.com/saworbit/didi/issues/907) · [PR #976](https://github.com/saworbit/didi/pull/976)
+- `2026-09-25` `project_add_export_preset` says when the preset's export folder does not exist. [#932](https://github.com/saworbit/didi/issues/932) · [PR #975](https://github.com/saworbit/didi/pull/975)
+- `2026-09-25` `audio_add_bus` refuses a bad argument before it asks for an editor. [#949](https://github.com/saworbit/didi/issues/949) · [PR #974](https://github.com/saworbit/didi/pull/974)
+- `2026-09-25` `project_export` and `gridmap_export_mesh_library` refuse control characters in `output_path`. [#939](https://github.com/saworbit/didi/issues/939) · [PR #973](https://github.com/saworbit/didi/pull/973)
+- `2026-09-25` `project_list_export_presets` reads the runnable preset a Godot 4.7 editor saved. [#922](https://github.com/saworbit/didi/issues/922) · [PR #972](https://github.com/saworbit/didi/pull/972)
+- `2026-09-25` `runtime_*` control tools and the live runtime-log resource share one deadline rule. [#856](https://github.com/saworbit/didi/issues/856) · [PR #971](https://github.com/saworbit/didi/pull/971)
+- `2026-09-25` A string sent to the engine keeps a leading byte-order mark, and one holding a NUL is refused. [#948](https://github.com/saworbit/didi/issues/948) · [PR #970](https://github.com/saworbit/didi/pull/970)
+- `2026-09-25` A checkpoint or a file write no longer fails on Windows because something held a file for a moment. [#937](https://github.com/saworbit/didi/issues/937) · [PR #969](https://github.com/saworbit/didi/pull/969)
+- `2026-09-25` Two `script_patch_method` calls on one script no longer lose a method. [#954](https://github.com/saworbit/didi/issues/954) · [PR #968](https://github.com/saworbit/didi/pull/968)
+- `2026-09-25` A board subscribed while the watcher already ran is no longer announced as changed. [#139](https://github.com/saworbit/didi/issues/139) · [PR #967](https://github.com/saworbit/didi/pull/967)
+- `2026-09-25` `editor_undo` and `editor_redo` no longer leave the editor's history inconsistent. [#913](https://github.com/saworbit/didi/issues/913) · [PR #966](https://github.com/saworbit/didi/pull/966)
+- `2026-09-25` Windows test-session timeout completion. [PR #960](https://github.com/saworbit/didi/pull/960)
+- `2026-09-25` `asset_reimport` no longer answers, or starts, inside the editor's own import pass. [#914](https://github.com/saworbit/didi/issues/914) · [PR #957](https://github.com/saworbit/didi/pull/957)
+- `2026-09-24` Two servers writing one project file could lose an update. [#929](https://github.com/saworbit/didi/issues/929) · [PR #953](https://github.com/saworbit/didi/pull/953)
+- `2026-09-24` A blackboard resource could say a board did not exist while showing its state. [#514](https://github.com/saworbit/didi/issues/514) · [PR #953](https://github.com/saworbit/didi/pull/953)
+- `2026-09-24` Three refusals said something other than what they meant. [PR #947](https://github.com/saworbit/didi/pull/947)
+- `2026-09-24` `scene_instantiate_node` did not say when an initial property failed to land. [PR #946](https://github.com/saworbit/didi/pull/946)
+- `2026-09-24` `audio_list_buses` could not ask a running game about its own mix. [PR #945](https://github.com/saworbit/didi/pull/945)
+- `2026-09-24` A bus layout the editor could not write was reported as one it would. [PR #944](https://github.com/saworbit/didi/pull/944)
+- `2026-09-24` Four handlers counted a published length bound in bytes. [PR #943](https://github.com/saworbit/didi/pull/943)
+- `2026-09-24` The bus layout setting was followed only when it was a `res://` path. [#935](https://github.com/saworbit/didi/issues/935) · [PR #942](https://github.com/saworbit/didi/pull/942)
+- `2026-09-24` A bus name with a quote, a backslash or a control character came back with Godot's escapes still in it. [#934](https://github.com/saworbit/didi/issues/934) · [PR #941](https://github.com/saworbit/didi/pull/941)
+- `2026-09-24` `user://` and `RES://` were read as folders inside the project. [PR #931](https://github.com/saworbit/didi/pull/931)
+- `2026-09-24` `runtime_inject_input` reported an action the game never declared as pressed. [PR #930](https://github.com/saworbit/didi/pull/930)
+- `2026-09-24` `project_export` lost a preset name with a space at either end. [PR #928](https://github.com/saworbit/didi/pull/928)
+- `2026-09-24` A release build with no export templates was a `500 internal_error`. [PR #928](https://github.com/saworbit/didi/pull/928)
+- `2026-09-24` `project_add_export_preset`'s `did_you_mean` never reached a caller. [PR #928](https://github.com/saworbit/didi/pull/928)
+- `2026-09-24` A presets file with a byte-order mark was blamed on a key nobody could see. [PR #928](https://github.com/saworbit/didi/pull/928)
+- `2026-09-24` `project_add_export_preset` stored a directory as `export_path`. [PR #928](https://github.com/saworbit/didi/pull/928)
+- `2026-09-24` Writing an input action broke navigation in the editor's 3D view. [#925](https://github.com/saworbit/didi/issues/925) · [PR #927](https://github.com/saworbit/didi/pull/927)
+- `2026-09-24` `project_list_export_presets` listed presets Godot never loads, and `project_export` tried to export them. [#921](https://github.com/saworbit/didi/issues/921) · [PR #924](https://github.com/saworbit/didi/pull/924)
+- `2026-09-24` Upgrading the addon printed ten "Missing .uid file" warnings. [PR #917](https://github.com/saworbit/didi/pull/917)
+- `2026-09-24` `resource_create` wrote `.res` files Godot cannot load. [PR #916](https://github.com/saworbit/didi/pull/916)
+- `2026-09-24` An overwrite left the editor answering from its old copy. [PR #916](https://github.com/saworbit/didi/pull/916)
+- `2026-09-24` `asset_reimport` reported a failed import as imported. [PR #915](https://github.com/saworbit/didi/pull/915)
+- `2026-09-24` Refusals no longer let the engine print first. [PR #915](https://github.com/saworbit/didi/pull/915)
 
-- **The roadmap and the amendment log describe the surface as it stands (#990).**
-  The roadmap opened on a 115-tool canonical surface, and the tool count is 120.
-  The amendment log's first paragraph said six amendments were implemented,
-  named thirteen, and listed two implemented tools as unaccepted proposals.
-  Neither passage now states a count that has to be edited by hand. The
-  roadmap's remaining-capabilities list had four items marked open that have
-  shipped: reverse usage lookup and import status tracking in
-  `project_analyze_impact` and `project_audit_assets`, capture of the editor's 2D
-  or 3D viewport or a game's, and engine warnings and errors read through
-  `runtime_read_output`. It now also lists localisation and game data, still open
-  under #779. The tool reference and the agent instructions now describe what
-  `ui_list_controls`' `text` is in a localised game (#988). They also say that
-  `project_set_setting` checks no path inside an array (#989), and which files to
-  register as translations. The 2026-09-25 exploration report gains a follow-up
-  noting that the two limits it confirmed have since been fixed. The website's
-  resources card names the blackboard boards.
-
-- **The vendored JSON parser is nlohmann/json 3.12.0 (#796).** It parses every request an MCP
-  client sends. The header is the signed upstream release, byte for byte. Two of its changes
-  could have reached Didi and neither has a caller here: `std::filesystem::path` converting as
-  UTF-8, which a build with that conversion deleted proves, and `get_ptr` no longer reading an
-  unsigned value as signed. Malformed input gets the same answers as before.
-
-- **The README and the website list every tool.** Their fourteen domains
-  counted 94 of the 120 canonical tools: the audio buses, the shader tools,
-  the spatial queries, the ghost previews, `asset_configure_import` and
-  fourteen more were in no domain. Every canonical tool is now in exactly one,
-  and the counts add up to 120. `ui_hit_test` and `viewport_diff_capture` were
-  still described as editor-only, which they have not been since a game
-  session could answer them, and `scene_get_property` as returning scalars,
-  where it returns vectors, colours, arrays, dictionaries and resource paths.
-  The API specification listed 42 of the extension's 81 bridge methods and now
-  lists them all, with which session kinds may run which. The architecture's
-  queue says why nothing is dequeued inside an import pass (#914), and the
-  developer guide names every file an addon script has to be listed in and the
-  local replay of the end-to-end CI step. macOS and Linux were "not in CI"; a
-  headless editor answers the vibe probes there and nothing asserts, which is
-  what both platform tables now say.
-
-- **The website and the quickstart start from the download.** Both told a
-  newcomer to clone and build, with a `D:/didi/build/Release` path in the
-  client configuration, although every release ships a built archive for all
-  three platforms. The site's platform cards now link each archive directly
-  through `releases/latest/download`, which always serves the newest release
-  because the archive names do not change, and say what 2.0.1 settled: no
-  Visual C++ Redistributable on Windows, glibc 2.34 or newer on Linux, and the
-  quarantine step for the un-notarized macOS binaries. The setup steps start
-  with the archive and its layout, and building from source is the
-  alternative. `QUICKSTART.md`'s "Build or Install" step had only the build;
-  it gains the download as Option B.
+---
 
 ## [2.0.1] - 2026-09-23
 
@@ -1679,6 +241,8 @@ about fifty optional arguments and result fields are new.
 Each archive now carries a README written for the download, the third-party
 notices for the code compiled into it, and on Windows a build that needs no
 Visual C++ Redistributable.
+
+Full write-ups for 2.0.1: [as first written](https://github.com/saworbit/didi/blob/fd9d0e5e8517143c0e892166c225485a840b2d87/CHANGELOG.md#201---2026-09-23).
 
 ### Breaking
 
@@ -1726,2690 +290,209 @@ Visual C++ Redistributable.
 
 ### Added
 
-- **The fuzz target lists cannot drift apart.** The set of fuzz targets was
-  written down five times with nothing joining them up: the `.cc` files in
-  `fuzz/`, `DIDI_FUZZ_TARGETS` in `CMakeLists.txt`, the matrix in `fuzz.yml`,
-  the table in `fuzz/README.md`, and the seed directories under
-  `fuzz/corpus/`. Every disagreement was quiet, and one was silent by
-  construction: the workflow builds the seed path by stripping `fuzz_` off the
-  target name and copies it with `2>/dev/null || true`, so a corpus directory
-  that is missing, misnamed or empty costs the run its committed seeds without
-  failing it, and the promise that the eight bytes which used to segfault the
-  frame decoder are re-executed on every run would stop being true in silence.
-  A target present in the build list and absent from the matrix is the same
-  shape from the other side: it compiles on every pull request and is fuzzed by
-  nothing, which is the case `fuzz.yml`'s own header calls worse than having no
-  target at all, and which #862 was when it happened to the Phase 7 harness.
-  `tests/test_fuzz_target_lists.py` now holds the five to each other, including
-  the decoder count `SECURITY.md` states. The lists stay explicit rather than
-  globbed, which is what `fuzz/README.md` asked for; explicit keeps them
-  readable and was never what kept them in step. #884
-- **The vendored headers have a watcher.** `THIRD_PARTY.md` ended by admitting
-  that the three copied single-header libraries in `include/` were "reviewed by
-  hand or not at all". They are files, not package manager entries, so
-  Dependabot cannot see them and neither can a lockfile scanner -- and the
-  review that was supposed to happen by hand is exactly the kind that does not.
-  `tools/check_vendored_versions.py` asks two questions and keeps them apart,
-  because they fail for different reasons. Whether this page still describes the
-  files on disk is answered by reading each header's own version banner and
-  comparing it with the table, needs no network, and runs in the documentation
-  suite on every pull request, so replacing a header and forgetting the table is
-  caught rather than inherited. Whether the file is still current is answered
-  against upstream, runs weekly in `supply-chain.yml`, and opens a tracking
-  issue rather than failing a check -- upstream shipping a release is news about
-  the world, not a defect in whichever branch happens to be open. The first run
-  found one: `json.hpp` is on 3.11.3 and nlohmann has published 3.12.0.
-  `nothings/stb` publishes no releases and tags nothing, so asking its releases
-  API returns an empty answer that would read as "up to date" forever; its
-  version is read out of the upstream header's banner instead.
-  `gdextension_interface.h` is deliberately untracked and the tool says so out
-  loud rather than omitting it, because it is a compatibility contract and
-  "is there a newer Godot?" is the wrong question to answer weekly.
-- **Dependabot watches the base image, and groups security fixes.** The Ubuntu
-  image `tools/localci/Dockerfile` builds on was the one moving part nothing
-  watched: the local CI lanes and the dev container both run on it, and an
-  unpatched base could sit there indefinitely while the tag beside it still read
-  the same. It is now pinned by digest, on the same reasoning the workflows pin
-  action SHAs -- `ubuntu:24.04` is rebuilt in place every few weeks, so the tag
-  alone makes a lane repeatable but not reproducible -- and Dependabot offers
-  the rebuilt image the way it offers a new action SHA, which is what keeps a
-  pin from becoming a way of staying unpatched. The release number stays a
-  manual decision, because that tag tracks what `ubuntu-latest` resolves to on
-  the GitHub runners; semver bumps are ignored and digest updates are not. Every
-  ecosystem also gained a second group, `applies-to: security-updates`, so a
-  disclosure affecting several packages at once arrives as one pull request
-  instead of six landing in the same minute. The security groups carry no
-  `update-types` filter deliberately: a fix is worth taking whether upstream
-  shipped it as a patch or as a major.
-
-- **A project website.** [saworbit.github.io/didi](https://saworbit.github.io/didi/)
-  is rendered from `site/` by a Pages workflow on every push to `main` and
-  checked on every pull request: the landing page and the brand assets it
-  draws on. The marks are inlined from `docs/brand/svg` at build
-  time, and the version and surface counts are read from `CMakeLists.txt` and
-  the README status block, so the site cannot publish a number the README does
-  not. The CI change classifier treats `site/` and the Pages workflow as
-  repository furniture, since nothing in either can reach the compiler.
-- **Platform support is stated where people look.** The README, the website,
-  the repository card and the contributing guide now say that Didi builds,
-  tests and ships on Windows, macOS and Linux, which of those the live editor
-  harness covers in CI, and that testers on macOS and Linux are wanted.
-- **The live editor matrix covers the whole supported range.** The extension
-  declares `compatibility_minimum = "4.5"` and 4.7 is the newest line, so the
-  supported range is three minor versions and CI loaded the addon into two of
-  them. Nothing anywhere opened a 4.6 editor (#759). That is the arrangement
-  that hides a regression rather than catching one, because GDExtension method
-  binds are pinned per version and the middle of a range is not something you
-  can interpolate: a fault that starts at 4.6 and is gone again by 4.7 is
-  invisible from both ends. #600 was a 4.6-affecting bridge fault and it was
-  only caught because it happened to show on 4.5 as well. The harness now runs
-  on 4.6.2 alongside 4.5.1 and 4.7.2, on every event rather than only on
-  `main`, because the leg is free: matrix legs get their own runners, all three
-  start in the same second, and the new one finishes inside the shadow of the
-  sanitizer job, which is what the run already waits for. A pull request waits
-  no longer than it did, and a 4.6 regression is found by the change that
-  caused it instead of after the merge.
-
-- **Every tool publishes a title.** Of the 126 entries `tools/list` returns,
-  the number carrying a human-readable title was zero, on either protocol
-  revision, so a host that displays one fell back to the identifier and
-  somebody approving a destructive mutation was shown
-  `gridmap_export_mesh_library` (#686). Every other field on the entry is
-  filled in with care: the four annotation hints take seven distinct
-  combinations across the surface, and a contract test keeps a description on
-  every parameter. The one field that exists solely for what a person reads was
-  the one nobody filled in, and it matters here because Didi's confirmation
-  story ends in a person. Titles come from one table, so a legacy alias cannot
-  be titled differently from the tool it resolves to.
-- **A blackboard writer can say "only if this has not changed".** The board
-  exists because more than one client is expected, and the lease was the only
-  concurrency guard on it: it covers tasks. Keys had no version and nothing a
-  second writer could pin a write to, so two agents that both read 0, both
-  incremented and both wrote 1 left the board holding 1, with neither call an
-  error and nothing in either response saying a concurrent change had happened
-  (#682). `blackboard_write` takes `expected_updated_at_ms`, which a read now
-  returns for the path it was given, and `0` means the path must not exist yet.
-  `blackboard_patch` takes `expected_revision`, the board's, because a patch
-  spans paths. A mismatch is refused `409` with `reason_code` `stale_write` or
-  `stale_patch`, naming what the board holds and who last wrote it, which is
-  the shape a refused task claim already uses. A caller that passes neither
-  keeps last-writer-wins.
-
-- **`runtime_launch` can leave the game running.** The tool is a batch runner:
-  it blocks, captures, classifies and terminates the child at the timeout. So a
-  game that runs -- the normal outcome when you launch one to play it -- was
-  reported `success: false`, `exit_code: 124`, "timed out", and was gone before
-  a caller could do anything with it. There was no other way to start one: no
-  `editor_play`, no `runtime_start`, and `runtime_stop` with no counterpart that
-  starts what it stops. That left the interactive half of the runtime surface --
-  inject input, step, pause, read output, get tree, explore, watch invariants,
-  checkpoint -- reachable only for a game somebody else had started, and this
-  repository's own harness starts one by hand for exactly that reason (#733).
-  `detach: true` starts the game, waits for it to publish a session, and answers
-  with that session; `runtime_attach_session` takes it from there and
-  `runtime_stop` ends it. An author can write code, run it, look at it and fix
-  it without asking a person to press F5. Nothing is captured -- the game's
-  output goes to the null device, because nobody is left to drain a pipe and a
-  full one would block the game -- so `limitation` says so and points at
-  `runtime_read_output`, and `session_published` is the field to branch on. The
-  pid reported is the game's own, which on Windows is often not the process this
-  tool started: Godot's console build launches the engine and waits on it. Two
-  things a game that outlives its launcher makes load-bearing, both of which a
-  blocking run hid: the child inherits nothing but its own null output, because
-  `bInheritHandles` would otherwise hand it a copy of the server's MCP stdout
-  and a client would wait for an end of input that never came while the game
-  ran; and the launch selects the session it just waited for, because a caller
-  that starts a game means to drive that game and the process may well still be
-  pointed at the editor it was launched from.
-
-- **`project_audit_assets` reports what is wrong with `project.godot` itself.**
-  Every other finding the audit makes is about a reference from one file to
-  another, so a manifest that registers a setting nobody can name read as a
-  project with nothing wrong with it. A `# disabled for now` above
-  `Good="*res://good.gd"` is the case: the engine registers
-  `autoload/#disabledfornowGood`, the script enters the tree under a name
-  nothing references, and the only place that surfaces is the compiler refusing
-  `Good` in a file three directories away, with nothing connecting the two.
-  `project_settings_issues` now carries that finding as `unusable_setting_name`,
-  with both names and the line the join started on, because the remedy is to
-  move or delete one line and the caller has to be told which. It is reported
-  for any section, not only `[autoload]`: a note above `config/name` registers
-  `application/#noteconfig/name` and the project runs under the engine's default
-  name instead of the one in the file (#818). The second finding is
-  `unparseable_project_settings` (#817). This is not a full parse, and
-  `limitations` says so: an empty list is not a promise that Godot will load the
-  file.
+- `2026-09-23` The fuzz target lists cannot drift apart. [#884](https://github.com/saworbit/didi/issues/884) · [PR #889](https://github.com/saworbit/didi/pull/889)
+- `2026-09-20` `project_audit_assets` reports what is wrong with `project.godot` itself. [#818](https://github.com/saworbit/didi/issues/818) · [#817](https://github.com/saworbit/didi/issues/817) · [PR #819](https://github.com/saworbit/didi/pull/819)
+- `2026-09-20` The vendored headers have a watcher. [PR #795](https://github.com/saworbit/didi/pull/795)
+- `2026-09-20` Dependabot watches the base image, and groups security fixes. [PR #795](https://github.com/saworbit/didi/pull/795)
+- `2026-09-19` The live editor matrix covers the whole supported range. [#759](https://github.com/saworbit/didi/issues/759) · [PR #763](https://github.com/saworbit/didi/pull/763)
+- `2026-09-19` `runtime_launch` can leave the game running. [#733](https://github.com/saworbit/didi/issues/733) · [PR #760](https://github.com/saworbit/didi/pull/760)
+- `2026-09-16` Every tool publishes a title. [#686](https://github.com/saworbit/didi/issues/686) · [PR #698](https://github.com/saworbit/didi/pull/698)
+- `2026-09-16` A blackboard writer can say "only if this has not changed". [#682](https://github.com/saworbit/didi/issues/682) · [PR #697](https://github.com/saworbit/didi/pull/697)
+- `2026-09-14` Platform support is stated where people look. [PR #587](https://github.com/saworbit/didi/pull/587)
+- `2026-09-14` A project website. [PR #584](https://github.com/saworbit/didi/pull/584)
 
 ### Changed
 
-- **The release archives stand on their own.** Each archive shipped the
-  repository's README, whose banner images and most of whose links are
-  relative paths into a tree the archive does not contain, and which explains
-  how to build what the archive already holds. It now carries a README written
-  for someone who has only the download: what each file is, where each half
-  goes, how to point the Didi console at the server, and the notes for that
-  platform alone, including the quarantine a browser download puts on the
-  macOS binaries. Three things were wrong rather than unhelpful, and are fixed.
-  The archives carried no third-party notices, although both binaries compile
-  in MIT-licensed code (nlohmann/json, stb_image_write, Godot's GDExtension
-  header) whose licenses ask for their notices to travel with every copy;
-  `THIRD_PARTY_NOTICES.txt` now does. The Windows binaries imported
-  `MSVCP140.dll` and `VCRUNTIME140.dll`, so a machine without the Visual C++
-  Redistributable could not start the server or load the extension, and one
-  with a redistributable older than 14.40 could crash in `std::mutex`; the
-  runtime is now linked statically, as it already was on Linux (#647) and as
-  Godot's own Windows builds do. And nothing stopped a tag being pushed over a
-  tree that still carried the previous version number, which would have
-  published binaries reporting the old version under the new name. The release
-  workflow now refuses a tag that does not match `CMakeLists.txt`,
-  `plugin.cfg` and a `CHANGELOG.md` section before it compiles anything, checks
-  that each archive holds exactly the tracked addon, the two binaries, the
-  class reference and three documents, checks what each binary links against
-  on its platform, runs the smoke test against the staged server rather than
-  the build tree, and reopens every archive to compare it with what was staged.
-  A tag now produces a draft release, with the version's summary and Breaking
-  list from this file above the generated notes, so the published archives are
-  the ones a person downloaded and checked. `CONTRIBUTING.md` has the release
-  steps.
-- **A connection that arrives is read when it arrives, rather than when the
-  previous one goes quiet.** Both IPC servers accepted one connection and only
-  accepted the next after the one they held had been idle for the recycle
-  window, so that window was an admission queue: 1,000 ms on Windows, 5,000 on
-  POSIX, paid by every `runtime_attach_session` and every repeat after a
-  transport failure. It was worse than the window suggests, because a slot is
-  also held for as long as a request is running: a viewport capture or any tool
-  call on the extension's 15-second main-thread deadline kept the only endpoint
-  to itself for its whole duration, and a client reconnecting in that time was
-  answered `ERROR_PIPE_BUSY` on Windows or left unread in the listen backlog on
-  POSIX. Each server now listens on four connections at once, one slot per
-  thread, which is the pattern the Win32 named-pipe documentation describes.
-  Requests still execute one at a time under a single lock, because the handler
-  ends up on Godot's main thread through a queue and nothing below it was
-  written for two callers -- reading concurrently and executing in turn is the
-  whole of the change. The recycle window stays, and stops being a tax: it is
-  now a slowloris guard that bounds how long a connection that has stopped
-  talking may keep a slot. #873
-
-- **Every security alert now has a disposition written down, including the ones
-  Scorecard raises.** `SECURITY.md` explained the ten CodeQL findings it
-  dismissed and said why a Security tab full of permanent alerts is one nobody
-  opens, but five Scorecard alerts had been sitting open underneath that
-  sentence since 2026-09-09 with nothing recorded about them anywhere. Four
-  measure controls a single maintainer cannot operate -- an approving reviewer,
-  CODEOWNERS review, last-push approval, a repository older than 90 days -- and
-  the fifth asks the local CI image to hash-pin a `pip install` whose version is
-  already pinned exactly and watched by Dependabot. Each one now carries its
-  reasoning in the same table as the CodeQL dismissals, so the next person to
-  open the tab reads a decision rather than re-deriving one. The section also
-  records something that cost an investigation to learn: a CodeQL dismissal is
-  bound to the code it was made against, not to the finding, so an edit near an
-  alert closes it and raises the same finding again under a new number with the
-  dismissal gone. That is what happened to the `test_runner` and
-  `process_runner` process operations when the process-tree kill and the stdin
-  change moved the `execvp` call, and it will happen again.
+- `2026-09-23` The release archives stand on their own. [PR #908](https://github.com/saworbit/didi/pull/908)
+- `2026-09-22` A connection that arrives is read when it arrives, rather than when the previous one goes quiet. [#873](https://github.com/saworbit/didi/issues/873) · [PR #875](https://github.com/saworbit/didi/pull/875)
+- `2026-09-20` Every security alert now has a disposition written down, including the ones Scorecard raises. [PR #804](https://github.com/saworbit/didi/pull/804)
 
 ### Fixed
 
-- **`audio_list_buses` offline lists the buses the engine loads from the
-  files.** A layout Godot's parser refuses loads as nothing and the game runs
-  on Master alone, but the lines above the break were read as buses, one of
-  them muted. That case now answers one Master bus with `layout_loads: false`
-  and the line to repair. A `project.godot` the engine refuses is refused here
-  too, rather than followed to a custom layout path. An index the layout skips
-  is kept as the unnamed default bus Godot makes of it, so `bus_count` matches
-  AudioServer. The layout is read through the shared ConfigFile scan. (#903,
-  #905)
-- **A bus muted with `mute = 1` is reported as muted.** `audio_list_buses`
-  compared `mute`, `solo` and `bypass_fx` to the word `true`, and Godot
-  converts the value instead, so a hand written `1` was a muted bus to the
-  engine and an unmuted one here. The three flags now go through
-  `config_file::booleanize`, the rule the other readers already use. The same
-  one line fix lands in `project_audit_assets`, where `remap/valid = 0` read
-  as a valid import. (#853)
-- **A refusal that names the argument that fixes it carries that argument.**
-  Five tools refuse a colliding output with the same sentence and all five read
-  the `overwrite` argument that would make the call succeed. Only
-  `project_export` put it in `retry_with`; the other four left it in the prose,
-  so a client had to read English to find the fix that was a field away on the
-  tool next door. `resource_create`, `script_create` and the visual test lab
-  carry it now, and all five say `already_exists` rather than four saying
-  nothing and one restating the floor's word for a 409.
-  `gridmap_export_mesh_library` needed an envelope before it could carry
-  anything: it answered through `CallToolResult::error`, which pushes the
-  sentence as plain text with no JSON around it, so `applyErrorDataFloor` never
-  saw it and the refusal reached a client as a sentence with no status and
-  nothing to branch on.
-
-  A check now reads the sentences: a message that says `pass <argument>: true`
-  is a promise about a specific argument, and the refusal has to carry it. It
-  found two more the issue had not named, a session on a foreign project asking
-  for `allow_foreign_project` and a resource type this engine does not know
-  asking for `allow_unknown_type`, both of which said it in prose only. #900
-- **`retry_with` has one shape again.** It shipped with #705 as
-  `retry_with: {"overwrite": true}`, an object a caller merges into the
-  arguments it already has, and `project_export` still answers a colliding
-  output path that way. #894 added eight more refusals carrying the key and
-  wrote the name as a bare string, so one field had two types and a client had
-  to check which it had been handed before it could read either. The eight are
-  objects now. `docs/TOOL_REFERENCE.md` describes the key for the first time,
-  including that `retryable` stays false alongside it, because the same call
-  unchanged would be refused again and `retry_with` is the change that makes it
-  succeed. A check pins the shape. #897
-- **A rolled back mutation says `rolled_back` everywhere.** A mutation whose
-  postcondition failed answers `outcome: rolled_back` when the undo took and
-  `outcome: unknown` when it did not. Nine sites in `godot_bridge.cpp` do. The
-  script attach and detach path said `reverted`, which nothing read and nothing
-  asserted, while `phase7_signal_bridge_probe.cpp` pins `rolled_back` against a
-  live editor for the signal paths, so the siblings were held to the word and
-  this one was not. One word, plus a pin so it does not come back. This is not
-  a general check on `outcome`: that key names several unrelated things in that
-  file, from viewport projections to undo availability, and the vocabulary that
-  matters here cannot be told from the others by reading the source. #896
-- **Twenty-seven bridge refusals say which conflict they are.** #892 left
-  `godot_bridge.cpp` outside the rule, which was right for that change and
-  wrong as an end state for the part of the file that never moved to
-  `bridgeError`. Its 409s and 422s all reached a caller as `conflict` or
-  `unprocessable`, so "autoload already exists, resend with replace", "the
-  active scene has unsaved changes, save it first", "the ShaderMaterial has no
-  shader assigned" and "there is nothing to undo" were one answer. Four "already
-  there" refusals now share `already_exists` and name the argument to resend
-  with under `retry_with`, and the rest say what they are: a scene that was
-  never saved, a shader written in code rather than built as a graph, a resource
-  that is not a PackedScene, a PackedScene whose dependencies are missing. The
-  guard holds the file to those two statuses and leaves the rest, because
-  `internal_error` is the honest name for a 500 and there are 184 of them. Three
-  of the twenty-seven were found by the guard rather than by reading: they
-  carried a data block already and no code in it. #894
-- **Every refusal above 400 names itself, in all five files that emit one.**
-  `tests/test_refusal_codes.py` states the rule the surface runs on: a person
-  reads `error.message` and a client branches on `error.data.code`. It
-  enforced that against two files, and the extension emits refusals from five,
-  which is how #890 and this landed in the unwatched ones. The clearest was the
-  same refusal done both ways: `editor_hook.cpp` answered a session-kind
-  mismatch with a sentence and `session_kind_rejected` under `data.code`, and
-  `runtime_request_router.cpp`, four hundred lines away, handed the identifier
-  over as the message and carried no code at all. Sixteen refusals across the
-  router, the expression sandbox and the runtime bridge now carry a code, so a
-  parse failure and an execution failure are no longer both `unprocessable`,
-  and a response over budget is no longer `internal_error`. The router's
-  session-kind refusal is a sentence. The guard scans every file that emits a
-  refusal shape it understands, and a new file that emits one and is named by
-  no list fails a test of its own rather than being found by hand. #892
-- **An authorization refusal keeps its structured half.** The handler the
-  extension installs on the IPC server rebuilt a refusal from two of `Error`'s
-  three fields, so anything under `data` was dropped on the one path that
-  answers a peer whose token has not been accepted yet. Nothing was losing a
-  code the day it was found, which is the argument for fixing it rather than
-  against: #862 and #865 were both this shape at five other sites, and the loss
-  would have arrived with whichever refusal grew a `data.code` first. The
-  envelope is built from the whole `Error` now, and the 503 for a session host
-  that went away mid-call carries `session_host_unavailable` so a client can
-  branch on it. `data` is left out rather than written as null when there is
-  none, because `error.value("data", json::object())` returns the null when the
-  key is present, which is how every reader of a live failure asks. #890
-
-- **One frame reader, called from both ends of both transports.** Reading a
-  length prefix a peer wrote existed five times: a decoder in
-  `protocol.hpp`, and a client read and a server read on each of the two
-  transports in `ipc_channel_win32.cpp`. No two of them agreed. The server
-  stopped allocating from the claim in #876 and the client was not moved with
-  it, so the same file held two answers to what a claimed frame buys (#880).
-  The deadline bounding a frame that had started arriving was 1,000 ms on
-  Windows and 5,000 on POSIX under two copies of the same four-line comment,
-  with nothing in either saying the other existed, and only the Windows number
-  had a test (#881). And the decoder `SECURITY.md` named as the fuzzed one,
-  `didi::ipc::parseFramedMessage`, had no caller in `src/` or `addons/` at all:
-  the shipping transports had their own reader and no fuzz target reached it
-  (#882).
-
-  There is now one `didi::ipc::readFramePayload`, with the growth policy and
-  the maximum beside it, and all four transport sites call it. The client ends
-  grow a response as it arrives the way the server ends already grew a request,
-  keeping their existing single deadline over the whole payload.
-  `parseFramedMessage` is gone, and `fuzz_framed_message` drives the real
-  reader instead, serving the payload in slices the fuzzer chooses so the
-  slowloris shape is reachable; its corpus, including the seed for the
-  over-read that target originally found, is kept. `SECURITY.md` and
-  `fuzz/README.md` now name the decoder that is covered.
-
-  The frame deadline keeps both of its numbers. Read on its own it looks like
-  drift; read next to `kServerIdleRecycleMs` it is not, because that window is
-  also 1,000 on Windows and 5,000 on POSIX and the two have always moved
-  together. Unifying them on 1,000 was tried and
-  `IPC.SplitRequestAcrossIdleDeadline` caught it on both POSIX platforms: a
-  client there may split a request across an idle window five times the
-  Windows one, and cutting the frame deadline without cutting the window drops
-  a request that was legitimately split. The three deadlines now sit together
-  in one platform block with the relationship written down and asserted, so a
-  change to one is made next to the others, and POSIX has the frame-deadline
-  test it never had, bounded from both sides.
-  #880 #881 #882
-
-- **A frame the server has not been sent is no longer a buffer it has already
-  allocated.** The server read a four-byte length prefix and allocated the
-  claimed size from it, before a byte of the payload had arrived and before the
-  handler reached `SessionHost::authorize`. That put the peak on the slot count:
-  giving each server four connection slots in #873 took the server's
-  unauthenticated ceiling from 128 MiB to 512 MiB inside the Godot editor
-  process, and nothing anywhere said so. The payload now grows as it arrives, in
-  64 KiB steps, so the prefix buys a read rather than a buffer and a claim the
-  peer never honours costs one chunk per slot. A legitimate frame is still
-  bounded by the same 128 MiB and still has the same single deadline across the
-  whole payload. `SECURITY.md` states the cost of an unauthenticated connection
-  where it describes the boundary. #876
-
-- **Four server threads no longer spin silently when the process runs out of
-  file descriptors.** `PosixIpcServer::serverLoop` never looked at `errno` after
-  `accept`, so the one failure that leaves the connection queued was
-  indistinguishable from the ordinary one that does not. `EAGAIN` means another
-  slot won the race and the listener is empty, which costs nothing. `EMFILE` and
-  `ENFILE` leave the connection in the backlog, so `poll` reports the listener
-  readable again immediately and the loop burns a core, once per slot since
-  #873, with no line anywhere naming a descriptor limit. Descriptor exhaustion
-  now logs once per slot and backs off, `EINTR` and `ECONNABORTED` stay quiet
-  with `EAGAIN`, and anything else logs the first of its kind. #877
-
-- **A Windows slot that cannot create its pipe instance says so.** Only slot 0
-  reports a refused endpoint; for the other three the same failure was a 200 ms
-  sleep and another go, with no log line in the path. Retrying is right, because
-  a transient failure should not take a slot out of service for the life of the
-  editor, but a slot that fails every time retried five times a second while
-  `isRunning()` answered true and `ipc::serverConnectionSlots()` answered 4. The
-  first failure per slot now logs with the Win32 error, and so does the recovery,
-  so the log says how many slots the server is really listening on. #878
-
-- **The two deadlines for opening a connection stop being flat 2,000 ms
-  numbers, and the comment on one of them stops stating something that is not
-  true.** `kRouteReconnectMs` said a local endpoint "either accepts immediately
-  or is not there", so 2,000 was a bound on a stall rather than a budget. A
-  named pipe whose instances are all in use answers `ERROR_PIPE_BUSY` and the
-  client retries until its deadline, which is why
-  `IPC.ConnectsWhileServerIsBetweenInstances` exists, and a Unix socket takes
-  the connection into the listen backlog and leaves it unread. Both sites, the
-  reconnect after a transport failure and the connect inside `attachDescriptor`,
-  now take what being accepted costs from `ipc::withAcceptAllowance`, the same
-  place the request deadlines have taken it since #872, so the number and the
-  window stop being chosen independently. Neither deadline got shorter on either
-  platform. #874
-
-- **A handshake deadline now allows for the wait to be accepted, so the attach
-  that `runtime_launch --detach` documents works on macOS and Linux.** A server
-  serves one accepted connection at a time and only accepts the next once the
-  one it holds has been idle for its recycle window. A client arriving in the
-  meantime still connects, because the kernel takes it into the listen backlog
-  and a named pipe hands out the next instance, and then waits with a request
-  nothing has read. The attach handshake allowed a flat 3,000 ms, which is over
-  the Windows window of 1,000 and under the POSIX window of 5,000. So
-  `runtime_attach_session`, the call `runtime_launch --detach` names as the next
-  step, answered `504` with `outcome_unknown: true` on both POSIX runners, four
-  runs out of four, while the session it said it could not reach then paused,
-  stepped and stopped perfectly. Windows was the control for the arithmetic, not
-  for the design. A deadline that may be spent on the first request over a new
-  connection now comes from `ipc::withAcceptAllowance`, which adds the window
-  from the same file the window is set in, so the two numbers stop being chosen
-  independently in two places. Three call sites used flat numbers and all take
-  it now: the handshake, the Control Room's one engine read, which was reporting
-  unsaved scenes as unknown, and the call-method preview probe, which was
-  skipping preview verification. `kWaitForDefinitiveResponse` is returned
-  unchanged, because a call with no deadline has nothing to extend. #782
-
-- **A process that has exited no longer reads as present on macOS and Linux.**
-  `queryProcessIdentity` is the function that says whether the pid in a session
-  descriptor is a real process, and its Windows branch has refused a corpse
-  since #287 because the wait handle is the only honest liveness test there.
-  The two POSIX branches did not hold the same standard. A child that has
-  exited and has not been reaped is a zombie, and the gates they used clear
-  one: `kill(pid, 0)` succeeds for a zombie exactly as it does for a running
-  process, and `/proc/<pid>/stat` is still there with a full starttime. So the
-  server kept answering that an engine somebody else started and did not reap
-  was present, and every answer built on that descriptor inherited it. Both
-  branches now read the process state, which is the only thing that separates
-  the two cases: `Z`, `X` and `x` on Linux, the three states proc(5) gives a
-  process that has exited, and `SZOMB` on macOS, read through `sysctl`.
-  #869 expected `proc_pidinfo` to carry the macOS state in `pbi_status`, and
-  the runner disagreed: it declines to describe a process that has exited at
-  all, so that field is never readable in the one state it was wanted for.
-  That is also why the macOS identity query was already refusing a corpse --
-  as a side effect of another call failing rather than by reading the state --
-  and it now refuses on the state read like the other two platforms.
-  `describeProcessInstance` needed the same read and is the half that decides
-  what a caller is told. Its Windows fallback reaches `proven_stale` through
-  the wait handle; its POSIX fallback stopped at `kill(pid, 0)` and reported a
-  corpse as `running_but_unidentified`, so fixing only the identity query would
-  have moved a zombie from "alive" to "something is running, we just cannot
-  name it". Both readers now share one state read. #786 gave didi's own
-  detached games an owner so the server stops making zombies; this is the
-  other half, for the editors it did not start (#869).
-- **A detached game is handed to init rather than left as the server's own
-  child.** On macOS and Linux `runtime_launch` with `detach: true` forked once
-  and returned, so the game stayed a child of a process that by design never
-  waits for it. The engine shuts down in about half a second and its pid then
-  sits in the process table as a zombie until the server itself exits. That
-  costs nothing on a batch run and is wrong for the loop `detach` exists to
-  support, where an agent starts a game per change and does it a few hundred
-  times in one session. Windows had no equivalent: a process that exits there
-  leaves nothing behind once its handles are closed. The launch now forks
-  twice. The middle process publishes the game's pid up the pipe the run
-  already had and exits immediately, which orphans the game into init's care,
-  and init reaps it. Reaping on a later call or from a `SIGCHLD` handler would
-  have made the leak rarer; this gives the process an owner, which is what
-  `detach` means. The argument list is now built before the fork as well,
-  because the child half of a fork in a threaded process may only make
-  async signal safe calls and building one is not. The test pins ownership
-  rather than the zombie, since a host reaps an orphan on its own schedule but
-  a pid this process never forked can never be waited for: `waitpid` answers
-  `ECHILD` while the game is still running (#786).
-- **Every refusal the extension emits names itself.** A client branches on
-  `error.data.code` and a person reads `error.message`. Two places published
-  neither. The three shader shape refusals answered with the identifier as the
-  whole message -- `invalid_shader_set_uniform_request` was the explanation a
-  person was shown -- because they called `errorJson` rather than `bridgeError`,
-  which is the helper that pairs an identifier with a sentence and keeps the
-  identifier in `data.code`. They now go through it, and a test pins the rule
-  that produced the gap: no `errorJson` call may hand a bare identifier over as
-  its message (#865). In `editor_hook.cpp` the refusals are built as literals,
-  and a refusal with no `data.code` is named by `applyErrorDataFloor`, which
-  reads the status and nothing else. So a `runtime_explore_scene` run that
-  stopped because the engine refused a press mid-window arrived as
-  `invalid_arguments` -- the name for a request that was malformed before the
-  run started -- and a cancelled command arrived as `timeout`, having waited for
-  nothing. The run now reports the bridge's refusal with the bridge's own status
-  and `data`, plus the action it was pressing, and every other refusal in that
-  file above 400 carries a code of its own: a profiler read, an invariant watch,
-  an exploration run and a frame step no longer share the word `conflict`
-  (#867). A 400 still takes `invalid_arguments` from the floor, because for an
-  argument this file validated and rejected that is the true name.
-- **A paused game is refused rather than explored.** `runtime_explore_scene`
-  drove a paused game for its whole window and reported a stuck interval with
-  `measured: true`, which is the one thing its own rules say must not happen: a
-  probe that cannot be read is excluded because no value is not stillness, and a
-  paused window is the same sentence with a different subject. A paused
-  `SceneTree` does not hand an injected event to a node that pauses, so
-  `runtime_inject_input` queues the event and gives it to `Input` when the tree
-  resumes. Every frame of a paused run was therefore a frame in which nothing it
-  pressed could have moved anything, and the report read as a finding about the
-  game. Pausing is how an agent arrives there: `pause_on_stuck` defaults to
-  true, so the tool's own output on a stuck interval is the input state of the
-  next call. It now refuses with 409 and `data.code: paused_game_session`,
-  naming `runtime_set_paused` as the way out, the same way the run already
-  refuses an action the project's InputMap does not declare and the mirror of
-  `runtime_step` refusing a game that is not paused. A pause that arrives after
-  the window opens is caught on the next press, which a queued release follows
-  so a refused run leaves no action down (#778).
-- **The Phase 7 signal bridge harness runs, and it passes.**
-  `tests/run_phase7_signal_bridge.ps1` is the only thing that drives
-  `signal.connect`, `signal.disconnect`, `signal.emit` and
-  `signal.listConnections` through a real editor. No workflow ran it, and it had
-  been failing for as long as that was true. The probe pinned every expected
-  failure by comparing `error.message` to an identifier, and the bridge stopped
-  answering that way when the identifiers moved to `error.data.code` and the
-  messages became sentences written for a person. The first scenario that named
-  an identifier failed and took the rest of the run with it, the same way on
-  4.5.1, 4.6.2 and 4.7.2. The probe now reads the identifier where the bridge
-  puts it, and the Live Godot Integration job runs the harness on all three
-  lines, in the seam build and again in the extension people install, so it
-  cannot rot unwatched again (#862). The second extension build the harness
-  needs adds about 18 seconds of compile, and a parallel build spends it beside
-  the first rather than after it, which is why it stays on by default now that
-  something collects the result.
-- **Two signal refusals say the identifier where every other one says it.** The
-  rule in the bridge is that `data.code` carries the stable identifier and
-  `message` carries a sentence. Two sites still built their error by hand, so
-  the identifier arrived as the whole message and `data.code` was absent: the
-  shape refusal shared by `signal_connect` and `signal_disconnect`, twelve lines
-  above a sibling that already did it the documented way, and the postcondition
-  mismatch that reports whether a rollback completed. A client switching on
-  `data.code` could not recognise either one, and a person was shown
-  `signal_postcondition_mismatch` as the explanation. Both route through
-  `bridgeError` now, and `invalid_signal_disconnect_request` and
-  `signal_postcondition_mismatch` have the sentences they were missing. Found by
-  the harness above, which is what it is for.
-- **A `scene_set_property` write that did not land says which of the two it
-  was.** `applied: false` was the whole account, and it covered two outcomes
-  that need different reactions. Measured on 4.5.1, 4.6.2 and 4.7.2, which
-  agree line for line: `Timer.wait_time = -3.0` leaves 1.0, `bus = "Music"`
-  with no such bus leaves `"Master"`, and `anchors_preset = 15` in
-  `layout_mode` 0 leaves 0 -- but `ProgressBar.value = 999` on a bar whose
-  `max_value` is 100 comes back holding **100**. That last row is the one the
-  old shape hid, because `value` is then a number Godot substituted and it
-  reads as a plausible result. A `not_applied` block now reports
-  `outcome: "unchanged"` or `outcome: "replaced"`, and carries
-  `engine_constraint` -- the range or enum the engine declares for that
-  property -- when the engine declares one (#767). Measured through the call
-  against a live 4.5.1 editor, all three of those rows carry one:
-  `wait_time` answers `range 0.001,4096,...`, which is the minimum Godot's own
-  error line was talking about, and `bus` answers `enum Master`, which is how a
-  caller learns there is no `Music` without a second call. The block is absent
-  when the write landed, so the happy path is unchanged on the wire.
-  Deliberately not included: a `reason_code` naming the cause. Three of those
-  four rows are identical in everything the call can observe, and the one
-  explanation Godot writes -- `Time should be greater than zero` -- goes to its
-  error stream, which a GDExtension has no route to. `anchors_preset` declares
-  an enum that contains 15, so the constraint on that row says the value was
-  fine and the cause is elsewhere; that is the reason the field is a fact about
-  the property rather than a verdict on the write.
-- **`signal_connect` writes the flags the editor's own Connect dialog writes.**
-  `flags` had to be exactly `2`, on the documented premise that "no other value
-  survives a scene save predictably". The engine disagrees: connecting with 2,
-  3, 6 or 7, packing, saving and loading with `CACHE_MODE_IGNORE` round-trips
-  the value exactly on 4.5.1, 4.6.2 and 4.7.2, and 3, 6 and 7 are what the
-  editor writes when Deferred or One Shot is ticked. So a connection a user
-  authored could be read through the surface and removed through the surface
-  and not put back, and the one put back had quietly stopped being deferred --
-  which is a behaviour change, not a cosmetic one, because deferred exists for
-  the cases where calling the method inside the signal's own emission is not
-  safe (#852). The persist bit stays required: without it the engine writes no
-  `[connection]` line at all, so the tool would be reporting work that did not
-  last. `CONNECT_REFERENCE_COUNTED` and `CONNECT_APPEND_SOURCE_OBJECT` are
-  refused for measured reasons rather than by omission -- the first only counts
-  a callable connected more than once and this surface answers `409` for one
-  that is already connected, and the second appends the emitter to the
-  arguments, so a zero-argument signal never reaches a zero-argument method
-  while the connect-time arity check says the pair is compatible.
-- **The same rule was wrong in four more places in the same call.**
-  `signal_disconnect` refused any connection whose flags were not exactly 2,
-  which is every deferred or one-shot connection in the open scene and every
-  connection at all inside an instanced scene, where the engine adds
-  `CONNECT_INHERITED` to the value it reports; it now removes anything the
-  scene file stores and still refuses an engine or editor connection, by name
-  and with the reason. An editor undo of a disconnect restored the connection
-  as a plain one; it now restores the flags it had. The response reported
-  `flags: 2` whatever happened, so a caller who asked for a deferred connection
-  could not tell whether it got one; it now reports what the connection has,
-  and a disconnect reports what the removed one had, which is what
-  `signal_connect` needs to put it back. The refusal was the bare identifier
-  `invalid_signal_connect_request` with `flags` named nowhere, so a caller who
-  passed `3` could not tell whether the problem was the flag, the method, the
-  node or the signal; it now names the argument, says which values are accepted
-  and says why the one sent is not. `include/didi/common/connection_flags.hpp`
-  is the one place the rule is stated, so the server and the bridge cannot
-  drift apart on it again.
-- **`resource_create`'s type guard asks the engine that will load the file.**
-  The guard's own description says a name the reference does not list is refused
-  "because Godot cannot load a resource whose type it does not know", and it was
-  checking that against the class reference pinned at 4.7 rather than against
-  the attached engine. The two are not the same list: 4.7 carries 1036 classes
-  and 4.5.1 carries 971, so `DrawableTexture2D` and `BlitMaterial` passed the
-  check, were written, and then produced `Can't create sub resource of type` on
-  the engine the file was for -- not one dropped property, the whole resource --
-  while the same response carried `api_version_matches_attached_engine: false`
-  (#766). With a session attached the type is now checked against that engine's
-  own `ClassDB`, and `property_check.type_checked_against` says which list
-  decided. The rule cuts both ways: a type the engine has and the dump does not,
-  which is every GDExtension type, is written with
-  `allowed_by: "attached_engine"` instead of needing `allow_unknown_type`. That
-  flag stays the route for a `class_name` script, which is in the script
-  server's list and in neither of these, and a write it forces through now
-  carries `type_unknown_to_attached_engine: true` beside `checked: true` so the
-  report does not read as agreement. With nothing attached, or with an extension
-  older than the new `engine.classExists` route, the pinned dump decides as
-  before: an engine that could not answer is not an engine that said no.
-
-- **A project.godot the engine will not open no longer reads as one it will.**
-  `config_file::scan` hands back the settings it managed to read out of a
-  manifest that is `ERR_PARSE_ERROR`, so a partial parse looks like a parse.
-  Four readers had to know that and three of them did not ask, which put two
-  surfaces in disagreement inside one session: `project_audit_assets` reported
-  the file as unloadable while `project_analyze_impact` reported its
-  `[autoload]` line as a live dependency of a singleton that is not registered
-  and cannot be, with nothing in `limitations` about it (#826). The question is
-  asked once now, by `config_file::loadFailure`, and each reader answers it in
-  the way its own job needs. `project_analyze_impact` and
-  `project_rename_references` still report the line, because a rename has to
-  edit it whether or not the file loads, and both now carry a limitation naming
-  the setting and the reason -- `impact_count` is what a caller reads as "here
-  is what a rename will touch", and a rename planned on a manifest the next
-  editor run will refuse is worth saying out loud. `script_check_syntax` stops
-  demoting an `Identifier not found` on the strength of an `[autoload]` key in
-  a file that registers nothing: measured on 4.5.1 and 4.7.2 with the entry
-  above the broken value and below it, the project does not open either way,
-  `--headless --path` falls through to the project manager and the singleton
-  never enters the tree. Those errors are real, so they stay errors, and they
-  now carry a note naming `project.godot` rather than sending a reader off to
-  rewrite a script that is fine. `project_remove_input_action` refuses instead
-  of deciding "the project does not define this" out of a file whose parse
-  stopped before the action -- and its removal would have written the editor's
-  whole settings map over the hand edit that broke the file.
-- **Every live route now gives the same account of a failed engine.** Five
-  places in this codebase turn a live failure into an answer, and they did not
-  carry the same facts. `annotateEngineState` is what attaches the account of
-  what happened to the engine -- whether it is alive, gone or unverifiable, the
-  crash report path and the exception, and then the `incident`, `cause` and
-  `recovery` that are what tell a caller to stop retrying -- and the Phase 7
-  envelope never called it. So the same crashed engine answered differently
-  depending on which tool noticed: `runtime_read_logs` reported the crash, and
-  `runtime_read_profiler` and `spatial_query_raycast_batch` reported
-  `runtime_route_request_failed` with an upstream code, no crash report path
-  and no reason not to call again (#854). That is the failure #595 was filed
-  about, one path along: back then the missing fact was the requested stop, and
-  it was added to one path and not the others. Nothing made the paths share.
-  Each was written where it was needed, each was correct about the thing it was
-  written for, and a fact added to one was invisible to the rest. There is one
-  funnel now, `annotateLiveRouteFailure`, in `didi::runtime` beside the
-  annotations it applies, and the registry dispatch, the runtime tools, the
-  live resource reads and the Phase 7 envelope all pass a failure through it
-  before they answer. Each keeps what is genuinely its own: `upstream_code` and
-  `upstream_message` belong to the Phase 7 envelope, the deadline that arrives
-  without transport state is the runtime reader's own rule, and whether a
-  quarantine actually took is the caller's fact rather than the funnel's. The
-  Phase 7 unknown-outcome branch gained the same account, because why an
-  outcome is unknown is the useful half and a mutation whose engine crashed
-  mid-call is not a mutation whose engine is merely slow. An engine that
-  answered is still not a route failure: a bad node path stays a `404` the
-  caller can fix, with no engine state attached and no route retired. The check
-  that keeps it honest was the harder half and matters more than the fix --
-  every route is driven through the same transport failure and required to
-  produce the same fields, so the sixth path cannot drift the way the fifth
-  did. `rendererError` inside the extension is deliberately not one of them: it
-  runs in the engine process, where there is no session descriptor to consult,
-  so it carries what the `Error` itself holds and says nothing it cannot know.
-
-- **`origin: scene` means the connection is in the scene, not that the receiver
-  happens to live there.** #461 gave every connection an `origin` so an agent
-  asking what is wired to a node could tell its own work from the scene dock's
-  listeners, and keyed `scene` on whether the receiver's path resolved inside
-  the edited scene. That is a different question from the one the field is read
-  for, and the two part company on any UI node: `Container::add_child` wires a
-  container to its own children to keep the layout in order, so a `Button` in a
-  `VBoxContainer` reported four connections where the saved `.tscn` carries one
-  (#768). The three extra were not what `signal_connect` makes, they cannot be
-  acted on because disconnecting one breaks the layout, and unlike the scene
-  dock's rows they had a real path into the user's own scene and a method name
-  that looked like project code, so nothing about them read as noise.
-  `CONNECT_PERSIST` is the engine's own answer to "is this stored in the scene
-  file", it is the only flag `signal_connect` accepts, and it was already in the
-  payload beside the field that could not tell them apart. So `scene` now means
-  persistent. The structural fact keeps its own value rather than being thrown
-  away: `engine` is a receiver in this scene whose connection is not saved, and
-  `editor` is a receiver that is not in this scene at all. `engine_connections`
-  counts the new bucket the way `editor_connections` already counted its own. A
-  filter of `origin != "editor"` selects the same set it always did.
-
-- **A headless game is refused as a game, and the renderer stopped dropping the
-  facts a refusal carries.** `viewport_capture_frame` against a headless game
-  answered with the editor's refusal: it called the game an editor, told the
-  caller to run the editor with a display, offered a synthesised preview that
-  detaching from a game does not produce, and said nothing about the request can
-  fix that, which reads as nothing can. `runtime_launch` defaults to
-  `headless: true`, so that is the state a caller who did not think about it is
-  in, and the fix is one argument on the call that started the process (#777).
-  The diagnosis was right and the noun and both remedies were wrong. The refusal
-  now asks the session kind, which is the same fact `editor_save_scene` and
-  `scene_get_hierarchy` already refuse a game with, and says the right sentence
-  for each: an editor keeps its wording and its preview route, a game is told to
-  launch again with `headless: false`, and a process that published no kind gets
-  what is true of both. It also publishes `code: "headless_engine"`,
-  `display_driver`, `session_kind` and `relaunch_argument`, so a caller can
-  branch without reading the prose.
-  Found on the way: `rendererError` built its response from the code and the
-  message alone, so any fact attached to an Error below it was dropped. That was
-  already costing something: an isolation restore that fails sets `isolated`,
-  `node_isolation_path` and `state_restored`, which is the one thing a caller
-  needs when nodes may still be hidden in their scene, and none of it had ever
-  reached a caller. It carries the data now.
-
-- **The two readers of `project.godot` answer offline, like its writer does.**
-  `project_set_setting` writes the file with no editor attached and explains
-  itself, and then `project_get_setting`, the tool whose job is to read that
-  value back, answered `503`. So a caller could write a setting, watch the file
-  change, and have no way to verify it, read it before overwriting, or diff
-  either side of it; the workaround was to parse `project.godot` in the client,
-  which is the thing these tools exist to avoid (#780).
-  `project_list_autoloads` was the second half of the same gap, and the odder
-  one: `project_analyze_impact` already resolves autoloads out of that file with
-  no editor and reports the line each one sits on, so the section was parsed
-  offline by one tool and unreadable to the tool named after it. Both now fall
-  back to the file and report `execution_mode: "offline_fallback"` with
-  `read_from`, the way five other readers on this surface already did.
-  Two things the offline answer says about itself rather than pretending
-  otherwise. A setting comes back as `value_literal`, the text the file holds,
-  and not as `value`: turning `PackedStringArray("4.5")` into JSON with no
-  engine means writing a Variant parser, and the writer beside it publishes what
-  it put in the file for exactly that reason. And a name the file does not set
-  is a `404` that states what it is not claiming, because Godot holds a default
-  for every built-in setting and writes one into the file only once it is
-  changed, so an attached editor may still have a value for it. An unloadable
-  manifest is refused by both, with the `409` the writer already gives, since a
-  file the engine answers `ERR_PARSE_ERROR` for describes no project.
-
-- **`runnable` is read the way the engine reads it, and one rule now covers
-  both readers.** A preset whose `runnable` was anything but the literal `true`
-  or `false` made the whole `export_presets.cfg` unparseable, so a project with
-  three working presets listed none of them. Godot loads that file without
-  complaint: measured through `ConfigFile` on 4.5.1 and 4.7.2, `runnable=1`
-  comes back as int 1 and converts to true, and `true`, `false`, `0` and `0.0`
-  all load (#842). The comparison was against the two words Godot's own writer
-  emits, which is the right guess about what the file usually holds and the
-  wrong rule for what the engine accepts, and it left the branch with no true
-  positives at all: a value the parser will not start, such as `runnable=maybe`,
-  is already `ERR_PARSE_ERROR` for the whole file and is reported as that. The
-  engine parses the value and lets the Variant convert, which is `!is_zero()`,
-  so a number decides on being zero, `null` is false, and anything else the
-  parser accepts is true. That rule now lives once, in `config_file`, beside
-  the header and key rules every ConfigFile reader shares. It was already
-  written twice: the import record reader needed it for
-  `use_hidden_project_data_directory` in #833, and only that copy had it right.
-  `invalid_runnable` is no longer one of the causes a presets refusal can name.
-
-- **The bus layout is read the way Godot writes it.** #836 fixed the reader that
-  finds `default_bus_layout.tres`. This is the reader of the file, and it had
-  never been run against one the engine saved: every fixture was hand written
-  with plain quotes and an explicit `bus/0`, which is the one shape it got
-  right, so the reader and its tests agreed with each other and not with the
-  engine (#844). Two faults, both measured on 4.5.1 and 4.7.2 against layouts
-  `ResourceSaver` produced. Names and sends are StringName literals, written
-  `&"Music"` and `&""`, and stripping the quotes alone left the `&` and the
-  quotes attached, so every name published was one no tool accepts:
-  `audio_configure_bus` resolves a name through `AudioServer.get_bus_index` and
-  answers 404 for it, and `AudioStreamPlayer.bus` silently keeps Master when the
-  name is unknown. And bus 0 is usually not in the file at all, because the
-  writer skips each property already at its default and Master's defaults are
-  the whole of it, so a three bus project listed two and started at index 1.
-  Mute Master and the file carries `bus/0/mute = true` and still no name, so the
-  bus arrived with an empty one; Master cannot be renamed, so index 0 is Master
-  whatever the file says. A project whose only bus is Master writes an empty
-  `[resource]` block, and the engine loads that back as one Master bus, which is
-  now the answer rather than none. Checked against all five layouts the engine
-  wrote during this: every name, volume, mute and send now matches what
-  `AudioServer` reported for the project that produced the file.
-
-- **The export presets refusal says which of the six causes it is.**
-  `readExportPresets` set one boolean from six unrelated causes, and
-  `project_list_export_presets` and `project_export` both answered with the same
-  sentence for all of them: the file is there and could not be parsed, fix it in
-  the Export dialog (#828). For two of the six the code already had the exact
-  line and threw it away. A preset file is not small, `[preset.0.options]` alone
-  runs to forty keys on a Windows preset, so "somewhere in this file" was the
-  whole search. The refusal keeps one code and one opening and now carries the
-  cause: `reason` is a stable token to branch on, the message says what was
-  found, and `line` is published where the cause has one rather than as a
-  `line: 0` nobody can open. The first cause found is the one reported, because
-  everything after a value the parser will not start is behind the same
-  ERR_PARSE_ERROR. The remedies were never the same either, which is the other
-  half of why one sentence did not fit: the Export dialog will not open a file
-  that does not parse, so it is the right next step for a duplicate preset name
-  and no help at all for a truncated write, and each cause now names its own.
-  `declared_preset_sections` is unchanged.
-
-- **The test runner refuses an argument it does not understand.** `didi_tests
-  --filter=Tools.Rename` runs one test. `didi_tests --filter Tools.Rename` ran
-  all 694 and printed no warning, no usage line and no `Filter:` header, and
-  the exit code was the whole suite's (#803). The argv loop was an if/else chain
-  with no final else, so the flag matched neither branch, the filter stayed
-  empty and everything ran. That is the same shape the server's own parser was
-  corrected for, and the loss here is the thing the flag exists to prevent: the
-  comment above it says a single test is run alone because the suite shares
-  process-global state, and the space form silently handed back the shared-state
-  run that reasoning avoids while looking like it had done what was asked. An
-  argument the runner does not know is now refused by name, with both accepted
-  forms printed and a non-zero exit. `--list` and `--filter=X` are unchanged.
-- **CONTRIBUTING says how to run the Python suite.** It documented one module
-  and the documentation tool, and never gave a command for the whole suite. The
-  two a contributor would reach for first both failed, neither because anything
-  was wrong: `discover -s tests -t .` refuses the directory because `tests/` has
-  no `__init__.py`, and a module list fails on the one bare sibling import that
-  only resolves with `tests/` on `sys.path` (#798). Both failures are
-  indistinguishable from real breakage, which is time spent for nothing or a
-  contributor deciding the suite is flaky. The working invocation is
-  `python -m unittest discover -s tests -t tests`: pointing the top level at
-  `tests/` is what makes discovery work and what puts the directory on the path,
-  so no `PYTHONPATH` is needed. Written down beside it: `DIDI_TEST_BINARY` must
-  be an absolute path, because it is handed straight to `subprocess.run`, and it
-  means the server binary for the Python suites and the test binary for
-  `tools/test_inventory.py`.
-
-- **The Markdown link check is one implementation, and it runs before you
-  push.** CI carried its own copy inside `ci.yml` as a heredoc. That copy
-  stripped fenced code blocks and not inline code spans, so any sample where a
-  `]` is followed by a `(` was read as a link and resolved as a path. Godot's
-  own type syntax is exactly that shape, so writing down what a typed array
-  looks like failed the build: #822 was green on every compiler, every
-  sanitizer, CodeQL, the fuzzers and all three live engines, and red on
-  `macos-latest (clang)` because of two sentences in the changelog (#824). The
-  job name said compiler and the cause was prose, the step ran on every matrix
-  leg so one sample burned the whole matrix, and the check existed nowhere a
-  contributor could run it. `tools/validate_documentation.py` already had the
-  same check without the bug, so the copy is gone rather than patched. The
-  required and forbidden contract phrases that lived beside it moved into the
-  validator too, which means the gate that pins a deadline or a cleanup rule
-  now runs from the same command as everything else. It caught its first one on
-  the way in: two documents carried the same sentence about session lock files
-  and only one of them had been corrected.
-
-- **A session lock file is swept up once nobody holds it.** The route takes a
-  lock beside the descriptor and releases it when the route closes. Releasing a
-  lock does not remove the file it was taken on, so every session that ever ran
-  left one behind in a directory every project on the machine shares, while the
-  descriptor beside it was retired correctly. Two weeks of ordinary use came to
-  205 files, none of them naming a live session (#787). The scan that
-  `runtime_list_sessions` already runs now sweeps them on the same opportunistic
-  pass that reaps a descriptor tombstone, which covers a crash as well as a
-  tidy exit: removing the file in the destructor would only have covered the
-  second. Two things have to be true before one goes. The descriptor beside it
-  has to be gone, so a live session is never a candidate, and the lock has to be
-  free, which is proved by taking it rather than by the file looking unused. A
-  lock another client holds answers 423 to the sweep exactly as it does to an
-  attach. Reproduced through the built server: thirty orphaned locks in a
-  session directory, one `runtime_list_sessions`, none left.
-
-- **The offline bus reader follows the manifest, and answers with the bus the
-  project actually has.** `audio_list_buses` read `project.godot` with its own
-  line reader and its own regex, comparing a section header as a whole line and
-  matching a key with its whitespace in place. Both are spellings the engine
-  honours, so a project that moved its layout file and wrote
-  `[ audio ]` or `buses / default_bus_layout` was told it has no buses at all,
-  with a note saying it ships no layout file while the file sat where the
-  manifest said (#836). Measured on 4.5.1, 4.6.2 and 4.7.2: each spelling on its
-  own turned a three bus project into `bus_count: 0`, and the ordinary spelling
-  read all three correctly. The manifest now goes through `config_file::scan`
-  like every other settings reader, which is what #809, #811 and #814 taught the
-  rest of them.
-  The second half is the answer for a project with no layout file. It was
-  `bus_count: 0` and an empty list, with a note in the same payload saying Godot
-  uses a single Master bus, so the two halves disagreed and the machine readable
-  one was wrong (#837). Every Godot project has a Master bus. Measured on all
-  three lines, with no layout file and again with the manifest naming one that
-  is not there: `AudioServer` reports one bus, Master, at 0 dB, no send, no
-  mute, no solo, no bypass. That is now the answer, with the same fields every
-  other bus carries. `layout_present: false` is unchanged and is still how a
-  caller tells a project that ships a layout from one that does not.
-
-- **The import record is looked for where Godot writes it.** The record was
-  found by taking the parent directory of a declared output, which is the right
-  answer for a texture and for nothing else. Godot builds that path from the
-  project data directory, so every importer whose outputs land somewhere else
-  got no record at all, fell back to the modification times and reported
-  `source_newer_than_output` for an asset the engine considers current (#833).
-  Godot's own `csv_translation` is the clearest case: on a three locale CSV it
-  writes the `.translation` files beside the CSV and the record under
-  `.godot/imported/`, so the two are nowhere near each other. The scene
-  importers do the same whenever meshes or materials are extracted to real
-  files. The audit now reads
-  `application/config/use_hidden_project_data_directory` out of `project.godot`
-  and builds the path the way the engine does. Measured on 4.5.1, 4.6.2 and
-  4.7.2 both ways: turning that setting off moves the record to
-  `godot/imported/` and moves no output at all, and a project that has turned it
-  off since its last import has a stale record sitting in the old directory,
-  which is why the setting is read rather than both names being tried. The
-  setting is read through the shared ConfigFile scan, so
-  `config / use_hidden_project_data_directory = false` is the same setting here
-  that it is to the engine (#809). A `project.godot` that is missing or does not
-  parse leaves the default `.godot`; a project whose manifest does not load has
-  no record under either name, and what the readers of an unloadable manifest
-  should say is #826. The project data directory is also skipped by the scan
-  under whichever name it has, which `.godot` alone did not cover.
-- **The freshness reproduction is tested against records Godot wrote.** The
-  audit reproduces four things the engine does by hand: the digest, the name of
-  the record, where the record lives, and what `dest_md5` is a digest of. Every
-  test of it was written against a `.md5` built by the test, so the fixture and
-  the implementation shared one belief and a wrong belief still passed a green
-  suite three times (#834). The live harness now imports a two locale CSV in the
-  smoke project on all three engine lines and audits the result. One assertion
-  covers a current asset whose source is newer than its outputs, which is the
-  state every clone is in and which only a record can answer. The other appends
-  one byte to one output and expects `output_changed_since_import`, which only
-  the `dest_md5` half can answer, over two files rather than the single output a
-  texture has. Both were run against the previous lookup and both fail there.
-
-- **The audit reads both halves of the record, and says so when it reads
-  neither.** #827 taught `project_audit_assets` to answer the freshness
-  question out of the `.md5` Godot writes beside an imported output. It read
-  one of the two digests in that file. The other one is the output side, so an
-  imported output that no longer matched what was imported reported clean
-  (#830). `dest_md5` is one digest over every `dest_files` value concatenated
-  in the order the sidecar declares them, which is why the merged output list
-  could not stand in for it: on an ordinary texture that list names the same
-  file twice. Outputs that disagree are now reported as
-  `output_changed_since_import`, a finding of its own rather than another
-  `source_changed_since_import`, because a changed source is usually
-  deliberate and a changed output never is. Measured on 4.6.2: corrupting one
-  output and rescanning reimports the asset whenever the editor's filesystem
-  cache is cold, which is every fresh clone and every new worktree.
-- **`source_newer_than_output` meant two things, and the documented remedy
-  fixed one of them.** It was reported both for an asset Godot has never
-  imported in this checkout and for a source above the 64 MiB the audit
-  hashes, and the two have different remedies (#831). Opening the project in
-  the editor once makes the first go away and does nothing at all for the
-  second, so a caller who followed the advice on a 200 MB source got the same
-  finding back with nothing explaining why. The two are now separate.
-  `source_newer_than_output` means there is no record, and its remedy is the
-  one that works. A record that is there and was not compared -- either half,
-  for size or for a read that did not complete -- is
-  `import_freshness_unchecked`, and its `detail` says which half and why. No
-  timestamp comparison is offered in its place, because the record proves the
-  engine will compare digests and the weaker signal is wrong for the reason
-  #827 was filed about. A finding may now carry a `detail` with no `line`,
-  which only the parse refusal published before.
-- **Import freshness is read from the record Godot wrote, not from
-  modification times.** `project_audit_assets` reported
-  `source_newer_than_output` for all three assets in this repository's own
-  `demo/`, and all three were false: the engine's own record said every one of
-  them was up to date (#827). The cause is that git does not carry mtimes, so
-  after a clone, a checkout or a new worktree the ordering of a committed
-  source and a committed output is whichever order the checkout happened to
-  write the two files in. That is not a corner case, it is every CI run, and a
-  finding that is always wrong teaches a caller to skim past findings. Godot
-  writes a `.md5` beside every imported output holding the digest of the source
-  it imported, named the way `ResourceFormatImporter::get_import_base_path`
-  names it, and that file is what the editor reads to decide a reimport. The
-  audit now reads it. A source whose digest disagrees is reported as
-  `source_changed_since_import`; a source whose digest agrees is not reported
-  at all, and no timestamp is consulted either way. `source_newer_than_output`
-  survives as the fallback and only as the fallback, for an asset with no
-  record and for a source above 64 MiB that is not hashed, so the weaker claim
-  is never presented as the engine's. The `limitations` say which is which, and
-  say what is still not checked: the engine also compares the digest of the
-  outputs and the importer's version, so no finding is not a promise that Godot
-  will leave the asset alone.
-- **A `.import` and an `export_presets.cfg` the engine refuses were both read as
-  though they had loaded.** #817 and #820 taught `project.godot` that a file can
-  end inside a value and that a balanced file is not a loadable one. Both
-  sentences are about a ConfigFile rather than about that one file, and the two
-  readers one file along consulted neither: `project_audit_assets` walked a
-  `.import` Godot answers `ERR_PARSE_ERROR` for, counted it as scanned and
-  reported `import_issue_count: 0`, and `project_list_export_presets` published a
-  preset out of a file with `export_path=)` in it, runnable, with `)` as the path
-  an export would write to (#823). Both now ask the scan what it already knows.
-  A sidecar is reported as `unparseable_import_metadata`, a finding of its own
-  rather than another `invalid_import_metadata`, and it carries the line and what
-  the parser could not start: the remedy is to repair one line, and the cost of
-  not repairing it is particular. The engine recovers from a broken sidecar
-  destructively -- on the next reimport it prints the parse error, imports the
-  asset with the importer's defaults and writes a new uid -- so what is lost is
-  every import setting in the file and every `uid://` reference to that asset,
-  while the asset itself comes back looking fine. An `export_presets.cfg` is
-  malformed as a whole instead, because that is what Godot does with it: asked to
-  export from a file with one refused value, 4.5.1, 4.6.2 and 4.7.2 all answer
-  `Invalid export preset name` and list no presets at all, even though the keys
-  ahead of that value parse. `project_export` reads through the same code, so it
-  refuses the same file rather than running against a preset the editor has never
-  had.
-- **A balanced `project.godot` is not a loadable one, and a line can hold two
-  settings.** `Scan::complete` counts brackets, which is what the walk it falls
-  out of can count. Godot parses a value, so `config/broken=)`,
-  `config/name=Pair` without the quotes, `a={1 2}` and `a=[1,,2]` are every one
-  of them `ERR_PARSE_ERROR` with every bracket closed, the project does not open
-  at all, and `project_set_setting` wrote into such a file, reported
-  `persisted: true`, and left it exactly as unloadable (#820). The write and the
-  dry run now refuse it with a 409 that names the line and says what the parser
-  cannot start, and `project_audit_assets` reports it as
-  `unloadable_setting_value` rather than answering `project_settings_issue_count:
-  0` for a project nothing will open. The check is deliberately not a
-  `VariantParser`: a constructor with the wrong arity, one the engine does not
-  know, and a `Resource()` whose file is missing are all `ERR_PARSE_ERROR` and
-  none of them is reported, because deciding those needs the engine's own tables
-  and a reader that guesses at them refuses files that load. An empty answer is
-  not a promise that Godot will load the file; a finding is a promise that it
-  will not.
-- Two settings on one line are two settings. `a=1 b=2` is two keys the engine
-  reads and registers, and `project_set_setting` works in whole lines -- which
-  is right for a value spread over four of them and wrong here, because it
-  rewrote the line with only the key it was asked about and deleted the other,
-  with every field in the response true about the one that survived and nothing
-  anywhere about the one that went (#821). The write and the removal now refuse
-  with a 409 naming the sibling, and splitting the line is the remedy. Refusing
-  rather than rewriting part of a line is the smaller change for a shape Godot's
-  own writer never produces. `project_analyze_impact` had the quieter half of
-  the same bug: its walk took the first key on a line, so a file named only by
-  the second one came back as `impact_count: 0`. It now reads every key on the
-  line.
-- A key the engine built by joining the line above into this one is refused for
-  the same reason: that name lives on more lines than a rewrite of the
-  assignment replaces, so the text above would join forward again and the
-  setting written would not be the setting asked for.
-- An identifier does not end a value. `Vector2 (1, 2)`, the same value with
-  `(1, 2)` on the line below, and an `Array[int]` with its `([1, 2])` after it
-  all load on 4.5.1, 4.6.2
-  and 4.7.2, and the reader ended the value at the space or at the `]` and built
-  a key out of what followed -- reporting a setting the engine does not have and,
-  once the check above existed, refusing a file that loads. The seven names that
-  are a value on their own are matched exactly, so `flag=true` followed by a
-  section header is still the boolean and then the section. This is not a
-  hypothetical shape: Godot's own editor writes `$selected_nodes` as an
-  `Array[NodePath]` with an empty `([])` after it, in the editor state files
-  under `.godot/editor/`, and the reader was building the key `([])2D` out of
-  the tail of it. Running the old walk and the
-  new one over 2036 ConfigFiles from three real games, the only lines that
-  differ are those, read correctly now.
-
-- **A value is what the engine reads, not the rest of one line.** #815 made the
-  writer replace a whole multi-line value. The reader was still handing back the
-  text between the `=` and the end of that one line, and Godot means neither
-  boundary. Its own writer spreads a dictionary over four lines, and the banner
-  it puts at the top of every `project.godot` documents `param=value ; comment`.
-  So `project_set_setting`'s dry run offered `{` as the value it was about to
-  replace, which is #417's failure exactly, and `previous_value` in the
-  confirmed report said the same thing. A `; note` after a value was carried
-  into it: `project_list_export_presets` published a preset named
-  `"Trailing" ; a note`, quotes and all, and `project_export` could not be given
-  that preset at all, while the same note in a `.import` made
-  `project_audit_assets` report `invalid_import_metadata` against a file the
-  engine loads without complaint. The value is now every line it spans, with the
-  comment on each line dropped, and a `;` is a comment at any bracket depth --
-  all asked of 4.5.1, 4.6.2 and 4.7.2, all three identical (#816). Asking
-  settled one more thing while it was being asked: a value ending does not end
-  the line. The engine carries on reading from where the value stopped, so
-  `a=1 b=2` is two settings, `name="a" [t]` opens a section, and
-  `name="a" # note` joins `#note` forward into the key below exactly as a
-  `# note` line of its own would. That last one is the habitual way to write a
-  comment, and it was the one spelling of #813's trap the scan still missed.
-
-- **A `project.godot` Godot refuses to parse is no longer read, previewed and
-  written as though it loaded.** A file that ends part-way through a value is
-  `ERR_PARSE_ERROR` for the engine and the project does not open at all.
-  `ConfigFile.load` returns 43 for the same text and still hands back the
-  sections it managed to read, which is the trap: a partial parse looks like a
-  parse. `project_set_setting` offered to replace a value in a file nothing can
-  load, and the confirmed write rewrote one line and reported success, leaving
-  it exactly as unloadable. The scan already computed the fact and no reader
-  consulted it. Both the write and its dry run now refuse with a 409 naming the
-  engine's own verdict, and `project_audit_assets` reports it (#817). The
-  opposite case is not this: a file that ends part-way through a *key* is
-  dropped by the engine with `OK`, which is an ordinary trailing `# note`, and
-  it is still read and written.
-
-- **A key is the tokens joined, not the text before the first `=`.** Godot does
-  not read a ConfigFile key as the text on one line. It reads a run of tokens,
-  joined, with every space between them dropped, and a line that has no `=` does
-  not end the key: it joins forward into the next line that does, swallowing any
-  `[section]` header on the way. Asked on 4.5.1, 4.6.2 and 4.7.2, all three
-  identical. The consequence people actually hit is writing `# disabled for now`
-  above an `[autoload]` entry, which is the natural way to turn a singleton off
-  by hand and is worse than leaving it on: the script loads under the name
-  `#disabledfornowGood`, so every `Good.` reference in the project fails at run
-  time and `autoload/Good` does not exist. `project_analyze_impact` reported an
-  autoload named `Good`, `project_rename_references` would have rewritten for a
-  name nothing registers, and the user's real fault was the one thing nothing
-  said (#813). The same rule made `config / name` a setting `project_get_setting`
-  could not find and `project_set_setting` appended a duplicate key for, and made
-  the GDScript diagnostics suppress an undefined identifier for a singleton that
-  is not there. Every reader of a ConfigFile now computes the key the way the
-  engine computes it, in one place. That includes the part a line-at-a-time
-  reader gets wrong in the other direction: a value can span lines -- every
-  `[input]` action Godot writes is a dictionary across four or more of them --
-  and those lines are value text, not keys. `project_set_setting` replaces the
-  whole of such a value rather than the first line of it, which used to leave a
-  dangling `}` that would join forward into the setting below.
-
-- **`export_presets.cfg` is read by the same rules as every other ConfigFile.**
-  Its reader still treated `#` as a comment, which is the mistake #810 fixed
-  elsewhere, and it could not take the one-token fix because of what sits under
-  it: a `#` line with no `=` is not a comment and not a broken line either, it is
-  a key that eats what follows. So a trailing `# note` had to stay harmless while
-  a note above a key had to stop the presets being reported as though they were
-  intact (#812). They now read as the engine reads them: a trailing note leaves
-  both presets, a note that swallows `platform` leaves a preset with no platform
-  and the file is refused as unparseable, and a file with content but no section
-  the engine honours is refused rather than reported as a project with no
-  presets. An ini whose sections are all something else is still a project with
-  no export presets, not a broken file.
-
-- **A spaced header hides nothing from the last two readers.** #809 fixed the
-  section rule in the four readers of `project.godot` and left two out on
-  purpose, because their fix was not the same one-token change. `[ preset.0 ]`
-  matched neither anchored pattern in `readExportPresets`, so every key under it
-  was skipped and a project with a working export preset reported as a project
-  with none, with nothing attached to say why -- the half that matters, because
-  `export_presets.cfg` is committed, hand-edited and generated for CI exports.
-  `[ remap ]` and `[ deps ]` were compared as whole lines in the `.import`
-  reader, so `project_audit_assets` reported `invalid_import_metadata` against a
-  file the engine loads without complaint (#814). Both now name their sections
-  through the same rule as the rest.
-
-- **A `#` line in `project.godot` is a setting, not a comment.** `;` starts a
-  comment in a Godot ConfigFile. `#` does not: asked on 4.5.1, 4.6.2 and 4.7.2,
-  `# Hash="*res://a.gd"` under `[autoload]` registers the setting
-  `autoload/#Hash`, and the script it names enters the tree on every run. The
-  impact scan skipped both characters, borrowing GDScript's comment rule for a
-  file that is not GDScript, so a user who disabled a singleton the habitual way
-  had a singleton that still loads and `project_analyze_impact` answered
-  `impact_count: 0` for the script it loads (#810) -- the answer that tool uses
-  to mean safe, beside `target_exists: true`. `project_rename_references`
-  collects from the same place, so it dropped the entry too. Such a line is now
-  read as the setting Godot reads, and reported with the text of the line, which
-  is the evidence that says why the autoload is still there. `;` is unchanged.
-  The same rule was wrong in the `.import` reader behind
-  `project_audit_assets`'s import findings, and is corrected with it.
-
-- **A spaced section header is the same section.** `[ application ]` is the
-  application section, and Godot merges a second spelling of a header into the
-  first -- asked on 4.5.1, 4.6.2 and 4.7.2, with a tab-padded header too. Three
-  readers compared the header as a whole line instead of the text inside the
-  brackets. `project_set_setting`'s dry run reported a setting that is in the
-  file as absent, with an empty `previous_literal`, so a caller could not see
-  what they were replacing, and the write appended a second `[application]`
-  section rather than updating the line above it -- a `project.godot` Godot's own
-  writer would never produce, from the one tool on the surface that edits that
-  file offline (#809). The GDScript diagnostics read no singletons out of such a
-  file, so every autoload a script named came back as an undefined identifier,
-  which is the whole reason that list is read. And `project_remove_input_action`
-  refused to remove an action that is there, because the file it checks did not
-  appear to define one. A header is now the bracket text, trimmed, everywhere it
-  is read. A different section is still a different section.
-
-- **A spaced `[autoload]` key is the same key.**
-  `GameState = "*res://scripts/game_state.gd"` is a working autoload. Godot
-  registers it exactly as it registers the spaceless form, and a tabbed one too
-  -- asked on 4.5.1, 4.6.2 and 4.7.2. `project_analyze_impact` matched the key
-  by the prefix `Name=`, so it read the spaced line as a line that names
-  nothing and answered `impact_count: 0` (#802), which is the answer this tool
-  uses to mean safe. `project_rename_references` collects from the same place
-  since #792, so it said nothing either, and a caller renaming or deleting on
-  an empty report broke every script that named the global. The key is now read
-  as the text before the first `=`, trimmed and compared whole, through the
-  same matcher `project_set_setting` already used on this file. The section
-  header was read the same strict way two lines up, so `[ autoload ]` was not
-  the autoload section either; it is now the text inside the brackets, trimmed.
-  A longer name that starts with the target is still a different autoload, a
-  key under another section is still under another section, and the spaceless
-  form reports exactly what it reported before.
-
-- **A second merge no longer cancels the first one's CodeQL run on `main`.**
-  The workflow cancelled any in-progress run for the same ref, which is right
-  for a pull request -- pushing a fixup should not leave the superseded run
-  burning twenty minutes -- and wrong for `main`, where the two runs are two
-  different commits rather than two attempts at one. Four of the last thirty
-  runs on `main` died that way, each time because a merge landed inside the
-  previous merge's C++ analysis. Two costs, neither obvious from the red X:
-  the cancelled commit was never analysed, and this workflow's own header says
-  it exists partly because Scorecard's SAST check scores on whether a tool ran
-  on the commits, which a cancelled run does not. The other is the X itself,
-  on a run that had nothing wrong with it, on the branch where a red mark is
-  supposed to mean something. `cancel-in-progress` is now true only for
-  `pull_request`, so pushes to `main` queue and each merge gets its own
-  analysis.
-
-- **`project_rename_references` reports the `[autoload]` line that defines the
-  name.** The rename and the impact analysis are meant to agree about what a
-  rename touches, and for a singleton they did not. The analysis reads
-  `project.godot` and reports the `[autoload]` key; the rename never read the
-  file, so the one line that defines the global was in `updated_files` because
-  it was not rewritten, in `code_references_not_updated` because it was not
-  listed, and in no other field (#792). A caller worked through the list by
-  hand, finished it, and still had a global that no longer existed. Both tools
-  collect from the same place now, and the key arrives in
-  `code_references_not_updated` with kind `autoload` and its line. It leads the
-  list rather than trailing it, so `max_impacts` cuts a use of the name before
-  it cuts the definition. It is reported and never rewritten, because an
-  autoload key and a symbol that happens to share its spelling are different
-  things and rewriting the definition of a global on a whole-word match is the
-  breakage this tool exists to prevent. When there is one, a `limitations`
-  sentence says to edit `project.godot` too; when there is not, nothing is said.
-
-- **`project_audit_assets` follows the resources `project.godot` names.** The
-  audit built its reference list from the project's resources, and
-  `project.godot` is not one, so nothing it names was ever counted as used.
-  Every Godot project ships an icon, so every project got at least one false
-  orphan on the one question this tool answers, and acting on the answer
-  deletes the icon (#774). The manifest is read through the same bounded scan
-  as everything else and counted in `scanned_text_files`, so `config/icon`,
-  `boot_splash/image`, `run/main_scene`, the `[autoload]` entries and the
-  `res://` values under `[internationalization]` all count as use. A quoted
-  `res://` value is a reference form now wherever it appears, which also covers
-  a path in an exported string property. It counts as use and is not checked
-  for existence: in a script the same form can be `"res://levels/"` with the
-  rest built at runtime, and a broken reference that is not broken is worse
-  than one that is not reported. The manifest stays out of the shared source
-  list, so `project_analyze_impact`, which reads that file itself and names the
-  section a line belongs to, still reports each setting once.
-
-- **`runtime_launch` names the process and the engine the rest of its answer
-  means.** Two fields in one response pointed somewhere else. The `summary`
-  sentence carried the pid of the process Didi spawned while `pid` and
-  `game_session.pid` carried the game's, and on Windows those are two live
-  processes: Godot's console build starts the engine as a child and waits on
-  it, so an agent quoting the sentence named a launcher that `runtime_stop`,
-  `runtime_attach_session` and Task Manager all disagreed with (#773). The
-  sentence is built from the game's pid now. When no session is published
-  there is no game pid to give, and the sentence says the number it has is the
-  process Didi spawned and may be a launcher.
-  And `attached_engine_version` was read after a detached launch had selected
-  the game it just started, so the game answered about itself: a 4.5 editor and
-  a 4.7 game read as agreement, `engine_version` was null because a detached
-  run captures no banner to read it from, and `matches_attached_engine` was
-  null in every configuration there is (#772). The attached session is read
-  before the launch selects the new one, the launched engine names itself
-  through the session the game published, and the comparison is made. This is
-  the press-play loop: an author edits in one engine and the game can run on
-  another, and the field whose name promises to say so said the opposite.
-
-- **A resource slot takes a list of classes, so materials can be assigned
-  again.** Godot spells the classes a property accepts as one comma-separated
-  string and repeats it under `class_name`, and `scene_set_property` compared
-  the whole string as a single class name. No class is called
-  `BaseMaterial3D,ShaderMaterial`, so every write to such a slot was refused,
-  including one naming a type in the list verbatim (#783). That is 34
-  properties in the pinned class reference, among them every material on every
-  mesh, `CanvasItem.material` which every `Node2D` and every `Control`
-  inherits, the particle process materials, the sky materials, the decal
-  textures and the camera attributes. A game is meshes with materials on them,
-  and none could be given one in 2D or 3D. The declared type is parsed as the
-  list it is now: a resource is accepted when it is, or inherits from, any
-  entry, and an entry written with a leading `-` names a class the slot
-  excludes even though it inherits from another one, which is how
-  `Decal.texture_albedo` takes a `Texture2D` and not an `AtlasTexture`. That is
-  the rule the editor's own resource picker applies. The refusal for a genuine
-  mismatch now names every type the slot takes rather than the raw string, and
-  an excluded type is told that it was excluded. `scene_instantiate_node`'s
-  `properties` and `shader_set_uniform` share the check and are fixed with it.
-
-- **`resource_create` stops writing files Godot cannot load or silently empties.**
-  Two faults in the same writer, both reporting success. The composite packed
-  arrays came out with a constructor per element --
-  `PackedVector2Array(Vector2(0, 0), Vector2(512, 0))` -- and Godot's text
-  parser answers `Expected float in constructor` and fails the whole resource,
-  not just the property, so a `NavigationPolygon`, a `Polygon2D`, a `Line2D`'s
-  points, an `OccluderPolygon2D` or a `Gradient`'s colours could not be
-  authored through the surface at all (#765). Godot's own saver writes one flat
-  run of components and that is what these write now; `"values"` still takes an
-  element per entry, and also takes the components already flattened, which is
-  what a caller copying one out of a `.tres` will send. A flat run that is not
-  a whole number of elements is refused, because Godot drops the trailing
-  part-element and says nothing. `PackedVector4Array` is written too, where
-  before it was refused as a type the writer did not know.
-  The second is that the declared-type guard only ever inspected objects, so
-  any string, number, boolean or array went into any typed slot verbatim with
-  `property_check` reporting `checked: true` (#764). Godot keeps the property's
-  default for a value it cannot convert and prints nothing a caller sees:
-  `radius = "big"` loads as `0.0`, `corner_detail = "many"` as `1`, and
-  `size = 7` on a `RectangleShape2D` as `(0, 0)`, which is a collision shape
-  with no extent that every tool in the chain called written. The guard now
-  reads the whole declared type rather than only the vector and colour ones, so
-  a slot declared `int`, `float`, `bool`, `String`, `StringName`, `NodePath`,
-  `Array` or a packed array refuses a value it cannot hold, naming the property,
-  what it is declared as and what to send. The conversions Godot does anyway are
-  kept: an integer into a `float`, a `"#rrggbbaa"` string into a `Color`, and
-  `4.0` where `4` was meant, because JSON does not separate the two. A declared
-  type with no rule -- a `Transform3D`, a `Dictionary`, a resource slot -- is
-  left exactly as it was.
-
-- **The Unix socket server stops without pulling a descriptor out from under
-  its own thread.** `PosixIpcServer::stop()` closed the listening socket and
-  then joined the thread that was still polling and accepting on it, so for up
-  to one 50 ms poll slice the accept loop worked a descriptor number the
-  process had already given back, and any `open` in that window could be handed
-  it (#757). POSIX names that reuse in the rationale for `close`, and this runs
-  inside a Godot editor, which opens files constantly. The `shutdown` that came
-  before the close was not buying a wakeup either: `shutdown` on a socket that
-  is only listening is `ENOTCONN`, so the Linux behaviour that made it look
-  deliberate does not hold on macOS, and the loop already left on its own
-  within a poll slice because the socket is non-blocking and it rereads the
-  running flag every pass. `stop` now leaves the listening descriptor alone,
-  joins, and closes it with no other thread left holding the number. The
-  connected client keeps its `shutdown` before the join, because that one is
-  connected, so the call applies, and it is what ends the long read an idle
-  client is sitting in. Taking it there now also stops the accept loop closing
-  it, so each descriptor has one owner and one close. The cost is up to 50 ms
-  on a teardown that already joins a thread. The POSIX branch had no test that
-  started and stopped a server at all; it now has one that holds a client open
-  across the stop, takes every descriptor number the teardown frees, and
-  fails on a stop that waits out the idle window, on a descriptor closed twice,
-  and on one closed by nobody.
-- **A timeout that could not finish the kill says so.** `runtime_launch`
-  terminates the job its child was spawned into and waits for the job to
-  empty, so the tool does not answer while its own game is still dying. The
-  wait is bounded at five seconds, because a process that will not die must
-  not hang the tool, and the bound left no trace: the job emptying, the
-  query failing and the bound expiring all reached the same exit and
-  produced the same answer, so a caller could not tell a kill that finished
-  from one that was abandoned (#755). A loaded machine reaches that bound
-  where an idle one does not, which is how it red-lighted a pull request
-  about tilemap coordinates that touches none of this. The answer now
-  carries `kill_wait`: `tree_exited`, `wait_expired`, `query_failed`, or
-  null for a run that never waited on a kill. `wait_expired` and
-  `query_failed` say so in the summary as well, because a tree that may
-  still be running changes what the next call can assume. The bound is
-  unchanged and the test asserts the strong form on the outcome that
-  earns it.
-- **The offline process tools take the whole tree down on timeout.** The
-  README states it as fact and the code only sometimes did it.
-  `process_runner.cpp` backs `csharp_check_build`, `shader_check_compile`,
-  `project_export`, `gridmap_export_mesh_library` and the git and engine runs
-  behind speculative verification, and it had neither guard the sibling spawner
-  grew in #351: on Windows it
-  started the child running and assigned the job afterwards, so anything
-  spawned in between was outside the job and survived `TerminateJobObject`,
-  and `dotnet build` starts MSBuild worker nodes almost immediately. On
-  POSIX only the child called `setpgid`, so a timeout that fired before the
-  child reached it signalled a process group that did not exist yet and
-  nothing was delivered at all (#758). The child is now created suspended,
-  put in the job, and then resumed; the parent calls `setpgid` too, the way
-  POSIX specifies for exactly this race; and the group signal falls back to
-  the single process rather than giving up. Didi is a long lived server, so
-  a leaked build accumulated over a session instead of dying with the call.
-
-- **One InputEvent vocabulary, spelled the engine's way, and published.**
-  `project_set_input_action` and `runtime_inject_input` both describe their
-  `events` as objects "in Godot's InputEvent shape" and did not agree on what
-  that shape is: the first read `shift`, the second `shift_pressed`, and Godot's
-  own property -- the one `project_set_input_action` itself writes into
-  `project.godot` -- is `shift_pressed`. So the tool accepted `shift`, stored it
-  as `shift_pressed`, and refused `shift_pressed` (#737). The engine spelling is
-  the answer now on both tools, the short form stays as an alias, and
-  `project_list_input_actions` reports both so a descriptor read from it can be
-  written straight back.
-- **The InputEvent vocabulary is published, not just enforced.**
-  `project_set_input_action`'s handler is closed -- it refuses an unknown
-  property, an unsupported type, a missing type and a non-integer keycode, every
-  time -- and its schema said `items: {"type": "object"}`, which is any object at
-  all. A host validating against the published schema sent whatever the model
-  invented and learned the vocabulary one round trip at a time (#736). It now
-  publishes a `oneOf` over the four shapes with `additionalProperties: false`,
-  per-field bounds and `required` on each branch, the way `runtime_inject_input`
-  already did.
-- **A refusal about an event says which entry and which property.** "Key event
-  contains an unknown property" named neither, on a tool taking up to 64 events,
-  where every other argument refusal on this surface names the property and
-  lists what the tool takes (#737). And a `oneOf` where every branch pins one
-  property to a `const` is a tagged union, so the validator reads the tag
-  instead of guessing from which required properties happen to be present: an
-  event with an unsupported `type` used to match the branch whose only required
-  property is `type` and be refused for a property of the wrong shape. That is
-  the shared validator, so `runtime_inject_input` and `tilemap_set_cells` get it
-  too. `keycode` now says in the schema that it is a `Key` enum value, which
-  nothing said before.
-- **A coordinate is an object anywhere a vector is.** Vectors are objects on
-  this surface -- `scene_set_property`, `scene_instantiate_node`,
-  `resource_create`, `physics_raycast_query`, `nav_query_path` -- and
-  `LLM_INSTRUCTIONS` states that rule with no exception. The two cell writers
-  took arrays, so an agent following its own instructions met two refusals in a
-  row on the tool whose whole job is painting a level, and
-  `tilemap_get_used_rect` answered with objects a caller then had to transform
-  before feeding them back (#738). `tilemap_set_cells` and `gridmap_set_cells`
-  take `{x, y}` and `{x, y, z}` now, the array forms still work, and each takes
-  the other's field name, `coords` or `position`, for the same thing.
-- **`LLM_INSTRUCTIONS` no longer forbids what the surface does.** One section
-  said to send `{x, y}` for a Vector2, a `#rrggbb` string for a Color and a
-  `res://` path for a Resource slot, and eleven lines later said not to send
-  Vector, Color or Resource values "in Phase 1" (#739). All three work, the
-  phase they name finished long ago, and an agent reading top to bottom met the
-  prohibition last. The sentence is now the exception list it should always have
-  been: arrays, objects that are not one of those shapes, and Transform, Basis
-  and Object values are refused, and the refusal names the property, its Godot
-  type and the shape it wants.
-- **A property write that landed says so.** `scene_set_property` compared what
-  the property holds against the raw JSON argument, so a Color sent as
-  `{r, g, b}` -- the spelling the instructions document -- came back with four
-  keys and was reported `applied: false`, and a `"#rrggbb"` string never matched
-  an object at all. `applied: false` is documented to mean Godot discarded the
-  write, so an agent following the instructions would undo or retry a write that
-  was perfect. #638 fixed exactly this for `shader_set_uniform` and this call
-  site kept the raw argument; it compares against the Variant actually sent now.
-- **A `oneOf` refusal picks the branch by type.** A coordinate taken as either
-  `[x, y]` or `{x, y}` has an array branch with no required properties, so every
-  malformed object counted it as the one shape the caller meant and was answered
-  "must be an array, not an object" -- about a form the tool accepts. The
-  validator drops branches whose declared type cannot hold the value, and
-  describes an array branch by its length rather than as "no required
-  properties", which is #489's finding in the shape this change produces.
-- **`scene_create` makes the scene you meant.** `root_type` was an enum of
-  `Node2D`, `Node3D` and `Control`, and almost every scene in a real project has
-  a root outside it: a player or an enemy is a `CharacterBody2D`, a pickup or a
-  trigger an `Area2D`, terrain a `StaticBody2D`, a HUD a `CanvasLayer`. The
-  route that worked was to create a throwaway `Node2D` scene, instantiate the
-  type you wanted under it, build the subtree there and `scene_pack_branch` it
-  to the real path -- four calls, nothing on the surface saying so, and a
-  scratch scene left on disk the caller then has to remember to delete (#740).
-  `root_type` is any Godot class that inherits `Node` now, which is the set
-  `scene_instantiate_node` has always taken. A class the engine does not know
-  and a class that is not a `Node` are refused separately, each naming the
-  class, and neither writes a file.
-- **An asset the editor has never seen gets imported, and the answer says
-  whether it did.** Adding art is step one of building a game and there was no
-  way to do it through the surface. `asset_reimport` sends a path with no
-  `.import` sidecar to `EditorFileSystem.update_file`, which announces a file
-  to the editor and does not import one, so no sidecar was written, nothing
-  appeared under `.godot/imported`, and the asset stayed unusable -- loading as
-  a null texture -- while the call answered `accepted_count: 1`,
-  `refreshed: [path]`, `idle: true`, which reads as "done, nothing was stale"
-  (#731). A path with no sidecar now also triggers `EditorFileSystem.scan`,
-  the walk that finds new files and runs the importer over them;
-  `editor_reload_project`'s `scan_sources` only re-examines files the editor
-  already knows about, which a new file is not. The result reports the outcome
-  rather than the call: `imported` for paths that carry a sidecar now and did
-  not before, `announced` for the ones that still carry none, which is the
-  ordinary answer for a script and a real problem for an image. The scanning
-  flag clears before the importer has written the sidecars, so a scan-driven
-  call asks the editor whether its work on each path is finished instead of
-  watching the flag.
-
-- **A syntax check says whether it asked a compiler.** `script_check_syntax`
-  takes either a `file_path` or a `source_text`, and only the first runs
-  `godot --headless --check-only`. Nothing in the result, the published schema
-  or the agent instructions said so, and checking a draft before writing it to
-  disk is what `source_text` is for. Six scripts with real GDScript compile
-  errors -- a typed variable assigned the wrong type, a mistyped keyword, an
-  undeclared identifier, an absent method, an unknown base class, a wrong
-  constructor arity -- each came back `has_errors: false`, which is the answer
-  a clean script gets, and the same bytes checked by `file_path` reported every
-  one (#728). The engine fields made it worse: all four come back null for a
-  check that asked no compiler, which is byte for byte what a `GODOT_BIN` that
-  cannot be launched returns, so one response shape stood for three states.
-  Every answer now carries `engine_checked`, and one that is `false` carries a
-  `limitation` naming what the verdict covers and pointing at
-  `project_verify_changes`, which compiles unsaved source in an isolated copy
-  of the project. The parameter description, `TOOL_REFERENCE` and
-  `LLM_INSTRUCTIONS` say it too.
-- **`runtime_launch` finishes its own kill before it answers.** The timeout
-  terminated the process it started and left the job object to clean up the
-  rest on the way out, and `KILL_ON_JOB_CLOSE` terminates asynchronously when
-  the last handle closes. Godot is often not the process that was started --
-  a `godot.cmd` wrapper, or Godot's own Windows console build, launches the
-  engine and waits on it -- so the game outlived the call that had just killed
-  it. The documented discovery flow is `runtime_launch`, then
-  `runtime_list_sessions`, then `runtime_attach_session`, and that sequence
-  lands inside the window every time: the list reported the game alive and not
-  stale, which was true, and the attach one call later could not connect to it
-  (#732). The timeout now terminates the job and waits for it to empty, so a
-  caller reading `alive` is reading a settled answer. The test that covers this
-  waited twenty seconds for the tree to go, which is exactly what hid it; on
-  Windows it now asserts with no wait at all.
-
-- **A crash comes back with somewhere to go.** `runtime_launch` captured a
-  script error correctly and then filed the only part a caller can act on under
-  `INFO`. Godot prints an error across several lines -- the message, then
-  `at: _ready (res://crasher.gd:6)`, then the GDScript backtrace -- and each
-  line was classified on its own text, so every frame of a crash got the level
-  `print()` gets and a caller filtering `logs` on `ERROR` kept the message and
-  dropped the whole stack (#744). A continuation now carries the level of the
-  error it belongs to and says so with `continuation: true`. `errors` stays a
-  list of message lines, and a `diagnostics` list beside it carries
-  `severity`, `message`, `file`, `line`, `function`, `rule` and `frames` --
-  the shape `script_check_syntax` and `script_create` already return for the
-  offline half.
-- **A run that crashed says so in its summary.** A script error aborts the rest
-  of the frame, so a game that throws in `_ready` never reaches its own exit
-  path and always runs to the timeout. `summary` is the field a reader reads
-  first and it named the timeout, while the cause sat in `errors` one key away
-  (#744). A run that times out with errors captured now names the count, the
-  timeout and the first message.
-- **A handler on a script that did not compile is reported as that, not as a
-  missing method.** Register an autoload, write the scripts that use it, wire
-  the signals: that is the order every Godot project is built in, and
-  `project_set_autoload` says `requires_editor_restart: true` for a reason. What
-  it does not say is what the restart costs every other tool. Until it happens,
-  a script naming the new singleton will not compile in that editor, no script
-  instance stands behind it, and every method the file declares is absent as far
-  as the engine is concerned. `signal_connect` answered "The target node has no
-  method by that name" and named the method -- correct, and the one thing that
-  was not wrong -- so the repair a caller reaches for is to rename a handler
-  that is already right (#729). That is now `409` with
-  `code: "target_script_not_compiled"`, carrying `script_path`,
-  `unresolved_autoloads` naming any registered singleton the script mentions,
-  and the same `note` `script_check_syntax` already carries for this condition.
-  A method that is in no file is still `404 target_method_not_found`.
-
-- **A raycast in the editor asks the edited scene's own world, and answers with
-  a path the surface takes.** Every spatial query resolved its world from the
-  root viewport. In a game that is where the scene lives, so it was right; in an
-  editor the edited scene is parented into a SubViewport under the editor's own
-  docks, and a Viewport carries its own World2D. A 2D ray was asked of a
-  different, empty space and reported `hit: false` through a floor that was
-  standing in its path, which is exactly what a ray through empty space returns
-  (#743). The 3D case only looked healthy by accident, because a SubViewport
-  inherits the root's World3D -- it hit, and then named the collider with a
-  370-character absolute path through the editor's dock tree and its volatile
-  instance ids, which every reader and writer on the surface refuses (#742).
-  Both now go through `Viewport.find_world_2d`/`find_world_3d` from the edited
-  scene's own viewport, and a collider is reported as `/root/<scene-root>/Child`
-  like everything else. `spatial_query_clearance`, `nav_query_path` and the
-  frustum query's sightline rays were reading the same wrong world and are
-  fixed with them; the sightline self-hit check compared a logical path against
-  an editor one and never matched, so it works now too.
-- **`collision_mask` takes Godot's whole 32-bit range.** The ceiling was
-  `2147483647`, so layer 32 and the natural "every layer" value `4294967295`
-  were both refused by a surface whose engine defines the mask as unsigned
-  32-bit (#743). `physics_raycast_query` also published no bounds at all where
-  its three siblings published theirs; it does now.
-- **A vector is written as the type the property is declared, not the type its
-  JSON looks like.** JSON has one shape for a vector and Godot has two types for
-  it, so `{"x": 16, "y": 16}` became `Vector2(16, 16)` wherever it appeared --
-  including in every integer-vector slot on the surface. Godot drops a `Vector2`
-  written into a `Vector2i`, so a TileSet built the obvious way was unloadable
-  while `resource_create` reported `created_offline`, `property_check` reported
-  `checked: true`, `scene_set_property` reported `applied: true` and
-  `tilemap_set_cells` reported six changed cells. The only witness that nothing
-  had been painted was the game's own stderr (#730). The pinned class reference
-  already carried each property's declared type and the check was using it for
-  names only; it now picks the literal too, so `tile_size` on a TileSet takes
-  `{x, y}` and gets a `Vector2i` while `size` on a RectangleShape2D takes the
-  same `{x, y}` and gets a `Vector2`. A component that will not fit -- a
-  fraction in an integer vector -- is refused rather than truncated, a `"type"`
-  that contradicts the declaration is refused naming both, and
-  `property_check.written_as_declared_type` names each property whose literal
-  came from the declaration, so the correction is visible rather than silent.
-- **`resource_create` says which engine its property check was not run
-  against.** The comment above the call site said the caller gets what
-  `script_reflect_class` gives them, and the code called the same helper, and
-  the documentation promised the two fields. They were never emitted: the tool
-  was handed the lease dispatch wrapper rather than the session client, so the
-  cast that reads the attached session's descriptor produced nothing and the
-  annotation returned early (#735). `property_check` and every entry of
-  `sub_resource_property_checks` now carry `attached_engine_version` and
-  `api_version_matches_attached_engine`, which matters because the dump is
-  pinned to one engine line and CI covers three.
-
-- **The last uncached build in CI is cached, and every platform now configures
-  the same way.** After the sanitizer job and the two live Godot jobs were given
-  a compiler cache, `windows-latest (msvc)` was the only build left compiling
-  from scratch, and on its own it was the entire critical path: a 12m28s run in
-  which every other job finished inside six minutes. It was the exception
-  because it used the Visual Studio generator, which ignores
-  `CMAKE_<LANG>_COMPILER_LAUNCHER`, so a cache could not be attached to it
-  without moving it to Ninja. It is on Ninja and sccache now, which collapses the
-  two configure steps into one -- the launcher is the only thing that still
-  differs across the three platforms, because ccache does not handle `cl.exe`
-  and sccache does. `--config Release` goes with it, since a single-config
-  generator has no configuration to select.
-
-  The Windows binaries move from `build/Release/` to `build/` in the six places
-  that named them, two of which hand the test runner `didi_tests` and four of
-  which hand it the server `didi`; the distinction is preserved. `ctest -C
-  Release` is left alone deliberately: CTest ignores `-C` on a single-config
-  generator and still finds both tests. The staged addon is unchanged, verified
-  by running the workflow's own file-list check against a real Ninja tree rather
-  than trusting that it would be.
-
-- **The live Godot jobs cache their compile instead of repeating it.** Both
-  engine versions built the same Windows Release tree from scratch, and the
-  `windows-latest (msvc)` job beside them built it a third time: about 11 minutes
-  of each 17-minute job, and the longest thing in CI once the sanitizer build was
-  cached. Sharing one build between the three jobs was the obvious move and the
-  wrong one. The msvc build is 9m40s against the Godot jobs' 11m38s, so making
-  them wait on it trades two parallel builds for one serial build plus an
-  artifact download and leaves the critical path where it was; it saves runner
-  minutes, which are free on a public repository, and spends latency, which is
-  not. These jobs now compile through sccache instead. That needs Ninja, because
-  the Visual Studio generator ignores `CMAKE_<LANG>_COMPILER_LAUNCHER`, and Ninja
-  needs the MSVC environment on PATH. Both engine versions share one cache key,
-  since they compile a byte-identical tree and differ only in the editor they
-  then drive. Ninja is single-config, so the binary moves from
-  `build/Release/didi.exe` to `build/didi.exe`; the build tree stays at `build/`,
-  which is where the harness writes its engine logs and where the failure
-  artifact upload looks for them, and the harness already resolved
-  `build\didi.exe` among its candidates.
-
-- **CI's critical path was a cold compile of a tree that was already cached.**
-  The sanitizer job builds on `ubuntu-latest` and had no compiler cache, so every
-  run compiled the whole tree from scratch: 21m45s of a 23m run. The
-  `ubuntu-latest (gcc)` job beside it compiled the same sources on the same
-  runner in 8 seconds, off a ccache the sanitizer job never got. Nothing else in
-  the workflow ran past minute 17, so one missing cache step was the whole of
-  CI's latency, and it had been paid on every pull request that touched the
-  engine. The job now takes the same pinned `ccache-action` under a key of its
-  own. The sanitizer flags are part of every compile command, so ccache hashes
-  them and cannot hand this build an object compiled without them; a separate key
-  also keeps two sets of objects from evicting each other out of one 500M cache.
-
-- **A push to main no longer cancels the run that was checking the last merge.**
-  `cancel-in-progress` applied to every ref, and main is the one ref where the
-  older run is not obsolete. The branch rule does not require a pull request to be
-  up to date before it merges, so two of them can both be green against an older
-  base, both merge, and disagree only once they are both on main -- and the run on
-  main is the only place that disagreement gets caught. The next merge cancelled
-  that run 29% of the time, and a cancelled run reports nothing at all.
-  Cancellation is now scoped to `pull_request`, where a newer head does genuinely
-  obsolete the run before it.
-
-- **`project_rename_references`'s preview names the sites it will leave
-  behind.** The tool's behaviour and its post-hoc honesty are unusually good: it
-  updates the scene connection, leaves GDScript alone, and names every site it
-  skipped, the function's own declaration included. It just named them after the
-  mutation. The `dry_run` preview -- the thing a caller reads to decide whether
-  to confirm -- carried every other field the confirm did and withheld that one
-  list, leaving the caller to notice that `code_reference_count: 4` beside
-  `updated_files: [one .tscn]` does not reconcile, and to infer by subtraction
-  that the declaration was among the sites being skipped (#716). The field was
-  already computed by the same call for the same arguments. It is now in the
-  preview, which also puts it in the confirmation fingerprint, so a token is
-  spent against the sites the caller was shown rather than against a list that
-  moved underneath them. The list is capped at `max_impacts` and the cap was
-  computed and dropped; `code_references_truncated` now says when it bit.
-
-- **Three semantic failures answer with the error envelope rather than a bare
-  string.** #420 put a code on eighteen of these, #460 on eight more, #492 on the
-  five unimplemented registrations and #548 on four behind valid arguments. Each
-  pass found what its census could reach, and these three sat behind a different
-  precondition again (#705): `project_export`'s overwrite refusal needs an output
-  path that **exists**, so the wrongness is in the filesystem rather than in the
-  arguments; `gridmap_export_mesh_library`'s extension check needs a valid
-  `source_scene` first, so a census generating junk gets that tool's other error;
-  and `csharp_check_build`'s launch failure needs a broken environment variable,
-  which no census varies. The export one was the sharpest: its whole message is an
-  instruction to retry with a different argument, and nothing said so in a way a
-  caller could branch on. It now answers `409` with `data.code: "conflict"`, the
-  `res://` output path and `retry_with: {"overwrite": true}`, the same shape
-  `script_create` gives the same collision. The extension check answers `400`
-  `invalid_arguments` naming the parameter and the extensions it takes. The
-  `csharp_check_build` one was fixed with the rest of that tool.
-
-- **Every unbound name in `eval_gdscript` is refused by its own name.** A typo in
-  `node`, a singleton a caller reasonably expected, a name of the caller's own --
-  each reached Godot and came back as "Expression execution failed: self can't be
-  used because instance is null (not passed)", a sentence about a word the
-  expression did not contain (#712). #488 diagnosed exactly this and fixed it for
-  the literal string `self`; the common case is not `self`. A bare identifier that
-  is not `node`, a literal, a letter-spelled operator or one of Expression's own
-  numeric constants is now refused with its own name in the message, saying that
-  `node` is what is bound and pointing at `node.get(...)` and
-  `scene_get_property`. The nineteen containment refusals are unchanged, and a
-  forbidden or reserved name keeps the sentence it already had.
-
-- **Two parameter descriptions stop offering a value their own enum refuses.**
-  `blackboard_task_list.status` read "such as pending, claimed or blocked", and
-  `claimed` is not a near miss for one of the six the enum holds -- it is the
-  word the sibling tool uses, and `blackboard_task_claim` puts a task in
-  `in_progress`. `project_export.mode` read "whether to export a debug or a
-  release build" and left out `pack`, which is not a variation on the other two:
-  it writes a `.pck` and is the only mode that works on a machine with no export
-  templates installed, which is every CI runner and most fresh checkouts (#708).
-  Since #462 every parameter carries a description precisely so a caller does not
-  have to make a call go wrong to learn the argument names; a description that
-  offers a value the enum rejects spends that budget backwards. Nothing could
-  catch these: the description tests count descriptions and the schema tests read
-  keys, and `probes/description_vs_schema.py` is the check that compares one
-  against the other.
-
-- **The two legacy names with no canonical replacement say so.** Eight of the ten
-  legacy aliases publish `_meta.didi.canonical` and a description naming the tool
-  they stand for. `mutate_scene_tree` and `instantiate_asset` published neither,
-  so a host routing `legacy: true` entries by their canonical name handled eight
-  and fell through on two with nothing in the entry saying why (#709). The reason
-  is not that their canonical tool is unimplemented: there is no canonical tool.
-  Neither capability was ever re-registered under a canonical name, so the legacy
-  name is the only name and `canonical_tool` in error data correctly reports it.
-  Both entries now say that, and say that the absent `canonical` is the reason
-  rather than an omission.
-
-- **Two tools stop advertising a set the answer is not a member of.** With an
-  editor attached, `project_audit_assets` and `project_get_uid_map` publish
-  `currentMode: "live"` and can answer `execution_mode: "local"`, while declaring
-  `executionModes: ["live", "offline_fallback"]` -- a claim that `local` is not
-  one of the things they do (#713). The answer is right and deliberate: #504 gave
-  both `local` for the call with no live work to do, because calling that an
-  offline fallback told a caller to reattach an editor that would change nothing.
-  The advertisement never learned the third word, and now does. The live path was
-  not removed from either: a uid map with `resolve` queries and an audit whose
-  scan produced findings both take it. `probes/advertised_vs_reported_mode.py`
-  now separates the two questions -- a mode the entry never declared, which no
-  argument can excuse, from a declared mode that is not `currentMode`, which is
-  what a tool whose live work depends on its arguments looks like.
-
-- **The listings say they move, and say when.** `initialize` published
-  `capabilities.tools.listChanged: false`, which in MCP is the server telling a
-  host that one `tools/list` at startup is enough. Every entry in that listing
-  then changed when the bridge changed: 68 move `currentMode`, and the other 58
-  move anyway because `editorConnected` and `sessionKind` are published per
-  tool. Both cannot be true. A host that listed before the user opened Godot
-  cached `currentMode: "unavailable"` for 59 live tools and never offered them
-  again, for the whole session (#701). Both listings now declare
-  `listChanged: true` and mean it: `notifications/tools/list_changed` and
-  `notifications/resources/list_changed` are sent when the state those entries
-  carry has moved -- a session attaching or detaching, a route obstruction
-  appearing or clearing. The check is one string comparison after each request,
-  taken from reads that attach nothing and scan nothing, so a quiet session
-  sends nothing and ten listings in a row send nothing. The resource listing
-  gets the same treatment because it carries the same state from the same
-  computation; this is separate from `notifications/resources/updated`, which is
-  per URI and already worked.
-
-- **`--ui-app off` stops declaring the MCP Apps extension.** The flag turned the
-  Control Room off everywhere except the handshake, which still told the client
-  the server serves it -- byte-identical `extensions` in all three modes. The
-  sequence a host then walked was: declare the UI extension, read the server
-  declaring it back, look for the app resource, and get a `400` on the only
-  resource the extension exists for (#717). Unconditional declaration is right
-  for `auto`, where the surface is opt-in on both sides and the two declarations
-  are the negotiation. `off` is not a negotiation: the operator has decided, and
-  no client declaration can change the answer. `auto` and `always` are unchanged.
-
-- **A refused ghost preview leaves the screen as it found it.** These are
-  on-screen gizmos an agent draws to show a human what it is about to do.
-  `editor_render_ghost_preview` replaces by default, and the teardown ran before
-  the engine had been asked whether the new shapes could be drawn at all, so a
-  2D preview asked for in a 3D scene reported `409` -- which reads as "nothing
-  happened" -- having already freed the proposal that was on screen. Neither the
-  agent nor the user could tell: the agent's bookkeeping still said the preview
-  was up, and the next clear answered `cleared_previews: 0`, which is what
-  "nothing was there" looks like (#707). The target world is now resolved before
-  anything is replaced, and when a refusal does follow a replace -- the shape cap,
-  or a rendering server call that fails mid-draw -- the error's `data` carries
-  `previews_were_replaced`, `cleared_previews` and `cleared_shapes`.
-  `tools/vibe/probes/ghost_preview_survival.py` holds the four rows, with the
-  argument-check refusal as the control that was always safe.
-
-- **`signal_disconnect` stops reporting a method signature problem.** Arity
-  compatibility is a precondition for making a connection and cannot be one for
-  removing it: a disconnect never calls the method. One validation helper served
-  both handlers, so tearing down a connection that is not there was answered
-  with "the target method cannot accept the arguments that signal carries" --
-  telling an agent that had changed a method's arguments, and was now cleaning
-  up the connections it made, to go and edit a signature to satisfy a check for
-  a connection it is trying to delete (#714). The true answer is the one the
-  same tool already gave for a compatible pair that was never connected: no such
-  connection. The three refusals `signal_connect` owns are unchanged.
-
-- **`scene_instantiate_node` says when the engine did not use the name it was
-  given.** Godot forbids `.`, `:`, `@`, `/`, `%` and `"` in a node name and
-  substitutes rather than refusing, and it uniquifies a name a sibling already
-  has. Reporting the real path was already right; what was missing was any field
-  saying a substitution had happened, so an agent that named a node after a
-  `class_name`, a filename or a JSON key built its next `NodePath` from the name
-  it chose, and the reason for the `404` that followed was four responses back
-  (#710). A call that gave a name now gets `node_name` back, and when that is not
-  the name asked for, `requested_name` and `name_substituted: true` beside it.
-  Omitting the name asks the engine to name the node and is not a substitution.
-
-- **A runtime endpoint too long for `sockaddr_un` says so.** On macOS the
-  session endpoint is built under the temporary directory and `sun_path` holds
-  104 bytes, so a stock `macos-latest` runner has five bytes of headroom.
-  `TMPDIR` twelve bytes longer and both ends of the bridge answered the
-  overflow with a bare `return false`: the plugin reported itself active, no
-  descriptor was published, every live tool gave the ordinary "no editor is
-  running" refusal, and nothing anywhere -- the editor log, the server log,
-  `runtime_list_sessions`, the control room -- mentioned a path length. That is
-  indistinguishable from the editor genuinely not running, which is the most
-  common state in the world (#711). The session now refuses before it builds
-  the socket, naming the byte length, the limit and the endpoint, and saying
-  that the temporary directory is the part a user can change. The two bridge
-  failures the extension already logged also go through Godot's own
-  `print_error`, so they reach the editor's Output panel and its `--log-file`
-  rather than only this process's stderr and a log ring that is read over the
-  route that just failed to exist. That is where the addon's Diagnostics page
-  has been telling people to look.
-
-- **`csharp_check_build` now reports the build it actually ran.** Four things
-  were wrong in the one payload. The MSBuild console logger prints every
-  diagnostic twice, once as it happens and once in the summary block it appends
-  by default, and nothing de-duplicated them, so a build MSBuild called `1
-  Warning(s)` and `1 Error(s)` was reported as `diagnostics_count: 4` beside
-  that summary in its own `raw_output`; the diagnostic code is optional in the
-  format MSBuild documents, and requiring one dropped `warning : Unable to find
-  a project to restore!` entirely, so a build that compiled nothing reported
-  zero diagnostics (#702). `diagnostics[].path` carried an absolute host path
-  beside a `project_file` the same object had already converted, so the one
-  field naming the file to go and fix was the one field no path-taking tool
-  accepts, and it carried the home directory of whoever ran the server; paths
-  inside the project are now `res://` and paths outside it, which are SDK and
-  NuGet targets, are left as they came (#703). Nothing said which `dotnet` ran,
-  so a missing SDK arrived as `exit_code: 2` on Windows and `127` with no error
-  at all on POSIX, wearing the costume of "your C# does not compile"; the
-  answer now names `dotnet_executable` and `dotnet_version`, a `DOTNET_BIN`
-  that does not exist or is a directory is passed over and reported in
-  `dotnet_executable_configured_rejected` the way `GODOT_BIN` has been since
-  #656, and an executable that is not a .NET SDK is a `503` naming what it
-  printed rather than a build verdict (#704). And `project_file` accepted a
-  `.sln` its description did not mention and preferred it over the `.csproj`
-  beside it, which is the exact shape a Godot C# project has, while a solution
-  that compiled nothing exited `0` and was reported as `success: true`; the
-  description names both and states the preference, `projects_built` counts the
-  projects MSBuild produced an assembly for, and a `dotnet` that exits `0`
-  having built none is no longer a success (#706).
-
-- **A session test reads its own directory, not the machine's.**
-  `RuntimeSessions.ListingNamesTheDirectoryItRead` made an empty descriptor
-  directory and then never pointed the client at it, so it listed whatever
-  `DIDI_SESSION_DIR` happened to hold: an earlier test's value, or nothing, in
-  which case the real one under the system temp directory. Any Godot running
-  anywhere on the machine put a live descriptor in the answer and failed it.
-  It sets the directory it created, compares the reported path exactly rather
-  than for the substring `didi`, and no longer asserts that no other directory
-  holds sessions -- the candidates come from the environment, so an editor
-  running for any reason puts a correct entry there, which is the thing the
-  field exists to say. The sibling test beside it goes through the same
-  helpers rather than writing the environment by hand, so isolation is visible
-  at a glance.
-
-- **`viewport_create_test_lab`'s preview names the file it replaces.** It made
-  the weak claim -- `argument_binding`, "this tool names no subject of its own
-  beyond the arguments it was given" -- about a call whose subject is a
-  constant, and showed the reader `target_resource_path`, a file the call reads
-  and does not modify (#685). The confirmation gate had already resolved
-  `res://didi_test_lab.tscn` and stat'd it, which is the only reason it fired
-  at all. The preview now reports that path with its size and content digest,
-  the way `script_create` does, `target_read` and `target_checked_on_confirm`
-  are true, and a token approved against one lab scene is refused if that file
-  changes inside the window.
-- **`--yolo` shows up where a client reads before it calls.** The flag removes
-  the confirmation gate, and the only difference it made to the published
-  surface was one fact inside a `didi_control_room` call: `initialize`, the
-  annotations and every tool's `_meta.didi` block were byte-identical in both
-  modes, and the per-result `confirmation: skipped` arrives after the mutation
-  (#684). `server/discover` did carry the flag, but that is a method a
-  2024-11-05 client never calls. `initialize` reports it now, and so does every
-  tool entry beside `currentMode` -- that block is already state rather than a
-  static fact about the tool, and whether this server will stop and ask is the
-  same kind of fact. The behaviour is unchanged; only its visibility was
-  missing.
-- **The blackboard records who removed a value, not only who wrote one.**
-  `blackboard_clear` is the one destructive call on the board and was the only
-  one with no identity argument at all: an agent that came back to find its
-  keys gone could read `author` on every value still there and nothing about
-  the call that took the rest (#681). It takes `author` and `reason` now, and a
-  read of a cleared path answers `reason: "cleared"` naming them; a clear of
-  the whole board, which leaves no path to attach that to, writes a line in the
-  board's audit that the next unanswerable read reports.
-  `blackboard_task_create` takes `author` for who asked for the task, which is
-  not `assigned_to`. `author` and `agent_id` stay different names because they
-  are different things -- one is provenance, the other an identity a lease is
-  checked against -- and every one of those parameters now says so.
-- **A blackboard key that expired does not read like one nobody wrote.** Once a
-  `ttl_seconds` lapsed, the value and its metadata were swept and the only tool
-  that can ask about the key answered as if it had never existed -- identical
-  to a read of a path nobody has ever written, down to the field list, with
-  `include_metadata: true` returning nothing on either (#680). A ttl is written
-  by an agent that wants something to lapse, and the two explanations lead
-  opposite ways: take the claim again, or go and find the work filed under a
-  path with a typo in it. A read that finds nothing now says `reason:
-  "expired"` with `expired_at_ms`, and the author and reason the write
-  supplied, or `reason: "no_record"`. A board remembers its 256 most recent
-  expiries.
-- **`blackboard_patch` says which operation failed, in its own words.** Every
-  semantic failure answered with nlohmann's exception text and its internal
-  identifier: "[json.exception.parse_error.105] parse error" for a patch
-  document that parsed perfectly well, and a byte offset into a JSON pointer
-  rather than into anything the caller sent (#679). A three-operation batch was
-  rolled back with "key 'nope' not found" and no way to tell which of the three
-  did it. The shape of each operation is checked here now, so a refusal names
-  the entry, the field and what was expected; the failures that can only be
-  found by applying the patch are applied one at a time, so they name the entry
-  too, and a failed `test` says what the board actually holds.
-- **A headless editor is a state Didi can name.** `--headless` is the only way
-  an editor runs on a build machine, in a container or over ssh, and Didi
-  attached to one happily: the session published, the bridge green, 68 tools
-  live. Then every tool whose answer is a picture failed with `404 not_found`
-  and "Viewport image is unavailable", which names nothing and reads as "look
-  again with a better argument" for a condition that will not change while that
-  editor is running (#676). The same server with no editor at all answered
-  better, because the live route existed so the offline fallback never ran. Both
-  capture tools now refuse `409`, naming the display driver and saying nothing
-  about the request can fix it, in the shape the far-plane refusal beside them
-  already used. The editor reports `display_server` and `renders` with its
-  state, so `didi_control_room` names the limitation beside the Godot 4.7
-  dirty-state one. Reproduced identically on Windows, macOS and Ubuntu.
-- **`editor_save_scene` reports what the engine printed while saving.** Against
-  a headless editor every save made Godot print `ERROR: Parameter "t" is null`
-  from its dummy rendering backend -- the save path asks for a scene thumbnail
-  and there is no renderer to make one -- and the tool answered `saved` with no
-  mention of it, leaving the error in a log nothing pointed at (#683). Seven
-  accumulated in one probe run of a couple of dozen calls. The thumbnail step
-  belongs to Godot's save and cannot be switched off from here, so the answer
-  now carries `engine_diagnostics` and a note saying they are about the
-  thumbnail rather than about the scene. The scene still saves.
-- **`script_check_syntax` refuses when the compiler never ran.** It answered
-  `has_errors: false` with no diagnostics when the Godot it was told to use
-  could not be launched, so a caller asking "does this compile?" about a script
-  with four compile errors was told yes (#677). `engine_version: null` was the
-  only trace and nothing said the pass had not happened. The one misconfigured
-  value that gets this far is a real file that is not the engine, which is what
-  a version-manager shim or the wrong file out of a bundle looks like; a
-  directory or a missing path was already discarded. When the executable that
-  was tried is a file that exists and it prints no Godot banner, the call is
-  now `503` with `code: "engine_unavailable"`, naming what was tried and what
-  went wrong, which is what `shader_check_compile` has always done. A machine
-  with no Godot installed is a different state and answers as it always has:
-  the lexer verdict, with `engine_available: false` and
-  `engine_unavailable_reason` saying the compiler did not run.
-  `engine_exit_code` and `engine_duration_seconds` accompany a check that did.
-  A `source_text` check spawns no engine by design and is unchanged.
-- **The engine-mismatch check works without an explicit attach.**
-  `attached_engine_version` and `matches_attached_engine` read the process
-  selection, which only `runtime_attach_session` or an earlier live call sets,
-  so on a server that had made neither they came back `null` -- "there is
-  nothing to compare against" rather than "I did not look" -- beside a live
-  editor on the same project (#687). They are now filled in whenever one live
-  session on this project can be seen, which is the condition live routing
-  already selects on; the read takes no route and no lock. `runtime_launch`,
-  the tool whose whole answer is what happened when your project ran, gained
-  the same four fields: which build ran it appeared only in the banner Godot
-  prints into the captured logs.
-- **`--managed-editor` starts against Godot's Windows console build.** It
-  refused after thirty seconds with "Owned editor did not attach", and pointed
-  the reader at an editor log that shows a healthy editor (#678).
-  `Godot_v*_win64_console.exe` is a launcher: it starts the ordinary editor as
-  a child, and the child is what loads the addon and publishes the session, so
-  managed mode waited for the process ID it spawned next to a descriptor for
-  its own workspace that had arrived in under four seconds. The owned editor is
-  now matched by the workspace it published on, which this run created and
-  nothing else has open, and `runtime_recovery_status` reports `editor_pid`
-  beside `pid` so the two are not confused when they differ. A refusal now
-  names the launched process ID, the workspace and every process that published
-  a session for it. `stop()` ends the job rather than only the launched
-  process, and waits for the whole tree rather than for that one process: it
-  used to return while a launcher's editor was still exiting, so
-  `runtime_restore_checkpoint` renamed a project directory another process
-  still had open. A restore also retries that rename for a few seconds rather
-  than failing on it: once no owned process holds the workspace, what is left
-  is somebody else's handle on a file written moments ago -- a scanner, an
-  indexer -- held for a fraction of a second, and a destructive operation
-  should not stop for that. CI runs the managed recovery suites against the
-  console build, which is the one the issue was about and the one that step
-  had been filtering out; the suites' own fixture cleanup waits for the editor
-  to release the workspace instead of reporting the wait as an error.
-- **`--log-level DEBUG` answers a client that does not read stderr.** The
-  startup log at `DEBUG` is one line per registered tool, which is past a pipe
-  buffer, and it was written inline on the thread that would have answered
-  `initialize`. A host that left stderr undrained saw no error, no exit and no
-  output: the server simply never answered (#689). The MCP stdio transport says
-  a server may write logs to stderr and a client may ignore them, so depending
-  on the client reading was depending on something the server was not promised,
-  and `DEBUG` is the level the field trial documents tell people to use. The
-  console is now written on its own thread behind a bounded queue: a full pipe
-  costs log lines, not the server, and the next line to reach a reader says how
-  many were dropped. The extension is unchanged and still writes inline.
-- **The editor exits cleanly on macOS and Linux.** Every editor exit on both
-  platforms ended in `SIGABRT` with the addon installed, and exited 0 without
-  it, whether the run was `--import` or `--editor --quit` (#688). macOS named
-  it: an uncaught `std::system_error`, "mutex lock failed: Invalid argument".
-  Linux reported `malloc_consolidate(): invalid chunk size` for the same thing.
-  The runtime IPC singleton's destructor calls `stop()`, which asks
-  `EditorHook` to cancel pending commands, and the hook was constructed inside
-  `start()` -- after the IPC object. Statics are destroyed in reverse order of
-  construction, so at exit the hook went first and `stop()` then locked a mutex
-  and swapped a queue that no longer existed. The hook is now built by the IPC
-  constructor, which puts the whole chain in an order whose reverse is safe.
-  Windows survived the same code because a destroyed `std::mutex` there does
-  not refuse a lock, which is why thirteen sessions of Windows testing never
-  saw it.
-- **The Linux release starts on a distro whose glibc meets the stated floor.**
-  The archive is built in an Ubuntu 22.04 container so the release does not
-  raise its glibc floor, and `release.yml` says so at length. glibc was not the
-  constraint that bound: the binary linked libstdc++ dynamically, and Ubuntu
-  22.04's libstdc++ is GCC 12's, which needs `GLIBCXX_3.4.30`. Rocky, RHEL and
-  AlmaLinux 9 have glibc 2.34 -- exactly the floor the container was chosen to
-  hold -- and libstdc++ from GCC 11, one release short, so neither `bin/didi`
-  nor the addon's `.so` would start there (#647). The release leg links the C++
-  runtime statically, which is what Godot's own Linux builds do and costs about
-  a megabyte, and a new step reads the symbol versions off both binaries and
-  fails the release if either needs a libstdc++ symbol version or a glibc above
-  2.34. README's platform table names the distros rather than saying "older
-  glibc".
-- **The macOS archive's `.gdextension` declares only what the archive holds.**
-  It is one file copied into every platform's archive and it declared
-  `macos.*.x86_64` and `macos.*.universal` pointing at the one dylib the release
-  builds, which is a thin arm64 Mach-O. Godot's loader requires every tag in a
-  key to be a feature of the running engine, so on an Intel Mac
-  `macos.release.x86_64` matched, the file was found, and the dynamic loader was
-  handed a library for another architecture: the user saw a generic "can't open
-  dynamic library" about a file that is plainly there, rather than the honest
-  answer the release notes already knew (#648). Only arm64 is declared now, so
-  Apple Silicon still matches and Intel is told there is no library for it.
-  `OS::has_feature("universal")` is true on both macOS slices, which is why
-  those entries were a second name for the same mistake.
-- **The Diagnostics page checks the architecture, not the filename.** It
-  reported `Extension binary: OK` for a library the engine cannot load, and that
-  page is what README asks macOS testers to paste into an issue (#648). It reads
-  the Mach-O header now and says which architecture the file holds and which one
-  the editor is. README's platform table also states the minimum macOS version,
-  which nothing did.
-
-- **The addon folds path case where the filesystem does, not only on Windows.**
-  Its two path comparisons each asked `OS.get_name() == "Windows"` and meant
-  "does this filesystem fold case". The default macOS volume is APFS,
-  case-insensitive and case-preserving, and folds exactly as NTFS does, so the
-  branch was right for two platforms out of three and wrong for the one that
-  shares the behaviour it was written for (#655). On a Mac a descriptor recorded
-  through one spelling and an editor reporting another read as a different
-  project in the Peers list, and the notice saying a chosen binary sits
-  somewhere Didi own file tools can write was not shown. Both now go through one
-  helper in `didi_client_config.gd`. The C++ side settled the same question in
-  #546 by taking the on-disk spelling from `std::filesystem::canonical`.
-
-- **A `GODOT_BIN` that cannot be used is reported, not discarded in silence.**
-  Resolution dropped it and fell through to the known locations, and
-  `script_check_syntax` reported that fallthrough as `engine_executable`, so
-  the one field that could have shown a user their variable was ignored named
-  something they never set (#656). On macOS the thing called Godot is
-  `/Applications/Godot.app`, a directory, so the obvious value to set is exactly
-  the one that got dropped, and `ADMIN_GUIDE` tells people to set this variable
-  when installations use another name or layout, which is the population that
-  will set it wrong. It now answers with `engine_executable_configured` and
-  `engine_executable_configured_rejected` beside the executable that ran
-  instead, and logs a WARN line; the rule is stated too, since "not a directory"
-  meant a non-executable file was kept and a bundle was dropped. The POSIX
-  `GODOT_PATH` directory search also looks for `Contents/MacOS/Godot`, so
-  pointing it at a bundle works wherever the bundle lives, including on a
-  case-sensitive volume where the bare `godot` candidate does not match `Godot`.
-- **`runtime_list_sessions` says which directory it read.** The server resolves
-  exactly one descriptor directory, and when the editor published somewhere
-  else there is nothing to find. "Nothing to find" came back in the same words
-  as "Godot is not running", down to the byte: the control room's Bridge light
-  named one cause and instructed the reader to do the thing they had already
-  done, and every input to that decision was in the facts list except the one
-  that was wrong (#649). `descriptor_directory` is now in the answer whether or
-  not anything was in it, and `descriptor_directories_with_sessions` names any
-  other candidate directory on the machine that does hold descriptors, which is
-  where to point `DIDI_SESSION_DIR`. The Bridge light's reason carries the same.
-  This bites hardest on macOS, where `TMPDIR` is a per-user path launchd sets
-  and a scrubbed environment does not have.
-
-- **`maxLength` counts what it says it counts.** JSON Schema defines the length
-  of a string as its number of characters, and `checkBounds` measured
-  `std::string::size()`, which is the UTF-8 byte count. So the server enforced a
-  bound a third as generous as the one it published for anything outside ASCII,
-  and reported the refusal in the units it was not using: a hundred-character
-  Japanese or Greek search term came back as "must be at most 256 characters
-  long" (#663). 140 string parameters carry a `maxLength`, and the ones people
-  put words in are the ones this bit. The schema check counts code points now,
-  and so do the handlers that had their own byte cap behind the same published
-  number -- the two search queries and the blackboard task title and
-  description -- so a client that validates against the published schema before
-  sending reaches the verdict the server reaches. Where a handler bounds bytes
-  for its own reason, its parameter description says so, which is what
-  `eval_gdscript.expression` and the node-path parameters already did.
-- **A parameter pinned to one value says why.**
-  `viewport_toggle_debug_draw.wireframe` is `const: false` and its description
-  read "Draw geometry as wireframe", so an assistant reading discovery was told
-  the parameter exists, told what it does, sent the value that does it, and was
-  refused with a sentence that restated the constraint and gave no reason
-  (#654). The reason was already written in `TOOL_REFERENCE`: Godot exposes no
-  supported live wireframe control. It is the description now, and every
-  refusal for a `const` or a single-value `enum` carries that parameter's
-  description with it. Three of the four pinned parameters on the surface
-  already said "this is pinned, and here is why", which is what made this an
-  invariant rather than one tool's slip, and there is a test for it now: the
-  description tests counted descriptions and the schema tests read keys, and
-  nothing compared one against the other.
-
-- **The export family answers with an envelope and previews what it will do.**
-  Four failures in `project_list_export_presets` and `project_export` were bare
-  prose strings with no code and nothing to branch on, which the error-envelope
-  census could not reach because they need the project in a particular state
-  rather than a particular argument (#651). With them, three things they were
-  getting wrong. A project with no export presets is now the same answer
-  whether or not `export_presets.cfg` is on disk, where an absent file was a
-  success and a present empty one an error; a file that is there and cannot be
-  parsed is its own `422`, carrying how many preset sections it declared, rather
-  than one sentence with an "or" in it covering three states. `project_export`
-  reports what `project_list_export_presets` already knows about the file
-  instead of answering "Export preset not found" for an unparseable one and
-  sending the reader off to add a preset the file already declares. And Godot's
-  console output is carried as `engine_output` under `error.data` with the
-  terminal escapes removed, rather than four kilobytes concatenated into a
-  message with the actionable line sixty lines down and the colour escapes
-  still in it.
-- **`project_export`'s preview reads the presets file.** It came back clean in
-  all five states `export_presets.cfg` can be in, and the real call failed in
-  every one, including for a preset name the sibling tool in the same process
-  could prove does not exist (#652). The check is one local file read, so the
-  preview does it: a preset that is not declared is refused at the dry run with
-  the names that are there under `available_presets`. The preview and the call
-  go through one function, so they cannot answer differently about the same
-  file.
-- **`gridmap_export_mesh_library`'s preview describes the file it replaces.**
-  It claimed `preview_kind: "target_state"`, which means the preview opened the
-  target and this is what it found, and described `source_scene` -- a file the
-  call reads and does not modify -- with its size and content digest under
-  `kind: "planned_mutation"`, while the file `overwrite` was about to destroy
-  appeared only in the echoed arguments (#657). The preview now reads
-  `output_path` and keeps the source beside it as context, and still refuses a
-  `source_scene` that is not there. Its conversion failure carried a message
-  shaped to hold a reason and holding none, ending in a colon with nothing
-  after it; it is an envelope with the engine's output now.
-
-- **A script this process may not read is not reported as bad code.**
-  `script_check_syntax` answered `isError: false`, `has_errors: true` and one
-  diagnostic at line 1 column 1 of a file whose bytes were never read, under
-  `rule: "file_not_found"` about a file that is found, so a reader acting on it
-  went and edited a line that is fine. `script_get_symbols` answered `400
-  invalid_arguments` about arguments that were fine. Both were the inverse of
-  the absent case, which answers `404`, so the state a `chmod` fixes was the one
-  that read like a code problem (#653). Both now refuse with `403`,
-  `code: "forbidden"` and `reason: "unreadable"` -- `project_search_text`'s
-  word for the same state -- naming the `res://` path rather than the absolute
-  host path. The fabricated diagnostic no longer carries a line and column it
-  did not derive from the file. The state is a mode with no read bit on Unix and
-  a file another program is holding open on Windows, and the new test creates
-  whichever of those the host supports.
-
-- **A file whose name JSON cannot carry is named, not blamed on the caller.**
-  A POSIX filename is a byte string, so a `.gd` copied off an old drive or
-  unpacked from a Latin-1 zip is a legal file with a name that is not UTF-8.
-  JSON is defined over Unicode, so serialising that path threw while building
-  the response, and the throw was caught as a caller having read an argument at
-  the wrong type: `project_list_resources` and `project_audit_assets` answered
-  `400 invalid_arguments` to calls that carried no arguments at all, and
-  `project_search_text`, `project_search_symbols` and `project_get_uid_map`
-  each behaved differently depending on the file's extension (#650). The
-  encoder failure is now its own code, `response_not_encodable` with a `500`,
-  because a response the server cannot encode is the server's fault; the
-  walkers skip such a file once, in the index and in the search walk, so they
-  all give the same answer about it; and they name it, with the undecodable
-  bytes rendered as U+FFFD, under `undecodable_paths` and
-  `undecodable_path_count` or as a `diagnostics` entry reading
-  `undecodable_name`. Windows names are UTF-16 and the default macOS volume
-  refuses the name outright, which is why eleven sessions of probing never met
-  this.
-
-- **`project_rename_references` previews the plan it is about to carry out.**
-  It is in the always-confirmed list with the reason written beside it: it
-  rewrites several files at once, there is no editor undo stack behind a file
-  on disk, and the preview is the only chance to see which files it will touch.
-  It had no preview probe, so the dry run bound the two identifiers the caller
-  had just typed to a token, reported `target_read: false`, and named no file
-  (#662). The preview now runs the scan and the plan the execute path already
-  computes: `before` carries `updated_files` with a per-file `changed_lines`
-  count, `updated_file_count`, `changed_lines` and `code_reference_count`. The
-  refusals moved with it, so a `new_name` that collides with an existing
-  connection is refused at the preview with its conflict list instead of
-  minting a token for a call that cannot run. The confirmation is bound to that
-  plan, so a project that changes in between is refused rather than rewritten
-  against a plan nobody saw.
-- **A match in a scene or a resource is not called a source code reference.**
-  The name-target fallback never looked at which file the line came from, so a
-  `[node name="health"]` line in a `.tscn`, an `ext_resource` line and a
-  property in a `.tres` all came back as `code_reference` (#665). They are
-  `resource_reference` now, which is the distinction `collectNodePathImpacts`
-  in the same file already made. It matters most in
-  `project_rename_references`, where the same bucket is returned as
-  `code_references_not_updated` under a limitation pointing at
-  `script_patch_method`, which cannot touch a `.tscn`; that limitation now says
-  which entries it applies to.
-- **The whole-project readers answer on a project with a baked mesh in it.**
-  A Godot resource writes a packed array on one line, and an `ArrayMesh` or a
-  baked `Curve3D` puts hundreds of kilobytes there. `project_analyze_impact`
-  and `project_audit_assets` handed every such line to the regex engine, at a
-  cost quadratic in its length, so one 400 KB line cost ten seconds in each and
-  a line past a megabyte never came back inside any client timeout (#661). Both
-  now check for the literal they are looking for before running a pattern, which
-  is the guard the sibling collectors in the same file already had. The same
-  calls answer in hundredths of a second and return the same findings. The
-  profile moved one of the two sites the report named: `referencesIn` was
-  already cheap, and the cost was the dead-signal member-call pattern, which is
-  asked a line at a time now.
-- **Those two readers are bounded, and say when they read less than the whole
-  project.** They held every file in memory at once with none of the limits
-  `project_search_text` applies, so on a 71 MB project one call cost 86 MB of
-  working set and 10.7 seconds, where the bounded sibling reading the same
-  bytes cost 10 MB (#664). The shared scan now applies the same three bounds --
-  4 MiB per file, 64 MiB in total, 10000 files -- and reports what they kept
-  out: the same project now costs 8 MB and answers in 1.9 seconds, and says
-  `truncated: true` rather than presenting a partial read as a whole one.
-  `project_rename_references` already refused a truncated scan and now names
-  which of the two reasons it was. `project_audit_assets` goes through that
-  scan rather than its own copy of the same loop, so a file type added to one
-  can no longer be invisible to the other.
-- **A duplicated branch survives the save.** `scene_duplicate_node` set the
-  owner of the copy's root and nothing else. Godot leaves every duplicated
-  descendant unowned and `PackedScene::pack` keeps only what the edited root
-  owns, so the editor showed the children, the tool reported success,
-  `editor_save_scene` reported saved, and the file held a bare copy of the root
-  (#659). The copy's descendants now take their owners from the branch they
-  were copied from, which keeps a runtime-only child unowned and leaves a node
-  inside an instanced sub-scene owned by that instance. The harness case only
-  ever duplicated a leaf, so nothing could fail; the new one duplicates a
-  branch two levels deep, saves, undoes, redoes, saves again, and reads the
-  file.
-- **Undoing `scene_remove_from_group` puts a persistent group back
-  persistent.** Deciding that needs the node's `SceneState` entry, and the two
-  sides of the comparison spelled the same node differently: `SceneState` says
-  `./Subject` where `Node.get_path_to` says `Subject`. Nothing ever matched,
-  every membership read as transient, and the undo restored it transient, so
-  the next save dropped a group the editor was still showing (#660). Both
-  comparisons now go through one helper. The harness covered only the transient
-  direction, which passed whatever the code did.
-- **`audio_configure_bus` says where the change ends up.** It writes the
-  running engine's `AudioServer` and reports `undo_redo_registered: false`
-  beside a `revert_with` block, which is the shape of "this lives in memory".
-  In an attached editor it is not: the editor's own bus-layout autosave picks
-  the change up and writes `res://default_bus_layout.tres` a moment later with
-  no call from anybody, so a tracked project file appears in the working tree
-  carrying whatever value was tried last (#622). The result now carries
-  `persisted_by_editor`, `layout_path` and a `limitation` saying which case it
-  is; a game session gets the opposite sentence, because nothing writes it
-  down there.
-- **`script_check_syntax` and `shader_check_compile` name the engine that
-  answered.** Both spawn a Godot to answer "will the engine accept this?", and
-  `resolveGodotExecutable` picks newest-first from `GODOT_BIN`, `GODOT_PATH` and
-  a fixed list, so on a machine with 4.5, 4.6 and 4.7 installed both answered
-  about a 4.5 project using 4.7. Neither said so, and `script_check_syntax` had
-  no `raw_output` for it to hide in (#617). Both now carry `engine_version`,
-  `engine_executable`, `attached_engine_version` and
-  `matches_attached_engine`, the same shape #466 gave `script_reflect_class`.
-- **The fix cycle spawns the interpreter it is running, not a command called
-  `python`.** There is no such command on macOS -- the Xcode Command Line Tools
-  provide `python3` and Apple removed the Python 2 shim in 12.3 -- nor in a
-  plain `ubuntu:24.04` image, so two gates in `tools/field-trial/cycle.py` died
-  on any machine GitHub did not prepare (#635). Both GitHub runners ship a
-  `python` shim, which is why CI could not see it. `sys.executable` is correct
-  by construction and needs no PATH lookup, which is what two existing test
-  modules already do.
-- **Both Python floors are written down.** The C++ build needs 3.9, which is
-  what a stock macOS ships; the Python test suite needs 3.10, because
-  `requirements-dev.txt` pins `jsonschema==4.26.0` and that release declares
-  `requires-python >= 3.10`. Neither number appeared anywhere, so a 3.9 machine
-  met the second one as a pip resolution error listing every jsonschema that
-  ever existed and naming no Python version (#634). The pin stays exact,
-  because CI reads it from that file and checks what it installed against it.
-  The floor is now in `requirements-dev.txt`, in the developer guide, and in a
-  configure-time note.
-- **A reconfigure with no source change recompiles one file, not 57 targets.**
-  The build identity carries a wall-clock stamp, so `version.hpp` was different
-  on every configure -- and it sits behind `mcp_protocol.hpp`, which 28 files
-  include, so a "nothing changed" reconfigure cost several minutes of compiling
-  (#633). `kBuildId` moves into a generated translation unit with an `extern`
-  declaration in the header, which keeps the identity exactly as it was and
-  leaves one object file to rebuild. CI never saw this; every incremental
-  workflow did.
-- **The checkpoint file-count boundary is tested with eleven files, not ten
-  thousand.** One test created, hashed, copied and then deleted ten thousand
-  files to reach the limit: 80 to 90 seconds on NTFS, which dominated the whole
-  native suite and left a temp directory full of them behind on an unclean exit
-  (#627). The limit is a value with a test seam now, production keeps its
-  10000, and a second test asserts that it does. The suite's Checkpoints block
-  went from 101 seconds to 5.
-- **The tilemap and gridmap rules a schema cannot state answer with a
-  sentence.** Uniqueness across array entries and a constraint between two
-  fields of one entry are hand-written, run either side of the schema check, and
-  are the rules a caller is most likely to trip because no schema-aware client
-  can pre-check them. All three answered with a raw identifier naming neither
-  the offending cell, nor the rule, nor what to change, and the third did not
-  even say which of several rules it stood for (#619). They now name the entry
-  indices, the coordinate or position, and the values.
-- **A live-only tool with no engine attached says what to do about it.** All
-  fourteen answered "No atomic runtime route is available for live dispatch",
-  which names neither Godot, nor the editor, nor anything a caller can act on,
-  in the single most common state a caller meets (#615). The refusal now names
-  the tool, says it needs a live Godot engine, and says how to get one, with
-  `blocked_on`, `needs_live_engine`, `offline_fallback`, `discover_with` and
-  `attach_with` beside it, plus `offline_alternative` where a sibling answers
-  offline. `audio_configure_bus` had that sentence written for this case and it
-  sat behind the route check where it could never ship; its content is in the
-  shared refusal now.
-- **A script the engine cannot read is not a script with nothing in it.**
-  `script_get_symbols` returned empty lists for a `.gd` saved as UTF-16 or in a
-  single-byte encoding, with `truncated: false` confirming nothing was dropped,
-  which is byte for byte the answer a correct empty script gets; an agent asking
-  where a method lives was told there is no such method (#614). It now refuses
-  with `415` and `binary_or_invalid_utf8`, the classification
-  `project_search_text` already reported for the same files.
-- **`script_check_syntax` fails a script Godot refuses to load.** It reported
-  `has_errors: false` for the same files. The engine does refuse them, but its
-  refusal points at engine source rather than at a `res://` line, so the parser
-  dropped the message and the answer came back clean (#613). The encoding is
-  checked before Godot is spawned, and an engine load failure with no `res://`
-  line is now kept as a diagnostic rather than dropped.
-- **Emitting a signal nothing is connected to is a no-op, and says so.**
-  Godot keeps a signal in its object's signal map only once it has a
-  connection, so a built-in signal with no listeners returns `ERR_UNAVAILABLE`
-  and the bridge answered "The engine refused the emit" -- in exactly the state
-  a caller is most likely to be in, driving a signal by hand before the
-  connection exists (#624). It now reports `emitted: false`,
-  `connection_count: 0` and a sentence saying nothing is listening. A delivered
-  emit reports the count it reached.
-- **An engine that answered is no longer reported as a session that is gone.**
-  The guard that keeps an engine's own refusal from reading as a routing
-  problem was scoped to 4xx, so a 5xx came back as `503` with
-  `data.code: "not_connected"` on a session whose very next call succeeded, and
-  an agent branching on that field detached and re-attached over a per-call
-  refusal (#625). An engine failure now answers `502` with
-  `code: "engine_refused"` and the engine's status under `upstream_code`;
-  `503` and `not_connected` stay for a route that could not deliver. A game
-  stopped on request still answers as the requested exit.
-- **`signal_emit`'s dry run runs the argument-value rules the confirmed call
-  runs.** #399 moved the argument *names* onto the preview path and the values
-  stayed behind, so a preview signed nesting, array and object sizes the
-  confirmed call then refused: two round trips and a spent token to learn
-  something the first call could have said (#616). The rules run before the
-  preview now, and the refusal names the entry, the rule and the limit instead
-  of answering `unsupported_signal_emit_argument`.
-- **A preview says what its probe actually read.** The probe reads a node's
-  `name` to confirm the node is there, and that was reported as the before
-  state of a `planned_mutation` of `name`. `signal_emit` changes no property of
-  its target, and neither do the eight other tools that reach the same branch,
-  so a caller diffing `before` against the result saw `name` unchanged and
-  concluded the call had not happened (#621). Those previews now report
-  `changes[].kind: "resolved_target"` with `before.resolved: true`.
-- **A float shader uniform set to a whole number survives the save.**
-  `ShaderMaterial.set_shader_parameter` stores the Variant it is handed without
-  coercing it, and the bridge built an `int` Variant for a JSON integer, so a
-  `float` uniform set to `0` or `1` held an int the material could not
-  serialise and Godot dropped the parameter at save time (#612). The writing
-  tool, the reading tool and the save all reported success on the way there.
-  The Variant is now built for the type the shader declares.
-- **A colour or vector write that landed says it landed.** `applied` compared
-  composites exactly, so a Color channel that is not representable in the
-  float32 it is made of -- `0.1`, which reads back as `0.10000000149011612` --
-  and a colour sent as `{r,g,b}` with the alpha left off, which the tool's own
-  schema documents, both reported a write that had worked as one that had not
-  (#618). Members are compared one by one now, against the value as it was sent
-  to the engine, with a tolerance sized to that float32 round trip.
-- **`shader_list_uniforms` reports each uniform's declared hint, and
-  `shader_set_uniform` honours it.** The engine has the hint in the same
-  `PropertyInfo` the name and type are read from, and neither tool looked at
-  it, so a caller could not learn a declared range short of reading the shader
-  source and a value 2.5x a `hint_range` maximum persisted without comment
-  (#620). The list now carries `hint`, and a value outside a declared range is
-  refused by name, the way `audio_configure_bus` refuses a volume outside the
-  bus editor's own range. `or_greater` and `or_less` are honoured.
-- **`shader_set_uniform` says the change is not on disk yet.** It writes to the
-  same place as `scene_set_property`, `tilemap_set_cells` and
-  `gridmap_set_cells` and is discarded the same way if the editor closes
-  without saving, and it was the only one of the four that carried neither
-  `scene_saved` nor the `limitation` sentence, which read as "this one did not
-  need saving" (#623).
-- **The schema gate refuses arguments that are not an object.** The one place
-  that reads a tool's published schema returned "no complaint" for an array, a
-  number or a string, so the gate reported that a call had satisfied a contract
-  it cannot satisfy (#629). It now names the type it was given. No handler was
-  ever reached with one: `tools/call` and `MutationSafety::evaluate` both refuse
-  a non-object first.
-- **`viewport_diff_capture` refuses a malformed capture id with the error
-  envelope.** Seven argument checks in the handler duplicated bounds the
-  published schema already states, and `dispatchTool` checks that schema before
-  any handler runs, so six of them could not be reached (#628). The seventh
-  could: the schema states the capture id's `pattern` and the checker does not
-  model `pattern`, so a 32-character id in the wrong case reached the handler
-  and came back as a bare sentence with no code to branch on. The duplicates are
-  gone and the surviving check answers the way #424 made its two neighbours
-  answer.
-- **The server starts under a project root with an accent in it.** On Windows
-  the narrow `main` the CRT synthesises converts the command line and the
-  environment through the system ANSI codepage, so `--project` and
-  `DIDI_PROJECT_ROOT` arrived mangled. A root holding a character that codepage
-  can represent, such as the one in `C:/Users/Jose`, killed the process with
-  `0xC0000409` and no output at all; Cyrillic, CJK and emoji roots became
-  question marks and were refused as an inaccessible directory (#611). The
-  Windows entry point is now `wmain`, so both arrive as UTF-16 and are encoded
-  to UTF-8 here, and the refusal written for an undecodable root is reachable
-  instead of escaping `main`.
-- **A game stopped on request is reported as the exit it is.** After
-  `runtime_stop`, the first call to reach the game answered a `504` with
-  `retryable: true` and a sentence about a pipe, the calls after it a `503`
-  about a missing route, and nothing said the exit was requested by this
-  caller with this code, so the sensible next move was to retry a process
-  that would never answer (#595). The server now remembers the stop it asked
-  for: the first call to reach the stopped game answers `incident:
-  "game_stopped"` with `exit_code`, `requested_by: "runtime_stop"` and
-  `retryable: false`, later calls carry the same fact under
-  `route_obstruction`, and `didi_control_room` names it until another session
-  is attached.
-- **What discovery advertises is what a call gets, for hit-testing a game
-  and for managed recovery.** `ui_hit_test` promised a game default in its
-  own `root_path` description and was refused for a game session, while
-  `ui_list_controls`, the other half of the same read, answered; it now
-  answers for the running game's root the way the listing does, so what a
-  game lists can be hit-tested before a click is injected at it (#592). The
-  four managed-recovery tools advertised `currentMode: "local"` and answered
-  `501 unimplemented` when the server was not started with
-  `--managed-editor`, and `runtime_restore_checkpoint` issued a confirmation
-  token before saying so; discovery and the control room now advertise them
-  as `unavailable`, every call answers `409` with `data.code:
-  "managed_mode_disabled"`, and the check runs before the confirmation gate,
-  so no token is minted for a call that cannot succeed (#599).
-- **Three places where the published contract and the handler disagreed.**
-  `runtime_explore_scene` refused every `duration_ms` below 3000 unless
-  `stuck_ms` was lowered too, because the default of one exceeded what the
-  other allowed; the default is now the smaller of 3000 and the window, and a
-  caller who sets both backwards is still refused (#596). `runtime_read_logs`
-  and `runtime_read_output` carried `exhausted: false` on every page, a flag
-  that meant the 64-bit sequence had wrapped and read as "there is more"; it
-  is now `sequence_overflowed`, every page carries `has_more`, and the tools
-  say to page until it is false (#598). `runtime_watch_invariants` documented
-  `node.get('health')` as its example expression, which the sandbox refuses
-  because a script's own variable can run a getter; the example, the probe
-  descriptions and the refusal now say native properties only and show one
-  that works (#593).
-- **The extension no longer prints engine errors at startup and on every
-  dashboard read, and its log stays out of a game's output.** On Godot 4.5
-  and 4.6 every `didi_control_room` call printed `ERROR: Parameter "mb" is
-  null` into the editor's log, because the bind for `get_unsaved_scenes`, a
-  4.7 method, was looked up on every call, and every editor and game printed
-  `non-existent interface function` at startup because a 4.7 class
-  registration function was asked for on every engine (#600). The method is
-  now checked once through `ClassDB.class_has_method`, and the interface
-  function is asked for only from 4.7. The extension also wrote two coloured
-  INFO lines per tool call into a game's own output (#601): its default level
-  is now `WARN`, the `didi/native/log_level` project setting sets it for every
-  process that loads the addon, `DIDI_LOG_LEVEL` still wins over both, and
-  colour codes are written only when stderr is a terminal. The server's
-  default stays `INFO`.
-- **Injected input reaches a paused game's nodes, and a click lands where it
-  is aimed.** A paused tree delivers `_input` only to nodes that process while
-  paused, so a batch injected during a pause reported `completed` and was gone
-  before `runtime_step` ran a frame, which made pause, press, step, look do
-  nothing (#594). `runtime_inject_input` now holds such a batch and reports
-  `outcome: "queued"` with `paused: true` and `delivery:
-  "next_unpaused_frame"`; `runtime_set_paused` and `runtime_step` hand the held
-  events to Input on the way to running, so they land in the first frame that
-  processes, and both report `released_input_events`. The `mouse_button` shape
-  had no position, so every injected click landed at the viewport origin and a
-  caller who had found a control's rect could not click it (#597); it now takes
-  `position` and `global_position`, and a `mouse_motion` shape with `position`
-  and `relative` moves the pointer first. `target_context` is a constant whose
-  description offered the editor as a choice the schema refused; the description
-  now says it is always `game_input` (#602).
-- **Scene edits the file cannot hold are refused before they happen, and the
-  hierarchy says who owns what.** Godot's packer keeps only the nodes the
-  edited scene owns, so a property, group or script change on a node inside an
-  instanced sub-scene was applied to the live tree, reported as applied, and
-  dropped by the save, which reported `saved` (#588). A `.tscn` has no marker
-  for a removed inherited node, so removing, moving or duplicating one went the
-  same way, and so did removing a node inside an instance (#589). Instancing
-  the edited scene into itself, directly or through a scene that depends on
-  it, built a recursive tree the editor then refused to save in a dialog the
-  caller never sees (#590). All of these now answer `409` before anything is
-  touched: `node_not_owned` names the owning scene and the instance root,
-  `node_inherited` names the base scene, and `cyclic_instance` names the chain
-  of scene files, which are the checks the editor makes in
-  `SceneTreeDock` before the same operations. The property gate also covers
-  `tilemap_set_cells`, `gridmap_set_cells` and `viewport_set_camera_transform`,
-  which write node state the packer drops the same way. Undoing a
-  `scene_remove_node` now restores the ownership of the branch it puts back:
-  Godot clears the owner of a node whose owner is no longer an ancestor when
-  the branch leaves the tree, so the restored node was one the next save would
-  have dropped, which the new gate was the first thing to notice. The dry-run preview refuses the
-  same calls with the same codes, because the probe now names the mutation it
-  is previewing and the bridge runs that call's own preconditions before the
-  read; the script base-type check runs on the preview the same way, so
-  `script_attach_to_node` no longer previews an attach the real call refuses
-  (#603). `scene_get_hierarchy` carries `owned_by_scene` on every node,
-  `instance_of` and `editable_instance` on instance roots, `inherited` on
-  nodes from the base scene and `inherits` at the top level, live and offline;
-  the offline parse's `instance` field is now `instance_of`, the same name on
-  both routes (#591). The `saved` answer from `editor_save_scene` is documented
-  as Godot's acceptance of the request, since `EditorInterface.save_scene`
-  returns OK for any open scene with a path.
-- **A bounded reader publishes `max_response_bytes`, and both new ones use the
-  same figure.** `script_get_symbols` and the dry-run preview each grew a count
-  bound without one, which left the response size resting on a per-item
-  declaration: a caller raising `max_symbols` could talk past it, and a tool
-  taking a list of bounded strings could sum past it. Both now carry the 8 MiB
-  `scene_get_hierarchy` publishes, reported whether or not it is reached, with
-  `truncated` beside it. Symbols are charged per declaration the way hierarchy
-  charges per node, so the one that crosses the limit is the one that stops. A
-  preview replaces values over 4 KiB with the byte count that stood there, and
-  the argument block whole if that is not enough; an elision always says it is
-  one, because the preview is the artifact a person approves. The confirmation
-  token is bound to the real arguments rather than the displayed copy, so
-  nothing elided for reading can fail a later confirm (#574, #575).
-- **The social preview banner named the wrong surface size.** The count in
-  its text had not moved since the surface was 98 names. `docs/brand/build.py`
-  now says 116 tools, and `social-preview.svg` and `.png` are regenerated
-  from it.
-- **Every required string parameter carries a declared length.** `minLength`
-  landed in #553; the other end did not, so 50 required strings had no
-  `maxLength` at all while 62 of 64 numbers carried a `minimum`. The split was
-  not along any line a caller could guess: a blackboard key was capped at 512
-  bytes and a Godot node path was not capped at all. Sized by what the value is
-  rather than by one global number: an identifier is 256, a path is the 1024
-  `search_path` already used, and a body (`source_text`, `new_definition`) is
-  1,048,576, which is the one place a large number is right and the point is
-  that it is declared. A schema stating its own narrower bound keeps it.
-  Stamped where `minLength` is stamped, so a parameter added later is bounded
-  without anyone remembering to say so, and a contract test keeps the count of
-  unbounded required strings at zero (#573).
-- **A refusal names both halves of the mistake.** The missing-argument check
-  and the unknown-argument check ran in sequence and each returned on its first
-  find, so the message that lists what a tool accepts only ever appeared when
-  every required argument was already correct. Getting a *required* name wrong,
-  which is the likelier mistake, reported a name the caller had not used as
-  missing and said nothing about the ones they had: `{"node_path",
-  "property"}` answered `Missing required argument 'target_node'.` and left
-  them to guess whether `node_path` had been ignored or accepted. One message
-  now carries the missing names, the unknown names and the whole parameter set
-  (#577).
-- **`case_sensitive` describes what it does.** Both `project_search_text` and
-  `project_search_symbols` published `"default": true` beside "Off by
-  default", and the handler is case-sensitive, so the declared default was
-  right and the description was the opposite of the behaviour. A caller who
-  read the prose and searched for `Player` in a codebase that spells it
-  `player` got zero matches and no reason to doubt the tool. A contract test
-  now compares every boolean parameter's prose against its declared default,
-  which is a class of defect neither the description tests nor the schema tests
-  could see: one counts descriptions and the other reads keys, and nothing
-  compared them (#576).
-- **`script_get_symbols` publishes a limit and says what it left out.** It was
-  the one reader on the surface with neither: a 10 MB script with 120,000
-  declarations came back as 15 MB of JSON, `isError: false`, with no
-  `truncated`, `max_*`, `omitted_*` or count field anywhere, so a caller could
-  not tell a complete answer from a clipped one and could not ask for less.
-  `max_symbols` defaults to 2000, counted across all six kinds because the
-  response is one thing, and every result carries `symbol_count_total`,
-  `returned_count` and `truncated`. The scan still reads the whole file, so the
-  total is the real total. The same disclosure `scene_get_hierarchy`,
-  `runtime_get_tree`, `project_search_text`, `ui_list_controls` and
-  `scene_get_selection` already publish (#575).
-- **A confirmation token is bound to what the preview saw, not only to the
-  call.** The preview read the target, computed `before`, signed it and never
-  looked again, so a file rewritten between the preview and the confirm was
-  overwritten with a change approved against bytes that were no longer there,
-  and the answer was `status: "success"` either way. The confirm reads the
-  target again and compares everything the probe reported, including a digest
-  of a file's bytes so an edit that keeps the length is caught like any other.
-  A mismatch is `409` with `data.target_changed` and nothing applied. The
-  preview says up front whether that check will be possible with
-  `target_checked_on_confirm`. A target that has *gone* is not a change of this
-  kind: there is no other writer's work to discard, and #425's rule that a
-  token minted while the target was there stays spendable once it is not is
-  unchanged (#572).
-- **A dry run runs the argument checks the real call runs.** The `..` node path
-  rule lived in the bridge alone, so seven of nine cases previewed a mutation
-  the identical arguments were then refused for: `scene_reparent_node` wrote
-  `preview_kind: "target_state"` and `kind: "planned_mutation"` over a real
-  `before` read off the live tree, for a call that cannot run. The rule is a
-  property of the argument, so it needs no engine and no open scene, and it now
-  lives in one place both binaries read. The same goes for
-  `script_patch_method`'s replacement guard: a `new_definition` that declares
-  the wrong kind of symbol is refused at the preview rather than at the write
-  (#571).
-- **A preview carries its arguments once.** `mutation_preview.arguments` and
-  `mutation_preview.changes[0].target` held the same object, so every response
-  was a little over twice the size of its request at every scale, with no cap
-  anywhere along the way: an 8 MB argument returned 16.8 MB of JSON on one
-  stdio frame with `isError: false`. `changes[].target` names what the change
-  is about now, such as the path and the symbol, which is what the field was
-  for; a tool with no subject of its own says so and points at the arguments
-  one level up (#574).
-- **`viewport_diff_capture` makes the viewport render before it compares.**
-  It takes its own comparison capture and had no way to ask for the main
-  screen, so it read whatever was last drawn in a viewport with no size and
-  answered `bit_identical: true`, `ssim: 1.0`, `isError: false` for a frame
-  where 55% of the pixels had changed. No threshold could help, because the
-  image was stale. `select_main_screen` is on `viewport_diff_capture` and
-  `viewport_capture_passes` now, the way it has been on
-  `viewport_capture_frame`, and all three go through the same deferred path:
-  select the screen, wait a frame for the layout, capture, put the previous
-  screen back. A call that names no camera selects the screen its own default
-  camera belongs to rather than asking for one (#568).
-- **`script_patch_method` refuses a symbol the script does not declare.** It
-  appended one instead and reported the same success as a replacement, so the
-  typo `ready` for `_ready` left a method nobody calls beside the one the
-  caller meant to edit, with `has_errors: false` because the file still
-  parses. A name the script does not declare is a 404 now, naming the kind and
-  the name; `create_if_missing: true` keeps the append for the callers who
-  want it, and `created` in the result says which of the two happened. The dry
-  run answers the same way, with `before.symbol_exists` (#569).
-- **`symbol_type` publishes the six kinds it models, and refuses the rest.**
-  It was a bare string with a default and no `enum`, and an unrecognised value
-  did not just fall through to a looser match: it switched off the check that
-  the replacement declares what it replaces. So `fucntion` for `function`
-  replaced a function with a variable, deleted the body and reported success,
-  while the schema said only "Defaults to function". The argument check now
-  refuses anything outside `function`, `variable`, `constant`, `signal`,
-  `enum` and `class` before the file is opened, and the patcher refuses it
-  again behind that. `patch_script_symbols` is the same handler (#570).
-- **Every required string parameter carries `minLength: 1`** unless the schema
-  says otherwise, stamped where `additionalProperties` is stamped. 41 of 90
-  accepted `""`, and the handlers behind them each answered differently: five
-  said the argument was missing when it had been supplied, one answered with a
-  bare string, and `viewport_create_test_lab` wrote a lab with no target in it
-  and reported the same success as a lab with one. The argument check now
-  refuses all of them in the envelope, naming the property. `script_create`'s
-  `source_text` is the one exception, because an empty file is a file (#553,
-  #554).
-- **Four failures behind valid arguments answer with the error envelope**
-  instead of prose: removing a project setting that is not there is `404
-  not_found`, a value nested past 16 levels is `400 invalid_arguments` and the
-  message no longer names an internal phase, an empty `class_name` is `400`,
-  and `viewport_capture_passes` offline is `503 not_connected` with
-  `retryable: true` like every other live-only tool (#548).
-- **Writers report the path they resolved, not the argument.** `script_create`,
-  `resource_create` and `script_patch_method` echoed the argument as the path
-  they wrote, so `res://d1/../reported.gd` was reported through a directory
-  that never existed while every reader named the file `res://reported.gd`.
-  On Windows the same seam let `res://PLAYER.gd` replace `res://player.gd`
-  while the preview's `before.path`, the result and the 409 conflict all named
-  a file that was never on disk. All of them now carry the resolved `res://`
-  path, in the on-disk case when a file is already there (#546, #551).
-- **`script_patch_method` keeps the file's line endings.** The file was read in
-  text mode, so on Windows a CRLF file came back LF on every line while the
-  result reported a single-method change. CRLF stays CRLF, a BOM stays, a
-  file with no trailing newline does not gain one, and a replacement spelled
-  with CRLF joins the file in the file's convention. `patch_script_symbols` is
-  the same handler (#550).
-- **`project_search_symbols` reads a `.GD` script.** The collector folded the
-  extension to admit the file and the symbol path then tested the suffix
-  case-sensitively, so `res://Upper.GD` was collected, dropped as having no
-  symbol extractor, and `.gd` was reported as an unsearchable extension for
-  the whole run. Both tests fold the same way now (#549).
-- **Search columns count code points.** `column` in `project_search_text` and
-  `project_search_symbols` was the byte offset plus one, and nothing said so,
-  which pointed past the match in any editor on a line with a non-ASCII
-  character before it. It is the 1-based column in Unicode code points now,
-  and the published `outputSchema` describes both `line` and `column` (#556).
-- **`script_reflect_class` compares the pinned dump to the project when no
-  session is selected.** It answered from the 4.7 dump and compared it to
-  nothing unless an earlier call had happened to select a session, so a 4.5
-  project asking first was told about 4.7 without a word. With no session the
-  response now carries `project_features_version` from `config/features` and
-  `api_version_matches_project_features`, and an unknown name is described as
-  absent from the pinned reference rather than from Godot (#555).
-- **A second `initialize` is refused.** The lifecycle makes initialization the
-  first interaction, and the server accepted another at any point, from any
-  `clientInfo`, answering it as though it were the first while resetting
-  nothing, so the confirmation tokens minted for the previous client stayed
-  spendable by whoever sent it. It now answers `-32600` with
-  `error.data.initialized: true`, and the session goes on serving the client
-  that opened it (#552).
-- **Live scene mutations say the change is unsaved.** Every committed
-  edited-scene mutation, from `scene_set_property` to `tilemap_set_cells`,
-  reported plain success while the change lived only in the editor's open
-  scene and its undo history, and `didi_control_room` read `Project: Ready`
-  over it. Each reply now carries `scene_saved: false` and a `limitation`
-  naming `editor_save_scene`. The dashboard asks an attached editor which
-  open scenes hold unsaved changes: on Godot 4.7 and later the Project light
-  goes amber and names them; on 4.5 and 4.6 the engine cannot say, and the
-  `Unsaved scenes` fact reports that rather than reading as clean (#557).
-- **`viewport_create_test_lab` checks the target first and writes the lab
-  where the audit can see it.** The handler created `addons/didi` before it
-  resolved the target, so a refused target left the project with a folder it
-  did not have, and it wrote the lab inside the addon's own folder, which
-  `project_audit_assets` excludes from orphan checks. The target is now
-  resolved before anything is touched, the lab is written to
-  `res://didi_test_lab.tscn`, and the result reports `target_resource_path`
-  resolved. A client that read the old path from the result sees the new one
-  there (#564).
-- **`viewport_create_test_lab` says whether it instanced the target.** The
-  description said it did not instance the target resource while every
-  PackedScene target was instanced as `TargetInstance`. The description, the
-  docs and a new `target_instanced` field now say which of the two scenes was
-  written (#565).
-- **`project_set_setting`'s descriptions say where the `create` guard runs.**
-  The name check needs an attached editor; offline the name is written whether
-  `create` is set or not, and the result's `limitation` already said so. The
-  tool and parameter descriptions promised a refusal the offline path never
-  gave (#547).
+- `2026-09-23` `audio_list_buses` offline lists the buses the engine loads from the files. [#903](https://github.com/saworbit/didi/issues/903) · [#905](https://github.com/saworbit/didi/issues/905) · [PR #906](https://github.com/saworbit/didi/pull/906)
+- `2026-09-23` A bus muted with `mute = 1` is reported as muted. [#853](https://github.com/saworbit/didi/issues/853) · [PR #904](https://github.com/saworbit/didi/pull/904)
+- `2026-09-23` A refusal that names the argument that fixes it carries that argument. [#900](https://github.com/saworbit/didi/issues/900) · [PR #901](https://github.com/saworbit/didi/pull/901)
+- `2026-09-23` `retry_with` has one shape again. [#897](https://github.com/saworbit/didi/issues/897) · [PR #899](https://github.com/saworbit/didi/pull/899)
+- `2026-09-23` A rolled back mutation says `rolled_back` everywhere. [#896](https://github.com/saworbit/didi/issues/896) · [PR #898](https://github.com/saworbit/didi/pull/898)
+- `2026-09-23` Twenty-seven bridge refusals say which conflict they are. [#894](https://github.com/saworbit/didi/issues/894) · [PR #895](https://github.com/saworbit/didi/pull/895)
+- `2026-09-23` Every refusal above 400 names itself, in all five files that emit one. [#892](https://github.com/saworbit/didi/issues/892) · [PR #893](https://github.com/saworbit/didi/pull/893)
+- `2026-09-23` An authorization refusal keeps its structured half. [#890](https://github.com/saworbit/didi/issues/890) · [PR #891](https://github.com/saworbit/didi/pull/891)
+- `2026-09-22` One frame reader, called from both ends of both transports. [#880](https://github.com/saworbit/didi/issues/880) · [#881](https://github.com/saworbit/didi/issues/881) · [#882](https://github.com/saworbit/didi/issues/882) · [PR #883](https://github.com/saworbit/didi/pull/883)
+- `2026-09-22` A frame the server has not been sent is no longer a buffer it has already allocated. [#876](https://github.com/saworbit/didi/issues/876) · [PR #879](https://github.com/saworbit/didi/pull/879)
+- `2026-09-22` Four server threads no longer spin silently when the process runs out of file descriptors. [#877](https://github.com/saworbit/didi/issues/877) · [PR #879](https://github.com/saworbit/didi/pull/879)
+- `2026-09-22` A Windows slot that cannot create its pipe instance says so. [#878](https://github.com/saworbit/didi/issues/878) · [PR #879](https://github.com/saworbit/didi/pull/879)
+- `2026-09-22` The two deadlines for opening a connection stop being flat 2,000 ms numbers, and the comment on one of them stops stating something that is not true. [#874](https://github.com/saworbit/didi/issues/874) · [PR #875](https://github.com/saworbit/didi/pull/875)
+- `2026-09-22` A handshake deadline now allows for the wait to be accepted, so the attach that `runtime_launch --detach` documents works on macOS and Linux. [#782](https://github.com/saworbit/didi/issues/782) · [PR #872](https://github.com/saworbit/didi/pull/872)
+- `2026-09-22` A process that has exited no longer reads as present on macOS and Linux. [#869](https://github.com/saworbit/didi/issues/869) · [PR #871](https://github.com/saworbit/didi/pull/871)
+- `2026-09-22` A detached game is handed to init rather than left as the server's own child. [#786](https://github.com/saworbit/didi/issues/786) · [PR #870](https://github.com/saworbit/didi/pull/870)
+- `2026-09-22` Every refusal the extension emits names itself. [#865](https://github.com/saworbit/didi/issues/865) · [#867](https://github.com/saworbit/didi/issues/867) · [PR #868](https://github.com/saworbit/didi/pull/868)
+- `2026-09-22` A paused game is refused rather than explored. [#778](https://github.com/saworbit/didi/issues/778) · [PR #866](https://github.com/saworbit/didi/pull/866)
+- `2026-09-22` The Phase 7 signal bridge harness runs, and it passes. [#862](https://github.com/saworbit/didi/issues/862) · [PR #864](https://github.com/saworbit/didi/pull/864)
+- `2026-09-22` Two signal refusals say the identifier where every other one says it. [PR #864](https://github.com/saworbit/didi/pull/864)
+- `2026-09-22` A `scene_set_property` write that did not land says which of the two it was. [#767](https://github.com/saworbit/didi/issues/767) · [PR #863](https://github.com/saworbit/didi/pull/863)
+- `2026-09-22` `signal_connect` writes the flags the editor's own Connect dialog writes. [#852](https://github.com/saworbit/didi/issues/852) · [PR #860](https://github.com/saworbit/didi/pull/860)
+- `2026-09-22` The same rule was wrong in four more places in the same call. [PR #860](https://github.com/saworbit/didi/pull/860)
+- `2026-09-22` `resource_create`'s type guard asks the engine that will load the file. [#766](https://github.com/saworbit/didi/issues/766) · [PR #858](https://github.com/saworbit/didi/pull/858)
+- `2026-09-21` A project.godot the engine will not open no longer reads as one it will. [#826](https://github.com/saworbit/didi/issues/826) · [PR #857](https://github.com/saworbit/didi/pull/857)
+- `2026-09-21` Every live route now gives the same account of a failed engine. [#854](https://github.com/saworbit/didi/issues/854) · [PR #855](https://github.com/saworbit/didi/pull/855)
+- `2026-09-21` `origin: scene` means the connection is in the scene, not that the receiver happens to live there. [#768](https://github.com/saworbit/didi/issues/768) · [PR #851](https://github.com/saworbit/didi/pull/851)
+- `2026-09-21` A headless game is refused as a game, and the renderer stopped dropping the facts a refusal carries. [#777](https://github.com/saworbit/didi/issues/777) · [PR #850](https://github.com/saworbit/didi/pull/850)
+- `2026-09-21` The two readers of `project.godot` answer offline, like its writer does. [#780](https://github.com/saworbit/didi/issues/780) · [PR #849](https://github.com/saworbit/didi/pull/849)
+- `2026-09-21` `runnable` is read the way the engine reads it, and one rule now covers both readers. [#842](https://github.com/saworbit/didi/issues/842) · [PR #848](https://github.com/saworbit/didi/pull/848)
+- `2026-09-21` The bus layout is read the way Godot writes it. [#844](https://github.com/saworbit/didi/issues/844) · [PR #847](https://github.com/saworbit/didi/pull/847)
+- `2026-09-21` The export presets refusal says which of the six causes it is. [#828](https://github.com/saworbit/didi/issues/828) · [PR #843](https://github.com/saworbit/didi/pull/843)
+- `2026-09-21` The test runner refuses an argument it does not understand. [#803](https://github.com/saworbit/didi/issues/803) · [PR #841](https://github.com/saworbit/didi/pull/841)
+- `2026-09-21` CONTRIBUTING says how to run the Python suite. [#798](https://github.com/saworbit/didi/issues/798) · [PR #841](https://github.com/saworbit/didi/pull/841)
+- `2026-09-21` The Markdown link check is one implementation, and it runs before you push. [#824](https://github.com/saworbit/didi/issues/824) · [PR #840](https://github.com/saworbit/didi/pull/840)
+- `2026-09-21` A session lock file is swept up once nobody holds it. [#787](https://github.com/saworbit/didi/issues/787) · [PR #839](https://github.com/saworbit/didi/pull/839)
+- `2026-09-21` The offline bus reader follows the manifest, and answers with the bus the project actually has. [#836](https://github.com/saworbit/didi/issues/836) · [#837](https://github.com/saworbit/didi/issues/837) · [PR #838](https://github.com/saworbit/didi/pull/838)
+- `2026-09-21` The import record is looked for where Godot writes it. [#833](https://github.com/saworbit/didi/issues/833) · [PR #835](https://github.com/saworbit/didi/pull/835)
+- `2026-09-21` The freshness reproduction is tested against records Godot wrote. [#834](https://github.com/saworbit/didi/issues/834) · [PR #835](https://github.com/saworbit/didi/pull/835)
+- `2026-09-20` The audit reads both halves of the record, and says so when it reads neither. [#830](https://github.com/saworbit/didi/issues/830) · [PR #832](https://github.com/saworbit/didi/pull/832)
+- `2026-09-20` `source_newer_than_output` meant two things, and the documented remedy fixed one of them. [#831](https://github.com/saworbit/didi/issues/831) · [PR #832](https://github.com/saworbit/didi/pull/832)
+- `2026-09-20` Import freshness is read from the record Godot wrote, not from modification times. [#827](https://github.com/saworbit/didi/issues/827) · [PR #829](https://github.com/saworbit/didi/pull/829)
+- `2026-09-20` A `.import` and an `export_presets.cfg` the engine refuses were both read as though they had loaded. [#823](https://github.com/saworbit/didi/issues/823) · [PR #825](https://github.com/saworbit/didi/pull/825)
+- `2026-09-20` A balanced `project.godot` is not a loadable one, and a line can hold two settings. [#820](https://github.com/saworbit/didi/issues/820) · [PR #822](https://github.com/saworbit/didi/pull/822)
+- `2026-09-20` Two settings on one line are two settings. [#821](https://github.com/saworbit/didi/issues/821) · [PR #822](https://github.com/saworbit/didi/pull/822)
+- `2026-09-20` A key the engine built by joining the line above into this one is refused for the same reason. [PR #822](https://github.com/saworbit/didi/pull/822)
+- `2026-09-20` An identifier does not end a value. [PR #822](https://github.com/saworbit/didi/pull/822)
+- `2026-09-20` A value is what the engine reads, not the rest of one line. [#816](https://github.com/saworbit/didi/issues/816) · [PR #819](https://github.com/saworbit/didi/pull/819)
+- `2026-09-20` A `project.godot` Godot refuses to parse is no longer read, previewed and written as though it loaded. [#817](https://github.com/saworbit/didi/issues/817) · [PR #819](https://github.com/saworbit/didi/pull/819)
+- `2026-09-20` A key is the tokens joined, not the text before the first `=`. [#813](https://github.com/saworbit/didi/issues/813) · [PR #815](https://github.com/saworbit/didi/pull/815)
+- `2026-09-20` `export_presets.cfg` is read by the same rules as every other ConfigFile. [#812](https://github.com/saworbit/didi/issues/812) · [PR #815](https://github.com/saworbit/didi/pull/815)
+- `2026-09-20` A spaced header hides nothing from the last two readers. [#814](https://github.com/saworbit/didi/issues/814) · [PR #815](https://github.com/saworbit/didi/pull/815)
+- `2026-09-20` A `#` line in `project.godot` is a setting, not a comment. [#810](https://github.com/saworbit/didi/issues/810) · [PR #811](https://github.com/saworbit/didi/pull/811)
+- `2026-09-20` A spaced section header is the same section. [#809](https://github.com/saworbit/didi/issues/809) · [PR #811](https://github.com/saworbit/didi/pull/811)
+- `2026-09-20` A spaced `[autoload]` key is the same key. [#802](https://github.com/saworbit/didi/issues/802) · [PR #808](https://github.com/saworbit/didi/pull/808)
+- `2026-09-20` A second merge no longer cancels the first one's CodeQL run on `main`. [PR #805](https://github.com/saworbit/didi/pull/805)
+- `2026-09-20` `project_rename_references` reports the `[autoload]` line that defines the name. [#792](https://github.com/saworbit/didi/issues/792) · [PR #801](https://github.com/saworbit/didi/pull/801)
+- `2026-09-20` `project_audit_assets` follows the resources `project.godot` names. [#774](https://github.com/saworbit/didi/issues/774) · [PR #791](https://github.com/saworbit/didi/pull/791)
+- `2026-09-20` `runtime_launch` names the process and the engine the rest of its answer means. [#773](https://github.com/saworbit/didi/issues/773) · [#772](https://github.com/saworbit/didi/issues/772) · [PR #790](https://github.com/saworbit/didi/pull/790)
+- `2026-09-19` A resource slot takes a list of classes, so materials can be assigned again. [#783](https://github.com/saworbit/didi/issues/783) · [PR #789](https://github.com/saworbit/didi/pull/789)
+- `2026-09-19` `resource_create` stops writing files Godot cannot load or silently empties. [#765](https://github.com/saworbit/didi/issues/765) · [#764](https://github.com/saworbit/didi/issues/764) · [PR #788](https://github.com/saworbit/didi/pull/788)
+- `2026-09-19` The Unix socket server stops without pulling a descriptor out from under its own thread. [#757](https://github.com/saworbit/didi/issues/757) · [PR #762](https://github.com/saworbit/didi/pull/762)
+- `2026-09-19` A timeout that could not finish the kill says so. [#755](https://github.com/saworbit/didi/issues/755) · [PR #761](https://github.com/saworbit/didi/pull/761)
+- `2026-09-19` The offline process tools take the whole tree down on timeout. [#758](https://github.com/saworbit/didi/issues/758) · [PR #761](https://github.com/saworbit/didi/pull/761)
+- `2026-09-19` An asset the editor has never seen gets imported, and the answer says whether it did. [#731](https://github.com/saworbit/didi/issues/731) · [PR #751](https://github.com/saworbit/didi/pull/751)
+- `2026-09-18` `scene_create` makes the scene you meant. [#740](https://github.com/saworbit/didi/issues/740) · [PR #754](https://github.com/saworbit/didi/pull/754)
+- `2026-09-18` A coordinate is an object anywhere a vector is. [#738](https://github.com/saworbit/didi/issues/738) · [PR #753](https://github.com/saworbit/didi/pull/753)
+- `2026-09-18` `LLM_INSTRUCTIONS` no longer forbids what the surface does. [#739](https://github.com/saworbit/didi/issues/739) · [PR #753](https://github.com/saworbit/didi/pull/753)
+- `2026-09-18` A property write that landed says so. [PR #753](https://github.com/saworbit/didi/pull/753)
+- `2026-09-18` A `oneOf` refusal picks the branch by type. [PR #753](https://github.com/saworbit/didi/pull/753)
+- `2026-09-18` One InputEvent vocabulary, spelled the engine's way, and published. [#737](https://github.com/saworbit/didi/issues/737) · [PR #752](https://github.com/saworbit/didi/pull/752)
+- `2026-09-18` The InputEvent vocabulary is published, not just enforced. [#736](https://github.com/saworbit/didi/issues/736) · [PR #752](https://github.com/saworbit/didi/pull/752)
+- `2026-09-18` A refusal about an event says which entry and which property. [#737](https://github.com/saworbit/didi/issues/737) · [PR #752](https://github.com/saworbit/didi/pull/752)
+- `2026-09-18` `runtime_launch` finishes its own kill before it answers. [#732](https://github.com/saworbit/didi/issues/732) · [PR #750](https://github.com/saworbit/didi/pull/750)
+- `2026-09-18` A handler on a script that did not compile is reported as that, not as a missing method. [#729](https://github.com/saworbit/didi/issues/729) · [PR #749](https://github.com/saworbit/didi/pull/749)
+- `2026-09-18` A crash comes back with somewhere to go. [#744](https://github.com/saworbit/didi/issues/744) · [PR #748](https://github.com/saworbit/didi/pull/748)
+- `2026-09-18` A run that crashed says so in its summary. [#744](https://github.com/saworbit/didi/issues/744) · [PR #748](https://github.com/saworbit/didi/pull/748)
+- `2026-09-18` A syntax check says whether it asked a compiler. [#728](https://github.com/saworbit/didi/issues/728) · [PR #747](https://github.com/saworbit/didi/pull/747)
+- `2026-09-18` A vector is written as the type the property is declared, not the type its JSON looks like. [#730](https://github.com/saworbit/didi/issues/730) · [PR #746](https://github.com/saworbit/didi/pull/746)
+- `2026-09-18` `resource_create` says which engine its property check was not run against. [#735](https://github.com/saworbit/didi/issues/735) · [PR #746](https://github.com/saworbit/didi/pull/746)
+- `2026-09-18` A raycast in the editor asks the edited scene's own world, and answers with a path the surface takes. [#743](https://github.com/saworbit/didi/issues/743) · [#742](https://github.com/saworbit/didi/issues/742) · [PR #745](https://github.com/saworbit/didi/pull/745)
+- `2026-09-18` `collision_mask` takes Godot's whole 32-bit range. [#743](https://github.com/saworbit/didi/issues/743) · [PR #745](https://github.com/saworbit/didi/pull/745)
+- `2026-09-17` The last uncached build in CI is cached, and every platform now configures the same way. [PR #727](https://github.com/saworbit/didi/pull/727)
+- `2026-09-17` The live Godot jobs cache their compile instead of repeating it. [PR #726](https://github.com/saworbit/didi/pull/726)
+- `2026-09-17` CI's critical path was a cold compile of a tree that was already cached. [PR #725](https://github.com/saworbit/didi/pull/725)
+- `2026-09-17` A push to main no longer cancels the run that was checking the last merge. [PR #725](https://github.com/saworbit/didi/pull/725)
+- `2026-09-16` `project_rename_references`'s preview names the sites it will leave behind. [#716](https://github.com/saworbit/didi/issues/716) · [PR #724](https://github.com/saworbit/didi/pull/724)
+- `2026-09-16` Three semantic failures answer with the error envelope rather than a bare string. [#705](https://github.com/saworbit/didi/issues/705) · [PR #723](https://github.com/saworbit/didi/pull/723)
+- `2026-09-16` Every unbound name in `eval_gdscript` is refused by its own name. [#712](https://github.com/saworbit/didi/issues/712) · [PR #723](https://github.com/saworbit/didi/pull/723)
+- `2026-09-16` Two parameter descriptions stop offering a value their own enum refuses. [#708](https://github.com/saworbit/didi/issues/708) · [PR #722](https://github.com/saworbit/didi/pull/722)
+- `2026-09-16` The two legacy names with no canonical replacement say so. [#709](https://github.com/saworbit/didi/issues/709) · [PR #722](https://github.com/saworbit/didi/pull/722)
+- `2026-09-16` Two tools stop advertising a set the answer is not a member of. [#713](https://github.com/saworbit/didi/issues/713) · [PR #722](https://github.com/saworbit/didi/pull/722)
+- `2026-09-16` The listings say they move, and say when. [#701](https://github.com/saworbit/didi/issues/701) · [PR #721](https://github.com/saworbit/didi/pull/721)
+- `2026-09-16` `--ui-app off` stops declaring the MCP Apps extension. [#717](https://github.com/saworbit/didi/issues/717) · [PR #721](https://github.com/saworbit/didi/pull/721)
+- `2026-09-16` A refused ghost preview leaves the screen as it found it. [#707](https://github.com/saworbit/didi/issues/707) · [PR #720](https://github.com/saworbit/didi/pull/720)
+- `2026-09-16` `signal_disconnect` stops reporting a method signature problem. [#714](https://github.com/saworbit/didi/issues/714) · [PR #720](https://github.com/saworbit/didi/pull/720)
+- `2026-09-16` `scene_instantiate_node` says when the engine did not use the name it was given. [#710](https://github.com/saworbit/didi/issues/710) · [PR #720](https://github.com/saworbit/didi/pull/720)
+- `2026-09-16` A runtime endpoint too long for `sockaddr_un` says so. [#711](https://github.com/saworbit/didi/issues/711) · [PR #719](https://github.com/saworbit/didi/pull/719)
+- `2026-09-16` `csharp_check_build` now reports the build it actually ran. [#702](https://github.com/saworbit/didi/issues/702) · [#703](https://github.com/saworbit/didi/issues/703) · [#704](https://github.com/saworbit/didi/issues/704) · [#706](https://github.com/saworbit/didi/issues/706) · [PR #718](https://github.com/saworbit/didi/pull/718)
+- `2026-09-16` A session test reads its own directory, not the machine's. [PR #700](https://github.com/saworbit/didi/pull/700)
+- `2026-09-16` `viewport_create_test_lab`'s preview names the file it replaces. [#685](https://github.com/saworbit/didi/issues/685) · [PR #699](https://github.com/saworbit/didi/pull/699)
+- `2026-09-16` `--yolo` shows up where a client reads before it calls. [#684](https://github.com/saworbit/didi/issues/684) · [PR #698](https://github.com/saworbit/didi/pull/698)
+- `2026-09-16` The blackboard records who removed a value, not only who wrote one. [#681](https://github.com/saworbit/didi/issues/681) · [PR #697](https://github.com/saworbit/didi/pull/697)
+- `2026-09-16` A blackboard key that expired does not read like one nobody wrote. [#680](https://github.com/saworbit/didi/issues/680) · [PR #696](https://github.com/saworbit/didi/pull/696)
+- `2026-09-16` `blackboard_patch` says which operation failed, in its own words. [#679](https://github.com/saworbit/didi/issues/679) · [PR #696](https://github.com/saworbit/didi/pull/696)
+- `2026-09-16` A headless editor is a state Didi can name. [#676](https://github.com/saworbit/didi/issues/676) · [PR #695](https://github.com/saworbit/didi/pull/695)
+- `2026-09-16` `editor_save_scene` reports what the engine printed while saving. [#683](https://github.com/saworbit/didi/issues/683) · [PR #695](https://github.com/saworbit/didi/pull/695)
+- `2026-09-16` `script_check_syntax` refuses when the compiler never ran. [#677](https://github.com/saworbit/didi/issues/677) · [PR #694](https://github.com/saworbit/didi/pull/694)
+- `2026-09-16` The engine-mismatch check works without an explicit attach. [#687](https://github.com/saworbit/didi/issues/687) · [PR #694](https://github.com/saworbit/didi/pull/694)
+- `2026-09-16` `--managed-editor` starts against Godot's Windows console build. [#678](https://github.com/saworbit/didi/issues/678) · [PR #693](https://github.com/saworbit/didi/pull/693)
+- `2026-09-16` `--log-level DEBUG` answers a client that does not read stderr. [#689](https://github.com/saworbit/didi/issues/689) · [PR #692](https://github.com/saworbit/didi/pull/692)
+- `2026-09-16` The editor exits cleanly on macOS and Linux. [#688](https://github.com/saworbit/didi/issues/688) · [PR #691](https://github.com/saworbit/didi/pull/691)
+- `2026-09-16` The Linux release starts on a distro whose glibc meets the stated floor. [#647](https://github.com/saworbit/didi/issues/647) · [PR #675](https://github.com/saworbit/didi/pull/675)
+- `2026-09-16` The macOS archive's `.gdextension` declares only what the archive holds. [#648](https://github.com/saworbit/didi/issues/648) · [PR #675](https://github.com/saworbit/didi/pull/675)
+- `2026-09-16` The Diagnostics page checks the architecture, not the filename. [#648](https://github.com/saworbit/didi/issues/648) · [PR #675](https://github.com/saworbit/didi/pull/675)
+- `2026-09-16` The addon folds path case where the filesystem does, not only on Windows. [#655](https://github.com/saworbit/didi/issues/655) · [PR #674](https://github.com/saworbit/didi/pull/674)
+- `2026-09-16` A `GODOT_BIN` that cannot be used is reported, not discarded in silence. [#656](https://github.com/saworbit/didi/issues/656) · [PR #673](https://github.com/saworbit/didi/pull/673)
+- `2026-09-16` `runtime_list_sessions` says which directory it read. [#649](https://github.com/saworbit/didi/issues/649) · [PR #673](https://github.com/saworbit/didi/pull/673)
+- `2026-09-16` `maxLength` counts what it says it counts. [#663](https://github.com/saworbit/didi/issues/663) · [PR #672](https://github.com/saworbit/didi/pull/672)
+- `2026-09-16` A parameter pinned to one value says why. [#654](https://github.com/saworbit/didi/issues/654) · [PR #672](https://github.com/saworbit/didi/pull/672)
+- `2026-09-16` The export family answers with an envelope and previews what it will do. [#651](https://github.com/saworbit/didi/issues/651) · [PR #671](https://github.com/saworbit/didi/pull/671)
+- `2026-09-16` `project_export`'s preview reads the presets file. [PR #671](https://github.com/saworbit/didi/pull/671)
+- `2026-09-16` `gridmap_export_mesh_library`'s preview describes the file it replaces. [PR #671](https://github.com/saworbit/didi/pull/671)
+- `2026-09-16` A script this process may not read is not reported as bad code. [#653](https://github.com/saworbit/didi/issues/653) · [PR #670](https://github.com/saworbit/didi/pull/670)
+- `2026-09-16` A file whose name JSON cannot carry is named, not blamed on the caller. [#650](https://github.com/saworbit/didi/issues/650) · [PR #669](https://github.com/saworbit/didi/pull/669)
+- `2026-09-15` `project_rename_references` previews the plan it is about to carry out. [#662](https://github.com/saworbit/didi/issues/662) · [PR #668](https://github.com/saworbit/didi/pull/668)
+- `2026-09-15` A match in a scene or a resource is not called a source code reference. [#665](https://github.com/saworbit/didi/issues/665) · [PR #668](https://github.com/saworbit/didi/pull/668)
+- `2026-09-15` The whole-project readers answer on a project with a baked mesh in it. [#661](https://github.com/saworbit/didi/issues/661) · [PR #667](https://github.com/saworbit/didi/pull/667)
+- `2026-09-15` Those two readers are bounded, and say when they read less than the whole project. [#664](https://github.com/saworbit/didi/issues/664) · [PR #667](https://github.com/saworbit/didi/pull/667)
+- `2026-09-15` A duplicated branch survives the save. [#659](https://github.com/saworbit/didi/issues/659) · [PR #666](https://github.com/saworbit/didi/pull/666)
+- `2026-09-15` Undoing `scene_remove_from_group` puts a persistent group back persistent. [#660](https://github.com/saworbit/didi/issues/660) · [PR #666](https://github.com/saworbit/didi/pull/666)
+- `2026-09-15` `audio_configure_bus` says where the change ends up. [#622](https://github.com/saworbit/didi/issues/622) · [PR #646](https://github.com/saworbit/didi/pull/646)
+- `2026-09-15` `script_check_syntax` and `shader_check_compile` name the engine that answered. [#617](https://github.com/saworbit/didi/issues/617) · [PR #645](https://github.com/saworbit/didi/pull/645)
+- `2026-09-15` The fix cycle spawns the interpreter it is running, not a command called `python`. [#635](https://github.com/saworbit/didi/issues/635) · [PR #644](https://github.com/saworbit/didi/pull/644)
+- `2026-09-15` Both Python floors are written down. [#634](https://github.com/saworbit/didi/issues/634) · [PR #644](https://github.com/saworbit/didi/pull/644)
+- `2026-09-15` A reconfigure with no source change recompiles one file, not 57 targets. [#633](https://github.com/saworbit/didi/issues/633) · [PR #643](https://github.com/saworbit/didi/pull/643)
+- `2026-09-15` The checkpoint file-count boundary is tested with eleven files, not ten thousand. [#627](https://github.com/saworbit/didi/issues/627) · [PR #643](https://github.com/saworbit/didi/pull/643)
+- `2026-09-15` The tilemap and gridmap rules a schema cannot state answer with a sentence. [#619](https://github.com/saworbit/didi/issues/619) · [PR #642](https://github.com/saworbit/didi/pull/642)
+- `2026-09-15` A live-only tool with no engine attached says what to do about it. [#615](https://github.com/saworbit/didi/issues/615) · [PR #641](https://github.com/saworbit/didi/pull/641)
+- `2026-09-15` A script the engine cannot read is not a script with nothing in it. [#614](https://github.com/saworbit/didi/issues/614) · [PR #640](https://github.com/saworbit/didi/pull/640)
+- `2026-09-15` `script_check_syntax` fails a script Godot refuses to load. [#613](https://github.com/saworbit/didi/issues/613) · [PR #640](https://github.com/saworbit/didi/pull/640)
+- `2026-09-15` Emitting a signal nothing is connected to is a no-op, and says so. [#624](https://github.com/saworbit/didi/issues/624) · [PR #639](https://github.com/saworbit/didi/pull/639)
+- `2026-09-15` An engine that answered is no longer reported as a session that is gone. [#625](https://github.com/saworbit/didi/issues/625) · [PR #639](https://github.com/saworbit/didi/pull/639)
+- `2026-09-15` `signal_emit`'s dry run runs the argument-value rules the confirmed call runs. [#616](https://github.com/saworbit/didi/issues/616) · [PR #639](https://github.com/saworbit/didi/pull/639)
+- `2026-09-15` A preview says what its probe actually read. [#621](https://github.com/saworbit/didi/issues/621) · [PR #639](https://github.com/saworbit/didi/pull/639)
+- `2026-09-15` A float shader uniform set to a whole number survives the save. [#612](https://github.com/saworbit/didi/issues/612) · [PR #638](https://github.com/saworbit/didi/pull/638)
+- `2026-09-15` A colour or vector write that landed says it landed. [#618](https://github.com/saworbit/didi/issues/618) · [PR #638](https://github.com/saworbit/didi/pull/638)
+- `2026-09-15` `shader_list_uniforms` reports each uniform's declared hint, and `shader_set_uniform` honours it. [#620](https://github.com/saworbit/didi/issues/620) · [PR #638](https://github.com/saworbit/didi/pull/638)
+- `2026-09-15` `shader_set_uniform` says the change is not on disk yet. [#623](https://github.com/saworbit/didi/issues/623) · [PR #638](https://github.com/saworbit/didi/pull/638)
+- `2026-09-15` The schema gate refuses arguments that are not an object. [#629](https://github.com/saworbit/didi/issues/629) · [PR #637](https://github.com/saworbit/didi/pull/637)
+- `2026-09-15` `viewport_diff_capture` refuses a malformed capture id with the error envelope. [#628](https://github.com/saworbit/didi/issues/628) · [PR #637](https://github.com/saworbit/didi/pull/637)
+- `2026-09-15` The server starts under a project root with an accent in it. [#611](https://github.com/saworbit/didi/issues/611) · [PR #636](https://github.com/saworbit/didi/pull/636)
+- `2026-09-14` A game stopped on request is reported as the exit it is. [#595](https://github.com/saworbit/didi/issues/595) · [PR #610](https://github.com/saworbit/didi/pull/610)
+- `2026-09-14` What discovery advertises is what a call gets, for hit-testing a game and for managed recovery. [#592](https://github.com/saworbit/didi/issues/592) · [#599](https://github.com/saworbit/didi/issues/599) · [PR #609](https://github.com/saworbit/didi/pull/609)
+- `2026-09-14` Three places where the published contract and the handler disagreed. [#596](https://github.com/saworbit/didi/issues/596) · [#598](https://github.com/saworbit/didi/issues/598) · [#593](https://github.com/saworbit/didi/issues/593) · [PR #608](https://github.com/saworbit/didi/pull/608)
+- `2026-09-14` The extension no longer prints engine errors at startup and on every dashboard read, and its log stays out of a game's output. [#600](https://github.com/saworbit/didi/issues/600) · [#601](https://github.com/saworbit/didi/issues/601) · [PR #607](https://github.com/saworbit/didi/pull/607)
+- `2026-09-14` Injected input reaches a paused game's nodes, and a click lands where it is aimed. [#594](https://github.com/saworbit/didi/issues/594) · [#597](https://github.com/saworbit/didi/issues/597) · [#602](https://github.com/saworbit/didi/issues/602) · [PR #606](https://github.com/saworbit/didi/pull/606)
+- `2026-09-14` Scene edits the file cannot hold are refused before they happen, and the hierarchy says who owns what. [#588](https://github.com/saworbit/didi/issues/588) · [#589](https://github.com/saworbit/didi/issues/589) · [#590](https://github.com/saworbit/didi/issues/590) · [#603](https://github.com/saworbit/didi/issues/603) · [#591](https://github.com/saworbit/didi/issues/591) · [PR #605](https://github.com/saworbit/didi/pull/605)
+- `2026-09-14` A bounded reader publishes `max_response_bytes`, and both new ones use the same figure. [PR #586](https://github.com/saworbit/didi/pull/586)
+- `2026-09-14` The social preview banner named the wrong surface size. [PR #585](https://github.com/saworbit/didi/pull/585)
+- `2026-09-14` Every required string parameter carries a declared length. [#573](https://github.com/saworbit/didi/issues/573) · [PR #583](https://github.com/saworbit/didi/pull/583)
+- `2026-09-14` A refusal names both halves of the mistake. [#577](https://github.com/saworbit/didi/issues/577) · [PR #583](https://github.com/saworbit/didi/pull/583)
+- `2026-09-14` `case_sensitive` describes what it does. [#576](https://github.com/saworbit/didi/issues/576) · [PR #583](https://github.com/saworbit/didi/pull/583)
+- `2026-09-14` `script_get_symbols` publishes a limit and says what it left out. [#575](https://github.com/saworbit/didi/issues/575) · [PR #582](https://github.com/saworbit/didi/pull/582)
+- `2026-09-14` A confirmation token is bound to what the preview saw, not only to the call. [#572](https://github.com/saworbit/didi/issues/572) · [PR #581](https://github.com/saworbit/didi/pull/581)
+- `2026-09-14` A dry run runs the argument checks the real call runs. [#571](https://github.com/saworbit/didi/issues/571) · [PR #581](https://github.com/saworbit/didi/pull/581)
+- `2026-09-14` A preview carries its arguments once. [#574](https://github.com/saworbit/didi/issues/574) · [PR #581](https://github.com/saworbit/didi/pull/581)
+- `2026-09-14` `viewport_diff_capture` makes the viewport render before it compares. [#568](https://github.com/saworbit/didi/issues/568) · [PR #580](https://github.com/saworbit/didi/pull/580)
+- `2026-09-14` `script_patch_method` refuses a symbol the script does not declare. [#569](https://github.com/saworbit/didi/issues/569) · [PR #579](https://github.com/saworbit/didi/pull/579)
+- `2026-09-14` `symbol_type` publishes the six kinds it models, and refuses the rest. [#570](https://github.com/saworbit/didi/issues/570) · [PR #579](https://github.com/saworbit/didi/pull/579)
+- `2026-09-14` `viewport_create_test_lab` checks the target first and writes the lab where the audit can see it. [#564](https://github.com/saworbit/didi/issues/564) · [PR #567](https://github.com/saworbit/didi/pull/567)
+- `2026-09-14` `viewport_create_test_lab` says whether it instanced the target. [#565](https://github.com/saworbit/didi/issues/565) · [PR #567](https://github.com/saworbit/didi/pull/567)
+- `2026-09-14` Live scene mutations say the change is unsaved. [#557](https://github.com/saworbit/didi/issues/557) · [PR #566](https://github.com/saworbit/didi/pull/566)
+- `2026-09-14` A second `initialize` is refused. [#552](https://github.com/saworbit/didi/issues/552) · [PR #563](https://github.com/saworbit/didi/pull/563)
+- `2026-09-14` `script_reflect_class` compares the pinned dump to the project when no session is selected. [#555](https://github.com/saworbit/didi/issues/555) · [PR #562](https://github.com/saworbit/didi/pull/562)
+- `2026-09-14` `project_search_symbols` reads a `.GD` script. [#549](https://github.com/saworbit/didi/issues/549) · [PR #561](https://github.com/saworbit/didi/pull/561)
+- `2026-09-14` Search columns count code points. [#556](https://github.com/saworbit/didi/issues/556) · [PR #561](https://github.com/saworbit/didi/pull/561)
+- `2026-09-14` Writers report the path they resolved, not the argument. [#546](https://github.com/saworbit/didi/issues/546) · [#551](https://github.com/saworbit/didi/issues/551) · [PR #560](https://github.com/saworbit/didi/pull/560)
+- `2026-09-14` `script_patch_method` keeps the file's line endings. [#550](https://github.com/saworbit/didi/issues/550) · [PR #560](https://github.com/saworbit/didi/pull/560)
+- `2026-09-14` Every required string parameter carries `minLength: 1` unless the schema says otherwise, stamped where `additionalProperties` is stamped. [#553](https://github.com/saworbit/didi/issues/553) · [#554](https://github.com/saworbit/didi/issues/554) · [PR #559](https://github.com/saworbit/didi/pull/559)
+- `2026-09-14` Four failures behind valid arguments answer with the error envelope instead of prose. [#548](https://github.com/saworbit/didi/issues/548) · [PR #559](https://github.com/saworbit/didi/pull/559)
+- `2026-09-14` `project_set_setting`'s descriptions say where the `create` guard runs. [#547](https://github.com/saworbit/didi/issues/547) · [PR #559](https://github.com/saworbit/didi/pull/559)
+
+---
 
 ## [2.0.0] - 2026-09-13
 
@@ -4421,6 +504,8 @@ wrong. The reason it is a major rather than a patch is that a client written
 against 1.8.0 branched on those wrong answers, and several of them are now
 different. Read the list below before upgrading.
 
+Full write-ups for 2.0.0: [as first written](https://github.com/saworbit/didi/blob/fd9d0e5e8517143c0e892166c225485a840b2d87/CHANGELOG.md#200---2026-09-13).
+
 ### Breaking
 
 - **`initialize` requires `protocolVersion`.** It is a required string in the
@@ -4428,47 +513,38 @@ different. Read the list below before upgrading.
   A client that omitted it now fails the handshake with `-32602` rather than
   connecting. This is the one change that can break a whole client rather than
   one call (#531).
-
 - **Every published `inputSchema` is closed.** `additionalProperties: false` is
   enforced, so an argument a tool does not declare is refused instead of being
   accepted and ignored. A call that carried a misspelled parameter used to
   succeed while doing something other than what was asked (#418, #397).
-
 - **`prompts/get` refuses an argument the prompt does not declare**, for the
   same reason (#511).
-
 - **`blackboard_task_claim` answers a lost race with `409`.** Naming a
   `task_id` that cannot be claimed returns `404` when the task does not exist
   and `409` when its state stands in the way. It used to return `isError:
   false` with `claimed: false`, so a caller branching on `isError` read a lost
   race as a win. An unnamed claim finding nothing is still a success (#529).
-
 - **`blackboard_task_complete` and `blackboard_task_update` answer an
   already-completed task with `409`, not `400`** (#530).
-
 - **`execution_mode` changed value on the definitions with no live path.**
   `blackboard://<board>/state`, `blackboard://<board>/tasks` and
   `godot://project/tree` report `local`; `ui://didi/control-room` reports
   `local_status`; and `tools/list` advertises the word each tool actually
   answers with. Anything branching on `offline_fallback` for these sees a
   different string (#503, #533).
-
 - **Tool annotations are decided per tool.** `destructiveHint`,
   `idempotentHint` and `openWorldHint` were four names for one bit and now
   carry their own values, which changes what a client may auto-approve. In
   particular `runtime_attach_session` and `runtime_detach_session` are no
   longer read-only (#505, #507).
-
 - **`runtime_detach_session` succeeds when nothing is attached**, answering
   `detached: false` instead of `503`. A caller treating any error as fatal saw
   a failure where there was none; a caller asserting on the error now sees a
   success (#537).
-
 - **Error payloads carry `data.code`, `data.tool` and `data.retryable`
   everywhere**, and roughly seventy call sites that answered with a bare JSON
   string now answer with the envelope. Substring-matching the old prose no
   longer works (#420, #460, #486, #487, #492, #526).
-
 - **Paths are validated by resolving them.** `res://nested/../ok.gd` is now
   written rather than refused, because it lands inside the project root, and a
   path holding a NUL or any other control character is refused rather than
@@ -4476,2175 +552,484 @@ different. Read the list below before upgrading.
 
 ### Added
 
-- `scene_call_method` runs a method the target node's own script declares, and
-  returns what it returned (#389). Didi could read a project completely and
-  could not press its main verb: `eval_gdscript` is read-only by contract, an
-  outbound signal announces work that never happened, and the editor dock a
-  human would click is not reachable. The allowlist is the node's own script,
-  so every engine method is out of reach by construction rather than by a
-  denylist, and leading-underscore names are refused. A coroutine is awaited
-  and the result carries the value its `completed` signal delivered, because
-  the call itself hands back a `GDScriptFunctionState` and answering with that
-  would report work that has not happened. The script must be a `@tool` script,
-  which is refused explicitly rather than returning the nothing Godot hands
-  back. Always confirmed. Recorded in
-  [Surface Amendments](docs/SURFACE_AMENDMENTS.md); the canonical surface is now
-  116 names.
-
-- `viewport_capture_frame` can select the editor main screen it needs (#381). An
-  editor viewport has no size unless its main screen is the one showing, so the
-  capture refused with a message telling the caller to switch to it in the
-  editor, which is the one thing an unattended agent could not do and no tool
-  could do for it. `select_main_screen: true` now selects the screen the
-  `camera_identifier` belongs to, waits the frame the control layout needs,
-  captures, and puts the previous screen back. The result reports
-  `main_screen_selected`, `main_screen_restored` and `previous_main_screen`; a
-  main screen an addon contributes cannot be named back, and that is stated
-  rather than implied. Default behaviour is unchanged.
-
-- `resource_create` can express a reference to another resource, so the
-  composite resources are authorable at last (#380). A property value of
-  `{"type": "ExtResource", "path": "res://..."}` becomes an `[ext_resource]`
-  entry carrying the type and uid read from the project index, and a new
-  `sub_resources` argument declares `[sub_resource]` blocks that
-  `{"type": "SubResource", "id": "..."}` names. Sub-resource properties follow
-  the same rules as top-level ones, so there is no second dialect, and
-  `load_steps` is computed rather than guessed. A reference to a file that is
-  not in the project, or to a sub-resource id not declared above the point that
-  names it, is refused: Godot resolves those to null rather than failing, which
-  is a resource reported as written and quietly wrong. TileSet,
-  AnimationLibrary, SpriteFrames, Theme and ShaderMaterial no longer have to be
-  written by hand outside the tool surface.
-
-
-- Nine more tools publish an `outputSchema`, and the rule for which do is
-  written down (#509). `blackboard_list_keys`, `blackboard_read`,
-  `blackboard_task_list`, `didi_control_room`, `project_list_export_presets`,
-  `resource_inspect`, `script_get_symbols` and `script_reflect_class` join the
-  eleven that already did. The rule is that a tool publishes a schema when
-  something checks it against a real answer, so a tool with no schema is
-  unspecified rather than special. It was already enforced and never stated: the
-  contract test fails a declared schema that nothing exercises. A live-only tool
-  now fails the suite if it acquires one, because nothing offline could check
-  it, and writing schemas for those 67 would be 67 unverified claims of exactly
-  the kind that made `scene_get_hierarchy` wrong.
+- `2026-09-12` Nine more tools publish an `outputSchema`, and the rule for which do is written down. [#509](https://github.com/saworbit/didi/issues/509) · [PR #523](https://github.com/saworbit/didi/pull/523)
+- `2026-09-10` `scene_call_method` runs a method the target node's own script declares, and returns what it returned. [#389](https://github.com/saworbit/didi/issues/389) · [PR #395](https://github.com/saworbit/didi/pull/395)
+- `2026-09-10` `viewport_capture_frame` can select the editor main screen it needs. [#381](https://github.com/saworbit/didi/issues/381) · [PR #393](https://github.com/saworbit/didi/pull/393)
+- `2026-09-10` `resource_create` can express a reference to another resource, so the composite resources are authorable at last. [#380](https://github.com/saworbit/didi/issues/380) · [PR #392](https://github.com/saworbit/didi/pull/392)
 
 ### Fixed
 
-- `initialize` reads the `protocolVersion` it is sent (#531). Every value got
-  the same answer: a revision this server serves, one it does not, an empty
-  string, a bare JSON number and a missing key all came back `2024-11-05`, so a
-  malformed `InitializeRequest` was accepted in silence and a client could not
-  tell a version it had been granted from one it had been refused. #312
-  validated the `tools/call` envelope; `initialize` sits in front of it and was
-  not covered. The field is a required string, so a missing key or a non-string
-  is refused with `-32602` carrying `supported` and `requested`, the shape the
-  2024-11-05 lifecycle's own example uses. A revision this server serves is
-  answered with itself, and any other string with `2024-11-05`, which is what
-  that specification requires of both cases.
-
-- `resources/subscribe` refuses with a reason that is true (#532). Subscribing
-  to any of the three `godot://` resources was refused because "nothing else
-  changes without a tool call from this client", which is false of all three:
-  `godot://runtime/logs` is described in its own listing entry as incremental
-  engine-side records, and editor state and the project tree change whenever the
-  user edits. The message stated as a fact the very thing that makes a
-  subscription worth having. The refusal stands, because accepting one would
-  promise updates that never arrive, but it now says what is actually so: Didi
-  does not yet publish change notifications for engine-side resources. And
-  because `initialize` advertises `resources.subscribe` for the server as a
-  whole, every `resources/list` entry now carries `_meta.didi.subscribable`, so
-  a host can tell before it asks rather than by asking and being refused.
-
-- Resources with no live path say what they are, not what they fell back from
-  (#533). #419 removed `offline_fallback` from the tools that never had a live
-  path; the `_meta.didi` block on resources and their own answers were not part
-  of that sweep, which the code said outright was still owed. A board is a file
-  in `.didi/blackboard/` and the project tree is a filesystem index, so
-  `offline_fallback` named a fallback from a route neither ever had, and a host
-  that dims or warns on that flag -- which is what the flag is for -- dimmed the
-  resources that are always fully available, with an editor attached and
-  healthy. `blackboard://<board>/state`, `blackboard://<board>/tasks` and
-  `godot://project/tree` report `local` now, and `ui://didi/control-room`
-  reports `local_status`, matching the tool that serves the same dashboard.
-  `godot://editor/state` and `godot://runtime/logs` keep `offline_fallback`,
-  because those really do fall back. The advertisement and the answer come from
-  the registration, so they cannot drift apart.
-- A second MCP server on a held editor is told so (#527). Only one server can
-  hold the editor bridge, which is a reasonable design; what a second server was
-  *told* was not. Its auto-attach was refused with `423`, the reason was dropped
-  on the floor, and every call afterwards answered the `503 not_connected` that a
-  server with no Godot running at all receives, byte for byte. The blackboard
-  exists because more than one agent is expected to work on a project at once, so
-  this is the multi-agent path rather than an edge case, and the second agent's
-  sensible next move from "nothing is running" is offline file edits over the
-  first agent's live work. The refusal is remembered now and reported as
-  `bridge_held`, with `bridge_held_by_another_client: true` in the error's `data`
-  and a control-room fact saying the editor is up and owned.
-
-- An engine crash survives the call that discovered it (#536). The first live
-  call after the editor died got a complete account: the incident, the cause, and
-  what to do. Every call after that reverted to the generic `503`, offline
-  answers resumed with nothing saying why, and `didi_control_room` -- the one
-  tool whose job is to say what state the bridge is in -- reported `Route:
-  detached`, which is also what it reports when no editor was ever started. The
-  incident is kept until a route opens again: the control room names it and when
-  it happened, and an `offline_fallback` answer carries `offline_reason` saying
-  the fallback follows a crashed engine rather than a session that never
-  attached. `runtime_detach_session` clears it, because letting go deliberately
-  is not an obstruction.
-
-- `runtime_detach_session` is idempotent (#537). Detaching with nothing attached
-  answered `503 not_connected` with `retryable: true`, advising a retry that
-  would never attach anything. Detach is a cleanup, and the session is torn down
-  implicitly when the editor goes, so a caller doing the tidy-up it is told to do
-  got an error for it. It answers `detached: false` now, the shape
-  `resources/unsubscribe` already uses two layers down for the same question, and
-  `detached: true` when it is the call that released something. Answering with
-  nothing attached is also what makes its success payload producible offline, so
-  it publishes an `outputSchema` now.
-
-
-- `blackboard_task_update` says what it takes for `progress` (#528). The
-  published description read "0 to 1" while the handler required an integer
-  percentage, so the documented range was not even representable and `0.5` was
-  refused as "must be an integer, not a number". A completed task has always
-  reported `progress: 100`, which is the real scale. The description says that
-  now, and the schema already did.
-
-- `blackboard_task_claim` answers a conflict like its siblings (#529). Three
-  tools on one board met the same state and answered in two shapes: a claim of a
-  task somebody else holds came back with `isError` false, `claimed: false` and
-  an English sentence, so a caller branching on `isError` read a lost race as a
-  win. Contention is what the board is for, so this was the most travelled path
-  on it. Naming a `task_id` that cannot be claimed now answers `404` when the
-  task does not exist and `409` when its state is what stands in the way, with
-  `data.reason_code` saying which: `already_leased`, `blocked_by_dependency`,
-  `tag_mismatch` or `not_pending`. Asking for whatever is ready and being told
-  nothing is stays a success, and carries a `reason_code` of `no_tasks`,
-  `all_leased`, `all_blocked` or `no_ready_task`, so the three cases can be told
-  apart without reading prose.
-
-- Completing an already-completed task is `409 conflict` (#530). It answered
-  `400 invalid_arguments`, which tells an agent to fix its arguments when there
-  is nothing to fix: the task exists, the lease was held, the id is well formed,
-  and the work is done. A retried completion after a dropped response is the
-  ordinary way to reach this state. `blackboard_task_update` answers the same
-  state the same way.
-
-
-- A path holding a NUL is refused rather than written somewhere else (#525).
-  `script_create` and `resource_create` checked the extension against the string
-  they were handed, and a NUL truncates that string at the filesystem boundary,
-  so `res://n1\0x.gd` passed the `.gd` check and thirteen bytes landed in a file
-  called `n1` with no extension. The call reported `created_offline` and echoed
-  back the path it had not written to. The shared write resolver now refuses any
-  control character in a path, by the same rule `blackboard_write` already
-  applies to a board key, so every writer in the server agrees about what a path
-  may hold.
-
-- `script_create` answers a bad path with a code (#526). Four failures behind
-  well-formed arguments came back as a bare JSON string with nothing to branch
-  on: a name too long for the filesystem, a `user://` target, a path not ending
-  in `.gd`, and a directory component too long. `scene_create` and
-  `resource_create` already returned the error envelope for the same shapes.
-  All four now carry a code, `retryable` and the tool name. A failed write
-  reports the reason the filesystem gave and the status that reason deserves,
-  so a path the filesystem will not take is a 400 rather than a 500 that says
-  the server broke. `resource_create` picked up the same envelope on the three
-  answers it still gave in prose.
-
-- `res://nested/../ok2.gd` is accepted, because it lands inside the project
-  (#534). Containment was decided by looking for `..` in the string, which
-  refused a normalised path inside the root while accepting `res://./ok.gd`
-  through the same root, and the resolve-and-compare check behind it never ran.
-  Composing a path from a directory and a relative name is the ordinary way to
-  build one. The three copies of the substring rule are gone and the resolve is
-  the check; what actually lands outside the root is still refused, with the
-  message that already said so.
-
-- A Godot `Error` reaches the caller with its name (#535). `scene_create` gave a
-  300-character filename to `ResourceSaver` and answered `500 internal_error`
-  with "failed with Error 19": the server had not broken, the argument was bad,
-  and the number had no name attached. The engine's file-and-path errors now
-  answer `400 invalid_arguments` and say what to do about it, and every place
-  the bridge printed a raw enum value now prints `ERR_CANT_OPEN (19)`. The table
-  is Godot's own `Error` enum from `extension_api.json`.
-
-
-- `runtime_detach_session` reports `server_build_id` again. Naming the echoed
-  descriptor `detached_session` left the bridge-build check looking for a
-  `session` key that is no longer there, so the one answer that reports on a
-  bridge the caller has just stopped talking to silently lost the field. It
-  reads either name now.
-
-- `godot://editor/state` names a scene root the scene tools accept (#502). It is
-  the resource a client reads to find out which scene is being edited, and it
-  answered with `Node.get_path()`: 364 characters of the editor's own viewport
-  chain, down through `@EditorNode@`, a `@SubViewport@` and the rest of where
-  Godot parents an edited scene. Every `scene_*` tool refuses that, so a caller
-  that read `active_scene_root` and passed it on got a 404 blaming the node.
-  `active_scene_root` is now built by the same function every scene answer
-  builds its paths with, so the resource and the tools describe the same tree in
-  the same vocabulary.
-
-- Every blackboard board is served as `application/json` (#513). Only
-  `blackboard://default/*` is a registered resource, so the mime type came from
-  the registry and fell through to `text/plain` for every other board. The same
-  JSON document was labelled two ways, and a client branching on mime parsed one
-  board and rendered the next as a wall of text. The type now comes from the
-  scheme and kind the read handler has already parsed; `text/plain` remains the
-  answer for a scheme this server does not serve.
-
-- A blackboard board says whether it exists, and the parameterised shape is
-  discoverable (#514). A board nobody had written answered exactly like a board
-  that exists and is empty, so an agent could not tell "empty, go ahead" from
-  "you have the name wrong and are about to start a second, private board nobody
-  is reading". Both payloads now carry `exists`, and reading a board still never
-  creates one. `resources/templates/list` is implemented and publishes
-  `blackboard://{board}/state` and `blackboard://{board}/tasks`, so a board other
-  than `default` can be found by a client that was never told its name.
-
-- A malformed blackboard URI names the part that was wrong (#515). Three
-  different shapes came back with the kind error, which named the one segment
-  that was fine in two of them: a query string on a correct kind, and a
-  traversal in the board name, were both told to fix a kind that was already
-  `state`. Each part is now checked in the order it appears and each names
-  itself. The refusals themselves are unchanged.
-
-- `prompts/get` refuses an argument the prompt does not declare (#511). #397 and
-  #418 closed unknown arguments on `tools/call`; `prompts/get` kept the old
-  behaviour on a different method, accepting the argument silently and dropping
-  it, so a caller who misremembered a name was handed a prompt rendered from
-  defaults and no signal that what they passed went nowhere. The refusal names
-  the property and lists what the prompt accepts, and `data` carries `argument`,
-  `prompt` and `accepted`.
-
-- A prompt has one description (#512). Each handler wrote a second one, so
-  `prompts/list` and `prompts/get` described the same prompt differently and a
-  host that listed prompts and then fetched one showed a person two sentences
-  for the same thing. `prompts/list` is served with an hour of cacheability, so
-  the first one stayed on screen. The description now comes from the
-  registration, which is the wording that says which tool families the workflow
-  is built from; the handler's pinned a Godot version that is the floor rather
-  than the target.
-
-- Every published `inputSchema` carries the `additionalProperties: false` the
-  server enforces (#508). #418 closed arguments by default and the schemas did
-  not follow, so 73 of 126 accepted anything by JSON Schema while the server
-  refused the same call. A client validating locally before sending passed the
-  call and then lost a round trip to a 400. The flag is now stamped from the
-  validator's own predicate, so the published schema and the check cannot
-  disagree; a schema that deliberately opens its arguments still says so.
-
-- `scene_get_hierarchy` declares the fields it returns (#510). Its
-  `outputSchema` named `file_path` and three others and stayed silent about
-  everything else, including `node_count` and `omitted_fields`, which are the
-  two a caller has to read to know whether the tree it got back is complete.
-  `file_path` was not a stale rename: the offline path parses a `.tscn` and
-  names the file it read, while a live answer carries `scene_file_path` from the
-  edited scene's own identity. Both are declared now, and neither is required,
-  because which one arrives depends on `source`. `project_search_text` and
-  `project_search_symbols` were missing `unsearchable_files` and
-  `unsearchable_extensions` the same way. The envelope the registry and the live
-  bridge stamp on the way out, `execution_mode`, `is_live_engine`, `session` and
-  `session_kind`, is declared from the place that stamps it.
-
-- `tools/list` says the mode a tool actually answers with (#503). #419 gave the
-  answers an honest name for work that was never engine work, and never reached
-  the discovery entry, which is the copy a host reads before it ever makes a
-  call. Eleven tools advertised `offline_fallback` and answered `local`,
-  `local_status` or `local_session_management`, so the entry said a tool was
-  running in fallback when there was nothing to fall back from. The name a tool
-  reports is now declared once, beside its execution modes, and both the entry
-  and the answer are taken from it. A tool with a live path keeps
-  `offline_fallback`, because for it the word is true.
-
-- `project_get_uid_map` and `project_audit_assets` stop calling an authoritative
-  answer a fallback (#504). Both have a live path and take it when there is live
-  work: the uid map when `resolve` names something for `ResourceUID` to answer,
-  the audit when the scan found references an engine can verify. With nothing
-  for the engine to do they still reported `offline_fallback`, which tells a
-  caller to attach an editor and ask again, including when one was already
-  attached and could have added nothing. That case now reports `local`.
-  `uid_map_source` and `reference_verification.mode` already said why.
-
-- Tool annotations are decided per tool instead of being four names for one bit
-  (#505, #507). `readOnlyHint`, `destructiveHint` and `idempotentHint` were all
-  derived from the mutation classification, so across all 126 tools the four
-  hints took exactly four shapes and the last two carried nothing a client could
-  act on. `runtime_attach_session` and `runtime_detach_session` sat in the
-  read-only bucket while picking and severing the attachment every later live
-  call routes through, which is the one thing a host auto-approving read-only
-  tools must not be told it can do unasked. Both are now `readOnlyHint: false`.
-  `destructiveHint` is false for the writers that can only add, and stays true
-  for anything taking an `overwrite` flag. `idempotentHint` is true for the
-  writers that land in the same state when called twice, so a client can retry a
-  call that timed out.
-
-- `runtime_detach_session` says what it did (#506). A successful detach answered
-  with the full descriptor of the session it had just disconnected, in the same
-  `session` field a connected answer uses, and the only thing separating the two
-  payloads was a missing `connected` key. The descriptor is now
-  `detached_session` and the answer carries `connected: false`.
-
-- The expression sandbox names the read that works (#488). A refused object read
-  stated the rule and not the way through, so the natural next call after being
-  refused was another refusal. `self` was worse: it parsed, reached Godot, and
-  came back as "self can't be used because instance is null", which reads like a
-  fault in the caller's expression rather than a fact about the sandbox. Both
-  refusals now name `node.get("position")`, which is the supported read and has
-  been all along, and `self` is refused by the sandbox rather than by the
-  engine. `eval_gdscript.context_node` says in its own description that it is
-  what `node` is bound to.
-
-- `tools/list` says which names are legacy (#493). Ten of the 126 registrations
-  are legacy names for a tool that is also listed under its own name, with an
-  identical schema, an identical description and identical `_meta`, so nothing
-  an MCP client reads said they were duplicates. Which of the two an agent
-  picked was a coin flip, error data named a `canonical_tool` the caller had
-  never heard of, and any inventory of the surface double-counted eight
-  capabilities. `didi_control_room` has reported `legacy` for all ten the whole
-  time; this carries the same fact one layer further out. `_meta.didi.legacy` is
-  now on every tool, true or false, because "this is not an alias" is a fact a
-  client should be able to read rather than infer from a missing key, and the
-  eight aliases that resolve to a differently named tool also carry
-  `_meta.didi.canonical` and name it in a closing sentence of their description.
-
-- `project_apply_changes` stops issuing a token for a call it cannot apply
-  (#491). The tool needs an isolated copy of the project, which needs a git work
-  tree that holds it. `project_verify_changes` checks that before doing
-  anything and refuses with a clear `409`. The apply tool's preview has no
-  target to read, and it did not check the precondition either, so it bound the
-  arguments to a confirmation token and spending that token returned the same
-  `409` the sibling had returned before any of it started: two calls and a token
-  to learn what the first could have said. The preview runs the same check now.
-  It still reports `target_read: false`, because the files the call would
-  overwrite have not been opened, and that is the honest half of what the old
-  preview said.
-
-- A `oneOf` branch behind a `$ref` says what it needs (#489). The required
-  properties for a branch were read straight off the branch object, and a
-  `$ref` object carries none of its own, so `physics_raycast_query.from` and
-  `nav_query_path.start_point` both rendered as "One of these is needed: no
-  required properties; or no required properties", which tells a caller nothing
-  at all. The reference is resolved first now, and the message reads "x, y; or
-  x, y, z". A branch that spells its own `required` out beside the `$ref` keeps
-  it, because that is the narrower statement of the two. Three tools on the
-  surface use `$ref` under `oneOf`; a contract test pins the rendered text for
-  all three, the inline `tilemap_set_cells` case included.
-
-- The project writers check what they are about to write (#485, #490).
-
-  `project_set_setting` refuses a name the engine does not define and then
-  wrote whatever value it was handed. `application/config/name` took `42` and
-  the project name became an integer; `application/run/main_scene` took
-  `res://nope.tscn` and the project stopped running. Both reported
-  `persisted: true`. The lookup that answers `defined_by_engine` is holding the
-  engine's own value, so its type was available at exactly the point where the
-  check belongs. A type mismatch is now a `409` naming `expected_type` and
-  `given_type`, and the conversions the engine does anyway are still allowed: an
-  integer into a float setting, a whole number into an int setting, a string
-  into a `StringName` or `NodePath`, a JSON array into any of the packed arrays.
-  A `res://` value is checked against the filesystem the way
-  `project_set_autoload` has always checked a script.
-
-  `project_remove_input_action` would remove an engine default such as
-  `ui_accept`, leave the running editor's InputMap without it, write nothing to
-  `project.godot`, and report `persisted: true`. `has_setting` answers true for
-  a built-in because the engine registers the built-in map as settings, which is
-  the right answer to "does this exist" and the wrong answer to "did this
-  project define it". The second question is answered by `project.godot` itself
-  now, and an action the file does not contain is refused with a `409` carrying
-  `engine_default: true`. A removal that does go ahead reports the deadzone and
-  event count the action had, rather than the defaults it used to echo.
-
-- Every error says what kind of failure it is, in the same place (#486, #487,
-  #492). `error.data` is the part a caller can branch on without parsing prose,
-  and on 35 well-formed, wrong calls only 14 carried a `data.code`. Twelve
-  carried an empty object, four carried `retryable` and nothing else, one
-  carried everything but the code, and the confirmation gate's `428` carried no
-  `data` at all. Each was a call site that filled it by hand or did not.
-
-  There is now a floor, filled once on the way out of the registry rather than
-  at each site: `code`, `tool`, `canonical_tool` and `retryable`, and a site
-  that knows more still says more with nothing it set overwritten. `code` is a
-  stable string rather than the status number beside it. The confirmation gate
-  carries its own copy, because it answers before the registry does, and its
-  `428` now names the argument to set to get a token.
-
-  The five unimplemented registrations answered with a bare string rather than
-  an envelope, because they refuse the call before any handler runs and so sat
-  in front of the sweep that fixed everything else. They answer `501` with
-  `code: "unimplemented"` now, which is the thing the sentence buried: this
-  failure is permanent.
-
-- `scene_get_hierarchy` answers the question it was asked (#482, #483, #484).
-  Three things it got wrong, all of them in the shape of an answer that reads
-  as a fact and is not one.
-
-  A branch stopped by `max_depth` was byte for byte a leaf: empty `children`,
-  no flag, nothing on the response. `max_depth` defaults to 10, so that is the
-  cut most callers actually hit, and the answer to "what is under this node"
-  was "nothing" rather than "not reported". A depth cut now reports itself the
-  way a `max_nodes` cut always has, with `children_omitted` and
-  `children_summary` on the node that stopped and `truncated: true` on the
-  response. The tally covers the whole subtree below the cut, which is what
-  `children_omitted` means everywhere else. `max_depth` also gained
-  `minimum: 0` and `maximum: 64`, so a negative value is refused rather than
-  silently clamped; it was the only bounded limit on the surface with no
-  bounds published.
-
-  `root_path` is documented as a node path or a `.tscn` file path, and with an
-  editor attached a `.tscn` path went to the live bridge, which resolves node
-  paths only. The result was a 404 saying it searched for the file and did not
-  find the file. A `.tscn` path is now read from the file in either mode.
-
-  `include_signals` and `include_scripts` are removed. They were advertised
-  with a default of `true` and did nothing on either route, and the live route
-  built `omitted_fields` out of them, so asking for properties added
-  `bulk_properties` to the list of fields omitted and declining them took it
-  off while the properties stayed empty either way. `omitted_fields` is now
-  the fixed list the live walk actually produces. `include_properties` stays,
-  because the `.tscn` parser honours it, and its description now says that the
-  live route never returns bulk properties.
-
-- Every tool parameter says what it is (#462). 217 of 381 carried no
-  `description`, and 52 tools documented none of theirs. Every tool had a
-  top-level description; the parameters inside it mostly did not, and the names
-  that cost a caller the most are the ones that are not the obvious guess:
-  `target_node` not `node_path`, `setting` not `setting_path`, `scene_path` not
-  `output_path`, `emitter_node` not `source_node`, `target_method` not
-  `method_name`. Argument errors already do this work after the mistake; a line
-  of prose does it before. `signal_connect.flags` is the case that shows what
-  was lost: `enum: [2]`, `default: 2`, no prose, so that only `CONNECT_PERSIST`
-  is accepted, and that a deferred or one-shot connection is not on offer, was
-  recoverable only by reading the enum and knowing what 2 means.
-
-  The prose lives in one table applied at registration rather than beside each
-  schema, because a name that means the same thing in fifteen tools should read
-  the same in all fifteen, and because an alias should document its parameters
-  identically to the tool it resolves to. Where a name genuinely differs, the
-  table says so: `signal_emit`'s `target_node` is the emitter and
-  `signal_connect`'s is the receiver. A description written inline in a schema
-  is left alone. A contract test asserts none are missing, rather than that few
-  are, so the next tool added cannot quietly reintroduce the gap.
-
-- A confirmation skipped by YOLO mode, or offered to a person, reports the
-  preview's own refusal (#463). Both paths mint the token by running the dry
-  run themselves, so a preview that refuses leaves no token, and both then fell
-  through to the ordinary path, which answered with the generic "this mutation
-  requires a dry-run preview". That is advice the caller had already taken, and
-  it hid the actual reason. The comment beside it promised the opposite:
-  skipping confirmation is not skipping validation. This was invisible until
-  `scene_call_method`'s preview became able to refuse.
-
-- `scene_call_method`'s dry run reads the call instead of a property (#463).
-  The preview reported the node's `name`, a constant that came back for a
-  method the script declares, for one it does not, and for every argument
-  list, because the shared node probe reads `name` when the call names no
-  property. It then minted a confirmation token for a call it already had the
-  evidence to refuse, and spending that token returned a 422 the preview never
-  mentioned: the script is not a `@tool` script, so the editor never made an
-  instance of it and there was nothing to run. Two round trips and a consumed
-  token to learn something the first one knew. The gate's own 428 promises the
-  preview reads the target where it can, and this one claimed
-  `preview_kind: "target_state"` while answering a different question.
-  `scene_call_method` now has its own probe: the bridge runs every check that
-  decides the outcome and stops before the method would run, so `before`
-  carries `method_name`, `method_exists`, `script_is_tool` and the declared
-  signature, and a call that cannot succeed is refused at preview with the
-  code the real call would have returned, issuing no token.
-
-- `signal_list_connections` marks the editor's own listeners (#461). A freshly
-  created `Sprite2D` with no user connections at all reported five, all of them
-  the scene dock's `SceneTreeEditor` callbacks. None exist in the saved
-  `.tscn` and none exist at runtime; they are alive only while the editor has
-  the scene open. An agent asking what is wired to a node got five false
-  positives to one true one, at a ratio that gets worse the emptier the scene,
-  and the only tells were a null `target_node` and a `Class::_method` spelling
-  that a caller has to already know to look for. Every connection now carries
-  `origin`, `scene` or `editor`, and the response carries `editor_connections`.
-  Marked rather than filtered, because a caller debugging the editor itself has
-  no other way to see them.
-
-- `ui_list_controls` and `ui_hit_test` name the subtree they actually covered
-  (#470). `root_path` is an input to both, and neither echoed back something
-  that could be sent anywhere: one answered `"<edited scene root>"`, a
-  placeholder no tool accepts, and the other echoed the literal default
-  `"/root"` while traversing from the edited scene root. The two reported
-  different subtrees for the same two nodes, and a caller comparing them had no
-  way to tell which spelling was real. Both now resolve the path the same way
-  every control and hit in their own answers is already named.
-
-- `scene_get_group_members` returns the group names a scene actually uses
-  (#472). A group nobody has ever used answered exactly as one that had just
-  been emptied, field for field, and nothing enumerated a scene's groups:
-  `scene_list_groups` requires a `target_node` and answers for that one node.
-  An agent that asked for `enemys` instead of `enemies` got a successful empty
-  answer and no second question available to ask. In Godot a group is only its
-  members, so there is no emptied group to go and find, which is exactly what
-  made the typo unrecoverable. The walk that collects members now also collects
-  the names in use, so `known_groups` comes back beside the empty list, with
-  `group_exists` for the name that was asked about. Capped at 128 names with
-  `known_groups_truncated`, and Godot's own underscore-prefixed internal groups
-  are left out.
-
-- `project_set_setting` checks the setting name against the engine (#464). It
-  accepted any name, `display/window/size/viewport_widht` included, wrote it
-  into `project.godot` and reported `status: "success"` with
-  `persisted: true`. The window was unchanged and nothing in the engine would
-  ever read that key. `project_get_setting` then returned it happily, so
-  reading back to double-check did not catch it either. Godot does support
-  custom project settings, so an unknown name is a legitimate mode, but it was
-  indistinguishable from the overwhelmingly more common case. With an editor
-  attached, an undefined name is now a 404 naming `create: true`, using the
-  same `ProjectSettings.has_setting` the getter already answers with, and
-  every success carries `defined_by_engine`. Offline there is no engine to ask
-  and the shipped class reference publishes no `ProjectSettings` property
-  list, so that route reports `defined_by_engine: null`, says in `limitation`
-  that the name was not checked, and still writes. The addon bootstrap, which
-  is an offline write by necessity, is unaffected.
-
-- `scene_instantiate_node` refuses a request that names nothing to
-  instantiate (#471). It declared no required arguments and sits behind no
-  confirmation gate, so an empty argument object added a bare `Node` named
-  `Node` under the edited scene root, and repeat calls added `Node2`, `Node3`.
-  `{}` is what a caller sends when it has not decided yet, when a schema
-  lookup failed, or when an argument-building step produced nothing, and
-  everywhere else on this surface that costs one 400 because every other
-  mutation either declares required arguments or sits behind the dry-run gate.
-  Nothing in the response said it had chosen both the parent and the type
-  itself. One of `node_type` or `scene_path` is now required, and `node_type`
-  no longer advertises a default a client would fill in. Defaulting
-  `parent_path` to the edited root is unchanged; there is one obvious answer
-  for that. The refusal is in the bridge as well as the tool, because
-  `mutate_scene_tree` with `action: "instantiate"` forwards straight to the
-  bridge and the mutation happens on that side.
-
-- `res://.didi/` is not listed or searched as project content (#468). Didi
-  keeps its blackboard and crash state there, and `query_project_resources`
-  reported those files as project resources while `project_search_text`
-  returned hits inside them. An agent auditing a project saw two files nobody
-  created, and a search over a project that uses the blackboard came back with
-  values the agent itself had written earlier in the session, as evidence about
-  the project. Didi's own lock file also surfaced in
-  `unsearchable_extensions`. Godot's resource filesystem ignores
-  dot-directories; the index and both searches now skip this one, and
-  `project_audit_assets` inherits it through the shared index.
-
-- `project_search_symbols` counts a file it reached and could not read symbols
-  from (#469). A `.tres` in the search path was neither scanned, nor skipped,
-  nor unsearchable, and its bytes were counted anyway, so the response read
-  `scanned_files: 0` with `scanned_bytes: 76`. Those counters are the only
-  thing separating "I searched and there was nothing" from "I searched
-  nothing", and a caller reading that one correctly concludes the path was
-  empty. A file with no symbol extractor now lands in `unsearchable_files`
-  with its extension, the way the text search already handles one it cannot
-  read, and contributes no bytes.
-
-- `resource_create` refuses a `resource_type` Godot does not know (#465). It
-  wrote `[gd_resource type="NoSuchResourceType"]`, reported
-  `status: "created_offline"`, and left a file the engine cannot load. The
-  tool already refused the lesser version of the same mistake, one property the
-  type does not declare, and the reason it skipped the larger one came back as
-  `property_check.reason: "type_not_in_api_reference"` on a success nothing
-  forces a caller to read. An unknown type is now a 400 naming the spelling
-  check. The escape hatch stays open, because a `class_name` script or a
-  GDExtension type is not in the shipped reference either: pass
-  `allow_unknown_type: true` and the result reports `checked: false` with
-  `allowed_by`. Sub-resource types are held to the same rule.
-
-- `resource_create`'s `property_check` says which engine it checked against
-  (#466). The check reads a shipped API dump pinned to one engine line, and CI
-  covers three, so a gap between the dump and the attached engine is the normal
-  case. `checked: true` read as "verified against your engine": a property
-  added in 4.7 passed the check and was then dropped by the 4.5.1 engine that
-  loaded the file, which is the failure the check exists to prevent. With an
-  editor attached, `property_check` now carries `attached_engine_version` and
-  `api_version_matches_attached_engine`, the two fields `script_reflect_class`
-  already carried. Both read one helper now, so the two cannot drift.
-
-- `resource_inspect` reads the type out of the file (#467). `type` is derived
-  from the extension, so every `.tres` came back as `Resource`: a valid
-  `CanvasItemMaterial` and a file Godot cannot load at all were reported
-  identically, differing only in byte count, on the tool named inspect. The
-  `[gd_resource]` header is the first line of a file the indexer already opens
-  for its dependencies, so `resource_type` now carries what the file declares,
-  or `null` where the header could not be read. `type` is unchanged, because
-  `project_list_resources` filters on it. Anything that is not a text resource
-  has no such field.
-
-- `resource_create` answers a bad `save_path` with the error envelope, the same
-  defect as #460 in a tool the path probe could not reach behind the
-  confirmation gate.
-
-- Eight tools answer a path-validation failure with the error envelope
-  (#460). The argument checks already answered with `error.code`, so the census
-  in `probes/surface_census.py` reported no bare-string errors on this build:
-  it sends junk arguments, and the argument check fires first. Behind valid
-  arguments naming a path that is not there,
-  `script_check_syntax`, `analyze_script_diagnostics`, `script_get_symbols`,
-  `script_create`, `viewport_create_test_lab`, `create_visual_test_lab`,
-  `project_search_text` and `project_search_symbols` handed the validator's
-  message back unwrapped, so a client switching on `error.code` got
-  `undefined` and had to substring-match English. The validator already carried
-  the right code; prefixing its message by hand was what threw it away. Each of
-  the eight now carries it through: 404 for a path that is not there, 400 for
-  parent traversal. The sentence naming which argument was read is unchanged.
-
-- Live scene answers name the scene they describe, and `scene_create` says it
-  changed which one that is (#448). `scene_create` opens the scene it writes,
-  which it reported as `opened: true`. What it did not report was that every
-  later `scene_*` call now answered about a different file, because no live
-  scene result carried the edited scene's path: a hierarchy came back with one
-  node and no field naming the scene it came from, and
-  `scene_get_property` on a node in the previous scene answered
-  `Scene node not found` without saying which scene it had searched. Both
-  answers were true of the wrong question, and the nodes were not gone, they
-  were in the other tab. `scene_get_hierarchy` and `scene_get_selection` now
-  carry `scene_file_path`, with `scene_is_unsaved` for a scene that has never
-  been saved; the scene node 404 names the scene it searched; and `scene_create`
-  reports `edited_scene_changed` and `previous_scene_file_path`. This is the
-  class #401 was about, one level up.
-
-- Every semantic failure in the Phase 7 bridge says a sentence, and a node of
-  the wrong type is told apart from a path that resolves to nothing (#441,
-  #443). #406 and #424 fixed the argument rejections; the failures underneath
-  them still answered with the identifier as the whole message, which is the
-  string a client shows a person. `target_method_not_found` does not say which
-  method was looked for or on which node, so the one thing the caller needed was
-  the one thing missing, and the same identifier appeared again as
-  `data.upstream_message`, so the envelope carried it twice and a sentence zero
-  times. All 129 of those sites now answer with a sentence and keep the
-  identifier as a stable code under `data.code`. `declared_signal_not_found` and
-  `target_method_not_found` name what was looked for and where;
-  `camera_path_does_not_resolve_to_camera3d` names the path and the type it
-  found instead. And `tilemap_target_not_found` no longer covers two different
-  problems: a path that resolves to nothing keeps that code and says so, while a
-  path that resolves to a node of the wrong type answers
-  `tilemap_target_wrong_type` naming the type it found, with
-  `gridmap_target_wrong_type` beside it. Those are different problems with
-  different fixes, and a caller that could not tell them apart retried the path
-  when it should have been looking at the node. The editor hook's own
-  `session_kind_rejected` is included: it rejects before the bridge is entered,
-  so it is the identifier a caller most often sees, and it now says which method
-  needs which session kind and which one is selected.
-
-- A number no float property can hold is refused rather than written as `inf`
-  (#437). A Godot `float` property is `real_t`, 32 bits in a standard build, and
-  `Vector2`, `Vector3` and `Color` are made of the same, so a JSON number above
-  about 3.4e38 became `inf` the moment it landed there. Three things then went
-  wrong and none was loud: the saved scene held `Vector2(inf, 5)`, which
-  propagates through the transform to every child on the next frame; the value
-  reported back was JSON `null`, which is not a number and cannot be sent back;
-  and `null` is also what a caller reads as unset, so an infinite value and an
-  unreadable one looked identical. `applied: false` was the only signal, and it
-  sits beside `status: "success"` where it also appears for a value the engine
-  merely coerced. `scene_set_property` and `scene_instantiate_node` now refuse
-  such a number, naming the property, the vector or colour component where there
-  is one, and the bound. Separately, a non-finite number read out of the engine
-  comes back as the string `"inf"`, `"-inf"` or `"nan"` instead of `null`,
-  because JSON has no spelling for them and nlohmann serialises all three as
-  `null`: nothing this tool accepts can produce one any more, but a scene
-  written by hand still can.
-
-- `script_patch_method` reads the replacement before it writes it, and keeps the
-  declaration where it found it (#438, #439, #440). Three separate ways to lose
-  a method silently. The replacement text was spliced over the target without
-  ever being parsed, so `new_definition: "var x = 1"` deleted `hello` and
-  reported `hello` patched, and a body under a mistyped name added that name
-  while the target stayed gone. The splice also wrote at column zero whatever
-  indentation the declaration was found at, so a method declared inside a nested
-  `class` was moved out of the class and the script stopped parsing, with the
-  write already done and nothing to roll back to. And a name declared both
-  inside a nested class and at the top level took the first match with no word
-  said about the other. Now: `new_definition` has to declare the symbol
-  `method_name` names, of the kind `symbol_type` asks for, or the call is
-  refused with a 400 and nothing is written; the replacement is reindented to
-  the declaration it replaces; and a name that matches more than one member
-  declaration is refused with the scopes and lines that matched. A local
-  variable that shares a member's name is not a second declaration and does not
-  trigger that. `new_definition`, `file_path` and `method_name` carry
-  `minLength: 1` in the published schema, so an empty one is rejected at
-  validation rather than previewing clean, minting a confirmation token and
-  failing the execute path. The required-argument refusal names the arguments
-  that are actually missing, uses the error envelope, and no longer offers
-  `symbol_name`, which this tool does not publish and would reject as an unknown
-  property.
-
-- `resource_create` checks property names against the type before it writes
-  anything (#444). Whatever names `properties` carried went into the
-  `[resource]` block and came back in `properties_written`. Godot drops a
-  property the type does not have when it loads the file, silently, so the call
-  reported four properties written and the loaded resource had none of them, and
-  nothing in the surface could show the loss: `resource_inspect` reports type,
-  file size, uid and dependencies, and no properties. Names are now checked
-  against what the pinned API dump declares for the type and its ancestors, and
-  an undeclared one is refused naming it, before anything is rendered. Three
-  cases are deliberately not refused: `script`, which is how a resource gets
-  properties of its own; a name beginning with `_` or containing `/`, because
-  the dump lists only the inspector-visible set while Godot stores more than
-  that, and `_data` on a Curve or `sources/0` on a TileSet have to keep working;
-  and any name on a type the reference does not carry, such as a script class,
-  because there is nothing to check it against. The result carries
-  `property_check` saying whether the check ran and which storage-only names
-  went in unverified, and `sub_resource_property_checks` says the same per
-  sub-resource.
-
-- The verification sandbox says which repository it used, and refuses one that
-  merely encloses the project (#450). `verifyChangesInSandbox` resolved the
-  repository with `git rev-parse --show-toplevel` from the project root and used
-  whatever came back, however far above the project it sat, reporting it only as
-  "the repository". A machine with a stray `git init` in the user profile made
-  that directory the repository for a sandbox project under `%TEMP%`: had it
-  carried a commit, the next step would have been `git worktree add` against the
-  home directory plus a copy of its uncommitted state, and the tool would have
-  reported `all_ok`. `repository_root` now names the work tree in the result and
-  in every error about it, and a repository that tracks nothing under the
-  project is refused naming both, because a tree that encloses the project
-  without holding it is far more likely to be an accident than an instruction. A
-  project in a repository of its own, and a project committed into a larger
-  repository, are both unaffected.
-
-- `project_apply_changes` fails in the same shape `project_verify_changes` does
-  (#449). The dry run answered with an envelope and the confirmed call did not:
-  apply built one by hand and only when the error carried data, so every failure
-  without data came back as a bare string with no code and no `retryable`. The
-  same condition reached through verify was wrapped and through apply was not.
-  This is the #420 family on a path the surface census does not reach, because
-  it is behind the confirmation gate.
-
-- The schema layer enforces the shapes it publishes, so `tilemap_set_cells`
-  names the field the way `gridmap_set_cells` always has (#442). The validator
-  resolved no `$ref`, read no `prefixItems`, no `oneOf` and no `const`. The
-  Phase 7 schemas are generated with their shared shapes under `$defs`, so
-  `tilemap_set_cells` publishing `coords` as a two-element array through
-  `$defs/vector2i` meant that shape was enforced nowhere: sending the
-  `{"x": .., "y": ..}` object form, which most of the rest of the surface takes,
-  went straight past validation and came back from the handler as a 404 carrying
-  `invalid_tilemap_set_cells_request`, the identifier #406 was closed for.
-  `gridmap_set_cells` is the same shape of tool with the same shape of mistake
-  and answered `Argument 'cells' entry 0.position must be an array, not an
-  object.`, because its schema inlines what tilemap's references. Now both do.
-  A wrong-shaped argument is a 400 from the schema, before the handler, with the
-  field named. `oneOf` reports against the one branch whose required properties
-  are all present, which is the shape the caller was reaching for; when no
-  single branch stands out it lists what each shape demands. Only same-document
-  `$ref`s are followed.
-
-- Three request edges below `tools/call` answer the way the specification says
-  (#445, #446, #447). A request with an explicit `id: null` was parsed as an
-  ordinary request and answered with a result. MCP narrows JSON-RPC here: the id
-  must be a string or a number and must not be null, because null is how a
-  response marks a request whose id could not be read, so answering one puts a
-  response on the wire no client can match to a request. It is now `-32600`,
-  beside the two neighbouring checks that were already there. `tools/list`,
-  `resources/list` and `prompts/list` took any `cursor` and answered with the
-  whole first page, which reads as a successful page to a client that kept a
-  cursor across a restart, and can loop; all three answer in one page and issue
-  no cursor, so any cursor is one this server did not issue and is refused with
-  `-32602`. And a `tools/call` naming a tool no registration carries answered
-  with a bare string inside an `isError` result, the last failure in the surface
-  shaped unlike every other; the specification calls an unknown tool a protocol
-  error, so it is now `-32602` carrying the name.
-
-- A dry run reads its target, so a preview of a mutation that cannot succeed is
-  no longer shaped like a preview of one that will (#417). Every preview was an
-  echo of the arguments: `scene_remove_node` previewed against a node that does
-  not exist came back byte-identical in shape to one that does, differing only
-  in the path and its hash, and the real call was a 404. An agent using
-  `dry_run` as its safety check before a batch got a clean preview for a typo'd
-  target and found out mid-batch. A preview now resolves a file target on disk,
-  a node target through one read-only property read on the attached engine, and
-  a setting against `project.godot`, and fails the way the real call would
-  rather than minting a token for it. `changes[].before` holds what is actually
-  there: the file's size, the property's current value, the setting's current
-  literal. `target_read` and `preview_kind: "target_state"` say when that
-  happened, and a preview that could not read its target reports
-  `unverified_mutation` rather than calling itself a planned one.
-
-- Work that was never engine work is no longer reported as a fallback (#419).
-  26 tools reported `execution_mode: "offline_fallback"` with a healthy editor
-  attached. That is the label this server uses to mean you did not get the good
-  answer and should attach an editor and ask again, so a caller branching on it,
-  or an agent reading it as a quality signal, concluded that reattaching would
-  improve an answer that was already authoritative. It cannot: the blackboard is
-  a file on disk, `project_search_text` walks the project tree,
-  `script_patch_method` rewrites a `.gd` file. It also buried the genuine
-  signal, because `viewport_capture_frame` and `capture_viewport` really do
-  synthesize a preview when there is no live frame and meant something different
-  by the same word. A tool with no `live` path now reports `local`, joining
-  `local_status` and `local_session_management`, and `offline_fallback` is left
-  to the seven tools for which it is true. The registration's `executionModes`
-  vocabulary is unchanged; this is the payload's own field, which already
-  differed for the session-management tools.
-
-- `project_audit_assets` does not call third-party addon files orphans (#427).
-  The tool's output is advice to delete files, and in a fresh project most of
-  that advice was about Didi's own brand assets: three of four orphans and 96%
-  of the reported orphan bytes. `res://addons/` is a conventional boundary in
-  Godot, holding code a developer did not write and is not responsible for
-  tidying, and the noise is worst in an empty project, which is when someone is
-  most likely to run an audit for the first time. Files beneath it are excluded
-  by default, `excluded_addon_orphans` says how many were left out so the number
-  is explainable, and `include_addon_orphans` asks for them back.
-
-- Every semantic failure carries a code (#420). Eighteen tools answered one with
-  a bare JSON string: no code, no `data`, no `retryable`. The prose was the good
-  part and is unchanged, but a client that switches on `error.code`, which is
-  the documented way to tell retryable from not, got `undefined` from those
-  eighteen and had to substring-match English instead. Most of them were losing
-  a code that already existed, because 31 call sites answered with an `Error`'s
-  message and dropped its `code`. `script_create` over an existing file is the
-  409 this server uses elsewhere for a conflict, a blackboard task that is not
-  there is a 404 rather than an invalid argument, and managed recovery being
-  switched off is a 501 rather than a bad request.
-
-- `viewport_toggle_debug_draw` and `viewport_set_camera_transform` say what was
-  wrong instead of returning a C++ identifier (#424). Both answered every
-  argument mistake with a single token such as
-  `invalid_viewport_toggle_debug_draw_request`, which is neither prose a person
-  can act on nor a code a client can branch on, and carried no
-  `"code": "invalid_arguments"` the way the other argument errors do. Calling
-  `viewport_toggle_debug_draw` with `{}` was the worst of it, because the
-  requirement it broke is expressed with `anyOf`, so the identifier was the
-  entire explanation of which of its flags it wanted. `shader_set_uniform`
-  reports the node it could not find rather than `shader_target_not_found`.
-
-- `resource_inspect` tells a directory from a path with nothing behind it
-  (#426). Both were "Resource not found", and they lead to different next
-  actions: fix the argument, or go find the file. A directory now says so and
-  points at `project_list_resources`.
-
-- `project_analyze_impact` reads every `project.godot` setting that holds a
-  path, not only `[autoload]` (#421). `run/main_scene` is the most load-bearing
-  path a Godot project has and is exactly what someone runs an impact analysis
-  before moving, and it came back `impact_count: 0` with `target_exists: true`,
-  which this tool uses to mean nothing depends on the target. The rule is any
-  line in the file whose value names the target rather than a list of keys that
-  goes stale as Godot adds settings, so `config/icon`,
-  `application/boot_splash/image`, `default_environment` and the `res://`
-  entries under `[editor_plugins]` are covered by the same change. The new kind
-  is `project_setting`; `autoload` keeps its own, because a rename treats it
-  differently.
-
-- `project_search_text` reads the text formats a project keeps references in,
-  and counts what it did not read (#422). It read four extensions, so a shader
-  uniform, an input action, a setting key or an `.import` flag returned an empty
-  result with `skipped_files: 0`, `truncated: false` and `diagnostics: []`, every
-  honesty field saying nothing was left out, while `project_list_resources`,
-  `project_audit_assets` and `project_analyze_impact` all read those same files.
-  `.gdshader`, `.gdshaderinc`, `.godot`, `.cfg`, `.json` and `.import` are read
-  now, and the result reports `unsearchable_files` and
-  `unsearchable_extensions` for whatever was never a candidate, so an empty
-  result can be told apart from a string the project does not contain.
-  `project_search_symbols` keeps the narrower set, because a declaration does
-  not live in a shader or a `.json`.
-
-- A tool's arguments are closed by default, so a typo'd property name is
-  refused rather than ignored (#418). Rejecting an unknown argument depended on
-  the schema remembering to publish `additionalProperties: false`, which 50 of
-  126 tools did. The sharp case is a plausible guess: `project_search_text`
-  takes `search_path`, `path` is the obvious guess, and it was accepted,
-  ignored, and the unscoped search it ran was reported as a success with
-  nothing in the response to tell the two apart. Every implemented tool answers
-  the same way now, and a new tool is covered on arrival rather than by
-  remembering. Nested objects keep the old rule, because several of them are
-  deliberately free-form maps. A tool that really does take arguments it does
-  not publish can say `additionalProperties: true`.
-
-- `pattern` and `uniqueItems` are enforced, having been published at 22 sites
-  and checked at none (#423). A confirmation token or session id of the right
-  length and the wrong alphabet passed validation and was looked up as if it
-  were real, while `minLength` and `maxLength` beside it were enforced. A
-  duplicate array entry passed while `minItems`, `maxItems` and `enum` on the
-  same property were enforced. `viewport_capture_passes` now declares the
-  uniqueness its own description promises, so a repeated pass is refused
-  offline the way the engine refuses it live.
-
-- The overwrite gate arms on the target, not on the flag (#425). `overwrite:
-  true` demanded a dry-run preview and the confirmation token it returns even
-  when nothing was behind the path, so a generator or a repeatable setup step
-  paid two extra round trips for every file, including the files that were new.
-  Writing a new file with the flag and writing one without it have identical
-  effects on disk, and only one of them was gated. A path with a file behind it
-  is still gated, because that call destroys something. A token minted while the
-  target existed stays spendable if the target goes before it is spent, which
-  arming on state would otherwise have turned into a refusal for offering the
-  confirmation the caller was told to get. `viewport_create_test_lab` and
-  `create_visual_test_lab` write one fixed path rather than the path their
-  `target_resource_path` names, and are gated on that.
-
-- Symbol scanning keeps a name that is not spelled in ASCII (#416). GDScript
-  identifiers may hold Unicode letters, and the scanners classified every byte
-  above ASCII as the end of a name, so `CaféMenu` came back as `Caf` and a name
-  that began with one was dropped with nothing to say so. A truncated name is
-  worse than a missing one because it looks real: `project_audit_assets`
-  reported a dead signal `pr` that no project contains, and
-  `project_search_symbols` disagreed with `project_search_text` about the same
-  file. The identifier rule now lives in one place and is shared by
-  `script_get_symbols`, `project_search_symbols`, `project_search_text`
-  whole-word matching, the audit's signal scan, and the impact and rename
-  scanners, which had also been refusing such a name as not an identifier. The
-  audit's patterns are a bounded character class behind a left boundary: an
-  alternation, an unbounded repeat and a missing boundary each turned a single
-  packed line in a .tscn into a refusal or a scan that ran for minutes.
-
-- Offline `scene_get_hierarchy` no longer answers a different question than the
-  one asked (#401). Any `root_path` that did not end in `.tscn` was replaced by
-  the project main scene and returned as an ordinary success, so a node path
-  that does not exist, a `res://project.godot`, and a binary `.scn` all came
-  back as the whole main scene with nothing saying the request had been
-  substituted. A non-`.tscn` path is now refused, and the main-scene default for
-  an omitted `root_path` reports `requested_root_path` and
-  `substituted_main_scene`.
-
-- `project_list_export_presets` reports no presets instead of a file error
-  (#403). Godot writes `export_presets.cfg` the first time a preset is added, so
-  a project that has never configured an export has no file, and the answer was
-  a failure naming an absolute host path the user never created. A missing file
-  is now an empty list with `presets_file_exists: false`. A file that exists and
-  cannot be read or parsed is still an error.
-
-- `project_analyze_impact` says whether the target exists (#404).
-  `resolved_kind: "file"` describes the shape of the string, so a typo'd
-  `res://` path returned a clean empty result byte-identical to a real file with
-  no dependents: the answer to "is it safe to delete this" and the answer to
-  "you typed it wrong" were the same response. A `res://` target now reports
-  `target_exists`, and an absent one adds a limitation saying the empty list
-  means not found. A `uid://` target reports `null`, because the engine resolves
-  those from a table a file scan cannot read.
-
-- `script_reflect_class` no longer gives advice it cannot honour, and says when
-  the pinned API is not the engine you are running (#405). Its description told
-  the caller to attach a live editor for the running engine's own state, and the
-  tool has no live mode, so following it returned the same answer. It now says
-  what the shipped dump covers and points a script class at
-  `script_get_symbols`. Separately, the session descriptor gained an optional
-  `engine_version`, which the extension fills from the engine itself, so with an
-  editor attached the response carries `attached_engine_version` and
-  `api_version_matches_attached_engine`. Major and minor are compared, so a
-  patch difference is not a mismatch, and an extension older than the field
-  reports `null` rather than a match it cannot vouch for.
-
-- `viewport_create_test_lab` names `runtime_launch` in the message it returns
-  (#408). It told the caller to run `execute_test_session`, which is one of the
-  ten legacy aliases, so a client that lists tools by canonical name and follows
-  the instruction was being steered onto the deprecated surface.
-
-- `tools/call` now checks the `inputSchema` each tool publishes before anything
-  dispatches (#397). The schemas were advisory: `additionalProperties: false`
-  was not applied, so `blackboard_read` accepted an argument it does not have,
-  and `required` was not applied, so `project_get_setting` with no `setting`
-  failed downstream as a `503` transport error. Every handler re-derived its own
-  checks by hand, so coverage was uneven. One check now reads the published
-  schema and refuses with a message naming the property; handler checks stay as
-  a second line of defence. Two of this project's own tests were calling tools
-  with argument names the schemas do not have, and passing.
-
-- `viewport_capture_passes` publishes the segmentation pass it has always drawn.
-  Its schema listed three pass kinds and capped the array at three; the engine
-  side takes four. Enforcing that schema turned the understatement into a
-  refusal of a picture the tool takes, which is how it was found.
-
-- `scene_add_to_group` and `scene_remove_from_group` no longer target the edited
-  scene root when `target_node` is missing (#396). Both declare it required, and
-  omitting it added the group to whatever the editor had open, reported success,
-  and left a mutation on a node the caller never named. A missing required
-  argument is now refused before the request reaches the editor.
-
-- A wrong argument type no longer reads as a server fault (#400). `max_depth`
-  given a string came back as `Internal error executing tool:
-  [json.exception.type_error.302] ...` and logged at ERROR. Declared types are
-  refused up front by name; anything the schema leaves open is reported as the
-  caller mistake it is, without quoting a C++ library.
-
-- Live Phase 7 tools no longer answer a bad argument with only a machine token
-  (#406). `invalid_signal_list_connections_request` and its siblings said
-  nothing about which property was wrong. The schema check runs first and names
-  it; the token stays in `data` as a stable machine code.
-
-- `dry_run` no longer mints a confirmation token for arguments the tool would
-  refuse (#399). The preview path skipped argument validation, so a call naming
-  `new_body` instead of `new_definition` was previewed, signed, and then
-  rejected on execution. The preview runs through the same check, so a token
-  exists only for a call that could have run.
-
-- `prompts/get` now requires the arguments `prompts/list` marks required (#402).
-  Omitting `target_resource_path` rendered the template with the placeholder
-  collapsed to `res://`, handing an agent an instruction to diagnose the whole
-  project. It is an invalid-params error naming the argument.
-
-- A confirmation token is no longer consumed by an attempt that failed its own
-  binding check (#398). The token was erased from the map before expiry and
-  argument binding were checked, so one mistyped argument burned the token the
-  caller had just previewed and the retry with the exact previewed arguments
-  came back "unknown or already used". A token is now spent only on the mutation
-  it authorises. An expired token is still dropped, and the mismatch message
-  says the token is still good.
-
-- The mutation gate no longer calls its preview exact (#407). The `428` demanded
-  "an exact dry-run preview" and the preview it demanded reported
-  `before: "not read or modified during dry-run"`, so a person approving a token
-  had nothing to approve on. The preview now reports
-  `preview_kind: "argument_binding"` and says plainly that it binds arguments
-  and does not read the target. What it does has not changed; what it claims
-  has.
-
-- `runtime_attach_session` no longer attaches a session belonging to a different
-  project than the server's root (#387). Automatic selection has always required
-  the project paths to match; naming a session skipped the check, so a server
-  started on one project would serve another project's scene tree, and route
-  mutations into it, while still reporting its own root. It now refuses with
-  `409` naming both paths, and `allow_foreign_project: true` is the explicit way
-  to do it anyway, which reports `project_mismatch: true` and the limitation.
-
-- `didi_control_room` no longer reports another project's session as this
-  project's, and the Project light is a real preflight (#388). The Bridge reason
-  is computed against descriptors for this project root, so a project with no
-  addon is no longer told to "attach one" because some unrelated editor happens
-  to be open, which is the instruction that produced the cross-project attach
-  above. The Project light checks for `addons/didi/didi.gdextension` and for the
-  plugin in `editor_plugins/enabled`, and names the fix for each; both are file
-  stats, so they answer in the state where nothing live can.
-
-- `scene_create` and `scene_pack_branch` no longer write a uid the engine never
-  learns (#379). `ResourceSaver.save` puts the uid in the file, but only Godot's
-  own save callback registers it with `ResourceUID`, and that callback does
-  nothing while `EditorFileSystem` is scanning, which is exactly the window an
-  agent writes in after attaching to a freshly started editor. The scan's
-  directory snapshot predates the file, so the scan did not pick it up either.
-  Every load of a referencing scene then warned and fell back to the text path.
-  Both writers now call `EditorFileSystem.update_file`, report `uid` and
-  `uid_registered`, and when a scan deferred the work they say so and Didi
-  re-indexes the path once the filesystem settles.
-
-- `script_check_syntax` no longer reports a false error for every script that
-  names an autoload (#383). Godot's `--headless --check-only` runs in a process
-  with no `SceneTree`, which is where autoloads are registered, so it reported
-  `Identifier not found` for a script the engine compiles and runs. It did so
-  permanently, not until the next editor restart. Didi now reads the
-  `[autoload]` section of `project.godot` and demotes those diagnostics to
-  warnings carrying a `note`, along with the `Compilation failed` line that
-  followed only from them, so `has_errors` is a verdict about the script again.
-  An `Identifier not found` naming anything else stays an error, and a real
-  parse error beside an autoload one keeps `has_errors: true`. `script_create`
-  and `script_patch_method` surface the same check and get the same treatment.
-
-- Didi can now enable its own addon in a project that does not have it (#382).
-  Every `project_*` writer was live-only, a live session needs the addon, and
-  enabling the addon is a `project_set_setting` write, so the first call an
-  agent makes in a new project was the one call it could never make.
-  `project_set_setting` now falls back to writing `project.godot` directly when
-  no session is attached, reporting `execution_mode: "offline_fallback"` and
-  the literal it wrote. The value reach and the name rules are the live ones,
-  so a setting written offline is the Variant a live write would have stored.
-  QUICKSTART and LLM_INSTRUCTIONS now carry the bootstrap as a tool sequence
-  rather than only as a sequence of clicks.
-
-- The extension no longer leaks one ObjectDB instance on a clean engine exit
-  (#373). Its engine output logger is a `RefCounted`, and shutdown dropped the
-  reference taken at install without freeing what that drop released. Godot
-  documents `unreference()` as returning true when the object should be freed
-  after the decrement, and freeing is the caller's job. The instance stayed in
-  ObjectDB with its class already unregistered, which is why the verbose
-  report named no class. A game process now exits with no leak warning, and
-  the live harness asserts that.
-
-- `asset_reimport` no longer reports success for a path Godot has no importer
-  for (#374). Godot's import system owns only the files carrying a `.import`
-  sidecar, and `EditorFileSystem.reimport_files` printed
-  `importer for type '' not found` to the editor output for each of the others
-  while returning nothing the tool could see. The batch is now split by what
-  each path needs: sidecar files go to `reimport_files`, and the rest go to
-  `EditorFileSystem.update_file`, which is the call Godot documents for a file
-  changed outside the editor. The result carries both lists as `reimported`
-  and `refreshed`.
-
-- `scene_create` now creates the project-contained parent directory of a
-  nested scene path instead of returning a bare `ResourceSaver.save failed
-  with Error 19` (#372). `script_create` and `resource_create` already created
-  theirs, so the writers disagreed with each other. `scene_pack_branch` shares
-  the same save path and gets the same behaviour.
-
-- The offline `missing_colon` rule no longer reads a four-character name
-  followed by a space as an `else` header, so a plain `hits += 1` stops being
-  reported as an `else` statement missing its colon (#371). Unlike the other
-  block keywords, `else` carries no trailing space, and the check for what
-  follows it never confirmed the line started with `else` at all.
-
-- The schema-enforcement test brings its own project. It searched `res://addons`
-  and asserted the search succeeded, with no fixture anywhere in it, so the only
-  thing making that true was the binary happening to be started from the
-  repository root. Run from anywhere else, the assertion that closing a schema
-  must not close the tool failed for a missing directory. It now creates the
-  project it stands in, and asserts the search found something rather than only
-  that it did not error.
+- `2026-09-13` `initialize` reads the `protocolVersion` it is sent. [#531](https://github.com/saworbit/didi/issues/531) · [PR #543](https://github.com/saworbit/didi/pull/543)
+- `2026-09-13` `resources/subscribe` refuses with a reason that is true. [#532](https://github.com/saworbit/didi/issues/532) · [PR #543](https://github.com/saworbit/didi/pull/543)
+- `2026-09-13` Resources with no live path say what they are, not what they fell back from. [#533](https://github.com/saworbit/didi/issues/533) · [PR #543](https://github.com/saworbit/didi/pull/543)
+- `2026-09-13` A second MCP server on a held editor is told so. [#527](https://github.com/saworbit/didi/issues/527) · [PR #542](https://github.com/saworbit/didi/pull/542)
+- `2026-09-13` An engine crash survives the call that discovered it. [#536](https://github.com/saworbit/didi/issues/536) · [PR #542](https://github.com/saworbit/didi/pull/542)
+- `2026-09-13` `runtime_detach_session` is idempotent. [#537](https://github.com/saworbit/didi/issues/537) · [PR #542](https://github.com/saworbit/didi/pull/542)
+- `2026-09-13` `blackboard_task_update` says what it takes for `progress`. [#528](https://github.com/saworbit/didi/issues/528) · [PR #541](https://github.com/saworbit/didi/pull/541)
+- `2026-09-13` `blackboard_task_claim` answers a conflict like its siblings. [#529](https://github.com/saworbit/didi/issues/529) · [PR #541](https://github.com/saworbit/didi/pull/541)
+- `2026-09-13` Completing an already-completed task is `409 conflict`. [#530](https://github.com/saworbit/didi/issues/530) · [PR #541](https://github.com/saworbit/didi/pull/541)
+- `2026-09-13` The schema-enforcement test brings its own project. [PR #540](https://github.com/saworbit/didi/pull/540)
+- `2026-09-13` A path holding a NUL is refused rather than written somewhere else. [#525](https://github.com/saworbit/didi/issues/525) · [PR #539](https://github.com/saworbit/didi/pull/539)
+- `2026-09-13` `script_create` answers a bad path with a code. [#526](https://github.com/saworbit/didi/issues/526) · [PR #539](https://github.com/saworbit/didi/pull/539)
+- `2026-09-13` `res://nested/../ok2.gd` is accepted, because it lands inside the project. [#534](https://github.com/saworbit/didi/issues/534) · [PR #539](https://github.com/saworbit/didi/pull/539)
+- `2026-09-13` A Godot `Error` reaches the caller with its name. [#535](https://github.com/saworbit/didi/issues/535) · [PR #539](https://github.com/saworbit/didi/pull/539)
+- `2026-09-12` `runtime_detach_session` reports `server_build_id` again. [PR #523](https://github.com/saworbit/didi/pull/523)
+- `2026-09-12` `godot://editor/state` names a scene root the scene tools accept. [#502](https://github.com/saworbit/didi/issues/502) · [PR #522](https://github.com/saworbit/didi/pull/522)
+- `2026-09-12` Every blackboard board is served as `application/json`. [#513](https://github.com/saworbit/didi/issues/513) · [PR #521](https://github.com/saworbit/didi/pull/521)
+- `2026-09-12` A blackboard board says whether it exists, and the parameterised shape is discoverable. [#514](https://github.com/saworbit/didi/issues/514) · [PR #521](https://github.com/saworbit/didi/pull/521)
+- `2026-09-12` A malformed blackboard URI names the part that was wrong. [#515](https://github.com/saworbit/didi/issues/515) · [PR #521](https://github.com/saworbit/didi/pull/521)
+- `2026-09-12` `prompts/get` refuses an argument the prompt does not declare. [#511](https://github.com/saworbit/didi/issues/511) · [PR #520](https://github.com/saworbit/didi/pull/520)
+- `2026-09-12` A prompt has one description. [#512](https://github.com/saworbit/didi/issues/512) · [PR #520](https://github.com/saworbit/didi/pull/520)
+- `2026-09-12` Every published `inputSchema` carries the `additionalProperties: false` the server enforces. [#508](https://github.com/saworbit/didi/issues/508) · [PR #519](https://github.com/saworbit/didi/pull/519)
+- `2026-09-12` `scene_get_hierarchy` declares the fields it returns. [#510](https://github.com/saworbit/didi/issues/510) · [PR #519](https://github.com/saworbit/didi/pull/519)
+- `2026-09-12` `tools/list` says the mode a tool actually answers with. [#503](https://github.com/saworbit/didi/issues/503) · [PR #518](https://github.com/saworbit/didi/pull/518)
+- `2026-09-12` `project_get_uid_map` and `project_audit_assets` stop calling an authoritative answer a fallback. [#504](https://github.com/saworbit/didi/issues/504) · [PR #518](https://github.com/saworbit/didi/pull/518)
+- `2026-09-12` Tool annotations are decided per tool instead of being four names for one bit. [#505](https://github.com/saworbit/didi/issues/505) · [#507](https://github.com/saworbit/didi/issues/507) · [PR #517](https://github.com/saworbit/didi/pull/517)
+- `2026-09-12` `runtime_detach_session` says what it did. [#506](https://github.com/saworbit/didi/issues/506) · [PR #517](https://github.com/saworbit/didi/pull/517)
+- `2026-09-12` The expression sandbox names the read that works. [#488](https://github.com/saworbit/didi/issues/488) · [PR #501](https://github.com/saworbit/didi/pull/501)
+- `2026-09-12` `tools/list` says which names are legacy. [#493](https://github.com/saworbit/didi/issues/493) · [PR #500](https://github.com/saworbit/didi/pull/500)
+- `2026-09-12` `project_apply_changes` stops issuing a token for a call it cannot apply. [#491](https://github.com/saworbit/didi/issues/491) · [PR #499](https://github.com/saworbit/didi/pull/499)
+- `2026-09-12` A `oneOf` branch behind a `$ref` says what it needs. [#489](https://github.com/saworbit/didi/issues/489) · [PR #498](https://github.com/saworbit/didi/pull/498)
+- `2026-09-12` The project writers check what they are about to write. [#485](https://github.com/saworbit/didi/issues/485) · [#490](https://github.com/saworbit/didi/issues/490) · [PR #497](https://github.com/saworbit/didi/pull/497)
+- `2026-09-12` Every error says what kind of failure it is, in the same place. [#486](https://github.com/saworbit/didi/issues/486) · [#487](https://github.com/saworbit/didi/issues/487) · [#492](https://github.com/saworbit/didi/issues/492) · [PR #496](https://github.com/saworbit/didi/pull/496)
+- `2026-09-12` `scene_get_hierarchy` answers the question it was asked. [#482](https://github.com/saworbit/didi/issues/482) · [#483](https://github.com/saworbit/didi/issues/483) · [#484](https://github.com/saworbit/didi/issues/484) · [PR #495](https://github.com/saworbit/didi/pull/495)
+- `2026-09-12` Every tool parameter says what it is. [#462](https://github.com/saworbit/didi/issues/462) · [PR #481](https://github.com/saworbit/didi/pull/481)
+- `2026-09-12` A confirmation skipped by YOLO mode, or offered to a person, reports the preview's own refusal. [#463](https://github.com/saworbit/didi/issues/463) · [PR #480](https://github.com/saworbit/didi/pull/480)
+- `2026-09-12` `scene_call_method`'s dry run reads the call instead of a property. [#463](https://github.com/saworbit/didi/issues/463) · [PR #480](https://github.com/saworbit/didi/pull/480)
+- `2026-09-12` `signal_list_connections` marks the editor's own listeners. [#461](https://github.com/saworbit/didi/issues/461) · [PR #479](https://github.com/saworbit/didi/pull/479)
+- `2026-09-12` `ui_list_controls` and `ui_hit_test` name the subtree they actually covered. [#470](https://github.com/saworbit/didi/issues/470) · [PR #479](https://github.com/saworbit/didi/pull/479)
+- `2026-09-12` `scene_get_group_members` returns the group names a scene actually uses. [#472](https://github.com/saworbit/didi/issues/472) · [PR #479](https://github.com/saworbit/didi/pull/479)
+- `2026-09-12` `project_set_setting` checks the setting name against the engine. [#464](https://github.com/saworbit/didi/issues/464) · [PR #478](https://github.com/saworbit/didi/pull/478)
+- `2026-09-12` `scene_instantiate_node` refuses a request that names nothing to instantiate. [#471](https://github.com/saworbit/didi/issues/471) · [PR #477](https://github.com/saworbit/didi/pull/477)
+- `2026-09-12` `res://.didi/` is not listed or searched as project content. [#468](https://github.com/saworbit/didi/issues/468) · [PR #476](https://github.com/saworbit/didi/pull/476)
+- `2026-09-12` `project_search_symbols` counts a file it reached and could not read symbols from. [#469](https://github.com/saworbit/didi/issues/469) · [PR #476](https://github.com/saworbit/didi/pull/476)
+- `2026-09-12` `resource_create` refuses a `resource_type` Godot does not know. [#465](https://github.com/saworbit/didi/issues/465) · [PR #475](https://github.com/saworbit/didi/pull/475)
+- `2026-09-12` `resource_create`'s `property_check` says which engine it checked against. [#466](https://github.com/saworbit/didi/issues/466) · [PR #475](https://github.com/saworbit/didi/pull/475)
+- `2026-09-12` `resource_inspect` reads the type out of the file. [#467](https://github.com/saworbit/didi/issues/467) · [PR #475](https://github.com/saworbit/didi/pull/475)
+- `2026-09-12` `resource_create` answers a bad `save_path` with the error envelope, the defect [#460](https://github.com/saworbit/didi/issues/460) fixed elsewhere. [PR #475](https://github.com/saworbit/didi/pull/475)
+- `2026-09-12` Eight tools answer a path-validation failure with the error envelope. [#460](https://github.com/saworbit/didi/issues/460) · [PR #474](https://github.com/saworbit/didi/pull/474)
+- `2026-09-12` Live scene answers name the scene they describe, and `scene_create` says it changed which one that is. [#448](https://github.com/saworbit/didi/issues/448) · [PR #459](https://github.com/saworbit/didi/pull/459)
+- `2026-09-12` Every semantic failure in the Phase 7 bridge says a sentence, and a node of the wrong type is told apart from a path that resolves to nothing. [#441](https://github.com/saworbit/didi/issues/441) · [#443](https://github.com/saworbit/didi/issues/443) · [PR #458](https://github.com/saworbit/didi/pull/458)
+- `2026-09-12` The verification sandbox says which repository it used, and refuses one that merely encloses the project. [#450](https://github.com/saworbit/didi/issues/450) · [PR #457](https://github.com/saworbit/didi/pull/457)
+- `2026-09-12` `project_apply_changes` fails in the same shape `project_verify_changes` does. [#449](https://github.com/saworbit/didi/issues/449) · [PR #457](https://github.com/saworbit/didi/pull/457)
+- `2026-09-12` A number no float property can hold is refused rather than written as `inf`. [#437](https://github.com/saworbit/didi/issues/437) · [PR #455](https://github.com/saworbit/didi/pull/455)
+- `2026-09-12` `resource_create` checks property names against the type before it writes anything. [#444](https://github.com/saworbit/didi/issues/444) · [PR #454](https://github.com/saworbit/didi/pull/454)
+- `2026-09-12` `script_patch_method` reads the replacement before it writes it, and keeps the declaration where it found it. [#438](https://github.com/saworbit/didi/issues/438) · [#439](https://github.com/saworbit/didi/issues/439) · [#440](https://github.com/saworbit/didi/issues/440) · [PR #452](https://github.com/saworbit/didi/pull/452)
+- `2026-09-11` The schema layer enforces the shapes it publishes, so `tilemap_set_cells` names the field the way `gridmap_set_cells` always has. [#442](https://github.com/saworbit/didi/issues/442) · [PR #456](https://github.com/saworbit/didi/pull/456)
+- `2026-09-11` Three request edges below `tools/call` answer the way the specification says. [#445](https://github.com/saworbit/didi/issues/445) · [#446](https://github.com/saworbit/didi/issues/446) · [#447](https://github.com/saworbit/didi/issues/447) · [PR #453](https://github.com/saworbit/didi/pull/453)
+- `2026-09-11` A dry run reads its target, so a preview of a mutation that cannot succeed is no longer shaped like a preview of one that will. [#417](https://github.com/saworbit/didi/issues/417) · [PR #436](https://github.com/saworbit/didi/pull/436)
+- `2026-09-11` Work that was never engine work is no longer reported as a fallback. [#419](https://github.com/saworbit/didi/issues/419) · [PR #435](https://github.com/saworbit/didi/pull/435)
+- `2026-09-11` `project_audit_assets` does not call third-party addon files orphans. [#427](https://github.com/saworbit/didi/issues/427) · [PR #434](https://github.com/saworbit/didi/pull/434)
+- `2026-09-11` Every semantic failure carries a code. [#420](https://github.com/saworbit/didi/issues/420) · [PR #433](https://github.com/saworbit/didi/pull/433)
+- `2026-09-11` `viewport_toggle_debug_draw` and `viewport_set_camera_transform` say what was wrong instead of returning a C++ identifier. [#424](https://github.com/saworbit/didi/issues/424) · [PR #433](https://github.com/saworbit/didi/pull/433)
+- `2026-09-11` `resource_inspect` tells a directory from a path with nothing behind it. [#426](https://github.com/saworbit/didi/issues/426) · [PR #433](https://github.com/saworbit/didi/pull/433)
+- `2026-09-11` `project_analyze_impact` reads every `project.godot` setting that holds a path, not only `[autoload]`. [#421](https://github.com/saworbit/didi/issues/421) · [PR #432](https://github.com/saworbit/didi/pull/432)
+- `2026-09-11` `project_search_text` reads the text formats a project keeps references in, and counts what it did not read. [#422](https://github.com/saworbit/didi/issues/422) · [PR #432](https://github.com/saworbit/didi/pull/432)
+- `2026-09-11` The overwrite gate arms on the target, not on the flag. [#425](https://github.com/saworbit/didi/issues/425) · [PR #431](https://github.com/saworbit/didi/pull/431)
+- `2026-09-11` A tool's arguments are closed by default, so a typo'd property name is refused rather than ignored. [#418](https://github.com/saworbit/didi/issues/418) · [PR #430](https://github.com/saworbit/didi/pull/430)
+- `2026-09-11` `pattern` and `uniqueItems` are enforced, having been published at 22 sites and checked at none. [#423](https://github.com/saworbit/didi/issues/423) · [PR #430](https://github.com/saworbit/didi/pull/430)
+- `2026-09-11` Symbol scanning keeps a name that is not spelled in ASCII. [#416](https://github.com/saworbit/didi/issues/416) · [PR #429](https://github.com/saworbit/didi/pull/429)
+- `2026-09-11` `script_reflect_class` no longer gives advice it cannot honour, and says when the pinned API is not the engine you are running. [#405](https://github.com/saworbit/didi/issues/405) · [PR #414](https://github.com/saworbit/didi/pull/414)
+- `2026-09-11` `viewport_create_test_lab` names `runtime_launch` in the message it returns. [#408](https://github.com/saworbit/didi/issues/408) · [PR #412](https://github.com/saworbit/didi/pull/412)
+- `2026-09-11` Offline `scene_get_hierarchy` no longer answers a different question than the one asked. [#401](https://github.com/saworbit/didi/issues/401) · [PR #411](https://github.com/saworbit/didi/pull/411)
+- `2026-09-11` `project_list_export_presets` reports no presets instead of a file error. [#403](https://github.com/saworbit/didi/issues/403) · [PR #411](https://github.com/saworbit/didi/pull/411)
+- `2026-09-11` `project_analyze_impact` says whether the target exists. [#404](https://github.com/saworbit/didi/issues/404) · [PR #411](https://github.com/saworbit/didi/pull/411)
+- `2026-09-11` A confirmation token is no longer consumed by an attempt that failed its own binding check. [#398](https://github.com/saworbit/didi/issues/398) · [PR #410](https://github.com/saworbit/didi/pull/410)
+- `2026-09-11` The mutation gate no longer calls its preview exact. [#407](https://github.com/saworbit/didi/issues/407) · [PR #410](https://github.com/saworbit/didi/pull/410)
+- `2026-09-11` `tools/call` now checks the `inputSchema` each tool publishes before anything dispatches. [#397](https://github.com/saworbit/didi/issues/397) · [PR #409](https://github.com/saworbit/didi/pull/409)
+- `2026-09-11` `viewport_capture_passes` publishes the segmentation pass it has always drawn. [PR #409](https://github.com/saworbit/didi/pull/409)
+- `2026-09-11` `scene_add_to_group` and `scene_remove_from_group` no longer target the edited scene root when `target_node` is missing. [#396](https://github.com/saworbit/didi/issues/396) · [PR #409](https://github.com/saworbit/didi/pull/409)
+- `2026-09-11` A wrong argument type no longer reads as a server fault. [#400](https://github.com/saworbit/didi/issues/400) · [PR #409](https://github.com/saworbit/didi/pull/409)
+- `2026-09-11` Live Phase 7 tools no longer answer a bad argument with only a machine token. [#406](https://github.com/saworbit/didi/issues/406) · [PR #409](https://github.com/saworbit/didi/pull/409)
+- `2026-09-11` `dry_run` no longer mints a confirmation token for arguments the tool would refuse. [#399](https://github.com/saworbit/didi/issues/399) · [PR #409](https://github.com/saworbit/didi/pull/409)
+- `2026-09-11` `prompts/get` now requires the arguments `prompts/list` marks required. [#402](https://github.com/saworbit/didi/issues/402) · [PR #409](https://github.com/saworbit/didi/pull/409)
+- `2026-09-10` `runtime_attach_session` no longer attaches a session belonging to a different project than the server's root. [#387](https://github.com/saworbit/didi/issues/387) · [PR #391](https://github.com/saworbit/didi/pull/391)
+- `2026-09-10` `didi_control_room` no longer reports another project's session as this project's, and the Project light is a real preflight. [#388](https://github.com/saworbit/didi/issues/388) · [PR #391](https://github.com/saworbit/didi/pull/391)
+- `2026-09-10` `scene_create` and `scene_pack_branch` no longer write a uid the engine never learns. [#379](https://github.com/saworbit/didi/issues/379) · [PR #390](https://github.com/saworbit/didi/pull/390)
+- `2026-09-10` `script_check_syntax` no longer reports a false error for every script that names an autoload. [#383](https://github.com/saworbit/didi/issues/383) · [PR #386](https://github.com/saworbit/didi/pull/386)
+- `2026-09-10` Didi can now enable its own addon in a project that does not have it. [#382](https://github.com/saworbit/didi/issues/382) · [PR #385](https://github.com/saworbit/didi/pull/385)
+- `2026-09-10` The extension no longer leaks one ObjectDB instance on a clean engine exit. [#373](https://github.com/saworbit/didi/issues/373) · [PR #377](https://github.com/saworbit/didi/pull/377)
+- `2026-09-10` `asset_reimport` no longer reports success for a path Godot has no importer for. [#374](https://github.com/saworbit/didi/issues/374) · [PR #376](https://github.com/saworbit/didi/pull/376)
+- `2026-09-10` `scene_create` creates the parent directory of a nested scene path instead of failing with Error 19. [#372](https://github.com/saworbit/didi/issues/372) · [PR #376](https://github.com/saworbit/didi/pull/376)
+- `2026-09-10` The offline `missing_colon` rule no longer reads `hits += 1` as an `else` missing its colon. [#371](https://github.com/saworbit/didi/issues/371) · [PR #375](https://github.com/saworbit/didi/pull/375)
 
 ---
 
 ## [1.8.0] - 2026-09-10
 
-### Fixed
-
-- Seeding a field trial no longer tries to execute a file that is not a
-  program, and no longer waits forever when a probe does not come back. The
-  seed asks the server it was handed for its build id and its tool manifest,
-  and the unit tests hand it a fixture six bytes long with an `.exe` name. On
-  Windows that launch reaches the antivirus filter driver before it fails, and
-  behind the native suite's thirty thousand freshly written files it stopped
-  coming back: a 1.8.0 release attempt sat in that one call for thirty-four
-  minutes with a flat processor and one line of log.
-
-  The module refuses those launches itself now, raising what the operating
-  system would have raised, so every outcome is unchanged and nothing is
-  spawned. The rule is the path rather than the name: anything under the system
-  temporary directory was put there by a fixture in that file and is not a
-  program, while `git` never is, so the tests that shell out to a real one are
-  untouched. It is one guard for the whole module because there are three such
-  fixtures and fixing the first one only moved the stall to the third.
-
-  Both probes also carry a timeout, which is a different fault. `subprocess`
-  bounds the wait for a child that started; a block inside `_execute_child` is
-  the child never starting, and no argument reaches it. The timeout is there for
-  a server that answers slowly, not for this.
-
-- `ctest` says where it stopped. Both suites carry a timeout below the release
-  job's own, and the Python suite runs unbuffered and verbose, so a run that
-  stalls fails at a known bound and names the test it was in. Thirty-four
-  minutes of the release attempt above produced one line, the one saying the
-  suite had started.
-
-- Every pull request now runs `ctest` against the same interpreter the release
-  hands CMake. `release.yml` passes its virtual environment's Python through
-  `-DPython3_EXECUTABLE` and `ci.yml` did not, so ctest's Python suite ran on
-  the runner's own interpreter, which has no `jsonschema` and cannot import two
-  of the modules. That difference is the only reason the release job's ctest
-  could load them while a pull request's could not.
-
-- Every pull request now runs `ctest`, which is what gates a tag. Nothing else
-  ran it: the other steps run the native binary directly and then name Python
-  modules one at a time, in separate processes and separate jobs, while `ctest`
-  runs one process over all of them through unittest discovery. That is a
-  different composition, and cutting 1.8.0 was the first thing to execute it. A
-  release should not be the first run of a command.
-
-- `Tools.OfflineCapabilityIsDerived` sets up the tool registry it reads instead
-  of inheriting whatever an earlier test left there. It passed only in a full
-  run and failed on its own, which is the opposite of what running a single test
-  is for, and on its own it never reached the property it exists to check.
-
-- `editor_reload_project` re-indexes the offline caches it says it re-indexed.
-  With no editor connected it reported `Offline caches re-indexed.` and dropped
-  nothing, so the cached resource index kept answering with what it read before.
-  Callers reach for this tool after changing files outside Didi, which is
-  exactly when that answer is wrong. (#358)
-
-- The shared resource index is keyed on the directory rather than on the
-  spelling of it. Almost every tool asks for `.`, so the cache filed two
-  different projects under one key and could serve each the other's index.
-  Resolving the path first is also what lets two tools that name the same
-  project differently share one crawl, which is the whole point of the cache.
-
-- The native suite no longer leaves its checkpoint fixtures in the temporary
-  directory when a run dies inside a test. The destructor that removes them
-  cannot run if the process never returns, and the file count boundary test
-  creates ten thousand files, so repeated deaths piled up more than a hundred
-  thousand of them. Nothing ever cleared those, and nothing said they were
-  there.
-
-  Each fixture now carries the pid that created it, and a run removes the
-  fixtures whose owner is gone before it creates its own. A pid that still
-  answers is left alone, so a suite running at the same time in another process
-  keeps its files; the safe mistake is to keep a stale directory, not to delete
-  a live one. The destructor now reports a removal it could not complete instead
-  of discarding the error code, which is what made the pile up silent. Two
-  suites run side by side stay green and clear the temporary directory between
-  them. (#363)
-
-- Offline tools no longer hand their child processes the server's standard
-  input (#350). Didi speaks JSON-RPC on stdio, so a `dotnet build`, a `git`
-  call or a headless Godot helper inherited the same handle the server reads
-  requests from. Two readers on one stream race whether or not the child ever
-  wants input, and a child that does want input waits for bytes that were meant
-  for the server and will never arrive.
-
-  `NUL` on Windows and `/dev/null` on POSIX, which is what
-  `runtime/managed_process.cpp` already did. Reproduced before fixing: with the
-  parent's stdin held open by a pipe, a child that reads to end of input blocks
-  until the timeout; with the fix it returns immediately.
-
-- The test runner binds spawned processes so a timeout cannot orphan them
-  (#351). On Windows it now launches suspended, assigns the process to a job
-  with `KILL_ON_JOB_CLOSE`, and then resumes, so there is no window in which the
-  child runs outside the job. `TerminateProcess` alone only killed what
-  `pi.hProcess` pointed at, and when Godot resolves to a `godot.cmd` wrapper
-  that is the interpreter -- leaving the engine running detached, holding file
-  locks and interfering with the next session. On POSIX the child calls
-  `setpgid` and the timeout signals the process group rather than the single
-  process.
-
-  Covered by a test that reproduces the orphan: `GODOT_BIN` points at a wrapper
-  script that starts a background grandchild publishing its own pid, the
-  session is given three seconds, and the grandchild must be gone afterwards.
-  Against the unfixed runner it fails on `!processAlive(grandchild)` and leaves
-  three live processes behind, which is the defect as a user meets it.
-
-- `resource_create` validates its target through
-  `paths::resolveProjectFileForWrite` instead of its own copy of the rules
-  (#352), and writes through the resolved path rather than the raw relative
-  one. The private copy caught an escaping path but accepted shapes every other
-  writing tool refuses -- an absolute path landing inside the project root, for
-  one -- which is the disagreement `project_path.hpp` says that function exists
-  to prevent. It also called `projectPathFromUtf8` outside its own `try`, so a
-  `save_path` that is not valid UTF-8 threw out of the handler instead of
-  returning an error.
-
-- `scene_get_selection` is no longer listed as an offline capability (#353). A
-  selection exists only in a running editor and there is no offline
-  implementation. The live set is tested first, so the wire answer was already
-  correct, which is exactly why the dead entry survived: it changed nothing
-  until the order changed.
-
-- The workflows that assert the pinned `jsonschema` version no longer read
-  `jsonschema.__version__`. That attribute is deprecated as of 4.26.0 and its
-  own warning says it will be removed, at which point the check would have
-  raised `AttributeError` and taken the release gate down with it -- on a
-  routine dependency bump, in the job that packages a release.
-
-  `importlib.metadata.version` instead, which is what the deprecation warning
-  points at. Verified under 4.26.0 with deprecation warnings promoted to
-  errors, and verified to still reject a mismatch.
-
-  Found by installing the version Dependabot proposed and running the check
-  against it, rather than by reading the diff. The diff is one line.
+Full write-ups for 1.8.0: [as first written](https://github.com/saworbit/didi/blob/fd9d0e5e8517143c0e892166c225485a840b2d87/CHANGELOG.md#180---2026-09-10).
 
 ### Added
 
-- A field trial can be run unattended. `tools/field-trial/trial.py` seeds the
-  working directory, briefs a fresh tester in its own client session, and scores
-  what that tester did from the transcript rather than from its own account of
-  itself. `--dry-run` exercises everything except the spending.
-
-  The reason to automate it is not the agent's hour, it is the maintainer's.
-  Three trials have now produced defects no suite found, and each cost a morning
-  of seeding by hand and remembering which manifest to score against. The
-  manifest is now dumped from the binary under test rather than copied from
-  wherever one is lying: gating trial 01 scored a binary emitting 94 canonical
-  tools against an on-disk manifest claiming 83, so the uncalled set, which is
-  the interesting half of a coverage report, was wrong about eleven of them.
-
-  It also closes the finding trial 03 paid for. A trial is seeded against a
-  server binary and scored against that binary's manifest, while the live half
-  of every call is answered by a GDExtension the tester installs by hand and no
-  artifact recorded. That run spent about an hour concluding a shipped
-  capability did not exist, because the bridge answering it was six days older
-  than the server. The seed now records the server's build id and the hash of
-  the addon the tester is meant to install, alongside the one lying in the
-  repository's own gitignored `addons/didi`, and `bridge.py` reads back the
-  pairing the server reported on every live session call. Its third verdict is
-  the one worth having: a run where no call ever reported a pairing is
-  `not_observed`, not clean, because nothing in it says which build served it.
-
-- `didi --version` prints the build id under the release version.
-
-  The version cannot tell two builds apart, and the server and the GDExtension
-  are separate files a user copies around separately. A session that has
-  attached reports both halves and says whether they match; before one is
-  attached, this is the only way to record which build a run was handed.
-
-- Fuzz targets for the three places Didi reads bytes it did not write: the IPC
-  frame decoder, the JSON-RPC request parser, and base64. libFuzzer, built with
-  ASan and UBSan, running on every code pull request and for longer nightly.
-
-  This started as a way to raise an OpenSSF Scorecard number and stopped being
-  that almost immediately. Reading `parseFramedMessage` closely enough to write
-  a target for it found a buffer over-read -- fixed in #344, before a single
-  fuzzer had been compiled. The only test that function had round-tripped a
-  frame the same code had just written, which is the one input shape guaranteed
-  not to find it.
-
-  Worth stating what was declined. Scorecard detects C++ fuzzing by looking for
-  the string `LLVMFuzzerTestOneInput` in a `.cc` file, so the point was
-  available for the price of committing a file that nothing compiles or runs.
-  That is the failure this repository's own documentation validator already
-  polices for Python tests: a test that does not execute is worse than none,
-  because it looks like coverage. These targets are built against `didi_core`
-  and executed in CI, and the corpus persists between runs so findings compound
-  instead of restarting from empty.
-
-  The eight bytes that used to segfault the frame decoder are a committed seed,
-  re-executed on every fuzz job for as long as the target exists.
-
-- The live harness now proves the loop composed rather than in halves: pause a
-  running game, inject one action, advance exactly one frame, and read back the
-  fixture's own `_input` and `_process` counters.
-
-  Both halves were already covered, and neither covered this. Stepping was
-  proven on a paused game; injected delivery was proven on a running one, read
-  back after a profiler window had let real time pass. An agent does neither.
-  It pauses, presses, advances a known number of frames and looks, and nothing
-  in the suite said the press is there when it looks. Six assertions now say
-  it, with no sleep and no profiler wait between the press and the read, so
-  what passes is determinism and not the wall clock being generous.
-
-  What they claim is bounded on purpose: the press is observed no later than
-  the completion of the step that follows it, and injecting does not resume the
-  game. Which side of the step the engine flushes the event on is left unpinned,
-  because that is the engine's business and an assertion about it would break
-  on a change nobody using Didi would care about.
-
+- `2026-09-09` A field trial can be run unattended. [PR #364](https://github.com/saworbit/didi/pull/364)
+- `2026-09-09` `didi --version` prints the build id under the release version. [PR #364](https://github.com/saworbit/didi/pull/364)
+- `2026-09-09` The live harness now proves the loop composed rather than in halves. [PR #360](https://github.com/saworbit/didi/pull/360)
+- `2026-09-09` Fuzz targets for the three places Didi reads bytes it did not write: the IPC frame decoder, the JSON-RPC request parser, and base64. [PR #349](https://github.com/saworbit/didi/pull/349)
 
 ### Changed
 
-- A viewport diff converts each image's pixels to luma once instead of twice.
-  `structuralSimilarity` and `perceptualHash` each built their own pair of
-  planes, so one diff held four of them; at the 2048 capture limit a plane is
-  32 MB. Two frames that are the same bytes now skip the block pass and the
-  second transform as well, because SSIM is 1.0 by definition there and the
-  second plane would be a copy of the first. The hash reported for those frames
-  is still the real hash rather than a zero: that would be a different answer,
-  not a cheaper one, and a test now says so. (#354)
+- `2026-09-09` A viewport diff converts each image's pixels to luma once instead of twice. [#354](https://github.com/saworbit/didi/issues/354) · [PR #367](https://github.com/saworbit/didi/pull/367)
+- `2026-09-09` `base64::decode` reserves its output. [#357](https://github.com/saworbit/didi/issues/357) · [PR #367](https://github.com/saworbit/didi/pull/367)
+- `2026-09-09` `project_analyze_impact`, `project_rename_references` and `project_analyze_bloat` no longer crawl the whole project from scratch. [#355](https://github.com/saworbit/didi/issues/355) · [PR #366](https://github.com/saworbit/didi/pull/366)
+- `2026-09-09` Node path impact analysis skips a file that cannot mention the target. [#356](https://github.com/saworbit/didi/issues/356) · [PR #366](https://github.com/saworbit/didi/pull/366)
+- `2026-09-09` The three API-blocked names now say what to use instead. [PR #360](https://github.com/saworbit/didi/pull/360)
+- `2026-09-09` CodeQL now runs on every pull request rather than on a path filter. [PR #349](https://github.com/saworbit/didi/pull/349)
+- `2026-09-09` All ten of CodeQL's first-pass findings were triaged and dismissed with written reasons rather than left open. [PR #349](https://github.com/saworbit/didi/pull/349)
 
-- `base64::decode` reserves its output. `encode` always did, while `decode`
-  grew a byte at a time and reallocated its way through payloads that run to
-  megabytes on every captured frame. (#357)
+### Fixed
 
-- `project_analyze_impact`, `project_rename_references` and
-  `project_analyze_bloat` no longer crawl the whole project from scratch. They
-  built their own indexer while every other read tool shared one, so inspecting
-  a resource and then asking for its impact walked the tree and parsed every
-  `.uid` file twice. They use the shared index now. `project_rename_references`
-  deliberately does not: it rewrites files, and a resource created outside Didi
-  while the cached list was alive would be missing from it, which is the
-  half-applied rename its truncation check exists to refuse. (#355)
+- `2026-09-10` Seeding a field trial no longer tries to execute a file that is not a program, and no longer waits forever when a probe does not come back. [PR #370](https://github.com/saworbit/didi/pull/370)
+- `2026-09-10` `ctest` says where it stopped. [PR #370](https://github.com/saworbit/didi/pull/370)
+- `2026-09-10` Every pull request now runs `ctest` against the same interpreter the release hands CMake. [PR #370](https://github.com/saworbit/didi/pull/370)
+- `2026-09-10` Every pull request now runs `ctest`, which is what gates a tag. [PR #370](https://github.com/saworbit/didi/pull/370)
+- `2026-09-10` `Tools.OfflineCapabilityIsDerived` sets up the tool registry it reads instead of inheriting whatever an earlier test left there. [PR #368](https://github.com/saworbit/didi/pull/368)
+- `2026-09-09` `editor_reload_project` re-indexes the offline caches it says it re-indexed. [#358](https://github.com/saworbit/didi/issues/358) · [PR #366](https://github.com/saworbit/didi/pull/366)
+- `2026-09-09` The shared resource index is keyed on the directory rather than on the spelling of it. [PR #366](https://github.com/saworbit/didi/pull/366)
+- `2026-09-09` The native suite no longer leaves its checkpoint fixtures in the temporary directory when a run dies inside a test. [#363](https://github.com/saworbit/didi/issues/363) · [PR #365](https://github.com/saworbit/didi/pull/365)
+- `2026-09-09` Offline tools no longer hand their child processes the server's standard input. [#350](https://github.com/saworbit/didi/issues/350) · [PR #362](https://github.com/saworbit/didi/pull/362)
+- `2026-09-09` The test runner binds spawned processes so a timeout cannot orphan them. [#351](https://github.com/saworbit/didi/issues/351) · [PR #362](https://github.com/saworbit/didi/pull/362)
+- `2026-09-09` `resource_create` validates its target with the shared project path rules instead of its own copy. [#352](https://github.com/saworbit/didi/issues/352) · [PR #362](https://github.com/saworbit/didi/pull/362)
+- `2026-09-09` `scene_get_selection` is no longer listed as an offline capability. [#353](https://github.com/saworbit/didi/issues/353) · [PR #362](https://github.com/saworbit/didi/pull/362)
+- `2026-09-09` The workflows that assert the pinned `jsonschema` version no longer read `jsonschema.__version__`. [PR #361](https://github.com/saworbit/didi/pull/361)
 
-- Node path impact analysis skips a file that cannot mention the target. It used
-  to duplicate the file text to mask comments and strings, then allocate a heap
-  string per line, for every scene and script in the project, and throw the lot
-  away one line later. Most files in a project never name a given node path.
-  (#356)
-
-- CodeQL now runs on every pull request rather than on a path filter. A change
-  that "only touches documentation" is a claim worth checking rather than
-  trusting. The cost is controlled by splitting the analyses: Python and
-  Actions are about a minute each and always run, while the C++ analysis takes
-  closer to twenty and runs only when something can reach the compiler.
-
-- All ten of CodeQL's first-pass findings were triaged and dismissed with
-  written reasons rather than left open. Alerts that can never be actioned are
-  how a Security tab stops being read, and the next real finding then arrives
-  looking exactly like the ones already learned to be ignored.
-
-  Five of them are integer-multiplication overflows inside
-  `stb_image_write.h`, vendored code this project is told not to modify. The
-  first attempt excluded the vendored files through a CodeQL configuration
-  file; it was loaded and had no effect. `paths-ignore` applies to interpreted
-  languages and to compiled languages analysed without a build, and this
-  analysis builds, because CodeQL for C++ observes the real compiler. The
-  configuration file was removed rather than left in the tree describing a
-  control that was not in force. None was a new defect: three are operator-nominated
-  process launches that advertise `openWorldHint: true`, one is the documented
-  `DIDI_SESSION_DIR` override, and one is a test probe reading its own
-  argument. [SECURITY.md](SECURITY.md) records each disposition.
-
-- The three API-blocked names now say what to use instead. `physics_simulate_step`,
-  `nav_bake_mesh` and `runtime_get_call_stack` stay registered and unimplemented,
-  and the documentation stopped ending the sentence there.
-
-  Silence reads as absence. An agent told only that a name is not callable
-  concludes the capability does not exist, and `LLM_INSTRUCTIONS.md` then sent
-  it to hand-edit project files -- which is where every field trial's damage
-  happened. Each blocked name now names its stand-in and, in the same breath,
-  what the stand-in is not: `runtime_step` advances whole frames and not exact
-  physics ticks at a caller's delta, a region baked in the editor is a bake
-  Didi did not perform and cannot verify, and an error's originating file,
-  function and line are one frame and not a stack. A stand-in offered without
-  its limits is the same false success the trials named as the worst defect
-  class, arriving in prose instead of in a response.
+---
 
 ## [1.7.0] - 2026-09-09
 
+Full write-ups for 1.7.0: [as first written](https://github.com/saworbit/didi/blob/fd9d0e5e8517143c0e892166c225485a840b2d87/CHANGELOG.md#170---2026-09-09).
+
 ### Added
 
-- Signed releases. Every release archive now carries SLSA build provenance,
-  signed through Sigstore by the release workflow, plus a `SHA256SUMS` file and
-  the provenance bundle as `didi-<tag>.intoto.jsonl`.
-
-  Didi ships prebuilt binaries, so "did this archive come from that source" has
-  to be answerable by someone holding only the download. Until now it was not
-  answerable at all. The check that matters names the workflow, not just the
-  repository, because an attacker can sign something of their own but cannot
-  produce a signature attributed to this repository's release workflow:
-
-  ```bash
-  gh attestation verify didi-linux-x64.tar.gz \
-    --repo saworbit/didi \
-    --signer-workflow saworbit/didi/.github/workflows/release.yml
-  ```
-
-  `--source-ref` is part of the documented check for a reason: the release
-  workflow can also be run manually as a rehearsal, and those runs sign too, so
-  their provenance carries the same repository and the same signer workflow.
-  Only the ref separates a published release from a dry run, so a verification
-  that omits it would accept a rehearsal artifact as something the project
-  published.
-
-  There is no signing key. The certificate is issued to the workflow run's own
-  OIDC identity and expires in minutes, so there is nothing for a maintainer to
-  leak, rotate or lose. The bundle ships as a release asset rather than living
-  only in GitHub's attestation store, so verification works offline for someone
-  who would rather not call the GitHub API -- and because that is the form
-  OpenSSF Scorecard's Signed-Releases check reads.
-
-  `SHA256SUMS` is covered by the same attestation, so it cannot be swapped
-  independently of the archives it describes. [SECURITY.md](SECURITY.md) has
-  the verification commands.
-
-- A rehearsal for the release pipeline. Running the release workflow manually
-  now builds, checksums and signs exactly what a tag would, then leaves the
-  result as a workflow artifact instead of publishing it. The signing path used
-  to be reachable only by tagging a real release, which meant the only way to
-  find out whether it worked was to do the thing that cannot be undone.
-
-- Repository automation and supply-chain hardening. Someone assessing this
-  project from the outside can now see what is enforced rather than what is
-  claimed.
-
-  **Code scanning.** CodeQL runs the `security-extended` query set over the
-  C++, the Python tooling, and the workflows themselves, on every code pull
-  request and weekly. Before this the only automated security signal was
-  Dependabot, which watches dependencies and says nothing about the C++ that
-  parses JSON-RPC off a pipe. OpenSSF Scorecard publishes a supply-chain score
-  behind a README badge, and dependency review blocks a pull request that
-  introduces a known vulnerability or a copyleft licence.
-
-  **Every action pinned to a commit SHA**, with the release named in a trailing
-  comment. A tag is a pointer its owner can move at any time, which is how one
-  compromised action leaked credentials from thousands of repositories at once.
-  `tools/validate_documentation.py` now rejects a workflow that pins any other
-  way, or that pins a SHA without saying which release it is. Every workflow
-  declares least-privilege `permissions:`, and `actionlint` and `zizmor` run
-  over them on every pull request.
-
-  **A generated test inventory.** `tools/test_inventory.py` derives the counts
-  from the suites themselves -- the native registry through `didi_tests
-  --list`, the Python suites through `ast`, the live harness through its
-  assertion sites -- and writes [docs/TEST_INVENTORY.md](docs/TEST_INVENTORY.md)
-  and the README badge. CI runs `--check` after the build, so a stale number is
-  a red run. The count this replaces went wrong often enough that the
-  documentation validator carries a rule forbidding one specific out-of-date
-  sentence about it.
-
-  The page publishes the Windows figures and says so. The native suite is
-  platform-conditional -- crash capture is Windows-only, and the IPC cases
-  differ between a named pipe and a Unix socket -- so a single native total is
-  false on two platforms out of three. The tool refuses to regenerate off the
-  reference platform rather than quietly replacing them.
-
-  **Branch protection on `main`**, a `CODEOWNERS` file, path-based pull request
-  labelling, categorised release notes, stale-thread handling, and an
-  `.editorconfig` that describes the indentation already in the tree.
-
-- Added `ui_list_controls`: the Control nodes under a root, with the
-  viewport-space rectangle each one occupies, its class, visibility, mouse
-  filter, and its text where it has any. Editor or game.
-
-  This is what makes a control addressable. `ui_hit_test` answers what sits
-  under a point, which is only useful once you already have a point, and it is
-  editor-only; `runtime_get_tree` gives the running tree with no rectangles and
-  no text. An agent that had just written a menu and needed to press Start was
-  left doing Godot's layout arithmetic on a `.tscn` itself, or guessing
-  coordinates.
-
-  The rectangle is `Control.get_global_rect`, the same one `ui_hit_test` reports
-  for a hit, so listing a control and hit-testing the centre of its rectangle
-  returns that control. Text is read as a property rather than through a
-  `get_text` bind per widget class, so `Button`, `Label`, `LineEdit` and a custom
-  Control exporting `text` are all covered by one path.
-
-  Read-only, bounded to 10,000 traversed nodes and 256 results, and it injects
-  nothing. Live only: a `.tscn` holds anchors and offsets, not the rectangle they
-  resolve to. Verified against real editors on Godot 4.5.1, 4.6.2 and 4.7.2;
-  every binding it uses was already shipped and carries an identical hash on all
-  three.
-
-- Added the Control Room: an interactive dashboard Didi serves to the host over
-  the existing stdio connection, rendered in the conversation by clients that
-  support MCP Apps. Red/amber/green lights for the bridge, project, safety
-  posture and coordination board, each carrying the pid, path or session behind
-  it; every registration with the execution mode it is in right now; and a tail
-  of Didi's own log, which until now went only to a standard error stream that a
-  client launching the server over stdio discards.
-
-  One read-only canonical tool, `didi_control_room`, and one resource,
-  `ui://didi/control-room`. The tool works with no host UI support at all and
-  returns the same payload as text, so nothing depends on the extension.
-
-  The extension is bilateral, so the UI surface is advertised only to a client
-  that declared `io.modelcontextprotocol/ui` -- an unaware host is not handed a
-  page of markup to read into a model's context. `--ui-app auto|always|off`
-  overrides that, and `off` withdraws the resource rather than merely hiding it
-  from the listing.
-
-  The page loads nothing from anywhere, so no content security policy domain is
-  declared and the host's default `default-src 'none'` applies unweakened. It
-  builds every value with `textContent`, because the strings it renders -- paths,
-  node names, log lines -- originate in files a project can contain, and a
-  project is not a trust boundary. It ignores any message whose sender is not the
-  host. The session token is outside the allowlist the payload is built from, and
-  the build fails if that field name appears in either the payload or the page.
-
-  This completes the recommended order in
-  [Human Interaction Design](docs/HUMAN_INTERACTION_DESIGN.md), whose third step
-  was deliberately left conditional on host support being broad enough to be
-  worth it. See [Control Room Design](docs/CONTROL_ROOM_DESIGN.md).
-
-- Added opt-in managed editor recovery: isolated project copies, saved-file checkpoints, one owned-editor restart, explicit reconciliation and preserved-workspace restoration. Four recovery tools expose state and actions without replaying uncertain edits. Ordinary attachment and runtime_launch remain unchanged. See [Managed Recovery](docs/MANAGED_RECOVERY.md) for coverage and limitations.
+- `2026-09-09` Signed releases: every archive carries SLSA build provenance signed through Sigstore, plus a `SHA256SUMS` file. [PR #341](https://github.com/saworbit/didi/pull/341)
+- `2026-09-09` A rehearsal for the release pipeline. [PR #341](https://github.com/saworbit/didi/pull/341)
+- `2026-09-09` Repository automation and supply-chain hardening. [PR #339](https://github.com/saworbit/didi/pull/339)
+- `2026-09-08` Added `ui_list_controls`: every Control under a root, with its rectangle, class, visibility and text. [PR #309](https://github.com/saworbit/didi/pull/309)
+- `2026-09-08` Added the Control Room, a dashboard of red, amber and green lights for clients that support MCP Apps. [PR #308](https://github.com/saworbit/didi/pull/308)
+- `2026-09-08` Added opt-in managed editor recovery. [PR #307](https://github.com/saworbit/didi/pull/307)
 
 ### Changed
 
-- The Linux release artifact is built *inside* Ubuntu 22.04 rather than *on*
-  it. The `ubuntu-22.04` runner image is being retired -- deprecation from
-  2026-09-17, unsupported from 2027-04-17 -- and GitHub brownouts already kill
-  jobs using the label. One killed a release rehearsal mid-compile, which is
-  how this was found rather than by a failed release.
-
-  The label was chosen for glibc in the first place: a binary built against
-  2.35 starts on Ubuntu 22.04 and Debian 12, and one built on a newer host does
-  not. Moving to `ubuntu-24.04` would have raised the floor to glibc 2.39 and
-  silently dropped every Ubuntu 22.04 LTS and Debian 12 user -- a decision about
-  who can run Didi, not a CI fix. Building in a pinned `ubuntu:22.04` container
-  on a supported runner keeps the floor exactly where it was.
-
-  The image is pinned by digest, because this build feeds the provenance
-  attestation: what built the binary should be a fact rather than whatever the
-  tag pointed at that day.
-
-- Corrected the documented Linux minimum in
-  [Administrator Guide](docs/ADMIN_GUIDE.md) from Ubuntu 20.04+ to Ubuntu
-  22.04+ / glibc 2.35+. It had not been true of a published archive for some
-  time: the build host sets the floor, and it had been 22.04. Nothing about
-  what ships changed here -- only the claim made about it.
-
-- CI decides what to run instead of running everything. A single cheap job
-  classifies the changed files, and the two 30-minute Windows Godot integration
-  matrices and the sanitizer build now start only when the change can reach
-  code, fixtures, or the workflow itself. A documentation change used to start
-  all four.
-
-  The workflow-level `paths:` filters that used to gate this are gone, and that
-  is the load-bearing part: a workflow skipped by a path filter reports no
-  result at all rather than reporting success, so a required status check named
-  on it leaves the pull request permanently unmergeable. A `CI Gate` job now
-  runs unconditionally and fails only when something that did run came back
-  red, which is what makes required checks usable here at all.
-
-- The pinned `jsonschema` version is read out of `requirements-dev.txt` by the
-  workflows that assert it, rather than typed into all three places. Dependabot
-  version updates for Python were switched off precisely because a bump could
-  only ever open a pull request that failed until someone edited two more
-  lines; they are on now, and a bump either passes the schema contract suites
-  or it does not.
-
-- The release job publishes with `gh` rather than a third-party action. It is
-  the one job holding `contents: write`, and `gh` is already on the runner, so
-  publishing costs no additional trusted code.
-
-- `project_audit_assets` now verifies both kinds of broken reference against the
-  running editor, not just UID ones. A `missing_file` finding says nothing the
-  scan indexed provides that path; `ResourceLoader.exists` says whether Godot
-  can load it, which is a different question. A remap, a resource type the index
-  does not cover, or an index that hit its own cap all read as absent on disk
-  and load perfectly well, and those were false findings.
-
-  A path the engine can load is cleared into `engine_only_references` with
-  `kind: "missing_file"`; one it cannot keeps its finding and gains
-  `confirmed_by_engine`. The two questions stay independent: a registered UID
-  does not make a missing path loadable, and a loadable path does not register
-  a UID, so a verdict on one never moves the other. UID clearing now also
-  requires the resolved path to load, because a UID can stay registered for a
-  file that is gone.
-
-  `uid_verification` is renamed `reference_verification` and its counters are
-  now `cleared` and `confirmed`, since it covers both kinds. UID findings are
-  sent before path findings so a run truncated at the 256 bound is still
-  deterministic. Neither name has appeared in a release.
+- `2026-09-09` The Linux release artifact is built *inside* Ubuntu 22.04 rather than *on* it. [PR #341](https://github.com/saworbit/didi/pull/341)
+- `2026-09-09` Corrected the documented Linux minimum in [Administrator Guide](docs/ADMIN_GUIDE.md) from Ubuntu 20.04+ to Ubuntu 22.04+ / glibc 2.35+. [PR #341](https://github.com/saworbit/didi/pull/341)
+- `2026-09-09` CI decides what to run instead of running everything. [PR #339](https://github.com/saworbit/didi/pull/339)
+- `2026-09-09` The pinned `jsonschema` version is read out of `requirements-dev.txt` by the workflows that assert it, rather than typed into all three places. [PR #339](https://github.com/saworbit/didi/pull/339)
+- `2026-09-09` The release job publishes with `gh` rather than a third-party action. [PR #339](https://github.com/saworbit/didi/pull/339)
+- `2026-09-09` `project_audit_assets` now verifies both kinds of broken reference against the running editor, not just UID ones. [PR #324](https://github.com/saworbit/didi/pull/324)
 
 ### Fixed
 
-- `didi::ipc::parseFramedMessage` accepted a frame whose length field was near
-  `UINT32_MAX` and then read gigabytes past the end of the buffer it was given.
-  An eight-byte input segfaulted.
-
-  The bounds check was written `size < 4 + len`. `len` is `uint32_t` and `4` is
-  `int`, so the usual arithmetic conversions evaluate the sum in 32-bit
-  unsigned arithmetic: `0xFFFFFFFC + 4` is `0`, the guard passed for any buffer
-  at all, and the `std::string` built from the payload was constructed with a
-  four-gigabyte length. Both operands are now widened before the addition.
-
-  Nothing in the shipping server called this function -- the live IPC paths
-  read frames through their own bounded implementation, which checks the length
-  against a maximum -- so this was reachable only by a caller of the header. It
-  is fixed rather than deleted because `include/didi/common/protocol.hpp` ships
-  in the addon include tree and this is the obvious function to reach for.
-
-  Found while choosing fuzz targets, which is the argument for the exercise:
-  the only existing test round-tripped a frame the same code had just written,
-  and a decoder is defined by what it does with input it did not write. The new
-  case covers wrapping lengths, truncated payloads, short headers, non-JSON
-  payloads, exact fits, and trailing bytes, and it segfaults against the old
-  decoder rather than merely failing.
-
-- `project_get_uid_map` and `project_audit_assets` work again without a Godot
-  session. Both were moved into the live-only capability set when they gained
-  their editor-backed paths, and the standalone process refuses a live-only
-  tool with `503 No atomic runtime route is available for live dispatch` when
-  nothing is attached. Both have complete offline paths, so both now declare
-  `live` and `offline_fallback`.
-
-  The in-process tests could not see this. They drive a client that holds no
-  route lease, so the refusal never fires there and the wrong advertisement
-  looks like a pass. Two tests close that gap: a native one that requires every
-  tool with an offline path to advertise it, and one in
-  `tests/test_tool_output_schema_contract.py` that drives the real binary with
-  no session and requires an answer rather than a refusal.
-
-- `project_audit_assets` checks its unresolved UID findings against the running
-  editor instead of leaving them as guesses. An `unresolved_uid` finding means
-  no scanned project file records that UID, which offline is the only reading
-  available; with an editor attached, `ResourceUID` can say whether it is true.
-
-  A UID the engine resolves is not broken, so it leaves `broken_references` and
-  is reported under `engine_only_references` with the path the engine gave. The
-  file it points at leaves `orphans` too, and its bytes come off `orphan_bytes`:
-  a file the engine proved is referenced cannot also be unreferenced, and a
-  report that said both would be arguing with itself. A UID the engine does not
-  know keeps its finding and gains `confirmed_by_engine`.
-
-  Corrected rather than annotated, because a finding left standing with a
-  footnote saying it is wrong is how a tool teaches people to skim past
-  findings. The trade is disclosed rather than silent: `engine_only_references`
-  adds a `limitations` line saying the editor's table is not in the repository,
-  so a fresh checkout would report those references broken.
-
-  `reference_verification` reports on every call whether the pass ran --
-  `live`, `unavailable`, or `not_needed` -- how many findings were sent, and
-  whether more than the 256-query bound existed. `execution_mode` follows it, because it
-  describes whether an engine contributed to the findings. What was scanned
-  does not change with it: `scan_source` is `project_files` on every call.
-
-- `project_get_uid_map` takes a `resolve` list and answers it from the engine.
-  Pass up to 256 `uid://` or `res://` values; with an editor attached they are
-  resolved by the `ResourceUID` singleton, which is the table the engine itself
-  resolves against, and each result reports `index_state` — whether the project
-  files agree, contradict it, or hold nothing.
-
-  This closes the roadmap's UID-to-path synchronization item, and it closes it
-  without parsing `.godot/uid_cache.bin`. That file is an undocumented binary
-  cache with no format guarantee: absent on a fresh clone, written on the
-  editor's schedule, and readable mid-write. Building reconciliation on it would
-  mean maintaining a format the engine does not support and re-proving it every
-  release, which is the shape Phase 7 option C was rejected for. `ResourceUID`
-  is public, and its binds carry identical hashes on Godot 4.5.1, 4.6.2 and
-  4.7.2, so there is no version gate.
-
-  What did not change is the map. `ResourceUID` exposes no enumeration through
-  GDExtension, so `uid_map` is a scan of the project files in both modes and
-  every response carries `uid_map_source` saying so. A call without `resolve`
-  reports `offline_fallback` even with an editor connected, because claiming
-  live for a file scan would be a lie. A miss says which kind it is:
-  `unknown_to_engine`, `malformed_uid`, `unsupported_query`, or offline
-  `not_in_project_files` — which is not the same claim as the resource not
-  existing.
-
-- `scene_close` no longer demands `discard_unsaved: true` for a scene the engine
-  says is clean. Godot 4.7 added the read side of editor dirty state,
-  `EditorInterface.get_unsaved_scenes()`; Didi now probes for that bind and, when
-  the engine omits the active scene from its unsaved list, closes on a call with
-  no arguments and reports `dirty_state: "clean"`.
-
-  The flag was the project's marker for destructive intent, and requiring it on
-  every close taught an agent to assert destructive intent it did not have. The
-  guard is not weakened where the engine cannot answer: Godot 4.5 and 4.6 bind
-  only the write-side `mark_scene_as_unsaved`, a scene that has never been saved
-  has no path for the engine to name, and a scene the engine reports as unsaved
-  is refused everywhere. Those three cases still return `409`, and the message
-  says which one it is. `discard_unsaved: true` is unchanged and still skips the
-  check.
-
-  Results carry `dirty_state_readable` and `dirty_state`, so a client reads which
-  case it is in from the response rather than inferring it from a version number,
-  and an engine without the bind degrades to the refusal rather than to a silent
-  discard.
-
-- One Didi process can drive several Godot sessions at once. Routes are held per
-  session, each with its own connection and ownership lock, so two tasks
-  interleaving requests on one stdio process each drive their own editor and
-  neither sees the other's. Opening a route for a named request does not move
-  the process selection, so a legacy client sharing the process keeps what it
-  attached, and detaching releases only the selected route.
-
-  Eight routes at once is the ceiling. Each holds an ownership lock, and a lock
-  held here is a session refused to every other Didi process, so the count is
-  bounded rather than left to grow; routes whose engine has gone are dropped
-  before the limit is consulted, and a genuine limit returns `429`. Every held
-  route is released on shutdown, not only the selected one.
-
-- A request no longer inherits a Godot session it never chose. Attaching set one
-  route for the whole process and every later request acquired it, so on a
-  process serving more than one task an agent could read from, or mutate, an
-  editor a different task had attached.
-
-  A request declaring protocol `2026-07-28` now names its session in
-  `_meta.didi.runtime_session_id` and is served on that one only. Naming nothing
-  gets no live route: a tool that can answer offline does and says so, and a
-  live-only tool is refused with `400` naming the field to set. `tools/list`,
-  `resources/list` and `resources/read` follow the same rule, so nothing is
-  reported live, or read, because an unrelated task opened a route. The named
-  session is checked for project identity, and a confirmation token now binds to
-  the session the call will actually run on rather than whichever route happened
-  to be current when the preview ran.
-
-  Legacy clients are unchanged. `runtime_attach_session` still selects a session
-  for the process and later legacy requests still inherit it. See
-  [Naming the runtime session](docs/INTEGRATION_GUIDE.md#naming-the-runtime-session).
-
-- A modern request is validated before it is dispatched. Advertising
-  `2026-07-28` while checking only the protocol version meant a request missing
-  its client capabilities, or carrying a null or fractional id, was executed and
-  answered rather than refused. All of those now return `-32602` before the
-  method runs, naming the field at fault. `server/discover` stays exempt,
-  because refusing the probe a client uses to learn what a server speaks would
-  make a dual-era server look like a legacy one.
-
-- MCP Apps is negotiated per request again. A legacy client declaring the UI
-  extension turned the Control Room on for every later request on that process,
-  including modern ones that declared nothing and could not render it.
-
-- A live failure no longer publishes the session endpoint. An error from a live
-  route carried the full public descriptor, so the named pipe or socket path
-  appeared in the tool's error text, in `error.data.session` as the engine
-  attached it, and in resource errors. The endpoint is not a credential -- the
-  descriptor directory is access controlled and the token is separate -- but an
-  error string is the payload most likely to be quoted onward into a model's
-  context, and identifying which session failed is a different act from handing
-  out the address to reach it. Failures now carry `session_id`, `kind`, `pid`,
-  `project_path`, `protocol_version`, `started_at_ms` and `schema_version`.
-
-  Successful results are unchanged and still carry `endpoint`, because that is a
-  client's own record of the route it used, and `runtime_list_sessions` still
-  reports it because choosing a session is what that tool is for.
-
-  A failure also names its session once now rather than twice. The extension
-  states the route on its way out and the standalone states it again when it
-  wraps the error, so a bridged failure carried the same session at the top
-  level and again in `error.data`. The top-level copy is the one a success also
-  uses, so it is the one kept; `error.data` retains everything else the engine
-  said about the failure, including `outcome`, `route_quarantine`, `transport`
-  and `engine`. The internal IPC error is unchanged, because at that layer the
-  extension's copy is the only attribution there is.
-
-- The managed editor does not outlive the host that owns it. It was reaped only
-  by a destructor, so it survived every exit that does not run one: a `SIGKILL`,
-  a supervisor or container stopping the host, a second Ctrl+C taking the C
-  runtime default on Windows, or the host crashing. What was left was a headless
-  Godot holding a workspace open, with nothing running that knew about it, in a
-  mode built for unattended runs where nobody is watching a process list.
-
-  Windows now creates the child inside a job object marked kill on close and
-  attaches it at creation, so there is no window where the child runs outside
-  the job, and the kernel ends it when the last handle to that job goes with the
-  process. Linux sets `PR_SET_PDEATHSIG` in the child before the exec, and
-  checks the parent again immediately afterwards because the kernel sends
-  nothing if the parent had already gone. A host that cannot create or nest a
-  job still starts its editor, and says in the log that the second line is
-  missing rather than leaving somebody to find out from an orphan. macOS has
-  neither mechanism and is recorded as the gap it is.
-
-- Ctrl+C stops the server. The `SIGINT` and `SIGTERM` handler called `stop()`,
-  which joins the blackboard watcher thread, detaches the runtime session over
-  IPC, and logs through a mutex. None of that is safe from a signal handler,
-  which the C runtime is explicit about: no heap, no stdio, nothing that makes a
-  system call. The flag the handler also set was read by nobody, and the stdio
-  loop stayed blocked inside `std::getline`, so a single Ctrl+C left the process
-  running and still holding the session. It took closing the client, or another
-  line on stdin, to get out.
-
-  The handler now stores two atomics and returns, and that is all it does.
-  Lines come off a reader thread, so the loop can wait on a flag rather than on
-  a descriptor and leave when one is set. A blocking read cannot be cancelled
-  portably: libstdc++ retries a read a signal interrupted, and on Windows the
-  handler runs on a thread the operating system made for the interrupt, so the
-  read is never interrupted at all. Teardown runs where it always belonged, on
-  the normal path when the loop returns.
-
-  Reading on a thread took away the backpressure the pipe used to provide, so
-  the pending queue is capped and the reader waits once it is full. Three
-  thousand pipelined requests come back in order and the process still exits 0.
-
-- The perceptual hash uses all 64 bits it reports. `perceptualHash` dropped the
-  DC term out of an 8x8 DCT block and wrote the 63 that were left to bits 0
-  through 62. Bit 63 was clear for every possible input, so the Hamming distance
-  of 64 that the header, `docs/TOOL_REFERENCE.md` and the `max_hamming_distance`
-  schema all offer could not be produced by the function producing the hashes. A
-  caller tuning a visual regression threshold was tuning against a range the
-  implementation could not reach. The median was also the average of the pair
-  either side of the middle of an odd count, which is not the median.
-
-  The block is 9x9 now and the hash takes the 64 lowest frequency AC
-  coefficients out of it, ordered by `u+v` and then by `u`. The DC term stays
-  out, so a uniform exposure change still moves no bits. The count is even, so
-  the median formula is the right one and exactly half the coefficients sit
-  above it, which is what makes 64 reachable between two real hashes. Documenting
-  63 instead would not have worked: a correct odd median split puts 31 bits in
-  every hash, so the most two of them can differ by is 62, and the contract would
-  have been wrong again by one. Hashes are computed per diff and never stored, so
-  nothing on disk went stale.
-
-- `DIDI_BUILD_TESTS=OFF` builds no tests. `didi_extension_signal_tests` sat
-  outside the guard, so a production configure recompiled every GDExtension
-  source a second time with test seams to produce a library nothing ships. It
-  had come out from under that guard once before, so there is now a configure
-  time check that refuses when either test-only target exists with the option
-  off, rather than a comment asking the next person not to do it again. A clean
-  test-off build produces exactly the server binary and the extension.
+- `2026-09-09` `didi::ipc::parseFramedMessage` accepted a frame whose length field was near `UINT32_MAX` and then read gigabytes past the end of the buffer it was given. [PR #344](https://github.com/saworbit/didi/pull/344)
+- `2026-09-09` `project_get_uid_map` and `project_audit_assets` work again without a Godot session. [PR #324](https://github.com/saworbit/didi/pull/324)
+- `2026-09-09` `project_audit_assets` checks its unresolved UID findings against the running editor instead of leaving them as guesses. [PR #323](https://github.com/saworbit/didi/pull/323)
+- `2026-09-09` `project_get_uid_map` takes a `resolve` list and answers it from the engine. [PR #322](https://github.com/saworbit/didi/pull/322)
+- `2026-09-08` `scene_close` no longer demands `discard_unsaved: true` for a scene the engine says is clean. [PR #321](https://github.com/saworbit/didi/pull/321)
+- `2026-09-08` One Didi process can drive several Godot sessions at once. [PR #318](https://github.com/saworbit/didi/pull/318)
+- `2026-09-08` A request no longer inherits a Godot session it never chose. [PR #318](https://github.com/saworbit/didi/pull/318)
+- `2026-09-08` A modern request is validated before it is dispatched. [PR #318](https://github.com/saworbit/didi/pull/318)
+- `2026-09-08` MCP Apps is negotiated per request again. [PR #318](https://github.com/saworbit/didi/pull/318)
+- `2026-09-08` A live failure no longer publishes the session endpoint. [PR #310](https://github.com/saworbit/didi/pull/310)
+- `2026-09-08` The managed editor does not outlive the host that owns it. [#305](https://github.com/saworbit/didi/issues/305) · [PR #306](https://github.com/saworbit/didi/pull/306)
+- `2026-09-07` Ctrl+C stops the server. [PR #302](https://github.com/saworbit/didi/pull/302)
+- `2026-09-07` The perceptual hash uses all 64 bits it reports. [PR #302](https://github.com/saworbit/didi/pull/302)
+- `2026-09-07` `DIDI_BUILD_TESTS=OFF` builds no tests. [PR #302](https://github.com/saworbit/didi/pull/302)
 
 ---
 
 ## [1.6.0] - 2026-09-06
 
+Full write-ups for 1.6.0: [as first written](https://github.com/saworbit/didi/blob/fd9d0e5e8517143c0e892166c225485a840b2d87/CHANGELOG.md#160---2026-09-06).
+
 ### Added
 
-- `runtime_explore_scene` drives a running game and reports what happened. `runtime_inject_input` presses a button and returns; `runtime_watch_invariants` samples every frame and presses nothing. Neither pair makes a playtest, because each injected event is its own IPC round trip: an agent driving from outside presses at whatever rate the transport allows and looks between presses, so a character that walks into a wall and stops responding is invisible to it. There is a position before the press and a position after it, and never the second in between where nothing happened. This runs the loop in the engine. It holds one InputMap action at a time on a schedule drawn from `seed` and from nothing else, samples the probes the caller named every frame through the same bounded sandbox the invariant watch uses, and reports the intervals in which nothing it pressed moved anything, each one naming the action that was down for it. It pauses on the first interval by default, so the state that stopped responding is still there to look at, or surveys the whole window when asked.
-
-  Input actions, not movement, because nothing outside a project's own controller knows how that project moves its player. Setting a position directly would move the sprite without running any of the code that decides whether it can move, which proves nothing about whether the game can be played. `nav_query_path` and the `spatial_query_*` family stay how an agent decides where to go.
-
-  A probe that cannot be read is not a probe that stayed still. An expression that fails every frame comes back with zero readings and its error, and never contributes a stuck interval, because a typo reported as a frozen game is the one answer this must never give. An action the project does not define fails the run rather than being skipped, for the same reason.
-
-  It reports and does not judge. A cutscene, an open menu and a real soft lock are the same thing from here, and the response says so by carrying `verdict: "none"`. That is the rule `docs/GOGO_DESIGN.md` set for anything built on input dispatch. Recorded as an accepted amendment in `docs/SURFACE_AMENDMENTS.md`, which is what this repository requires before a name is registered. The surface is now 109 canonical tools, 106 implemented, 119 registrations.
-
-- `viewport_capture_passes` takes a `segmentation` pass. Each `GeometryInstance3D` is painted a flat colour of its own and the response carries a legend: node path, class, the colour it was given, the colour that came back, how many pixels it claimed, and the 2D box those pixels fall in. The box is read out of the picture rather than projected onto it, which is the bounding-box overlay the report asked for, as data rather than as ink nobody has a font to draw. This did not ship with the other two passes because the viewport post-processes after the pass shader writes: a colour written as `(1,73,151)` came back as `(1,92,186)` on a 4.5.1 editor and unchanged on 4.7.2, so a legend naming the colour it asked for would have described pixels that were not in the picture. It no longer asks. The frame is read back, every pixel is matched to the entry it is nearest, and each entry reports the commonest colour among the pixels it claimed, which is in the image by construction on whichever engine drew it. A pixel further from every entry than the match radius belongs to nobody, so an antialiased edge is unclaimed rather than filed under whichever node it fell closer to, and `segmentation_unclaimed_pixels` counts them. The palette uses three levels a channel, because four puts two of them close enough after the shift that the answer would depend on the engine, and no neutral colours, because an entry a grey background could sit on is an entry that would claim pixels no node painted. A node past the palette is not painted at all rather than sharing a colour, and is named in `segmentation_unpainted`. The live harness reads the returned PNG and checks every legend colour against the pixels, on both engines.
-
-- `project_verify_changes` now takes `run_scene`, and a new `project_apply_changes` writes a proposal into the working tree once it has passed. Checking a proposal was only ever a parse, and nothing could act on the answer: a caller who liked the result had to apply the same writes itself through the ordinary writers, one file at a time, with no relationship between what was proved and what was written. `run_scene` opens a scene in the isolated copy, headless and bounded by `run_frames`, so a scene that fails to load, an `@onready` path that resolves to nothing, or a `_ready()` that divides by zero is caught by the thing that catches it, which is running. The exit code is not the whole answer there, because Godot leaves a runtime script error on its error stream and still exits 0, so the error lines are read as well. A proposal whose scripts did not parse is not run at all, and `ran` says so, because paying for an engine start to be told what the parse already said produces a load failure that reads as a runtime fault. `project_apply_changes` runs that same check and writes only if it passes, staging every file before replacing any, so the change cannot stop half applied. It runs the verification itself rather than trusting an earlier call, because a caller who verified a minute ago is describing a project that may have moved since. A proposal that does not pass writes nothing and comes back as the report, marked as an error so it cannot be read as a success with a footnote. It always requires a confirmation token. The surface is now 109 canonical tools, 106 implemented, 119 registrations.
-
-- The Godot editor plugin now carries a console. Enabling the addon adds a **Didi** main screen, marked with Didi's own mark, because the main screen is the one surface Godot draws a plugin's icon on -- an icon set on a bottom-panel button is not rendered, including one taken from the editor's own theme. Its Dashboard is six cards, each a red, amber or green light with the fact behind it and a button for the next step: the live bridge and how long it has been up, the extension and the library path it wants, the server binary and whether it has been verified by running it, the client configuration and whether the project has one, this editor's session, and the other sessions published on the machine. Cards are read from the session descriptors Didi publishes, so what the console reports is what a client would find.
-
-- The console can close and reopen the live bridge from a switch. The endpoint belongs to the GDExtension rather than to the plugin, so the switch unloads and reloads the extension and reports the status Godot returns -- including the one that means "not without a restart". It never claims the bridge closed because it asked. Verified on Godot 4.5.1, 4.6.2 and 4.7.2: the endpoint stops, the session is retired, the editor stays up, and loading again publishes a new session.
-
-- A Log page, with two sources and no third invented one. The console's own record is every state change it watched and every action taken through it, timestamped, kept across the panel being rebuilt and never written to disk. The other is the log Godot writes for the last *run* of the project, read from its tail, with the indented location lines under an error inheriting that error's level so filtering to errors does not hide the file and line. Both filter by level and by substring. Didi's own server logs to its process's standard error, which an editor started from a desktop shortcut has nowhere to show, and the page says that rather than presenting an empty view.
-
-- Connect generates the launch configuration for Claude Code, Cursor, Claude Desktop and VS Code with the binary located and the project path filled in, and writes it into the project for the two clients that read one from there -- after showing what it will write and warning when it would replace a file. Settings holds what that configuration carries: log level, endpoint name, and whether it passes `--yolo`.
-
-- Automatic detection of the `didi` binary deliberately skips anything inside the project. A path under `res://` is a path Didi's own file tools can write to, and Diagnostics runs the located binary to ask its version; keeping the project out of detection means an in-project binary is only ever run because a person browsed to it. Choosing one anyway is allowed and the page says so.
-
-- Editor preferences live in Godot's `EditorSettings` under `didi/`, which is stored with the editor rather than in the project, so a preference governing an assistant is not a file that assistant can rewrite. The console never displays, copies or reports a session token: the descriptor reader copies the fields it names and the shared secret is not one of them, and a test fails the build if that changes.
-
-- Added `project_verify_changes`, which checks a set of proposed file contents together in an isolated copy of the project. `script_check_syntax` already answers whether one file parses, from source text, without writing anything. What it cannot answer is whether a set of files is consistent with each other, because a script that preloads a sibling is only correct when that sibling is the proposed one rather than the one still on disk. So the whole proposal is written into a git worktree built from HEAD, checked there, and the worktree is taken away again, on the failing paths as well. Nothing it does can be seen from the working tree. Uncommitted work is carried across, because a check that ignored it would answer a question about a project nobody has open, and the commit it was checked against is reported. Untracked files cannot be carried and are named rather than counted, so a proposal that depends on one is not silently checked against a project missing it. It refuses rather than falling back to copying a project directory, which for a Godot project means its imported assets too.
-
-- A transport failure on a route with a known session now reports `error.data.engine` as `alive`, `gone`, or `unknown`. A failure saying the peer closed the pipe does not say why it went, and that is the difference between an engine that crashed and one that is alive and simply not answering. `unknown` stays distinct from `gone`, because a process that could not be queried is not a process that has ended, and filing one as the other would invent the fact a caller most wants. The check compares the recorded start time as well as the pid, so a recycled pid reads as `gone` rather than as the session that used to own it. All four routes that classify a transport failure share one implementation, so they cannot answer the question differently; the tool route, which every live tool takes, previously had no session in scope to answer it with at all.
-
-- `didi --dump-tool-manifest` now emits the required request fields of every implemented tool, and the documentation validator checks that the section documenting a tool names each of them. The counts and the name tables both passed while the `project_export` page described a call that cannot succeed, because nothing compared the documented request against the schema the binary enforces. A field documented by its components, such as `point.x` and `point.y`, counts as named. A manifest from an older binary carries no such map and the check simply has nothing to read.
-
-- Added `editor_render_ghost_preview` and `editor_clear_ghost_previews`, which draw wireframe boxes in the open editor viewport to show where a proposed mutation would land before anything on disk changes. A developer asked to approve `Vector3(12.4, 0.0, -8.2)` in chat can now look at it instead. The shapes are handed to the rendering server directly rather than added to the scene, so the scene tree, the scene dock and the saved file are all untouched and the editor never becomes dirty; there is nothing to undo because nothing was done, and the responses say `scene_modified: false`. Cyan marks an addition, yellow a translation and red a deletion, and a caller that wants a different colour can give one. Both 2D rectangles and 3D boxes are drawn, each into its own world, and one call draws into one world rather than splitting across both. Previews stay up until they are cleared, which is what makes them useful to look at, so `editor_clear_ghost_previews` with no argument clears everything whatever left it behind, and no more than 256 shapes can be on screen at once.
-
-- Added `viewport_capture_passes`, which draws the live 3D scene again with every geometry node's material replaced and returns a depth or world-space normal image next to the ordinary colour frame. A flat colour picture cannot say whether one thing is nearer than another or which way a surface faces, and these can. Each pass comes back as its own image, in the order it was asked for, rather than as one stacked picture that would need labels drawn on it to be read. Depth divides by the rendering camera's own far plane unless one is given, and the value used is reported. The passes are orderings rather than measurements, and say so: the shaders undo the sRGB curve the framebuffer applies, but the viewport post-processes afterwards by an amount that depends on the engine, with a 4.7.2 editor returning the written values unchanged and a 4.5.1 editor returning them scaled by about a quarter. A semantic segmentation pass was left out for the same reason, since a legend mapping colours to node paths would not match its own pixels on every engine. Every `material_override` is put back before the call returns, including on the paths that fail, and a restore that does not succeed is the error the caller gets, because a scene left wearing a debug material matters more than a frame that did not arrive.
-
-- Added `spatial_query_frustum`, which lists the 3D nodes inside a camera frustum in the attached session, nearest first. The frustum comes either from a Camera3D already in the scene, whose transform, projection, near and far planes are read, or from parameters written out by hand; both build the same six planes, so a node one form calls visible is never a node the other calls hidden. A node with geometry is tested by its own bounding box and reported as `inside` or `intersecting`; a node without geometry is tested at its origin, and which test ran is reported. Aspect ratio does not live on a camera, so its source is reported too: a running game is measured through the camera's own viewport, while an edited scene uses the project's configured viewport size, because the shape of an editor pane is a fact about the window rather than about the game. With `sightline` set, rays are cast from the camera to each node's corners and centre, and the count that arrived is reported alongside `clear`, `partial` or `blocked`. Rays see physics colliders only, so geometry without one does not block, and a node whose sightline was not sampled carries no sightline field rather than a clear one.
-
-- Added `shader_get_visual_graph`, which returns a VisualShader's nodes and connections per shader type as structured JSON. A project that builds its materials as graphs was opaque: the uniform tools read what a graph exposes, and nothing said what the graph itself was made of. Each node carries its id, its Godot class, and its position in the editor graph; each connection carries the node and port it runs from and to, because a graph is its links as much as its nodes. A shader written as code is refused with a message saying so, rather than reported as a graph with no nodes in it. Node and connection counts are reported separately from the returned lists, so a bounded response says how much it left out.
-
-- Added `shader_set_uniform`, the write half of `shader_list_uniforms`. It takes the same JSON spellings `scene_set_property` takes for each Godot type, so a caller learns one contract rather than two, and a `res://` path fills a texture or other resource uniform after being loaded and checked against the class the uniform declares. A name the shader does not declare is refused rather than written: `set_shader_parameter` accepts any name and silently does nothing with an unknown one, so a typo would otherwise come back as a write that worked. The change goes through the editor UndoRedo stack on the material's own `shader_parameter/<name>` property, which is the one the scene file writes and the inspector edits, so undoing it is the undo a person expects. The result reports what the uniform holds afterwards rather than the value it was handed, with `applied` saying whether they match.
-
-- Added `shader_list_uniforms`, which reads the shader uniforms of a `ShaderMaterial` held by a node in the edited scene. Nothing in the surface could see them: `resource_inspect` reports file metadata and `scene_get_property` reports the material slot, and neither reaches inside to the parameters an agent wants to read or tweak. Each uniform comes back with its declared Godot type and its effective value, which is the material's override where it has one and the shader's own default otherwise. There is deliberately no flag separating those two: `get_shader_parameter` returns the default for a uniform the material never set, so a flag built on the returned value would have claimed every uniform was overridden, and the live harness caught exactly that before it shipped. `settable` comes from the same decision `scene_set_property` makes about which JSON spellings exist, so the two cannot disagree about what a caller may write. A uniform of a type with no JSON spelling is still reported by name and type with a null value, rather than failing the whole read. A material slot holding something that is not a ShaderMaterial is refused and names what it found, because an empty uniform list would read as a shader with nothing to set.
-
-- Added `spatial_query_clearance`, which sweeps a box, sphere or capsule along a path and reports how far it gets. A raycast answers whether a line is clear, which is not the same question as whether a body is: a corridor a ray passes down cleanly can still be too narrow for the character that has to walk it, and that is the question a doorway or a spawn point actually asks. It returns the safe and unsafe fractions the engine gave, plus the position the shape reached, and nothing in between interprets what a particular pair of fractions means. A zero-length sweep is accepted on purpose, unlike a ray of no length, because asking whether a shape fits where it stands is a real question. Bodies block; areas do not, because a trigger volume is not geometry and a corridor reported blocked by a checkpoint is answering a different question. Both dimensions, with `sphere` naming a circle in 2D so one request shape works either way.
-
-- Added `spatial_query_raycast_batch`, which casts up to 64 rays against the attached session's physics world in one dispatch. Deciding whether a spawn point is in the player's line of sight, or whether a corridor has clearance, meant one round trip per ray or a viewport capture and a guess, and neither is affordable in a loop that pays per turn. The direct space state and the method binds are resolved once for the batch rather than once per ray, so every ray is also answered against the same physics state instead of against successive ones. Each entry goes through the `physics_raycast_query` contract unchanged and comes back with the same hit record, so a batch entry and a single call cannot describe the same hit differently; a rejection names the index of the ray that failed. One batch is one dimension, because a 2D and a 3D ray are answered by different space states and a batch that split across both would be answering from two worlds. A ray that cannot be answered fails the whole batch rather than leaving a gap, since a partial batch read as complete is a clear sightline that was never checked.
-
-- Added `runtime_watch_invariants`, which watches declared conditions every frame of a running game and stops the game on the frame that breaks one. An agent could already drive a game and read values back out of it, one round trip at a time, but it could not notice a condition that is false for two frames, and by the time a poll returned the frame was gone. Three kinds, each one that can be answered honestly: `performance_between` on a Performance monitor, which is what a minimum frame rate is; `expression_between` on a bounded sandbox expression, which is what a bounded property is, and which covers a world-boundary check through a vector component; and `no_engine_errors`, which is what an unhandled script error looks like from outside the script. A violation reports the condition, the value that broke it, the bound it broke, and the elapsed time, and by default pauses the game on that frame so the state that failed is still there to read. The outcome has three values rather than two: an invariant that never produced a reading makes the run `inconclusive`, never `held`, because a condition nobody could measure is not a condition that stayed true. The request is refused if an invariant has no bound at all, since a condition that cannot be violated would report as held on nothing.
-
-- Added `project_rename_references`, which renames a symbol in the places Godot serializes it: the `signal` and `method` attributes of a `[connection]`, and the property segment of a `NodePath` in an animation track. Those are exactly the references a text search finds but cannot explain, and exactly the ones an agent renaming a variable in a script forgets, so a project that looked clean broke at runtime. Every file is staged before any is replaced, so the change cannot stop half applied because the last file was the one that could not be written. GDScript and C# references are reported with their file and line and never rewritten: the language is dynamically typed, a whole-word match may be this symbol or an unrelated local that shares the name, and rewriting on that evidence would be a second source of the breakage this exists to prevent. It refuses a name a connection or track already uses, because that would merge two symbols with no way back, and it refuses to run at all on a truncated project scan, because renaming the files that were read and leaving the rest is the half-applied change itself. The rewrite and `project_analyze_impact` share one set of matchers and the plan is checked against the report before anything is written, so a disagreement between what was reported and what would be edited stops the whole change.
-
-- `scene_set_property` and the `properties` argument of `scene_instantiate_node` take Vector2, Vector2i, Vector3, Vector3i, Color and Resource paths. The scalar contract meant a 2D node could not be placed at all, a CollisionShape2D could not be given a shape, a TileMapLayer could not be given a TileSet and a Sprite2D could not be given a texture, so scene data ended up in `_ready()` and the scene a person opens was not the scene Didi built. Vectors come from `{x,y}` and `{x,y,z}` objects, which is the encoding `resource_create` already takes, so the live and offline sides agree. Colour comes from `{r,g,b}` with an optional `a` or from a `#rrggbb`/`#rrggbbaa` string. A resource slot takes a `res://` path, loaded through ResourceLoader and refused if the loaded type is not the class the property holds, the same check `script_attach_to_node` makes for a Script; `null` clears one. An object carrying a member the target type does not have is refused rather than having it dropped. An empty resource slot reads back as nil, so the property's declared type now comes from the class rather than from whatever the slot happens to hold, and `scene_get_property` can describe a position, a colour and a filled slot instead of refusing to encode them.
-
-- Added `script_create`, which writes a GDScript file under the project root. Every other `script_*` tool assumed the `.gd` file already existed, so the first step of the documented workflow was the one step that had to happen outside Didi. It takes `script_path`, `source_text` and `overwrite`, preserves an existing script unless the overwrite is explicit and confirmed, and runs the same diagnostics `script_patch_method` runs after its write, so a bad script is visible at creation rather than at attach time.
+- `2026-09-06` `runtime_explore_scene` drives a running game and reports what happened. [PR #277](https://github.com/saworbit/didi/pull/277)
+- `2026-09-06` `project_verify_changes` now takes `run_scene`, and a new `project_apply_changes` writes a proposal into the working tree once it has passed. [PR #277](https://github.com/saworbit/didi/pull/277)
+- `2026-09-06` `viewport_capture_passes` takes a `segmentation` pass. [#141](https://github.com/saworbit/didi/issues/141) · [PR #266](https://github.com/saworbit/didi/pull/266)
+- `2026-09-05` The Godot editor plugin now carries a console. [PR #262](https://github.com/saworbit/didi/pull/262)
+- `2026-09-05` The console can close and reopen the live bridge from a switch. [PR #262](https://github.com/saworbit/didi/pull/262)
+- `2026-09-05` A Log page, with two sources and no third invented one. [PR #262](https://github.com/saworbit/didi/pull/262)
+- `2026-09-05` Connect writes the launch configuration for Claude Code, Cursor, Claude Desktop and VS Code, and Settings holds what it carries. [PR #262](https://github.com/saworbit/didi/pull/262)
+- `2026-09-05` Automatic detection of the `didi` binary deliberately skips anything inside the project. [PR #262](https://github.com/saworbit/didi/pull/262)
+- `2026-09-05` Editor preferences live in Godot's `EditorSettings`, outside the project, and the console never shows a session token. [PR #262](https://github.com/saworbit/didi/pull/262)
+- `2026-09-05` Added `project_verify_changes`, which checks a set of proposed file contents together in an isolated copy of the project. [PR #257](https://github.com/saworbit/didi/pull/257)
+- `2026-09-05` A transport failure on a route with a known session now reports `error.data.engine` as `alive`, `gone`, or `unknown`. [PR #256](https://github.com/saworbit/didi/pull/256)
+- `2026-09-05` `didi --dump-tool-manifest` emits every tool's required fields, and the validator checks the docs name each one. [PR #254](https://github.com/saworbit/didi/pull/254)
+- `2026-09-05` Added `editor_render_ghost_preview` and `editor_clear_ghost_previews`: wireframe boxes that show where a change would land. [#147](https://github.com/saworbit/didi/issues/147) · [PR #253](https://github.com/saworbit/didi/pull/253)
+- `2026-09-05` Added `viewport_capture_passes`, which returns depth and normal images alongside the colour frame. [PR #252](https://github.com/saworbit/didi/pull/252)
+- `2026-09-05` Added `spatial_query_frustum`, which lists the 3D nodes inside a camera frustum in the attached session, nearest first. [#142](https://github.com/saworbit/didi/issues/142) · [PR #249](https://github.com/saworbit/didi/pull/249)
+- `2026-09-05` Added `shader_get_visual_graph`, which returns a VisualShader's nodes and connections per shader type as structured JSON. [#119](https://github.com/saworbit/didi/issues/119) · [PR #246](https://github.com/saworbit/didi/pull/246)
+- `2026-09-05` Added `shader_set_uniform`, the write half of `shader_list_uniforms`. [PR #245](https://github.com/saworbit/didi/pull/245)
+- `2026-09-05` Added `shader_list_uniforms`, which reads the shader uniforms of a `ShaderMaterial` held by a node in the edited scene. [PR #244](https://github.com/saworbit/didi/pull/244)
+- `2026-09-05` Added `spatial_query_clearance`, which sweeps a box, sphere or capsule along a path and reports how far it gets. [PR #242](https://github.com/saworbit/didi/pull/242)
+- `2026-09-05` Added `spatial_query_raycast_batch`, which casts up to 64 rays against the attached session's physics world in one dispatch. [PR #241](https://github.com/saworbit/didi/pull/241)
+- `2026-09-04` Added `runtime_watch_invariants`, which watches declared conditions every frame of a running game and stops the game on the frame that breaks one. [PR #240](https://github.com/saworbit/didi/pull/240)
+- `2026-09-04` Added `project_rename_references`, which renames a symbol in the places Godot serializes it. [#145](https://github.com/saworbit/didi/issues/145) · [PR #239](https://github.com/saworbit/didi/pull/239)
+- `2026-09-04` `scene_set_property` and the `properties` argument of `scene_instantiate_node` take Vector2, Vector2i, Vector3, Vector3i, Color and Resource paths. [#210](https://github.com/saworbit/didi/issues/210) · [PR #236](https://github.com/saworbit/didi/pull/236)
+- `2026-09-04` Added `script_create`, which writes a GDScript file under the project root. [PR #234](https://github.com/saworbit/didi/pull/234)
 
 ### Fixed
 
-- `project_verify_changes` no longer reports every proposal as broken in a project that names a resource by `uid://`. The isolated copy is a git worktree, and a project gitignores `.godot`, which is where Godot keeps the UID cache, so nothing in the copy can resolve a uid. A project that names one, which `project.godot` does for its audio bus layout as soon as anything writes one, makes the engine print `ERROR: Unrecognized UID` when it loads. That line arrives in the output of every check the sandbox runs, and the verdict is taken from the error stream because Godot exits 0 for a plain syntax error, so it was attributed to each proposed script in turn and to the scene run. Every proposal came back failing, with a reason that had nothing to do with the files being checked. Godot 4.7.2 does not print it, so the tool worked there and failed on 4.5.1 and 4.6.2, which is most of the supported floor.
-
-  The copy is now asked what it says on its own, once, before anything of the caller's is checked, and those lines are not counted against anybody. A measured baseline rather than a list of known engine messages: a pattern list would need extending for every engine version, and it would also hide a genuinely unresolved uid in a proposed resource, while subtracting what the copy already said keeps anything the proposal actually added. Failing to measure a baseline is not a reason to fail a verification, so a probe that cannot run leaves every line attributed, which is the behaviour this had before.
-
-  Checked on Godot 4.5.1, 4.6.2 and 4.7.2: a proposal that parses passes on all three, a proposal missing the sibling it preloads still fails and still names it, and a script with a plain syntax error still fails even though Godot exits 0 for it. The fixture CI builds is clean and has never had a uid reference in it, which is why nothing here caught this.
-
-- Every page under `docs/` is reachable again. Nine design and plan documents had nothing in the repository pointing at them, which is the same defect `docs/INTEGRATION_GUIDE.md` was fixed for and which comes back every time a page is added without a home. A new `docs/README.md` indexes all of them, grouped by what a reader came to do, and repeats the status banner each design record carries so a superseded proposal is not mistaken for current behaviour. The repository README links it and keeps its own short list for a first read. Checked with a link and anchor sweep over all 40 Markdown files: no broken relative link, no broken heading anchor.
-
-- The `[Unreleased]` section of this file had eighteen `### Added` headings and ten `### Fixed` ones, because every change appended its own rather than joining the existing one. Keep a Changelog expects one section per category per release, which is what every released version here already does, and twenty-eight headings is not a section anyone can read. Consolidated into one of each, entry text and order untouched.
-
-- `docs/TOOL_REFERENCE.md` said the project search skips "`.git`, `.godot`, `.worktrees`, and build outputs". It now names them, including `.gemini` and the `build-` prefix, because "build outputs" was the phrase that let `build-ninja` go unnoticed.
-
-- The build no longer races itself placing the class reference. `didi` and `didi_tests` each copy `resources/didi_class_reference.json` next to their own binary, and on a single-config generator that is the same directory, so both wrote one path while ninja ran the two post-build steps at the same time. A macOS CI run failed on it with "No such file or directory" for a file that is committed and was never missing. Each target stages under a name of its own and renames, which replaces atomically, so whichever finishes last wins and neither can read a half-written file. The generator expression stays, because a multi-config generator does put the two binaries in different directories.
-
-- A blackboard operation waits out a lock somebody else is holding instead of reporting an error. The wait was fifty attempts twenty milliseconds apart, so a holder that kept the board much over a second turned every other agent's call into an internal error. A board is a coordination surface between agents, so several of them wanting it at once is the ordinary case, and eight agents each holding it across a read, a modify, a write and the lock file's own fsync passes that budget on a loaded machine. That is what failed the sanitizer job on a4a5de5: one of eight concurrent claimers was told its claim errored rather than that it lost. The wait is now a deadline of five seconds rather than a count of attempts, because an attempt that itself costs twenty milliseconds quietly halved a budget expressed in attempts, and the retry sleep is spread so eight waiters do not wake together and collide again. Nothing is waiting on a lock no live process holds: both implementations tie the lock to an open file description, so the operating system releases it when the holder exits however it exits, and a longer wait cannot turn a dead holder into a hang. The message said "another process is holding the blackboard lock" when the holder is as often another thread in the same one; it now says the lock stayed held for the whole wait, and says how long that was. The two concurrency tests counted failures and threw the message away, which is what left the CI failure to be inferred from timestamps, so they report the first error they saw.
-
-- A blackboard save can no longer destroy the board. `saveBoard` wrote the serialised board to a temporary and renamed it over the file, and when that rename failed it deleted the board and tried the rename again. A rename over an existing file already replaces it, so the delete was never buying anything, and the one case where it did work is the case that loses everything: on Windows a delete behind an open handle goes pending, the name stays taken until that handle closes, the second rename is refused, and the temporary is cleaned up on the way out. Every key and every task on that board was gone, with an internal error as the only trace. The save now goes through the same staged write `script_create`, `resource_create` and `asset_reimport` already use: a failure reports itself and the board on disk is untouched. The test makes the board read only, which is the one replace failure that can be forced on demand, because `MOVEFILE_REPLACE_EXISTING` refuses a read-only destination while `remove` clears the attribute and succeeds. On the old code the write returned success and the board had been overwritten.
-
-- Three tools no longer fail on a path the active Windows code page cannot hold. `path::string()` and `path::generic_string()` convert through that code page, so a project directory named in Chinese, Japanese, Korean, Greek, Cyrillic or anything else outside it threw `std::system_error` and the call came back as "No mapping for the Unicode character exists in the target multi-byte code page". `project_search_text` and `project_search_symbols` hit it in four places, on the containment check, the skipped-directory name, the extension and the reported project root; `project_verify_changes` hit it building the project-relative path of a proposed file; `script_create` and `script_patch_method` hit it running diagnostics after the write, which means the file was already on disk when the call reported an internal error. The existing Unicode tests never reached this because `ç` and `ã` do have a mapping in code page 1252. The new ones use characters that do not.
-
-- `script_create` and `script_patch_method` report the Godot compiler's diagnostics again. Both handed the analyser an absolute path, and Godot names `res://` paths in the errors it prints, so the location patterns matched nothing and every compiler diagnostic was dropped along with its line number. The lexical rules still fired, which is why the loss was quiet: a response with `has_errors: false` looked the same as a script with nothing wrong with it. They pass the `res://` path now, which is the form the analyser and the engine both already speak.
-
-- The resource index and project search no longer scan out-of-source build trees. Both skipped `build`, `build-clean` and `build-vs` by name, so `build-ninja`, the tree this repository is actually built in, was walked in full. Every artifact in it counts against the index's cap, so a large enough build tree pushes real project files out of the index entirely, and a text search returned hits inside generated files as project matches. Both now also skip any directory whose name starts with `build-`, which is the prefix `import_health` already used, and the search skips `.gemini` so the two agree about the same tree. A prefix rather than the `build*` glob `.gitignore` uses, because `buildings/` is a plausible project directory and should stay searchable.
-
-- `script_patch_method` and `create_visual_test_lab` drop the shared resource index after they write. `resource_indexer.hpp` states it as the contract for a tool that changes the tree, and these two were the ones not keeping it, so for as long as the cache stayed warm `project_audit_assets`, `project_find_referencing_scenes`, `project_search_symbols` and `resource_inspect` all answered from the tree as it was before the write. The per-file memo goes with it, which matters most for exactly these writers: a patch that lands on the same byte count inside the filesystem's timestamp resolution is the one change the memo cannot see for itself.
-
-- A transport failure reporting `engine: unknown` now says why. That word covers two different problems, an engine that crashed and a query that was refused, and reporting them with one word leaves a reader exactly where they started; #227 spent several rounds inferring from log timestamps what the payload could have stated. `error.data.engine_reason` is `open_denied`, with the operating system's own number in `engine_os_error`, or `running_but_unidentified` when something with that pid is running and could not be confirmed as the process the session opened. `alive` and `gone` carry no reason, because they need none.
-
-- The live harness reports the editor's exit code when a request in the themed-Control block fails. Every tool error there is the transport reporting a process that has gone, and the exit code is the only thing that names how it went; the payload reads threw first and nothing had looked at the process by the time anything else could.
-
-- A Godot that Didi starts to answer a question no longer publishes a runtime session. The extension starts an authenticated IPC session and writes a descriptor whenever it loads, which is right for an editor or a game someone is running and wrong for an engine started to check a proposal: it leaves another session for the next discovery to find, and a run killed at its timeout leaves the descriptor behind for the tombstone reaper. The isolation the C# and shader helpers already used now covers the verification sandbox as well, and the guard that sets it lives in one place instead of two.
-
-- `project_verify_changes` reported a script with a plain syntax error as fine. It judged each proposed file by the exit code of `godot --headless --check-only`, and Godot exits 0 for a parse error while printing it, reserving a non-zero exit for cases like a `preload` that resolves to nothing. So a proposal whose scripts do not parse came back `all_ok: true`, which is the one answer this tool must never give wrongly. It now reads the engine's error stream as well, which is what `script_check_syntax` has always done, and the failing script's `detail` carries those lines. Found by red-teaming the run half of this change: the same mistake would have let a scene run pass on an engine that had refused to load its script.
-
-- A live call that changes nothing is now sent once more, on a new connection to the same session, when the transport fails. A broken pipe leaves a caller unable to say whether the engine ran the request, and for a mutation that has to be reported, because applying it twice is worse than not knowing. For a call that changes nothing, repeating it is the same as making it, so asking again is what settles it and the failure no longer has to be reported as an unknown outcome. This is what #227 costs a CI run for: an `eval_gdscript` that lost its connection failed a harness run for a reason that had nothing to do with what the run was testing. Repeatability comes from the same mutation table that decides dry runs and confirmation tokens, so a tool cannot be repeatable in one place and a mutation in another, and `editor_render_ghost_preview` asked to accumulate rather than replace is excluded because a second attempt would draw the same proposal twice. One repeat, before the quarantine that would otherwise retire the route, never in a loop. A result that took two attempts carries `transport.repeats`; a failure asked twice and answered neither time carries `transport.repeated`. Mutations are untouched.
-
-- `docs/INTEGRATION_GUIDE.md` was reachable from no document in the repository. It is a current, user-facing page -- how to install the addon into an existing project and wire each supported assistant to it -- and the README's own navigation table, which is where readers are told to start, did not list it. Added.
-
-- `docs/REALIGNMENT_IMPLEMENTATION_PLAN.md` showed thirty-seven unticked checkboxes and nothing ticked, while `docs/HUMAN_INTERACTION_DESIGN.md` recorded the first item of that same programme as done. Both cannot be right. The plan now carries a status banner saying what verifiably shipped -- the dual-era front end serving `2026-07-28` alongside `2024-11-05`, `server/discover`, and `resultType` on every result -- and what did not: `_meta.didi` is still what clients are told to read rather than a namespaced extension, and the four-tier documentation restructure with its `docs/history/` directory never happened. The boxes are left as the record of intent they are, rather than ticked retroactively by someone guessing.
-
-- Brought the documentation into line with the editor console rather than leaving eight pages describing a plugin that only printed a line at startup. `docs/HUMAN_INTERACTION_DESIGN.md` is the substantial one: it recorded an editor status line as step 4, conditional and unstarted, and listed "any settings UI" and a log view in the editor among the things not to build. The console shipped all three, so the document now records what was built, where it exceeded the recommendation, and why each objection either still holds or was consciously overridden -- the log page shows the two sources `runtime_read_logs` and `runtime_read_output` do not serve and that are readable exactly when the connection is down, and the settings page composes launch arguments rather than becoming a second source of configuration. The reasoning is amended in place rather than deleted, as the rest of that document already does. The addon file tree in `docs/INTEGRATION_GUIDE.md` listed three of thirteen files, which is a copy instruction that produces an addon whose console cannot open. `ARCHITECTURE.md` gains the console in its topology, off the IPC path, and an off-by-one in that diagram's box art is fixed. `ADMIN_GUIDE.md`, `CAPABILITIES.md` and `LLM_INSTRUCTIONS.md` now point at the tab that answers "why is this unavailable"; `SECURITY.md` records that the console's copyable report cannot contain a token; `BRAND.md` records that three of its sources ship inside the addon and are held byte-identical; and `CONTRIBUTING.md` and `DEVELOPER_GUIDE.md` say what adding a file to the addon requires.
-
-- Removed a message prefix that nothing can emit any more. `Failed or timed out reading response` was a fallback for transport failures carrying no structured state, and the messages it matched were replaced when failures started naming their cause.
-
-- A transport failure could not say why it failed. A peer that hung up and a deadline that expired shared one message, "Failed or timed out reading response length", alongside `timed_out: false` denying the timeout that message offered, which is the payload in #227 and left nobody able to say which had happened. The failure now carries `reason` in `error.data.transport`, one of `peer_closed`, `deadline`, `io_error` or `stopped`, and `waited_ms` saying how long that operation actually waited. An operation ended at five seconds under a ten second deadline is being ended by something other than its own deadline, and the number is what shows that. Messages name the cause instead of offering two. Both the Windows pipe and the Unix socket report it, and the three existing flags are unchanged so nothing reading them has to move.
-
-- `docs/TOOL_REFERENCE.md` told readers that `project_export` takes a preset `name`. The schema has never accepted that field and never will, so the call it documented fails with a 400 for anyone who follows the page; the required field is `preset`. Documented the request shapes of `tilemap_set_cells`, `tilemap_get_used_rect` and `gridmap_set_cells`, which were named in a bullet list and never described, and of `project_search_text` and `project_search_symbols`, whose section explained every limit but never said what to send. Added `scene_get_selection` to the capability matrix, which was the one implemented tool it never mentioned.
-
-- `shader_list_uniforms` reported `value: null` for every uniform a material does not override, where the value actually in effect is the shader's own declared default. `ShaderMaterial.get_shader_parameter` answers nil for such a uniform on 4.5.1, 4.6.2 and 4.7.2, so a shader's declared defaults were reported as no value at all. The default lives in the rendering server, and it is now read from there when the material has none. A null value now means neither source could supply one, which is what a session with no renderer looks like, and the documentation says so. `shader_set_uniform` reports the same effective value in `old_value`, while its undo entry still restores nil so that undoing a write takes the override off rather than pinning the default in its place. There is still no flag separating an override from a default: the same call that answers nil in a running game answers with the default in a 4.7.2 editor, so it cannot establish that difference in every session.
-
-- A live tool call no longer fails at the moment a connection is recycled. A server holds one endpoint instance and recycles it after a second of quiet so another client can have it, and recycling discards whatever the client has already written. A client that came back at that instant either had its request thrown away and was told the outcome was unknown for something the engine never ran, or had the write itself refused; both failed the call, and on a loaded CI runner that cost whole harness runs. The client now decides for itself, on elapsed time rather than on a liveness probe that can go stale between the check and the write: a connection quiet for longer than a fraction of the recycle window is replaced instead of trusted. Both numbers come from one place with the margin asserted, because two independently chosen timeouts in two processes is how this comes back. A server also serves, rather than discards, a request that arrives while it is tearing a connection down, which is what protects a client built before this change.
-- A client no longer gives up connecting when the endpoint momentarily has no instances. A server destroys its only instance before creating the next, and in that gap the wait fails with "not found" rather than "busy", which was treated as final with seconds of the deadline unspent. Found by the test written for the recycle boundary above, which failed on this instead; the two ship together because making the client reconnect deliberately turns a rare path into the common one.
-- A server no longer applies a frame-arrival deadline to writing a response. The response is the answer to a request the handler has already run, and one larger than the endpoint buffer needs the client to drain it, so giving up after a second threw away completed work and left the caller unable to tell what happened.
-
-- `viewport_capture_frame` works on a game session. A running game could be paused, stepped, driven with injected input and read through its tree and both log streams, and never seen; the only way to look at it was an OS screenshot from outside Didi, which is useless headless and in CI. Attached to a game it captures the root viewport and reports `session_kind: "game"` and `camera_identifier: "root_viewport"`; the editor camera selectors stay editor-only and are refused there. `viewport_diff_capture` follows, which is how a stepped frame gets asserted. Node isolation stays editor-only, because it hides and restores nodes in the edited scene.
-- `viewport_capture_frame` refuses a viewport that has no size instead of returning it as a successful live frame. A 2D editor viewport that is not the selected main screen is a collapsed control, and Godot hands back its 2x2 minimum; the tool reported that as `is_live_frame: true` with nothing to distinguish it from a scene that happens to be empty. The refusal names the size and says the requested main screen is not the one on screen.
-- `resource_create` refuses a `save_path` that is not `.tres` or `.res`. It wrote Godot text-resource markup into whatever path it was handed, including a `.gd` file, and reported `created_offline` for a file `script_check_syntax` immediately called unparseable in the same session.
+- `2026-09-06` `project_verify_changes` no longer reports every proposal as broken in a project that names a resource by `uid://`. [PR #278](https://github.com/saworbit/didi/pull/278)
+- `2026-09-06` The build no longer races itself placing the class reference. [PR #276](https://github.com/saworbit/didi/pull/276)
+- `2026-09-06` A blackboard operation waits out a lock somebody else is holding instead of reporting an error. [PR #275](https://github.com/saworbit/didi/pull/275)
+- `2026-09-06` Every page under `docs/` is reachable again. [PR #274](https://github.com/saworbit/didi/pull/274)
+- `2026-09-06` The `[Unreleased]` section had 18 `### Added` and 10 `### Fixed` headings; consolidated into one of each. [PR #274](https://github.com/saworbit/didi/pull/274)
+- `2026-09-06` `docs/TOOL_REFERENCE.md` names every directory project search skips, including `build-` trees. [PR #274](https://github.com/saworbit/didi/pull/274)
+- `2026-09-06` A blackboard save can no longer destroy the board. [PR #274](https://github.com/saworbit/didi/pull/274)
+- `2026-09-06` Three tools no longer fail on a path the active Windows code page cannot hold. [PR #274](https://github.com/saworbit/didi/pull/274)
+- `2026-09-06` `script_create` and `script_patch_method` report the Godot compiler's diagnostics again. [PR #274](https://github.com/saworbit/didi/pull/274)
+- `2026-09-06` The resource index and project search no longer scan out-of-source build trees. [PR #274](https://github.com/saworbit/didi/pull/274)
+- `2026-09-06` `script_patch_method` and `create_visual_test_lab` drop the shared resource index after they write. [PR #274](https://github.com/saworbit/didi/pull/274)
+- `2026-09-06` A transport failure reporting `engine: unknown` now says why. [PR #267](https://github.com/saworbit/didi/pull/267)
+- `2026-09-06` The live harness reports the editor's exit code when a request in the themed-Control block fails. [PR #267](https://github.com/saworbit/didi/pull/267)
+- `2026-09-05` `docs/INTEGRATION_GUIDE.md` was reachable from no document in the repository. [PR #265](https://github.com/saworbit/didi/pull/265)
+- `2026-09-05` `docs/REALIGNMENT_IMPLEMENTATION_PLAN.md` carries a status banner saying what shipped, instead of 37 unticked boxes. [PR #265](https://github.com/saworbit/didi/pull/265)
+- `2026-09-05` Brought the documentation into line with the editor console rather than leaving eight pages describing a plugin that only printed a line at startup. [PR #264](https://github.com/saworbit/didi/pull/264)
+- `2026-09-05` A Godot that Didi starts to answer a question no longer publishes a runtime session. [PR #263](https://github.com/saworbit/didi/pull/263)
+- `2026-09-05` `project_verify_changes` reported a script with a plain syntax error as fine. [PR #263](https://github.com/saworbit/didi/pull/263)
+- `2026-09-05` A live call that changes nothing is now sent once more, on a new connection to the same session, when the transport fails. [PR #261](https://github.com/saworbit/didi/pull/261)
+- `2026-09-05` Removed a message prefix that nothing can emit any more. [PR #256](https://github.com/saworbit/didi/pull/256)
+- `2026-09-05` A transport failure could not say why it failed. [PR #255](https://github.com/saworbit/didi/pull/255)
+- `2026-09-05` `docs/TOOL_REFERENCE.md` told readers that `project_export` takes a preset `name`. [PR #254](https://github.com/saworbit/didi/pull/254)
+- `2026-09-05` `shader_list_uniforms` reports a shader's declared default instead of `null` for uniforms a material does not override. [#119](https://github.com/saworbit/didi/issues/119) · [PR #251](https://github.com/saworbit/didi/pull/251)
+- `2026-09-04` A live tool call no longer fails at the moment a connection is recycled. [PR #237](https://github.com/saworbit/didi/pull/237)
+- `2026-09-04` A client no longer gives up connecting when the endpoint momentarily has no instances. [PR #237](https://github.com/saworbit/didi/pull/237)
+- `2026-09-04` A server no longer applies a frame-arrival deadline to writing a response. [PR #237](https://github.com/saworbit/didi/pull/237)
+- `2026-09-04` `viewport_capture_frame` works on a game session. [PR #235](https://github.com/saworbit/didi/pull/235)
+- `2026-09-04` `viewport_capture_frame` refuses a viewport that has no size instead of returning it as a successful live frame. [PR #235](https://github.com/saworbit/didi/pull/235)
+- `2026-09-04` `resource_create` refuses a `save_path` that is not `.tres` or `.res`. [PR #234](https://github.com/saworbit/didi/pull/234)
 
 ---
 
 ## [1.5.0] - 2026-09-03
 
+Full write-ups for 1.5.0: [as first written](https://github.com/saworbit/didi/blob/fd9d0e5e8517143c0e892166c225485a840b2d87/CHANGELOG.md#150---2026-09-03).
+
 ### Added
 
-- Added `scene_get_selection`, which reports the nodes selected in the Godot editor. It answers what a person means by "this node", and nothing in the surface could answer it before. Discovery now exposes 94 canonical tools plus 10 legacy registrations (104 total). 91 canonical tools are implemented and 3 remain unimplemented. The implementation remains 91/94 canonical tools, and all 3 Phase 7 names remain registered but unimplemented. Live and editor only: a selection exists only in a running editor, so an empty list read from a file would be a fabricated fact rather than a fallback. Entries carry the node path relative to the edited scene root plus class and name, capped at 256, with `selected_total` and `truncated` reported separately because two cases are deliberately counted and not named: a node selected in a scene other than the edited one, which has no path from the edited root, and a node freed between the engine building the list and Didi reading it. The `EditorInterface` and `EditorSelection` method binds were verified against extension API dumps from Godot 4.5.1 and 4.7.2 rather than assumed stable, and the live harness exercises the call on both.
-- Exposed boards as subscribable MCP resources: `blackboard://<board>/state` and `blackboard://<board>/tasks`, with `resources/subscribe`, `resources/unsubscribe`, and `notifications/resources/updated`. The `resources.subscribe` capability moves to `true` because the handlers now exist. An agent waiting on another agent's work no longer polls `blackboard_read` on turns it pays for. The writer is a different `didi` process, so the server watches the board file's size and modified time on a background thread: still polling, but polling that costs no request, no token and no turn, and only while something is subscribed. The first tick records the current state rather than announcing it. A notification carries the URI and never the contents, so reading still goes through `resources/read` and its bounds. Only `blackboard://` URIs are subscribable, since nothing else changes without a call from the same client. Every write to stdout is now serialised through one lock, which `runStdio` did not need when it was the only writer. Tool counts are unchanged at 94 canonical, 90 implemented, 104 total; the listed resource count moves from 3 to 5.
-- Added task allocation on the blackboard: `blackboard_task_create`, `blackboard_task_claim`, `blackboard_task_update`, `blackboard_task_complete`, and `blackboard_task_list`, recorded as an accepted amendment. Discovery now exposes 94 canonical tools plus 10 legacy registrations (104 total). 91 canonical tools are implemented and 3 remain unimplemented. The implementation remains 91/94 canonical tools, and all 3 Phase 7 names remain registered but unimplemented. Claiming is atomic: reading that a task is free and writing that it is yours happen under one board lock, so agents racing for the same task produce one winner and a clean refusal for the rest. A lease is the crash story, and the only record of a claim: when it lapses the task returns to the pool, and nothing renews one on an agent's behalf. Dependencies gate readiness, must already exist, and cannot form a cycle. Only the lease holder may update or complete a task, because completing someone else's releases its dependents on work that is still half done; reopening a reviewed or failed task is the deliberate exception. Tasks live in a board section `blackboard_write` cannot address, so a write cannot corrupt the queue.
-- Added a shared blackboard: `blackboard_write`, `blackboard_read`, `blackboard_patch`, `blackboard_list_keys`, and `blackboard_clear`, recorded as an accepted amendment in [docs/SURFACE_AMENDMENTS.md](docs/SURFACE_AMENDMENTS.md). Discovery now exposes 94 canonical tools plus 10 legacy registrations (104 total). 91 canonical tools are implemented and 3 remain unimplemented. The implementation remains 91/94 canonical tools, and all 3 Phase 7 names remain registered but unimplemented. Two agents are two processes, so the board is a file under `.didi/blackboard/` in the project rather than process memory: an in-memory board would pass every single-agent test and be empty for the second agent, which is the only case that motivated it. Every read-modify-write runs under an OS-backed exclusive lock and saves through an atomic rename. Paths are dot or slash separated and reject traversal, empty segments and control characters; a write refuses to run through an existing value rather than silently turning another agent's number into a container. Entries take an optional `ttl_seconds` and disappear from reads, listings and the file once it lapses. Patches are RFC 6902 and all or nothing. `blackboard_clear` always requires a confirmation token, because there is no non-destructive clear. Board content is data and never instruction: values are stored and returned verbatim and Didi never interprets or executes them. Bounds ship in the response: 256 KiB a value, 4 MiB a board, 10,000 keys, 32 levels deep.
-- Extended `project_audit_assets` with bounded, read-only Godot `.import` health evidence. Existing metadata can now report invalid metadata, missing source assets, missing generated outputs, and source timestamps newer than outputs, with metadata/source/target provenance and a total count independent of the response cap. The scanner reads at most 20,000 regular sidecars, 256 KiB, and 1,024 declared outputs per sidecar; skips generated build trees plus directory/file symlinks; validates sidecar/source identity and project containment; and retains only the requested top findings. Timestamp findings are deliberately named `source_newer_than_output`: Didi does not claim to reproduce Godot's checksum, importer-version, or settings-validity decisions.
-- Started Phase 8 with exact static node-path blast-radius analysis in `project_analyze_impact`. Relative, `/root/...`, `%...`, and `$...` targets now resolve as `node_path`; scene connection endpoints, animation tracks, serialized `NodePath` properties, and direct GDScript references are classified without matching similarly named siblings. Dynamic paths remain explicitly outside the evidence boundary, and no mutation or refactoring cascade is implied.
-- Hardened the Phase 7 delivery after independent red/purple review: unsigned JSON integers above `INT64_MAX` can no longer wrap into valid tile/grid coordinates or the GridMap clear sentinel; every mutating Phase 7 request now reports a non-retryable unknown outcome after an ambiguous post-dispatch transport failure; tile/grid rollback method binds are verified before mutation; generated prompts and current documentation now match the 80/83 manifest; and the validator rejects the stale capability claims that exposed the drift.
-- Delivered `tilemap_set_cells`, `tilemap_get_used_rect`, and `gridmap_set_cells`, taking the surface to 80/83 implemented with only the three API-blocked Phase 7 contracts reserved. TileMapLayer and GridMap mutations validate every record and referenced resource before creating one UndoRedo action, snapshot every old cell, reread exact post-state, roll back a mismatch, and report no-op batches without adding undo history. The used-rect read returns exact integer position, size, and end coordinates. The live fixture covers set, erase/clear, no-op, wrong class, invalid-last-record atomicity, and real TileSetAtlasSource/MeshLibrary validation.
-- Delivered `viewport_set_camera_transform` and `viewport_toggle_debug_draw` as the viewport half of Phase 7A, taking the surface to 77/83 implemented with 6 names still reserved. Camera edits target an in-scene `Camera3D`, validate finite bounded vectors and FOV, commit one editor UndoRedo action, and verify observed state. Debug control supports only public collision/navigation SceneTree hints for future games run from the editor; it rejects the retained wireframe request, preserves omitted values, rereads both hints, and restores both original values on any failed setter or postcondition.
-- Delivered `anim_list_tracks` and `anim_play_track` as the second half of Phase 7B, taking the surface to 75/83 implemented with 8 names still reserved. An agent could see an AnimationPlayer in the tree and nothing about what it held. The list returns every animation in the player's library, sorted by name, with length, loop mode, and each track's type, path and key times, in the editor or a game, capped at 128 animations, 128 tracks, 256 keys and 256 KiB with a cursor that says where it stopped. It never touches a key. The play is game-only: it checks the name exists, calls `AnimationPlayer.play` once with the requested speed and direction, and rereads `is_playing` and `current_animation` rather than trusting the call; `dispatched` is not completion. A negative speed without `from_end` is rejected because it would play nothing from time zero. Current animation is read through `Object.get` because `get_current_animation` changes hash between Godot 4.5 and 4.7. The live harness lists the fixture's animation in both sessions and plays it in the game with the key count unchanged afterwards.
-- Delivered `physics_raycast_query` and `nav_query_path` as Phase 7B partial delivery, taking the surface to 73/83 implemented with 10 names still reserved. Line of sight and reachability were guesswork from screenshots and transform arithmetic. The raycast fires one segment through the root viewport's existing World2D or World3D with the contract's fixed flags (bodies and areas on, hit from inside off, back faces on in 3D) and returns the hit point, normal, collider path and class, and collision layer, or every detail field as null on a miss. The path query asks the same world's navigation map for a path and returns the ordered points, capped at 256, with `reachable` false on an empty path. Neither creates a world, a map or a body, and neither bakes anything. Both run in the editor or a game; in the editor the root viewport's world is the editor's own, not the edited scene's, so the live harness proves a real hit and a real path in a game session and an honest miss in the editor.
-- Delivered `runtime_inject_input` (legacy alias `inject_input_event`) as Phase 7C partial delivery, taking the surface to 71/83 implemented with 12 names still reserved. Until now an agent could launch a game and watch it, but not press anything in it. A call carries 1 to 32 explicit events across the five allow-listed classes: action, key, mouse button, joypad button and joypad motion. Every event is constructed and fully configured before the first is dispatched, so a bad event in position five fails the batch with nothing sent, and press and release are separate events with no timer and no implied release. Dispatch is `Input.parse_input_event`, which returns void, so the result counts calls made rather than events accepted; the live harness proves delivery through a fixture that observes `_input`. Game sessions only: the standalone policy refuses editor sessions and the extension refuses again before the bridge. A mutation with `dry_run` and no confirmation token, since an input event is not reversible and not destructive.
-- Delivered `runtime_read_profiler` as Phase 7C partial delivery, taking the surface to 70/83 implemented with 13 names still reserved. Until now an agent chasing a stutter could read one frame at a time and nothing across time. The tool samples ten `Performance` monitors on the Godot main thread over a window of up to 5 seconds and 120 samples, driven by the frame callback so nothing blocks, and returns min, max, mean and last per metric. Availability is the pinned `Performance.get_monitor` bind existing and nothing else: a zero reading is a legitimate sample, which matters because most monitors are legitimately zero in an idle editor. A non-finite reading counts as invalid, and a metric with no valid sample reports explicit nulls rather than dropping the fields. One collector runs per session; a second request while one is active gets `423`, and shutdown mid-window returns `504` with the outcome rather than a partial window. The live harness collects a window in the editor and in a game session and checks the shape, the count and the order.
-- Added `audio_configure_bus`, which sets a bus volume, mute or solo on the running engine. It is live only on purpose: writing the layout file would change what the project loads next time and not what anyone is listening to now. A bus can be named or numbered, and a name is resolved through the engine so a bus added at runtime is addressable. A `volume_db` outside -80 to 24 is rejected rather than clamped, because outside that range a caller is either confusing decibels with a linear gain or has slipped a digit and clamping hides both. Bus state is not part of the edited scene, so the editor undo stack does not carry it; the result says so and returns the values it replaced, which are the only way back. The live harness changes a bus, reads it back through a separate call rather than trusting the response that made the change, and puts it back.
-- Added `audio_list_buses`. A muted bus is invisible: the game runs, nothing errors, and no sound comes out, and nothing in Didi could read the bus layout at all, so the question could not be asked. Live it reports each bus's volume, mute, solo, bypass, routing and effect chain from `AudioServer`; every method it calls carries the same hash on Godot 4.5.1, 4.6.2 and 4.7.2, so there is no per-version branch, and the live harness proves it on all three. Offline it reads the project bus layout, following `audio/buses/default_bus_layout` and falling back the way Godot does. A project with no layout file is reported as exactly that rather than as an error, and the offline result says effect chains were not read, because an empty list would otherwise read as "no effects".
-- Added `project_analyze_impact`, which answers what else changes if this changes. Renaming a variable or a signal can break a scene that wired it, an animation track that keyframes it, or an autoload that loads it, and Godot reports none of that until the game runs. A lexical search does not report it either: the connection lives in a `.tscn` as an attribute and the keyframe lives inside a quoted `NodePath`, so the agent edits the script, sees a clean search, and ships a project that is broken at runtime. Every place the target is named is returned with the form it takes, whole word so tracing `health` does not report every `max_health`, plus where the name is declared. A target that is neither a path nor a single identifier is rejected rather than answered with an empty report, because "nothing depends on this" and "you asked the wrong question" must not look the same to a caller about to delete something.
-- Added `project_audit_assets`, an offline pass over the whole project that reports three things no single file can show: assets nothing references, references that resolve to no file, and signals nothing emits or connects. It follows every reference form Godot writes, including the uid-only `ext_resource` that Godot has been writing since 4.4, so an asset named only by uid is not called an orphan. Orphan detection is restricted to asset types because a scene nothing references is usually a level you open by hand, and a tool that reports those is a tool people learn to ignore. The findings are evidence, not a delete list, and the response says so: a path a script builds at runtime cannot be followed, and neither can a connection made through a variable name. Both limits ship in the payload, not only in the docs.
-- Closed Phase 6 without expanding the protocol surface: mandatory explicit Godot project selection, project-keyed runtime endpoints, one-client OS session locks, mutation dry-runs, and exact confirm-before-write tokens.
-- Closed Phase 5 with six canonical tools: C# build diagnostics, real shader compilation diagnostics, secret-redacted export-preset discovery, guarded headless export, deterministic GridMap MeshLibrary generation, and live non-injecting UI hit-testing.
-- Added a cross-platform argv-only process runner with finite deadlines, child-group termination, a 1 MiB combined-output cap, and Windows command-line quoting coverage.
-- Added the approved Phase 7-12 roadmap, including canonical-surface completion and governance requirements for all future phases.
-- Completed the 2026-08-29 Phase 7 feasibility gate on Godot 4.5.1 and 4.7.2. The reproducible [evidence](docs/PHASE_7_API_FEASIBILITY.md) found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts; the [executable plan](docs/PHASE_7_IMPLEMENTATION_PLAN.md) stopped before Tasks 2-13.
-
-- The documentation validator now requires every `tests/test_*.py` module to be named by some workflow. CI runs named `unittest` modules rather than discovering the tests directory, so a new test file ran nowhere until someone remembered to add a step -- and passed locally, so nothing looked wrong. `tests/test_phase7_signal_admission.py` was in exactly that state: it asserts the Phase 7 signal test seam never reaches a shipping build, and it executed in no job at all. It is now registered, and the rule prevents a recurrence.
-- Added YOLO mode: `--yolo`, or `DIDI_YOLO=1`, skips confirmation on destructive tools for unattended runs. It is a launch flag only, chosen by the person starting the process; nothing reachable from a tool call can set it, and a test asserts no tool exposes such an argument. It skips confirmation, not validation or authentication. The open gate is visible at startup, in `server/discover` as `_meta.didi.confirmationsSkipped`, and on every affected result as `confirmation: skipped` -- distinct from `human` and `agent`, because nobody confirmed anything.
-- Confirmation for destructive tools can now reach a human. When a client declares the `elicitation` capability, a confirmation-gated call without a token returns an `input_required` result carrying an `elicitation/create` and the real dry-run preview, so a person sees what will change rather than a tool name. `accept` executes; `decline` and `cancel` both refuse and stay distinguishable. Previously the agent received the confirmation token and echoed it back, which is the agent confirming to itself.
-- A client that cannot elicit is not silently downgraded: the token flow remains, and every confirmed mutation now records `_meta.didi.confirmation` as `human` or `agent` so a caller can tell what the confirmation was worth.
-- Didi now serves MCP revision `2026-07-28` alongside `2024-11-05`. Every result carries `resultType`, and cacheable operations carry `ttlMs` and `cacheScope`. The freshness values are deliberately conservative: `tools/list`, `resources/list` and `resources/read` embed live session availability that flips when an editor starts or stops, so they report `ttlMs: 0` -- immediately stale. A cache that serves a stale availability claim is worse than no cache. Only `server/discover` and `prompts/list`, which are compile-time constants, claim a real freshness window.
-- Discovery advertises only revisions Didi actually serves, and that is enforced rather than asserted: a test drives a real request at every version discovery advertises and requires it to succeed, so the advertised list cannot outrun the implementation.
-- Added `server/discover`, making Didi dual-era. MCP revision `2026-07-28` removed the `initialize` handshake: a modern client declares its protocol version in `_meta` on every request, and servers must implement discovery. Didi still serves `2024-11-05` result shapes and so advertises only that revision, but a modern client now receives `-32022 Unsupported protocol version` naming what it can retry with, instead of the silence a legacy-only stdio server gives it. A request carrying a supported version is self-contained and needs no prior `initialize`. Legacy clients are unaffected.
-- Delivered the four signal tools -- `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit` -- as Phase 7 partial delivery, taking the surface to 69/83 implemented with 14 names still reserved. They were admitted only after the production-configuration extension passed the raw signal bridge trial on Godot 4.5.1, 4.6.2 and 4.7.2. That trial had never been run: one compile flag controlled both admission and the failure-injection test seams, so the only binary that could serve a signal request was one no user would ever run. Separating the two is what made the trial possible.
-- The signal test seams remain compiled out of every shipping build, and a test now asserts the seam configurator is absent from production rather than asserting the whole feature is.
-- Added `runtime_read_output`, which reads what the **engine** printed rather than what Didi recorded: `print()` from a running game, `push_warning`, `push_error`, and GDScript parse and runtime errors, the last carrying the originating script file and line. Didi registers a custom `Logger` class and subscribes it through `OS.add_logger`; this is the first class the extension registers with the engine rather than only calling into. The stream is a separate 2,000-record ring with the same cursor contract as `runtime_read_logs`, so heavy engine output cannot evict Didi's own diagnostics. Verified end to end against Godot 4.5.1, 4.6.2, and 4.7.2. Where an engine does not expose the class-registration interface the extension still loads, warns at startup, and the tool returns no records rather than failing.
-- Added `didi --dump-tool-manifest`, which emits the registered tool surface as sorted, byte-stable JSON with counts and names. Documentation and the CI MCP smoke are now validated against it, so a published count can never disagree with the software.
-- Added `kLegacyToolNames` as the single declaration of which registrations are legacy. The canonical/legacy split previously existed only in prose and could not be verified.
-- Added `--list` and `--filter=<substring>` to the native test runner, so a single case can be run in isolation.
-- Added [docs/SURFACE_AMENDMENTS.md](docs/SURFACE_AMENDMENTS.md), the record through which the canonical tool surface may grow.
-- Added specification tool `annotations` to every registered tool. `readOnlyHint` is derived from the same mutation classification that drives `dry_run` and confirmation, so 41 of the 89 registrations are identifiable as safe to auto-approve without splitting any tool into read and edit pairs. `destructiveHint` is true for every mutation, and `openWorldHint` is true for the six tools that start a subprocess against the project and false for the rest.
-- Added `outputSchema` to the tools whose result shape has been observed, covering script diagnostics, both project searches, resource listing, session listing, viewport capture, scene hierarchy, and their legacy aliases. A contract test exercises each one through the built binary and validates its real payload against the published schema. Tools that cannot be exercised, and every unimplemented name, declare none.
-- Added `structuredContent` to successful JSON tool results, carrying the same payload as the text block after execution-mode and session attribution. The text block is unchanged.
+- `2026-09-03` Added `scene_get_selection`, which reports the nodes selected in the Godot editor. [PR #201](https://github.com/saworbit/didi/pull/201)
+- `2026-09-03` Exposed boards as subscribable MCP resources. [PR #201](https://github.com/saworbit/didi/pull/201)
+- `2026-09-03` Added task allocation on the blackboard. [PR #201](https://github.com/saworbit/didi/pull/201)
+- `2026-09-03` Added a shared blackboard. [PR #201](https://github.com/saworbit/didi/pull/201)
+- `2026-09-03` Extended `project_audit_assets` with bounded, read-only Godot `.import` health evidence. [PR #188](https://github.com/saworbit/didi/pull/188)
+- `2026-09-03` Started Phase 8 with exact static node-path blast-radius analysis in `project_analyze_impact`. [PR #187](https://github.com/saworbit/didi/pull/187)
+- `2026-09-03` Hardened the Phase 7 delivery after independent red/purple review. [PR #186](https://github.com/saworbit/didi/pull/186)
+- `2026-09-03` Delivered `tilemap_set_cells`, `tilemap_get_used_rect` and `gridmap_set_cells`: 80/83 tools implemented. [PR #185](https://github.com/saworbit/didi/pull/185)
+- `2026-09-03` Delivered `viewport_set_camera_transform` and `viewport_toggle_debug_draw` (Phase 7A viewport half): 77/83 implemented. [PR #184](https://github.com/saworbit/didi/pull/184)
+- `2026-09-02` Delivered `anim_list_tracks` and `anim_play_track` as the second half of Phase 7B, taking the surface to 75/83 implemented with 8 names still reserved. [PR #183](https://github.com/saworbit/didi/pull/183)
+- `2026-09-02` Delivered `physics_raycast_query` and `nav_query_path` as Phase 7B partial delivery, taking the surface to 73/83 implemented with 10 names still reserved. [PR #182](https://github.com/saworbit/didi/pull/182)
+- `2026-09-02` Delivered `runtime_inject_input`, so an agent can press keys and buttons in a running game: 71/83 implemented. [PR #181](https://github.com/saworbit/didi/pull/181)
+- `2026-09-02` Delivered `runtime_read_profiler` as Phase 7C partial delivery, taking the surface to 70/83 implemented with 13 names still reserved. [#116](https://github.com/saworbit/didi/issues/116) · [PR #180](https://github.com/saworbit/didi/pull/180)
+- `2026-08-31` Added `audio_configure_bus`, which sets a bus volume, mute or solo on the running engine. [PR #179](https://github.com/saworbit/didi/pull/179)
+- `2026-08-31` Delivered the four signal tools (`signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit`): 69/83 implemented. [PR #179](https://github.com/saworbit/didi/pull/179)
+- `2026-08-31` Added `audio_list_buses`. [PR #178](https://github.com/saworbit/didi/pull/178)
+- `2026-08-31` Added `project_analyze_impact`, which answers what else changes if this changes. [PR #175](https://github.com/saworbit/didi/pull/175)
+- `2026-08-31` Added `project_audit_assets`, which reports unreferenced assets, broken references and signals nothing uses. [#146](https://github.com/saworbit/didi/issues/146) · [PR #171](https://github.com/saworbit/didi/pull/171)
+- `2026-08-31` Added specification tool `annotations` to every registered tool. [PR #163](https://github.com/saworbit/didi/pull/163)
+- `2026-08-30` The documentation validator now requires every `tests/test_*.py` module to be named by some workflow. [PR #110](https://github.com/saworbit/didi/pull/110)
+- `2026-08-30` Added YOLO mode: `--yolo`, or `DIDI_YOLO=1`, skips confirmation on destructive tools for unattended runs. [PR #109](https://github.com/saworbit/didi/pull/109)
+- `2026-08-30` Confirmation for destructive tools can now reach a human. [PR #108](https://github.com/saworbit/didi/pull/108)
+- `2026-08-30` A client that cannot elicit is not silently downgraded. [PR #108](https://github.com/saworbit/didi/pull/108)
+- `2026-08-30` Didi now serves MCP revision `2026-07-28` alongside `2024-11-05`. [PR #107](https://github.com/saworbit/didi/pull/107)
+- `2026-08-30` Discovery advertises only revisions Didi actually serves, and that is enforced rather than asserted. [PR #107](https://github.com/saworbit/didi/pull/107)
+- `2026-08-30` Added `server/discover`, making Didi dual-era. [PR #106](https://github.com/saworbit/didi/pull/106)
+- `2026-08-30` The signal test seams stay compiled out of shipping builds, and a test asserts it. [PR #103](https://github.com/saworbit/didi/pull/103)
+- `2026-08-30` Added `runtime_read_output`, which reads what the engine printed rather than what Didi recorded. [PR #101](https://github.com/saworbit/didi/pull/101)
+- `2026-08-30` Added `outputSchema` to every tool whose result shape has been observed, checked against real payloads. [PR #98](https://github.com/saworbit/didi/pull/98)
+- `2026-08-30` Added `structuredContent` to successful JSON tool results, carrying the same payload as the text block after execution-mode and session attribution. [PR #96](https://github.com/saworbit/didi/pull/96)
+- `2026-08-30` Added `didi --dump-tool-manifest`, which emits the registered tool surface as sorted, byte-stable JSON with counts and names. [PR #83](https://github.com/saworbit/didi/pull/83)
+- `2026-08-30` Added `kLegacyToolNames` as the single declaration of which registrations are legacy. [PR #83](https://github.com/saworbit/didi/pull/83)
+- `2026-08-30` Added `--list` and `--filter=<substring>` to the native test runner, so a single case can be run in isolation. [PR #83](https://github.com/saworbit/didi/pull/83)
+- `2026-08-30` Added [docs/SURFACE_AMENDMENTS.md](docs/SURFACE_AMENDMENTS.md), the record through which the canonical tool surface may grow. [PR #83](https://github.com/saworbit/didi/pull/83)
+- `2026-08-29` Completed the 2026-08-29 Phase 7 feasibility gate on Godot 4.5.1 and 4.7.2. [PR #64](https://github.com/saworbit/didi/pull/64)
+- `2026-08-29` Added the approved Phase 7-12 roadmap, including canonical-surface completion and governance requirements for all future phases. [PR #63](https://github.com/saworbit/didi/pull/63)
+- `2026-08-29` Closed Phase 6 without expanding the protocol surface. [PR #52](https://github.com/saworbit/didi/pull/52)
+- `2026-08-28` Closed Phase 5 with six canonical tools. [PR #45](https://github.com/saworbit/didi/pull/45)
+- `2026-08-28` Added a cross-platform argv-only process runner with deadlines, child-group termination and a 1 MiB output cap. [PR #45](https://github.com/saworbit/didi/pull/45)
 
 ### Changed
 
-- Took the version out of the C++ sources. `project(VERSION ...)` in `CMakeLists.txt` now generates `didi/common/version.hpp` into the build tree, and `mcp_protocol.hpp` and `main.cpp` read it instead of spelling `1.4.0` out three times between them. The documentation validator no longer compares those two files, because they cannot drift; it rejects a literal version appearing in either of them instead. The contributing instructions were also incomplete: they listed eight files to update and omitted `demo/addons/didi/plugin.cfg`, which the validator has been checking all along.
-- Mutating tool schemas now advertise `dry_run`; editor reload, script patching, and overwrite-enabled offline writers require a 120-second single-use token bound to the exact arguments, project, and runtime route.
-- The documentation validator now derives the Phase 7 status block's implementation ratio, and the spelled-out forms of published counts, from the tool manifest as well. Both were still literals, so registering any new canonical tool failed CI until the validator itself was edited.
-- Corrected the published read-only registration count. It was stated as 43 and the binary reports 41; the figure had never been checked against the software.
-- The documentation validator derives every published tool count from the tool manifest instead of matching hard-coded numbers in prose. It previously enforced that documents agreed with each other rather than with the binary, and implementing any reserved tool would have failed CI until the validator itself was edited.
-- The CI MCP smoke verifies the live `tools/list` surface against the manifest emitted by the same build, and now asserts every `implemented` flag rather than a sample.
-- Split the fused surface rule: "no success stubs" remains absolute, while new tool names are added through a recorded surface amendment.
-- Documented that Godot 4.5 and 4.6 expose no read-side scene dirty state through GDExtension and that `EditorInterface.get_unsaved_scenes()` arrives in 4.7, which Didi does not yet consume. The previous wording named only 4.5 and read as a permanent engine limitation.
-- The live integration harness runs on Windows PowerShell 5.1. It previously required PowerShell 7 solely because of `ConvertFrom-Json -Depth`, which does not exist on 5.1 and is unnecessary on either host.
-- Discovery now exposes 83 canonical tools plus 10 legacy registrations (93 total). 80 canonical tools are implemented and 3 remain unimplemented.
-- Phase 7 status is `PARTIAL_DELIVERY`. All 15 implementation-feasible names are delivered. The remaining `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack` contracts stay registered but unimplemented because no supported public API/semantics satisfying the exact approved contract was found on either tested version.
+- `2026-09-03` Took the version out of the C++ sources. [#38](https://github.com/saworbit/didi/issues/38) · [PR #197](https://github.com/saworbit/didi/pull/197)
+- `2026-09-03` Discovery now exposes 83 canonical tools plus 10 legacy registrations (93 total). [PR #185](https://github.com/saworbit/didi/pull/185)
+- `2026-09-03` Phase 7 status is `PARTIAL_DELIVERY`. [PR #185](https://github.com/saworbit/didi/pull/185)
+- `2026-08-30` The validator derives the Phase 7 status ratio and spelled-out counts from the tool manifest, not literals. [PR #101](https://github.com/saworbit/didi/pull/101)
+- `2026-08-30` Corrected the published read-only registration count. [PR #101](https://github.com/saworbit/didi/pull/101)
+- `2026-08-30` The live integration harness runs on Windows PowerShell 5.1. [PR #96](https://github.com/saworbit/didi/pull/96)
+- `2026-08-30` The documentation validator derives every published tool count from the tool manifest instead of matching hard-coded numbers in prose. [PR #83](https://github.com/saworbit/didi/pull/83)
+- `2026-08-30` The CI MCP smoke checks `tools/list` against the same build's manifest and asserts every `implemented` flag. [PR #83](https://github.com/saworbit/didi/pull/83)
+- `2026-08-30` Split the fused surface rule: no success stubs stays absolute, and new tool names need a surface amendment. [PR #83](https://github.com/saworbit/didi/pull/83)
+- `2026-08-30` Documented that Godot 4.5 and 4.6 expose no scene dirty state and that 4.7 adds `get_unsaved_scenes()`. [PR #83](https://github.com/saworbit/didi/pull/83)
+- `2026-08-29` Mutating tool schemas now advertise `dry_run`. [PR #52](https://github.com/saworbit/didi/pull/52)
+- `2026-08-28` The Godot 4.5.1 harness covers shader compilation, pack export, MeshLibrary generation and UI hit-testing; 162 native tests. [PR #45](https://github.com/saworbit/didi/pull/45)
 
 ### Fixed
 
-- Packaged the addon from the build directory instead of the source tree. Release packaging copied `addons/didi/*` verbatim, which meant an archive contained whatever a POST_BUILD step or a tool had left in a tracked directory: `bin/.gitkeep` and, on any machine where `viewport_create_test_lab` had run, a generated `test_lab_sandbox.tscn`. The build now assembles the complete addon at `build/addons/didi/` and packaging reads that. `cmake --install` also shipped an addon without `didi_plugin.gd`, the script `plugin.cfg` names, so an installed plugin could not start; the addon file list is now declared once and used by both the staged copy and the install rules. The extension is still copied into the demo and smoke Godot projects, which can only load it from inside their own `res://`.
-- Corrected documentation that had drifted from the build. The architecture diagram and the integration guide still said 78 canonical tools when the manifest emits 83, the README badge and two documents named only the legacy MCP revision when `server/discover` advertises `2026-07-28` alongside `2024-11-05`, and nothing described the launch arguments at all. The administrator guide now carries a command line option table and the exit `2` refusal behaviour, and the quickstart, capability matrix, and agent instructions say that a malformed option is refused rather than ignored.
-- Refused unknown and malformed command-line options at startup instead of ignoring them. The parser had no final else, so a misspelled option or a log level outside the documented enum started the server as though the launch had succeeded, and a value-taking option would consume the flag after it: `--log-level --yolo` came up without YOLO mode and without the warning that says confirmations are off. Unknown options, missing values, option-shaped values, empty values, unknown log levels, and stray arguments now exit 2 with the reason and the relevant help line, before project resolution or any server startup. Accepted forms are unchanged.
-- Quarantined the runtime route only on transport failure. `sendPhase7LiveRequest` retired the route on any error before classifying it, so an ordinary rejection from the engine left every later live call in the session unable to dispatch, including unrelated tools. Its contract test never covered this: both cases were transport failures and one only looked like one, using a bare `Error(502)` that carries no transport state.
-- Reaped orphaned session descriptor tombstones. Retirement is move-then-delete, so an owner that died between the two steps left a `.didi-retired-*` file that nothing ever removed and the registry grew without bound. Discovery now removes such an entry only when its contents parse as a descriptor, the session id in the filename matches the session id inside it, and the owning process is provably gone; an alive or unverifiable owner, unreadable contents, or a name that disagrees with its contents all retain it. POSIX still always retains, because no portable unlink primitive is bound to a verified open file.
-- Reconciled all current operating documentation with Phase 6: completed the roadmap's 79-tool table, documented project-root startup, session lock `423`, mutation preview/confirmation semantics, and labeled historical design records so they are not mistaken for current behavior.
-- Gave four order-dependent native tests their own setup. `Tools.CaptureViewportWithIpc` was intermittently failing because it registered none of the tools or resources it called and borrowed them from whichever test ran before it; the assertion that failed depended on execution order. Every native test passes in isolation.
-- Preserved ordinary comments when replacing GDScript symbols.
-- Preserved explicit `null` JSON-RPC success results.
-- Failed closed before creating a Windows session pipe when the owner-and-Administrators security descriptor cannot be built.
-- Rejected malformed MCP/JSON-RPC parameter types (including scalar `params`), request-only methods sent without an ID, JSON numeric overflow, and unsupported `Content-Length` framing without terminating the server or dispatching hidden mutations.
-- Protected `resource_create` and visual test-lab files from replacement unless callers pass `overwrite: true`.
-- Enforced one reconnect-and-I/O IPC deadline on POSIX, exact response-ID correlation on both transports, and distinct handler-exception responses that preserve the parsed request ID.
-- Bounded `runtime_launch` to 1–120 seconds, treated Windows exit code 259 as completed, broadened Godot 4.5.1/4.6.2/4.7.2 and POSIX/macOS discovery, and clarified that `break_on_error` classifies output after exit.
-- Declared explicit x86_64, arm64, and universal macOS GDExtension keys; launched Windows Godot batch wrappers, including non-ASCII paths, through the trusted System32 `cmd.exe`; accepted arithmetic `+`; parsed Godot 4 multiline compiler diagnostics; limited the `else` colon rule to the complete keyword; and stopped advertising the unimplemented MCP logging capability.
-- Made lightweight GDScript diagnostics and both symbol APIs string/comment-aware, recognized annotated/static/inner declarations, added bounded and format-validated Godot `.uid` sidecars across resource types, and removed unsafe `demo/` and recursive scene-path fallbacks in favor of UTF-8-safe project-root-confined files.
-- Parsed Godot 4.5 dummy-renderer shader diagnostics, used the supported four-argument `find_children` API for generated MeshLibrary scripts, restored editor routing after long offline work, and applied Control's documented rectangle fallback when `_has_point` has no callable override.
-- Updated the Linux, macOS, and Windows fast MCP smoke to lock the 79-canonical/89-total Phase 5 surface and all six new execution-mode/schema contracts.
+- `2026-09-03` Packaged the addon from the build directory instead of the source tree. [PR #195](https://github.com/saworbit/didi/pull/195)
+- `2026-09-03` Refused unknown and malformed command-line options at startup instead of ignoring them. [#189](https://github.com/saworbit/didi/issues/189) · [PR #190](https://github.com/saworbit/didi/pull/190)
+- `2026-09-03` Corrected documentation that had drifted from the build. [96b436b](https://github.com/saworbit/didi/commit/96b436baea70256a205052be8a040ad979372a84)
+- `2026-08-30` Reconciled all current operating documentation with Phase 6. [PR #101](https://github.com/saworbit/didi/pull/101)
+- `2026-08-30` Updated the Linux, macOS, and Windows fast MCP smoke to lock the 79-canonical/89-total Phase 5 surface and all six new execution-mode/schema contracts. [PR #101](https://github.com/saworbit/didi/pull/101)
+- `2026-08-30` Quarantined the runtime route only on transport failure. [PR #96](https://github.com/saworbit/didi/pull/96)
+- `2026-08-30` Gave four order-dependent native tests their own setup. [PR #96](https://github.com/saworbit/didi/pull/96)
+- `2026-08-30` Reaped orphaned session descriptor tombstones. [PR #84](https://github.com/saworbit/didi/pull/84)
+- `2026-08-28` Godot 4.5 dummy-renderer shader diagnostics parse, and editor routing is restored after long offline work. [PR #45](https://github.com/saworbit/didi/pull/45)
+- `2026-08-28` GDScript diagnostics and symbol APIs are string and comment aware, with safe project-confined file handling. [PR #44](https://github.com/saworbit/didi/pull/44)
+- `2026-08-28` Declared explicit x86_64, arm64, and universal macOS GDExtension keys. [PR #43](https://github.com/saworbit/didi/pull/43)
+- `2026-08-28` Malformed JSON-RPC params, ID-less requests, numeric overflow and bad `Content-Length` framing are rejected safely. [PR #42](https://github.com/saworbit/didi/pull/42)
+- `2026-08-28` One reconnect-and-I/O IPC deadline on POSIX, exact response-ID matching, and distinct handler-exception responses. [PR #42](https://github.com/saworbit/didi/pull/42)
+- `2026-08-28` `runtime_launch` is bounded to 1 to 120 seconds, with broader Godot discovery and Windows exit code 259 handled. [PR #42](https://github.com/saworbit/didi/pull/42)
+- `2026-08-28` Failed closed before creating a Windows session pipe when the owner-and-Administrators security descriptor cannot be built. [PR #41](https://github.com/saworbit/didi/pull/41)
+- `2026-08-28` Protected `resource_create` and visual test-lab files from replacement unless callers pass `overwrite: true`. [PR #41](https://github.com/saworbit/didi/pull/41)
+- `2026-08-28` Preserved ordinary comments when replacing GDScript symbols. [PR #39](https://github.com/saworbit/didi/pull/39)
+- `2026-08-28` Preserved explicit `null` JSON-RPC success results. [PR #39](https://github.com/saworbit/didi/pull/39)
 
-### Verified
-
-- Extended the disposable Godot 4.5.1 integration harness through valid/invalid shader compilation, pack export, deterministic two-item MeshLibrary generation, and ordered live UI hit-testing with and without ignored controls. The native suite contains 162 passing tests.
+---
 
 ## [1.4.0] - 2026-08-28
 
+Full write-ups for 1.4.0: [as first written](https://github.com/saworbit/didi/blob/fd9d0e5e8517143c0e892166c225485a840b2d87/CHANGELOG.md#140---2026-08-28).
+
 ### Added
 
-- Closed Phase 4 with four canonical tools: bounded literal `project_search_text`, lexical GDScript/C# `project_search_symbols`, editor-backed `asset_reimport`, and exact live `viewport_diff_capture`.
-- Added 32-lowercase-hex live capture IDs backed by an 8-entry/64 MiB process-local RGBA LRU cache with a 2,048 × 2,048 per-image limit.
-- Added reversible `node_isolation_path` capture with optional transparent background, instance-ID-safe reverse restoration, forced redraws, and explicit restoration metadata.
-- Added exact-dimension RGBA diff metrics and transparent PNG output, including threshold, pixel count/ratio, per-channel mean error, maximum delta, and nullable bounding box.
+- `2026-08-28` Closed Phase 4 with four canonical tools. [PR #6](https://github.com/saworbit/didi/pull/6)
+- `2026-08-28` Added 32-lowercase-hex live capture IDs backed by an 8-entry/64 MiB process-local RGBA LRU cache with a 2,048 × 2,048 per-image limit. [PR #6](https://github.com/saworbit/didi/pull/6)
+- `2026-08-28` Added reversible `node_isolation_path` capture with optional transparent background. [PR #6](https://github.com/saworbit/didi/pull/6)
+- `2026-08-28` Added exact-dimension RGBA diff metrics with transparent PNG output. [PR #6](https://github.com/saworbit/didi/pull/6)
 
 ### Changed
 
-- Version is now `1.4.0`; discovery exposes 72 canonical tools plus 10 legacy registrations (82 total). Fifty-four canonical tools are implemented and 14 remain unimplemented.
-- Project search enforces canonical containment, allowlisted `.gd`/`.cs`/`.tscn`/`.tres` formats, symlink/generated-tree exclusion, UTF-8 validation, deterministic order, and file/byte/result/preview limits.
-- Asset reimport validates the complete source batch before mutation, permits one active request, and requires two consecutive editor-idle callbacks before success.
-- Carried forward automated version, release-fact, support-policy, and Markdown-link drift validation from the Phase 3 documentation reconciliation.
-- Removed agent-internal workflow reports, plans, and specifications from the project tree, ignored their former paths, and added validation to prevent them from being committed again.
+- `2026-08-28` Version is now `1.4.0`; discovery exposes 72 canonical tools plus 10 legacy registrations (82 total). [PR #6](https://github.com/saworbit/didi/pull/6)
+- `2026-08-28` Project search enforces containment, an extension allowlist, UTF-8 validation, deterministic order and size limits. [PR #6](https://github.com/saworbit/didi/pull/6)
+- `2026-08-28` Asset reimport validates the whole batch first, allows one request at a time, and waits for two idle callbacks. [PR #6](https://github.com/saworbit/didi/pull/6)
+- `2026-08-28` Carried forward automated version, release-fact, support-policy, and Markdown-link drift validation from the Phase 3 documentation reconciliation. [PR #6](https://github.com/saworbit/didi/pull/6)
+- `2026-08-28` Removed agent workflow reports and plans from the tree, with validation to keep them out. [PR #6](https://github.com/saworbit/didi/pull/6)
+- `2026-08-28` The Godot 4.5.1 harness covers search, SVG reimport, node isolation and visual diffs. [PR #6](https://github.com/saworbit/didi/pull/6)
 
 ### Fixed
 
-- Prevented synchronous `EditorFileSystem.reimport_files` callbacks from deadlocking the pending-reimport lifecycle lock.
+- `2026-08-28` Prevented synchronous `EditorFileSystem.reimport_files` callbacks from deadlocking the pending-reimport lifecycle lock. [PR #6](https://github.com/saworbit/didi/pull/6)
 
-### Verified
-
-- Extended the Godot 4.5.1 disposable integration harness through real search, SVG reimport, reversible node isolation, a non-empty visual mutation diff, and an exact post-undo diff while preserving fixture and session cleanup.
+---
 
 ## [1.3.0] - 2026-08-27
 
+Full write-ups for 1.3.0: [as first written](https://github.com/saworbit/didi/blob/fd9d0e5e8517143c0e892166c225485a840b2d87/CHANGELOG.md#130---2026-08-27).
+
 ### Added
 
-- Closed Phase 3 with ten canonical tools: local session discovery/attach/detach/get plus live structured logs, pause/step/stop, runtime tree inspection, and bounded `eval_gdscript`.
-- Added atomic schema-1 descriptors and process-unique same-user IPC endpoints for concurrent Godot editor and game sessions. Authenticated protocol-1.3 attach uses a 3-second handshake and preserves the previous route on failure.
-- Added a 2,000-record cursor log ring with deterministic gap/filter behavior, 16 KiB messages, 64 KiB details, and token/expression-source redaction.
-- Added exact paused game stepping, single-pending-step enforcement, shutdown cancellation, pause verification, 10,000-node plus 256 KiB runtime-tree bounds with UTF-8-safe field truncation, and PID-plus-process-start identity checks across Windows, Linux, and macOS.
-- Added strict read-only expression evaluation with a receiver-aware allowlist, ClassDB-prebound scalar property reads, in-subtree contexts/results, cooperative deadlines, depth/element/size limits, and adversarial scanner/callback coverage.
+- `2026-08-27` Closed Phase 3 with ten canonical tools. [PR #3](https://github.com/saworbit/didi/pull/3)
+- `2026-08-27` Added atomic schema-1 descriptors and process-unique same-user IPC endpoints for concurrent Godot editor and game sessions. [PR #3](https://github.com/saworbit/didi/pull/3)
+- `2026-08-27` Added a 2,000-record cursor log ring with deterministic gap/filter behavior, 16 KiB messages, 64 KiB details, and token/expression-source redaction. [PR #3](https://github.com/saworbit/didi/pull/3)
+- `2026-08-27` Added exact paused game stepping with runtime-tree bounds and process identity checks on all three platforms. [PR #3](https://github.com/saworbit/didi/pull/3)
+- `2026-08-27` Added strict read-only expression evaluation with an allowlist, deadlines and size limits. [PR #3](https://github.com/saworbit/didi/pull/3)
 
 ### Changed
 
-- Version is now `1.3.0`; discovery exposes 68 canonical tools plus 10 legacy registrations (78 total). Fifty canonical tools are implemented and 18 remain honestly unimplemented.
-- Deterministic same-project auto-attach selects an unambiguous sole session or unique editor; ambiguity remains detached. `runtime_get_session` performs a fresh bounded authenticated identity handshake and quarantines the failed route without disturbing a concurrently superseding route.
-- Capability metadata is session-kind-aware: `sessionKind` identifies the selected editor/game, `editorConnected` is true only for an editor, and `liveAvailable` requires that the selected kind is allowed for that exact tool or resource.
-- Live main-thread work now has a 15-second extension deadline with explicit `not_started` versus `unknown_outcome` results. Public live calls use a 17-second outer deadline and quarantine only the exact failed route generation.
-- POSIX session discovery now uses `$XDG_RUNTIME_DIR/didi-sessions` when XDG provides an absolute path, otherwise the effective-UID-qualified temporary fallback. Proof-safe POSIX retirement retains a non-`.json` tombstone that discovery ignores; Windows deletes the exact verified object through its open handle.
-- CI smoke now locks the 78-registration surface, Phase 3 execution metadata, cursor schema, evaluator limits, and the still-unimplemented runtime input/call-stack/profiler tools.
-- Runtime logging is explicitly scoped to structured Didi events. It does not capture arbitrary external `print()` output; `runtime_launch` remains the bounded child stdout/stderr path.
+- `2026-08-27` Version is now `1.3.0`; discovery exposes 68 canonical tools plus 10 legacy registrations (78 total). [PR #3](https://github.com/saworbit/didi/pull/3)
+- `2026-08-27` Deterministic same-project auto-attach selects an unambiguous sole session or unique editor; ambiguity remains detached. [PR #3](https://github.com/saworbit/didi/pull/3)
+- `2026-08-27` Capability metadata is session-kind-aware. [PR #3](https://github.com/saworbit/didi/pull/3)
+- `2026-08-27` Live main-thread work now has a 15-second extension deadline with explicit `not_started` versus `unknown_outcome` results. [PR #3](https://github.com/saworbit/didi/pull/3)
+- `2026-08-27` POSIX session discovery now uses `$XDG_RUNTIME_DIR/didi-sessions` when XDG provides an absolute path, otherwise the effective-UID-qualified temporary fallback. [PR #3](https://github.com/saworbit/didi/pull/3)
+- `2026-08-27` CI smoke locks the 78-registration surface, Phase 3 metadata, cursor schema and evaluator limits. [PR #3](https://github.com/saworbit/didi/pull/3)
+- `2026-08-27` Runtime logging is explicitly scoped to structured Didi events. [PR #3](https://github.com/saworbit/didi/pull/3)
+- `2026-08-27` The v1.3.0 release matrix runs the complete native suite plus concurrent editor/game integration coverage on Godot 4.5.1 and 4.7.2. [PR #3](https://github.com/saworbit/didi/pull/3)
 
-### Verification
-
-- The v1.3.0 release matrix runs the complete native suite plus concurrent editor/game integration coverage on Godot 4.5.1 and 4.7.2. The test runner's reported total remains authoritative as the suite evolves; the live harness preserves the 119-request Phase 1/2 baseline and adds the Phase 3 session, routing, tree, log, control, and evaluation sequences.
+---
 
 ## [1.2.0] - 2026-08-27
 
-### Added
-- **Phase 1 live engine substrate** for Godot 4.5+: native main-loop dispatch, real edited `SceneTree` traversal, scalar property access, UndoRedo-backed node mutations, editor undo/redo/save/rescan, and real editor viewport PNG capture.
-- **Phase 2 project wiring** with 18 new canonical live tools for script attachment, autoloads, typed InputMap events, bounded project settings, scene groups, and scene create/open/close/branch packing.
-- **Atomic project persistence** through `ProjectSettings.save()` with snapshot rollback and live `InputMap` reload.
-- **Disposable 119-request Godot integration fixture** covering Phase 1 and Phase 2 success, undo/redo, persistence failure and rollback, resource ownership, overwrite, malformed input, and unsafe-path cases.
-- **Honest capability discovery**: every `tools/list` and `resources/list` entry now reports `_meta.didi.executionModes`, `implemented`, and an explanatory `reason` when unavailable. Dynamic metadata also reports the current live/offline state.
-- **Cross-version integration harness** covering Godot 4.5.1, 4.6.2, and 4.7.2.
+Full write-ups for 1.2.0: [as first written](https://github.com/saworbit/didi/blob/fd9d0e5e8517143c0e892166c225485a840b2d87/CHANGELOG.md#120---2026-08-27).
 
-### Fixed & Hardened
-- Removed the non-functional GDScript singleton pump and all live-success stubs.
-- Prevented timed-out queued commands from mutating the editor later and bounded main-thread work to 64 commands per frame.
-- Made timeout cancellation state-aware for queued commands. Phase 3 later replaced the already-running indefinite wait with bounded `unknown_outcome` handling and route quarantine.
-- Removed the original outer timeout race; Phase 3 subsequently made the public live-call deadline finite and generation-safe.
-- Made cross-thread bridge readiness atomic and resolved pending IPC promises during editor shutdown.
-- Kept scene mutations in the edited scene's UndoRedo history, used undo-side references for removed nodes, and preserved node lifetimes across history pruning.
-- Rejected unknown or type-incompatible scalar properties and restored exact sibling order after remove and reparent undo.
-- Confined node resolution and mutations to the edited scene subtree, protected its root, rejected cyclic reparenting, and rejected non-`Node` ClassDB objects before UndoRedo registration.
-- Preserved live viewport provenance and dimensions at the public MCP boundary; only real GPU-backed captures report `is_live_frame: true`.
-- Centralized result-level execution provenance and kept offline-only filesystem/parser work out of Godot's main-thread command queue.
-- Updated pull-request CI assertions to cover the complete 68-registration surface, dynamic execution modes, resources, and canonical scene hierarchy output.
-- Made `scene_close` conservative on Godot 4.5: explicit `discard_unsaved: true` is required because that API cannot expose active-scene dirty state.
-- Made explicit scene overwrite replace the ResourceLoader cache and reload existing editor tabs before verification.
-- Raised the minimum supported Godot version to 4.5, where the required native main-loop callback API is available.
-- Reconciled README, quickstart, capability, tool, protocol, architecture, operations, LLM, resource/prompt, developer, roadmap, contribution, and security documentation with the verified implementation.
+### Added
+
+- `2026-08-27` Phase 2 project wiring: 18 new live tools for scripts, autoloads, input actions, settings, groups and scenes. [PR #2](https://github.com/saworbit/didi/pull/2)
+- `2026-08-27` Atomic project persistence through `ProjectSettings.save()` with snapshot rollback and live `InputMap` reload. [PR #2](https://github.com/saworbit/didi/pull/2)
+- `2026-08-27` A disposable 119-request Godot integration fixture covering Phase 1 and Phase 2. [PR #2](https://github.com/saworbit/didi/pull/2)
+- `2026-08-27` Phase 1 live engine substrate for Godot 4.5+. [PR #1](https://github.com/saworbit/didi/pull/1)
+- `2026-08-27` Honest capability discovery: every tool and resource says whether it is implemented, and why not. [PR #1](https://github.com/saworbit/didi/pull/1)
+- `2026-08-27` Cross-version integration harness covering Godot 4.5.1, 4.6.2, and 4.7.2. [PR #1](https://github.com/saworbit/didi/pull/1)
+
+### Fixed
+
+- `2026-08-27` Made timeout cancellation state-aware for queued commands. [PR #2](https://github.com/saworbit/didi/pull/2)
+- `2026-08-27` Removed the original outer timeout race; Phase 3 subsequently made the public live-call deadline finite and generation-safe. [PR #2](https://github.com/saworbit/didi/pull/2)
+- `2026-08-27` Updated pull-request CI assertions to cover the complete 68-registration surface, dynamic execution modes, resources, and canonical scene hierarchy output. [PR #2](https://github.com/saworbit/didi/pull/2)
+- `2026-08-27` Made `scene_close` conservative on Godot 4.5: explicit `discard_unsaved: true` is required because that API cannot expose active-scene dirty state. [PR #2](https://github.com/saworbit/didi/pull/2)
+- `2026-08-27` Made explicit scene overwrite replace the ResourceLoader cache and reload existing editor tabs before verification. [PR #2](https://github.com/saworbit/didi/pull/2)
+- `2026-08-27` Removed the non-functional GDScript singleton pump and all live-success stubs. [PR #1](https://github.com/saworbit/didi/pull/1)
+- `2026-08-27` Prevented timed-out queued commands from mutating the editor later and bounded main-thread work to 64 commands per frame. [PR #1](https://github.com/saworbit/didi/pull/1)
+- `2026-08-27` Made cross-thread bridge readiness atomic and resolved pending IPC promises during editor shutdown. [PR #1](https://github.com/saworbit/didi/pull/1)
+- `2026-08-27` Kept scene mutations in the edited scene's UndoRedo history, used undo-side references for removed nodes, and preserved node lifetimes across history pruning. [PR #1](https://github.com/saworbit/didi/pull/1)
+- `2026-08-27` Rejected unknown or type-incompatible scalar properties and restored exact sibling order after remove and reparent undo. [PR #1](https://github.com/saworbit/didi/pull/1)
+- `2026-08-27` Node edits are confined to the edited scene, its root is protected, and cyclic reparenting is rejected. [PR #1](https://github.com/saworbit/didi/pull/1)
+- `2026-08-27` Preserved live viewport provenance and dimensions at the public MCP boundary; only real GPU-backed captures report `is_live_frame: true`. [PR #1](https://github.com/saworbit/didi/pull/1)
+- `2026-08-27` Centralized result-level execution provenance and kept offline-only filesystem/parser work out of Godot's main-thread command queue. [PR #1](https://github.com/saworbit/didi/pull/1)
+- `2026-08-27` Raised the minimum supported Godot version to 4.5, where the required native main-loop callback API is available. [PR #1](https://github.com/saworbit/didi/pull/1)
+- `2026-08-27` Reconciled every user and developer document with the verified implementation. [PR #1](https://github.com/saworbit/didi/pull/1)
 
 ---
 
 ## [1.1.0] - 2026-08-26
 
-### Added
-- **Exhaustive 40-Tool Canonical Surface across 9 Functional Domains**:
-  - *Domain 1 (Scene Tree & Nodes)*: `scene_get_hierarchy`, `scene_instantiate_node`, `scene_remove_node`, `scene_reparent_node`, `scene_set_property`, `scene_get_property`, `scene_duplicate_node`.
-  - *Domain 2 (Signals & Events)*: `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit`.
-  - *Domain 3 (Scripting & Reflection)*: `script_check_syntax`, `script_reflect_class` (built-in Godot 4 class reflection), `script_get_symbols` (AST parser), `script_patch_method`.
-  - *Domain 4 (Vision & Render)*: `viewport_capture_frame`, `viewport_set_camera_transform`, `viewport_create_test_lab`, `viewport_toggle_debug_draw`.
-  - *Domain 5 (Physics, Animation & Navigation)*: `physics_raycast_query`, `physics_simulate_step`, `nav_bake_mesh`, `nav_query_path`, `anim_list_tracks`, `anim_play_track`.
-  - *Domain 6 (Tilemaps & GridMaps)*: `tilemap_set_cells`, `tilemap_get_used_rect`, `gridmap_set_cells`.
-  - *Domain 7 (Resources & Project Files)*: `resource_create`, `resource_inspect`, `project_list_resources`, `project_get_uid_map`.
-  - *Domain 8 (Execution, Input & Debug)*: `runtime_launch`, `runtime_inject_input`, `runtime_get_call_stack`, `runtime_read_profiler`.
-  - *Domain 9 (Editor Lifecycle & Undo/Redo)*: `editor_undo`, `editor_redo`, `editor_save_scene`, `editor_reload_project`.
-- **Roadmap Specification**: Added `docs/ROADMAP.md` documenting the full 9-domain matrix and architectural vision.
-- **Backwards Compatibility**: Preserved all 10 legacy v1.0 names (`capture_viewport`, `get_scene_hierarchy`, etc.) as registered compatibility surface.
-- **Enhanced Error Reading**: Structured error capture for GDScript compiler errors, runtime crashes, and engine log buffers.
+Full write-ups for 1.1.0: [as first written](https://github.com/saworbit/didi/blob/fd9d0e5e8517143c0e892166c225485a840b2d87/CHANGELOG.md#110---2026-08-26).
 
-### Fixed & Hardened
-- Restrict named pipe DACL strictly to Owner and Local Administrators (`D:(A;;GA;;;BA)(A;;GA;;;OW)`), removing `WD`.
-- Enforce `0600` permissions on POSIX Unix domain sockets.
-- Fix recursive mutex deadlock in `PosixIpcClient`.
-- Implement non-blocking I/O cancellation (`CancelIoEx` on Win32, `shutdown()` on POSIX) for graceful server shutdown.
-- Windows binary stdio mode (`_setmode(_O_BINARY)`) and `cin.gcount()` framing checks.
-- Project root path traversal boundary confinement on file modifications.
-- Atomic log verbosity level management (`std::atomic<LogLevel>`).
+### Added
+
+- `2026-08-26` A 40-tool canonical surface across nine domains, from the scene tree to the editor lifecycle. [3e23174](https://github.com/saworbit/didi/commit/3e23174732d8d66868e8229b703fccfee4ce18e0)
+- `2026-08-26` Added `docs/ROADMAP.md` with the nine-domain matrix and the architectural vision. [3e23174](https://github.com/saworbit/didi/commit/3e23174732d8d66868e8229b703fccfee4ce18e0)
+- `2026-08-26` The ten v1.0 tool names stay registered as a compatibility surface. [3e23174](https://github.com/saworbit/didi/commit/3e23174732d8d66868e8229b703fccfee4ce18e0)
+- `2026-08-26` Structured capture of GDScript compiler errors, runtime crashes and engine logs. [3e23174](https://github.com/saworbit/didi/commit/3e23174732d8d66868e8229b703fccfee4ce18e0)
+
+### Fixed
+
+- `2026-08-26` Restrict named pipe DACL strictly to Owner and Local Administrators (`D:(A;;GA;;;BA)(A;;GA;;;OW)`), removing `WD`. [3e23174](https://github.com/saworbit/didi/commit/3e23174732d8d66868e8229b703fccfee4ce18e0)
+- `2026-08-26` Enforce `0600` permissions on POSIX Unix domain sockets. [3e23174](https://github.com/saworbit/didi/commit/3e23174732d8d66868e8229b703fccfee4ce18e0)
+- `2026-08-26` Fix recursive mutex deadlock in `PosixIpcClient`. [3e23174](https://github.com/saworbit/didi/commit/3e23174732d8d66868e8229b703fccfee4ce18e0)
+- `2026-08-26` Implement non-blocking I/O cancellation (`CancelIoEx` on Win32, `shutdown()` on POSIX) for graceful server shutdown. [3e23174](https://github.com/saworbit/didi/commit/3e23174732d8d66868e8229b703fccfee4ce18e0)
+- `2026-08-26` Windows binary stdio mode (`_setmode(_O_BINARY)`) and `cin.gcount()` framing checks. [3e23174](https://github.com/saworbit/didi/commit/3e23174732d8d66868e8229b703fccfee4ce18e0)
+- `2026-08-26` Project root path traversal boundary confinement on file modifications. [3e23174](https://github.com/saworbit/didi/commit/3e23174732d8d66868e8229b703fccfee4ce18e0)
+- `2026-08-26` Atomic log verbosity level management (`std::atomic<LogLevel>`). [3e23174](https://github.com/saworbit/didi/commit/3e23174732d8d66868e8229b703fccfee4ce18e0)
 
 ---
 
 ## [1.0.0] - 2026-08-26
 
+Full write-ups for 1.0.0: [as first written](https://github.com/saworbit/didi/blob/fd9d0e5e8517143c0e892166c225485a840b2d87/CHANGELOG.md#100---2026-08-26).
+
 ### Added
-- **Unified C++20 Dual Architecture**: Single CMake build producing standalone stdio executable (`didi.exe`) and in-engine GDExtension shared library (`didi_extension.dll`).
-- **MCP 2024-11-05 Protocol Support**: Fully compliant JSON-RPC 2.0 transport supporting newline-delimited messages and HTTP-style `Content-Length` headers over `stdin`/`stdout`.
-- **Historical v1.0 IPC**: Ultra-low-latency OS Named Pipe transport (`\\.\pipe\godot_didi_ipc` on Windows, UNIX domain sockets on POSIX) with 4-byte little-endian length framing. Phase 3 and Phase 6 later replaced the fixed endpoint name with authenticated, project-keyed, process/session-unique endpoints.
-- **10 Domain Tools Across 5 Functional Areas**:
-  - *Visual & Vision*: `capture_viewport` (SubViewport off-screen PNG memory blit + RFC 4648 Base64 output), `create_visual_test_lab` (multi-camera sandbox generator).
-  - *Scene Tree*: `get_scene_hierarchy` (hierarchical AST parser and live tree reflection), `mutate_scene_tree` (with Godot `EditorUndoRedoManager` transaction safety).
-  - *Scripting & Code*: `analyze_script_diagnostics` (GDScript 2.0 static linter + headless compiler validator), `patch_script_symbols` (safe regex-escaped symbol replacer).
-  - *Runtime & Debug*: `execute_test_session` (headless engine subprocess runner with timeout enforcement and structured log capture), `inject_input_event`.
-  - *Asset Pipeline*: `query_project_resources` (UID & `res://` dependency scanner with deny-list pruning), `instantiate_asset`.
-- **Dynamic MCP Resources**: Registered `godot://project/tree`, `godot://editor/state`, and `godot://runtime/logs` URIs.
-- **Turnkey Prompt Templates**:
-  - `godot_debug_visual_anomaly`: Guided 5-step visual inspection and correction loop.
-  - `godot_generate_gameplay_slice`: End-to-end mechanic construction and validation workflow.
-- **Offline Fallback Engine**: Enables code diagnostics, asset indexing, scene parsing, and headless test sessions even when the Godot Editor GUI is closed.
-- **Security & Safety Hardening**:
-  - Restricted SDDL security descriptor for Windows Named Pipes (Current User & Administrators only).
-  - GDExtension IPC restricted to `GDEXTENSION_INITIALIZATION_EDITOR` level.
-  - Viewport dimension clamping (16x16 to 4096x4096) and 128 MB frame buffer safety limits.
-  - Parameterized CLI process arguments preventing shell injection.
-  - Async-signal safe shutdown mechanism.
-- **Automated Test Suite**: 16 unit and integration tests passing with 100% success rate (`didi_tests.exe`).
-- **Comprehensive Documentation Suite**: Architecture guide, tool reference manual, dynamic resources/prompts guide, integration guide, developer guide, API protocol specification, admin guide, and LLM system prompt instructions.
+
+- `2026-08-26` One C++20 CMake build produces the standalone `didi` server and the in-engine GDExtension. [f062719](https://github.com/saworbit/didi/commit/f062719d7960e31733898c8df80cbd3623b46167)
+- `2026-08-26` MCP 2024-11-05 over JSON-RPC 2.0 on stdio, newline-delimited or `Content-Length` framed. [f062719](https://github.com/saworbit/didi/commit/f062719d7960e31733898c8df80cbd3623b46167)
+- `2026-08-26` Named-pipe and Unix-socket IPC to the editor, later replaced by per-session endpoints. [f062719](https://github.com/saworbit/didi/commit/f062719d7960e31733898c8df80cbd3623b46167)
+- `2026-08-26` Ten tools across vision, scene tree, scripting, runtime and the asset pipeline. [f062719](https://github.com/saworbit/didi/commit/f062719d7960e31733898c8df80cbd3623b46167)
+- `2026-08-26` Resources `godot://project/tree`, `godot://editor/state` and `godot://runtime/logs`. [f062719](https://github.com/saworbit/didi/commit/f062719d7960e31733898c8df80cbd3623b46167)
+- `2026-08-26` Prompt templates `godot_debug_visual_anomaly` and `godot_generate_gameplay_slice`. [f062719](https://github.com/saworbit/didi/commit/f062719d7960e31733898c8df80cbd3623b46167)
+- `2026-08-26` Offline fallback: diagnostics, asset indexing, scene parsing and headless test runs without an open editor. [f062719](https://github.com/saworbit/didi/commit/f062719d7960e31733898c8df80cbd3623b46167)
+- `2026-08-26` Security hardening: restricted pipe access, editor-only IPC, frame size limits and no shell in process launches. [f062719](https://github.com/saworbit/didi/commit/f062719d7960e31733898c8df80cbd3623b46167)
+- `2026-08-26` 16 unit and integration tests. [f062719](https://github.com/saworbit/didi/commit/f062719d7960e31733898c8df80cbd3623b46167)
+- `2026-08-26` Documentation: architecture, tool reference, integration, developer, API, admin and LLM guides. [f062719](https://github.com/saworbit/didi/commit/f062719d7960e31733898c8df80cbd3623b46167)
+
+---
+
+## Stability
+
+Didi follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html), and a
+major number is a statement about compatibility rather than about maturity. The
+two are worth separating, because this project is further along on the first
+than on the second.
+
+**What a version number promises.** The tool names, their arguments, and the
+shape of a successful answer are the public surface. A change that breaks one of
+them bumps the major, which is what 2.0.0 is: the release corrects error codes,
+handshake validation and schema strictness across the surface, and a client
+written against 1.8.0 can break on any of them.
+
+**What it does not promise.** Didi is not finished. Its own status block says
+`PARTIAL_DELIVERY`, three canonical tools are registered and unimplemented, and
+[the roadmap](docs/ROADMAP.md) has Phase 12, the phase that owns reproducible
+artifacts, supported platform matrices and compatibility guarantees across
+versions, barely started: `didi setup` and `didi doctor` are the whole of it so
+far. Until it lands there is no upgrade or rollback guarantee beyond the
+changelog, and no commitment to a support window for an older minor line.
+
+Read the version for what changed. Read this section and the roadmap for how
+much of the thing exists.

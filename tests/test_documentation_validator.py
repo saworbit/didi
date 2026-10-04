@@ -106,6 +106,13 @@ Phase 7 status is PARTIAL_DELIVERY after the 2026-08-29 Godot 4.5.1 and Godot 4.
             "CHANGELOG.md",
             """# Changelog
 
+## Releases at a glance
+
+| Version | Released | What it brought | Added | Changed | Fixed | Breaking | Tools implemented |
+| :--- | :--- | :--- | ---: | ---: | ---: | ---: | :--- |
+| [Unreleased](#unreleased) | not yet | Work since 1.4.0 |  |  |  |  | 117 of 120 |
+| [1.4.0](#140---2026-08-28) | 2026-08-28 | Version 1.4.0 | 0 | 0 | 1 | 0 | 54 of 72 |
+
 ## [Unreleased]
 
 Discovery now exposes 120 canonical tools plus 10 legacy registrations (130 total). 117 canonical tools are implemented and 3 remain unimplemented.
@@ -115,6 +122,10 @@ Phase 7 is PARTIAL_DELIVERY: 15/18 names are implementation-feasible and 3/18 ar
 ## [1.4.0] - 2026-08-28
 
 Version 1.4.0 release record.
+
+### Fixed
+
+- `2026-08-28` Version 1.4.0 release record. [PR #6](https://github.com/saworbit/didi/pull/6)
 """,
         )
         self.write(
@@ -884,6 +895,117 @@ Second section.
 
         self.assertFalse(
             any("Managed editor recovery section must name" in error for error in errors),
+            errors,
+        )
+
+    CHANGELOG = """# Changelog
+
+## Releases at a glance
+
+| Version | Released | What it brought | Added | Changed | Fixed | Breaking | Tools implemented |
+| :--- | :--- | :--- | ---: | ---: | ---: | ---: | :--- |
+| [Unreleased](#unreleased) | not yet | Work since 2.0.0 |  |  |  |  | 117 of 120 |
+| [2.0.0](#200---2026-09-13) | 2026-09-13 | A major | 1 | 0 | 2 | 1 | 113 of 116 |
+
+## [Unreleased]
+
+### Fixed
+
+- `2026-10-04` A newer fix. [#2](https://github.com/saworbit/didi/issues/2) · [PR #3](https://github.com/saworbit/didi/pull/3)
+- `2026-10-02` An older fix. [PR #1](https://github.com/saworbit/didi/pull/1)
+
+## [2.0.0] - 2026-09-13
+
+A summary for the release notes.
+
+### Breaking
+
+- **A field is renamed.** It was `old` and is `new`, and a client reading
+  `old` reads nothing.
+
+### Added
+
+- `2026-09-12` A new tool. [f062719](https://github.com/saworbit/didi/commit/f062719d7960e31733898c8df80cbd3623b46167)
+
+### Fixed
+
+- `2026-09-13` One fix. [PR #5](https://github.com/saworbit/didi/pull/5)
+- `2026-09-13` Another fix on the same day. [PR #4](https://github.com/saworbit/didi/pull/4)
+"""
+
+    def test_changelog_of_dated_lines_is_valid(self):
+        self.assertEqual(VALIDATOR.validate_changelog(self.CHANGELOG), [])
+
+    def test_changelog_entry_is_one_line(self):
+        text = self.CHANGELOG.replace(
+            "- `2026-10-02` An older fix. [PR #1](https://github.com/saworbit/didi/pull/1)",
+            "- **An older fix.** It wrapped onto a second line, the way\n"
+            "  the paragraphs this replaced did. [PR #1](https://github.com/saworbit/didi/pull/1)",
+        )
+
+        errors = VALIDATOR.validate_changelog(text)
+
+        self.assertTrue(any("is one line shaped like" in error for error in errors), errors)
+
+    def test_changelog_entry_needs_a_reference(self):
+        text = self.CHANGELOG.replace(
+            " [PR #1](https://github.com/saworbit/didi/pull/1)", " (see the pull request)"
+        )
+
+        errors = VALIDATOR.validate_changelog(text)
+
+        self.assertTrue(any("is one line shaped like" in error for error in errors), errors)
+
+    def test_changelog_entry_has_a_length_limit(self):
+        text = self.CHANGELOG.replace("An older fix.", "An older fix " + "and more " * 20 + "detail.")
+
+        errors = VALIDATOR.validate_changelog(text)
+
+        self.assertTrue(any("keep it to 160" in error for error in errors), errors)
+
+    def test_changelog_sections_run_newest_first(self):
+        text = self.CHANGELOG.replace("`2026-10-02` An older fix", "`2026-10-05` An older fix")
+
+        errors = VALIDATOR.validate_changelog(text)
+
+        self.assertTrue(any("runs newest first" in error for error in errors), errors)
+
+    def test_changelog_rejects_an_invented_or_repeated_section(self):
+        invented = self.CHANGELOG.replace("### Added", "### Fixed & Hardened")
+        repeated = self.CHANGELOG.replace(
+            "### Added", "### Fixed\n\n- `2026-09-13` Early. [PR #7](https://github.com/saworbit/didi/pull/7)\n\n### Added"
+        )
+
+        self.assertTrue(
+            any("is not a changelog section" in error for error in VALIDATOR.validate_changelog(invented))
+        )
+        self.assertTrue(
+            any("has a second '### Fixed'" in error for error in VALIDATOR.validate_changelog(repeated))
+        )
+
+    def test_changelog_glance_counts_match_the_sections(self):
+        text = self.CHANGELOG.replace("| 1 | 0 | 2 | 1 |", "| 1 | 0 | 3 | 1 |")
+
+        errors = VALIDATOR.validate_changelog(text)
+
+        self.assertIn(
+            "CHANGELOG.md: the 2.0.0 glance row says 3 for Fixed; the section has 2", errors
+        )
+
+    def test_changelog_glance_lists_every_release(self):
+        text = self.CHANGELOG.replace(
+            "| [2.0.0](#200---2026-09-13) | 2026-09-13 | A major | 1 | 0 | 2 | 1 | 113 of 116 |\n", ""
+        )
+
+        errors = VALIDATOR.validate_changelog(text)
+
+        self.assertTrue(any("must list every version section" in error for error in errors), errors)
+
+    def test_changelog_glance_unreleased_row_matches_the_surface(self):
+        errors = VALIDATOR.validate_changelog(self.CHANGELOG, expected=(121, 118, 3))
+
+        self.assertIn(
+            "CHANGELOG.md: the [Unreleased] glance row must say '118 of 121' tools implemented",
             errors,
         )
 
