@@ -39,6 +39,10 @@ struct EditorCopyRefresh {
     json scenes_discarded_unsaved = json::object();
     // The files the editor held and could not reload, each with the reason.
     json failed = json::array();
+    // The files written into a folder the editor did not list, and still did
+    // not list once the scan asked for them was applied or the wait ran out
+    // (#1177). A class_name such a file declares is unknown to every check.
+    std::vector<std::string> index_pending;
 };
 
 // discard_unsaved lets a tab that has unsaved changes, or one the engine
@@ -57,12 +61,13 @@ std::optional<Error> refuseUnsavedOpenScenes(const std::shared_ptr<ipc::IIpcClie
                                              bool discard_unsaved);
 
 // A writer of one file: editor_copy_reloaded, editor_scene_reloaded when a tab
-// held it and was rebuilt, and editor_copy_error when the editor held the file
-// and could not reload it.
+// held it and was rebuilt, editor_copy_error when the editor held the file
+// and could not reload it, and editor_index_pending when it does not list it.
 void reportEditorCopy(json& payload, const EditorCopyRefresh& refresh);
 
-// A writer of several: editor_copies_reloaded, editor_scenes_reloaded, and
-// editor_copy_errors naming each file the editor held and could not reload.
+// A writer of several: editor_copies_reloaded, editor_scenes_reloaded,
+// editor_copy_errors naming each file the editor held and could not reload,
+// and editor_index_pending naming each file it does not list.
 void reportEditorCopies(json& payload, const EditorCopyRefresh& refresh);
 
 } // namespace didi::mcp
