@@ -528,6 +528,20 @@ The three Phase 7 blockers are unchanged; the newest name is `asset_configure_im
 
 ### Fixed
 
+- **Every Godot object Didi constructs is finished or not handed back
+  (#1166).** The bridge, the expression sandbox and the engine output logger
+  each had their own copy of the construction that sends
+  `NOTIFICATION_POSTINITIALIZE`, and the two outside the bridge handed back the
+  half-built object when the notification could not be sent. There is one
+  copy now, which destroys such an object and fails.
+
+- **A failed undo registration no longer leaves the editor mid-action
+  (#1152, part 1).** Script attach and detach, group add and remove, and the
+  shader uniform write returned an error with the action still open when a do
+  or undo step failed to register, so the next mutation was nested inside it
+  and its commit executed nothing. They close it now, as every other handler
+  does. A test seam forces the failure in the signal bridge probe.
+
 - **A detached runtime_launch no longer takes another project's game
   (#1167).** It waited for any game session that started after the call, from
   any project, so a game started meanwhile on another project was reported as

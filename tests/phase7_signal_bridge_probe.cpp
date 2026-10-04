@@ -252,6 +252,15 @@ void runSeamScenarios(Probe& probe) {
     Probe::require(Probe::connection(probe.list("BasicEmitter"), "mismatch_disconnect", "Receiver", "receive_basic", 2),
                    "disconnect mismatch rollback did not restore pre-state");
 
+    // A registration that fails after the action was opened closes it, so the
+    // next mutation commits an action of its own. Left open, the next one was
+    // nested inside it, its commit executed nothing, and the group add it made
+    // read back as not applied (#1152).
+    configure("group_undo_registration_failure");
+    Probe::error(probe.request("scene.addToGroup", {{"target_node", "Receiver"}, {"group", "seam_probe"}}), 500);
+    Probe::success(probe.request("scene.addToGroup", {{"target_node", "Receiver"}, {"group", "seam_probe"}}));
+    Probe::success(probe.request("scene.removeFromGroup", {{"target_node", "Receiver"}, {"group", "seam_probe"}}));
+
     configure("connect_postcondition_mismatch_rollback_failure");
     auto unknown = probe.request("signal.connect", relation("mismatch_connect", "receive_basic"));
     Probe::error(unknown, 500, "signal_postcondition_mismatch");
