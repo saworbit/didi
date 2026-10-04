@@ -123,7 +123,9 @@ What `setup` does, in order, and what stops it:
    touched: other servers, other keys, their order and the file's indentation
    stay. JSON with comments, JSON that does not parse, and a Codex
    `config.toml` that declares `mcp_servers.didi` outside the block setup
-   writes are refused and left as they are. The arguments are the ones the
+   writes are refused and left as they are. A table under it, such as
+   `[mcp_servers.didi.env]` after `# END didi`, is kept, as the JSON clients
+   keep keys added to their entry. The arguments are the ones the
    dock's Connect page writes: `--project <root> --log-level INFO`.
 6. Writes the agent guide between `<!-- BEGIN didi -->` and `<!-- END didi -->`
    into `AGENTS.md`, or into the project's `CLAUDE.md`, `.claude/CLAUDE.md` or

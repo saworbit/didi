@@ -108,6 +108,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Fixed
 
+- `2026-10-05` `didi setup` keeps a table a person adds under Codex's `mcp_servers.didi`, such as its `env`, instead of refusing the file. [#1144](https://github.com/saworbit/didi/issues/1144) · [PR #1186](https://github.com/saworbit/didi/pull/1186)
 - `2026-10-05` Eight refusals name the fix that applies instead of another, and the route failure and session-kind refusals read as proper sentences. [#1184](https://github.com/saworbit/didi/issues/1184) · [PR #1185](https://github.com/saworbit/didi/pull/1185)
 - `2026-10-04` A 422 from `script_attach_to_node` or `scene_call_method` names its own fix, not `export_presets.cfg`. [#1181](https://github.com/saworbit/didi/issues/1181) · [PR #1183](https://github.com/saworbit/didi/pull/1183)
 - `2026-10-04` A Godot that cannot be run is reported at once on Linux and macOS, and CI runs the live `didi setup` test on each engine line. [#1144](https://github.com/saworbit/didi/issues/1144) · [PR #1180](https://github.com/saworbit/didi/pull/1180)
