@@ -18,7 +18,6 @@ ci:
           - '.github/workflows/**'
           - '.github/dependabot.yml'
           - '.github/labeler.yml'
-          - '.github/release.yml'
 
 build:
   - changed-files:
