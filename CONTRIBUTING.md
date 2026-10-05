@@ -320,9 +320,10 @@ sections under each release.
 2. **Bump the version** in one pull request, following the release contract
    above, and give the new `## [x.y.z] - <date>` section in `CHANGELOG.md` a
    short summary above its first `###` heading and a row in the *Releases at a
-   glance* table, whose counts the validator checks. That summary, and the
-   `### Breaking` list when there is one, lead the release notes, so write them
-   for someone deciding whether to upgrade, with absolute links.
+   glance* table, whose counts the validator checks. The release notes are
+   that whole section: the summary, the `### Breaking` list when there is one,
+   then every dated line. Write the summary for someone deciding whether to
+   upgrade. Relative links are made absolute at the tag.
 3. **Tag the merge commit** on `main` as `vx.y.z` and push the tag. The
    workflow refuses a tag that does not match `CMakeLists.txt`, `plugin.cfg`
    and the changelog section, before it compiles anything.
