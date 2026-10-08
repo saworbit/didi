@@ -6,7 +6,7 @@
     "note": "main before Q4 (15c8458), 2026-09-28"
   },
   "budgets": {
-    "full": 205800,
+    "full": 208800,
     "core": 96900
   },
   "raises": [
@@ -33,6 +33,14 @@
         96900
       ],
       "why": "Q7 part 1 (#1133): scene_set_property takes writes and scene_get_property takes reads, each a closed, typed item schema, and property_name names a path into a resource the node holds. Both tools are in core, so the same 962 bytes land in both profiles. Measured 205,471 full and 96,616 core with that change; core stays under half of the 203,634 Q4 measured."
+    },
+    {
+      "date": "2026-10-08",
+      "full": [
+        205800,
+        208800
+      ],
+      "why": "Q9 part 1 (#1206): runtime_run_scenario, which proves a behaviour in one call, with its step vocabulary as one closed item schema (kind, frames, action, expression, context_node, minimum, maximum, text, level, absent, label) and a request_id because it runs as a job. It is not in core, so core does not move. Measured 208,435 full with that change, against 205,666 on main: 2,768 bytes, all of it the new entry."
     }
   ]
 }
