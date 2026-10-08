@@ -224,8 +224,10 @@ public:
             asked = stopped.isOk();
             if (stopped.isErr()) report["stop_error"] = stopped.error().message;
             // The exit that follows is this run's doing, not a crash, and a
-            // later call that meets it should say so (#595).
-            runtime::recordRequestedStop({m_gamePid, m_sessionId, 0, 0});
+            // later call that meets it should say so (#595). Only when the
+            // game took the request, as runtime_stop records it: a stop that
+            // failed may be a game that had already died.
+            if (asked) runtime::recordRequestedStop({m_gamePid, m_sessionId, 0, 0});
         }
         report["stop_requested"] = asked;
         if (m_routeOpen) {

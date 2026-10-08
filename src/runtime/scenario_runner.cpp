@@ -592,7 +592,8 @@ private:
         bool every_step_ran = true;
         for (size_t index = 0; index < m_spec.steps.size(); ++index) {
             const auto outcome = m_steps[index].value("outcome", std::string());
-            if (outcome == "not_run") every_step_ran = false;
+            // Finished, not merely started: done for an action, held for a check.
+            if (outcome != "done" && outcome != "held") every_step_ran = false;
             if (!m_spec.steps[index].isAssertion()) continue;
             ++total;
             if (outcome == "held") {
