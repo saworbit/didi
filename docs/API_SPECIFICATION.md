@@ -345,7 +345,7 @@ serves a stale claim is worse than no cache.
 | `tools/call` | Client $\rightarrow$ Server | Executes a tool by name with arguments |
 | `resources/list` | Client $\rightarrow$ Server | Lists all available static and dynamic resources |
 | `resources/templates/list` | Client $\rightarrow$ Server | Lists the parameterised resource shapes, currently `blackboard://{board}/state` and `blackboard://{board}/tasks` |
-| `resources/read` | Client $\rightarrow$ Server | Retrieves contents of a specific resource URI (`godot://...`), the change journal `godot://project/journal` among them |
+| `resources/read` | Client $\rightarrow$ Server | Retrieves contents of a specific resource URI (`godot://...`), the change journal `godot://project/journal` and the proof records `godot://project/scenarios` among them |
 | `prompts/list` | Client $\rightarrow$ Server | Lists all registered prompt templates |
 | `prompts/get` | Client $\rightarrow$ Server | Evaluates a prompt template with provided arguments |
 | `tasks/get` | Client $\rightarrow$ Server | Reads a task this server answered a `tools/call` with, and its result once completed. See [Jobs and the tasks extension](#jobs-and-the-tasks-extension). |
@@ -488,11 +488,13 @@ one request at a time, and `project_export` and `csharp_check_build` run a
 helper process that can take minutes, during which nothing else was answered.
 `asset_reimport` and `editor_reload_project` wait for the editor to apply a
 scan, which can take minutes on a slow editor, past the fifteen seconds the
-bridge waits for any one command.
+bridge waits for any one command. `runtime_run_scenario` and `project_run_tests`
+(Q9) start a Godot of their own and run a scenario or a test suite to the end,
+which can take most of their timeout.
 Each can now run as a **job**: the same tool call, through the same pipeline,
 on a thread of its own, with its answer kept.
 
-**`request_id`.** All four tools take an optional `request_id`, 8 to 64 letters,
+**`request_id`.** All six tools take an optional `request_id`, 8 to 64 letters,
 digits, `.`, `_`, `:` or `-`, chosen by the caller. A call that carries one runs
 as a job and waits up to about ten seconds for it:
 
