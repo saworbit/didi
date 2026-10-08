@@ -178,6 +178,7 @@ if (-not $fixtureRoot.StartsWith($buildRoot + [IO.Path]::DirectorySeparatorChar,
 . (Join-Path $PSScriptRoot 'change_journal.ps1')
 . (Join-Path $PSScriptRoot 'reimport_job.ps1')
 . (Join-Path $PSScriptRoot 'scenario_runner.ps1')
+. (Join-Path $PSScriptRoot 'test_runner.ps1')
 Remove-TestDirectory -Path $fixtureRoot
 # Only what the fixture tracks. The Python suites run the server against
 # tests/godot_smoke and leave runtime state in its .didi/, which a whole copy
@@ -5671,6 +5672,9 @@ text = "Not a key"
     # Q9 in docs/BUILD_QUEUE.md. It starts and stops games of its own beside
     # the harness's, and puts its controller back as it found it.
     Invoke-ScenarioRunnerBlock -EditorSession $editorSession -FixtureRoot $fixtureRoot
+
+    # Q9 part 2. Its own project, with a stand-in for GUT's runner.
+    Invoke-TestRunnerBlock -BuildRoot $buildRoot
 
     # Last, while the editor and the game are both still attached, so no block
     # after it depends on what its cases leave behind. Q2 in docs/BUILD_QUEUE.md.
