@@ -180,6 +180,7 @@ where it is. Editor or game.
 - `runtime_watch_invariants` is game only. Use it to assert what must stay true while a game runs rather than polling: it samples every frame and pauses on the frame that breaks a condition. Read `outcome` before anything else. `inconclusive` means an invariant never produced a reading, which is not the same as `held`.
 - `runtime_explore_scene` is game only, and it is the one that drives. It holds the project's own InputMap actions on a seeded schedule and samples probes you name every frame, then reports the intervals in which nothing it pressed moved anything. Use it to find out whether a level can be played at all rather than pressing one button per round trip and looking between presses. Name the actions and the probes: it cannot know what counts as movement in your project, and it presses actions rather than setting a position because only the project's own controller knows how its player moves. A probe expression reads a property with `node.get("position").x`, not `position.x`. Check `measured` before reading anything else: false means no probe returned a value and the window is unobserved. It reports observations and carries `verdict: "none"`. A stuck interval is a window where nothing moved, which is a cutscene, a menu or a soft lock, and telling those apart is yours. Resume the game before you explore it: a paused tree queues injected input instead of delivering it, so a paused run is refused with `data.code: paused_game_session` rather than reported still, and `pause_on_stuck` means the previous run is what paused it.
 - `runtime_run_scenario` is how to say "it works" with evidence. It starts its own game, so attach nothing first, and it never moves your selected session. Write the steps a tester would: `wait_until` the state you need, `press` an action, `wait` frames, then `assert` what must be true and `assert_output` what the game must print. A scenario with no assertion is refused. Only `verdict: "pass"` is a pass; on `fail`, `failure` names the step and the value it read. Before citing an earlier pass, read `godot://project/scenarios`: a pass is `stale` once a file it ran against has changed.
+- `project_run_tests` runs the project's own GUT or GdUnit4 tests when it has them. Trust its `verdict`, not the framework's exit code, which is 0 for a run that tested nothing. On `fail`, `failed_tests` and `tests` name each failure with its file and message; on `error`, `reason` says why nothing was proved, and `not_imported` means the project has to be opened in the editor once first.
 - `project_rename_references` renames a symbol in the scene connections and animation tracks that serialize it. Call `project_analyze_impact` first to see every site. It never rewrites GDScript or C#, or the `[autoload]` key in `project.godot`: it reports those with file and line, and they are yours to patch. Renaming an autoload and leaving that key gives every script a global that no longer exists, so read the kind on each entry. An empty report is not proof that nothing else names the symbol.
 - `script_reflect_class` consults a limited built-in map; it is not authoritative live ClassDB documentation.
 
@@ -228,7 +229,7 @@ Whether music loops is an import option, not a property of the player, so no sce
 
 ### Observe or control an already-running session
 
-Ordinary Didi starts detached and exposes 121 canonical tools plus 10 legacy registrations. On first availability it may select the sole same-project session, or a unique editor among games; same-kind ambiguity stays detached. Verify rather than assume selection:
+Ordinary Didi starts detached and exposes 122 canonical tools plus 10 legacy registrations. On first availability it may select the sole same-project session, or a unique editor among games; same-kind ambiguity stays detached. Verify rather than assume selection:
 
 1. Call `runtime_list_sessions`, preferably with the canonical project path.
 2. Choose the intended `editor` or `game` descriptor and call `runtime_attach_session` if deterministic auto-selection did not choose it.
@@ -245,12 +246,12 @@ Treat `eval_gdscript` as a small read-only expression language. Prefer literals,
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `118/121`
+**Canonical implementation:** `119/122`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `PARTIAL_DELIVERY`. The implementation is 118/121 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and exactly 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version.
+Phase 7 is `PARTIAL_DELIVERY`. The implementation is 119/122 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and exactly 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version.
 
 All 15 feasible Phase 7 names are delivered and callable, including `tilemap_set_cells`, `tilemap_get_used_rect`, and `gridmap_set_cells` in editor sessions. Do not call or advertise the remaining 3 as available; feasibility is not implementation. See [reproducible evidence](PHASE_7_API_FEASIBILITY.md) and the [approved executable plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 

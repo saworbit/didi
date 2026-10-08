@@ -464,7 +464,7 @@ void ResourceRegistry::registerAllDefaultResources() {
     scenarios.uri = "godot://project/scenarios";
     scenarios.name = "Scenario Results";
     scenarios.description =
-        "The last run of each runtime_run_scenario, newest first, with whether a file it ran against has changed since.";
+        "The last run of each runtime_run_scenario and project_run_tests, newest first, with whether a file it ran against has changed since.";
     scenarios.mimeType = "application/json";
     scenarios.capability = {{"offline_fallback"}, true, {}, "local"};
     scenarios.readHandler = []() -> Result<std::string> {

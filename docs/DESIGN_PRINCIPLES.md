@@ -232,7 +232,11 @@ pass is only true for the files it ran against.
 `editor_reload_project` as jobs: a
 `request_id` repeated after a client timeout reads the job instead of running
 the work again, a native test counts the runs, and the live harness checks that
-a repeated reimport job reimports nothing. [Q9](BUILD_QUEUE.md#q9-proof-in-one-call) is the rest.
+a repeated reimport job reimports nothing. [Q9](BUILD_QUEUE.md#q9-proof-in-one-call)
+is the rest: `runtime_run_scenario` refuses a scenario with no assertion, stops
+its game on every path and records the files a pass was true for, and
+`project_run_tests` judges a test run by its report, so a run that tested
+nothing, or lost a test file to a parse error, cannot pass.
 
 ## P8. Own the boundary, stay in scope, derive every fact
 

@@ -185,7 +185,9 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         , "didi_control_room"
         , "project_search_text", "project_search_symbols",
         "csharp_check_build", "shader_check_compile", "project_list_export_presets",
-        "project_export", "gridmap_export_mesh_library"
+        "project_export", "gridmap_export_mesh_library",
+        // Starts a headless Godot of its own to run GUT or GdUnit4 (Q9).
+        "project_run_tests"
     };
 
     // What a tool with no live path calls its own work, in its own answers.
@@ -319,6 +321,7 @@ CallToolResult handleAssetConfigureImport(const json& args, std::shared_ptr<ipc:
 Result<json> previewAssetConfigureImport(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleCSharpCheckBuild(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleShaderCheckCompile(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleProjectRunTests(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleProjectListExportPresets(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleProjectExport(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 CallToolResult handleProjectAddExportPreset(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
@@ -1230,6 +1233,7 @@ const std::unordered_map<std::string_view, std::string_view> kToolTitles = {
     {"project_remove_autoload", "Remove an autoload"},
     {"project_remove_input_action", "Remove an input action"},
     {"project_rename_references", "Rename a resource everywhere"},
+    {"project_run_tests", "Run the project's tests"},
     {"project_search_symbols", "Search for symbols"},
     {"project_search_text", "Search project text"},
     {"project_set_autoload", "Register an autoload"},
@@ -5421,6 +5425,33 @@ void ToolRegistry::registerAllDefaultTools() {
         }}, {"required", {"shader_path"}}};
         // The source client, for the same reason script_check_syntax takes it.
         t.handler = [this](const json& args) { return handleShaderCheckCompile(args, m_sourceIpcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        // Q9 part 2: the project's own GUT or GdUnit4 tests, run headless. The
+        // verdict rules are in src/offline/test_reports.cpp.
+        ToolDefinition t;
+        t.name = "project_run_tests";
+        t.description =
+            "Runs the project's GUT or GdUnit4 tests in a headless Godot and returns a result per test, "
+            "read from the JUnit report rather than the exit code. verdict is pass only when tests ran, "
+            "one passed, none failed and every test script loaded.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"framework", {{"type", "string"}, {"enum", json::array({"auto", "gut", "gdunit4"})},
+                               {"default", "auto"},
+                               {"description", "auto runs whichever of the two the project has."}}},
+                {"paths", {{"type", "array"}, {"maxItems", 32}, {"items", {{"type", "string"}}},
+                           {"description", "res:// directories or .gd files. Default res://test, or GUT's .gutconfig.json."}}},
+                {"name", {{"type", "string"}, {"pattern", "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"}, {"default", "tests"},
+                          {"description", "Recorded as .didi/scenarios/<name>.json."}}},
+                {"timeout_seconds", {{"type", "integer"}, {"minimum", 5}, {"maximum", 900}, {"default", 120}}},
+                {"request_id", {{"type", "string"}, {"minLength", 8}}}
+            }},
+            {"additionalProperties", false}
+        };
+        t.handler = [this](const json& args) { return handleProjectRunTests(args, m_sourceIpcClient); };
         registerTool(std::move(t));
     }
     {

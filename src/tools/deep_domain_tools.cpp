@@ -9,6 +9,9 @@
 #include "didi/offline/process_runner.hpp"
 #include "didi/offline/project_file_lock.hpp"
 #include "didi/offline/test_runner.hpp"
+#include "didi/offline/test_reports.hpp"
+#include "didi/runtime/scenario_runner.hpp"
+#include "didi/mcp/jobs.hpp"
 #include "didi/common/engine_version.hpp"
 #include "didi/runtime/session_client.hpp"
 #include <algorithm>
@@ -18,6 +21,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <mutex>
 #include <optional>
 #include <cmath>
@@ -644,6 +648,202 @@ CallToolResult handleShaderCheckCompile(const json& args, std::shared_ptr<ipc::I
         result, offline::engineVersionFromOutput(run.value().output), configured.executable,
         attached.has_value() ? attached->engine_version : std::string());
     return CallToolResult::successJson(result);
+}
+
+// project_run_tests (Q9 part 2). The rules are in src/offline/test_reports.cpp;
+// this starts the framework and keeps what it wrote.
+namespace {
+
+// Every .gd file the run names, for the record of what a pass was true for.
+std::vector<std::string> testScriptSeeds(const std::filesystem::path& root,
+                                         const std::vector<std::string>& test_paths) {
+    std::vector<std::string> seeds;
+    std::vector<std::string> roots = test_paths;
+    if (roots.empty()) {
+        // GUT reads its directories from .gutconfig.json.
+        std::ifstream in(root / ".gutconfig.json", std::ios::binary);
+        const auto config = json::parse(in, nullptr, false);
+        if (config.is_object() && config.contains("dirs") && config["dirs"].is_array()) {
+            for (const auto& dir : config["dirs"]) {
+                if (dir.is_string()) roots.push_back(dir.get<std::string>());
+            }
+        }
+    }
+    for (const auto& path : roots) {
+        if (path.rfind("res://", 0) != 0) continue;
+        const auto target = root / paths::projectPathFromUtf8(path.substr(6));
+        std::error_code error;
+        if (std::filesystem::is_regular_file(target, error)) {
+            seeds.push_back(path);
+            continue;
+        }
+        for (std::filesystem::recursive_directory_iterator it(
+                 target, std::filesystem::directory_options::skip_permission_denied, error), end;
+             !error && it != end && seeds.size() < 512; it.increment(error)) {
+            if (it->path().extension() != ".gd") continue;
+            const auto relative = it->path().lexically_relative(root);
+            seeds.push_back("res://" + paths::projectPathToUtf8(relative.generic_string()));
+        }
+    }
+    std::sort(seeds.begin(), seeds.end());
+    seeds.erase(std::unique(seeds.begin(), seeds.end()), seeds.end());
+    return seeds;
+}
+
+// The error a run that did not pass answers with, the report kept beside it.
+json testRunError(const offline::TestRunVerdict& verdict, int timeout_seconds) {
+    const auto& reason = verdict.reason;
+    if (reason == "tests_failed" || (reason == "scripts_did_not_load" && verdict.verdict == "fail")) {
+        return {{"code", 422}, {"message", verdict.summary},
+                {"data", {{"code", "tests_failed"}, {"retryable", false},
+                          {"no_remedy", "No argument changes a failing test: each is named in failed_tests "
+                                        "with its message. Change the code or the test, then run again."}}}};
+    }
+    if (reason == "scripts_did_not_load") {
+        return {{"code", 422}, {"message", verdict.summary},
+                {"data", {{"code", "scripts_did_not_load"}, {"retryable", false},
+                          {"no_remedy", "A script in scripts_did_not_load does not parse; fix it, then run "
+                                        "the tests again."}}}};
+    }
+    if (reason == "no_tests" || reason == "nothing_proved") {
+        return {{"code", 422}, {"message", verdict.summary},
+                {"data", {{"code", "no_tests"}, {"reason", reason}, {"field", "paths"}, {"retryable", false}}}};
+    }
+    if (reason == "no_report" && verdict.report.value("not_imported", false)) {
+        return {{"code", 409}, {"message", verdict.summary},
+                {"data", {{"code", "project_not_imported"}, {"retryable", false},
+                          {"no_remedy", "Open the project in the Godot editor once, or run godot --headless "
+                                        "--import in it, so the framework's classes exist."}}}};
+    }
+    if (reason == "timeout") {
+        json data = {{"code", "timeout"}, {"timeout_seconds", timeout_seconds}, {"retryable", true}};
+        if (timeout_seconds < offline::kMaxTestTimeoutSeconds) {
+            data["retry_with"] = {{"timeout_seconds", offline::kMaxTestTimeoutSeconds}};
+        } else {
+            data["no_remedy"] = "The tests ran past the longest timeout this tool takes.";
+        }
+        return {{"code", 504}, {"message", verdict.summary}, {"data", std::move(data)}};
+    }
+    if (reason == "cancelled") {
+        return {{"code", 409}, {"message", verdict.summary},
+                {"data", {{"code", "job_cancelled"}, {"field", "request_id"}, {"retryable", false}}}};
+    }
+    // no_report, report_unreadable, exit_code_disagrees: the framework did
+    // something neither answer describes, which output_tail shows.
+    return {{"code", 500}, {"message", verdict.summary},
+            {"data", {{"reason", reason}, {"retryable", false}}}};
+}
+
+}  // namespace
+
+CallToolResult handleProjectRunTests(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    namespace fs = std::filesystem;
+    auto request = offline::parseTestRunRequest(args);
+    if (request.isErr()) return CallToolResult::fromError(request.error());
+    auto root = projectRoot();
+    if (root.isErr()) return CallToolResult::fromError(root.error());
+    auto framework = offline::chooseTestFramework(request.value(), offline::detectTestFrameworks(root.value()));
+    if (framework.isErr()) return CallToolResult::fromError(framework.error());
+    auto test_paths = offline::resolveTestPaths(request.value(), framework.value(), root.value());
+    if (test_paths.isErr()) return CallToolResult::fromError(test_paths.error());
+    const bool gut = framework.value().framework == offline::TestFramework::gut;
+
+    // Emptied first, so a report an earlier run left is never read as this
+    // run's. The name is a plain file name, so this stays inside .didi.
+    const auto& name = request.value().name;
+    const auto report_dir = root.value() / ".didi" / "tests" / name;
+    std::error_code error;
+    fs::remove_all(report_dir, error);
+    fs::create_directories(report_dir, error);
+    if (error) {
+        return CallToolResult::errorJson(500, "The report directory .didi/tests/" + name +
+                                                  " cannot be created: " + error.message());
+    }
+    const std::string report_res = "res://.didi/tests/" + name + (gut ? "/results.xml" : "");
+
+    const auto ran_against =
+        runtime::collectProofFiles(root.value(), testScriptSeeds(root.value(), test_paths.value()));
+    const auto started_at_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                   std::chrono::system_clock::now().time_since_epoch())
+                                   .count();
+    auto godot_arguments =
+        offline::isolatedGodotArguments({"--path", paths::projectPathToUtf8(root.value())});
+    for (auto& argument : offline::testCommandArguments(framework.value(), test_paths.value(), report_res)) {
+        godot_arguments.push_back(std::move(argument));
+    }
+    auto run = runGodot(root.value(), godot_arguments, request.value().timeout_seconds);
+    if (run.isErr()) return CallToolResult::fromError(run.error(), "Failed to run the tests: ");
+
+    offline::TestRunFacts facts;
+    facts.framework = framework.value();
+    facts.paths = test_paths.value();
+    facts.exit_code = run.value().exit_code;
+    facts.timed_out = run.value().timed_out;
+    facts.cancelled = run.value().cancelled;
+    facts.output = run.value().output;
+    facts.output_truncated = run.value().output_truncated;
+    // GUT writes the file it was given; GdUnit4 writes report_<n>/results.xml
+    // under the directory it was given.
+    std::optional<fs::path> report_file;
+    if (gut) {
+        if (fs::is_regular_file(report_dir / "results.xml", error)) report_file = report_dir / "results.xml";
+    } else {
+        for (fs::recursive_directory_iterator it(report_dir, error), end; !error && it != end;
+             it.increment(error)) {
+            if (it->path().filename() == "results.xml") {
+                report_file = it->path();
+                break;
+            }
+        }
+    }
+    if (report_file) {
+        std::ifstream in(*report_file, std::ios::binary);
+        facts.report_xml = std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    }
+    const auto verdict = offline::judgeTestRun(facts);
+
+    json report = verdict.report;
+    report["kind"] = "tests";
+    report["scenario"] = name;
+    report["report_file"] = report_file ? json(paths::resourcePathOf(*report_file)) : json(nullptr);
+    report["duration_seconds"] = run.value().duration_seconds;
+    report["files"] = runtime::scenarioFilesJson(ran_against);
+    report["files_truncated"] = ran_against.truncated;
+    const auto changed = runtime::changedScenarioFiles(root.value(), ran_against.files);
+    report["stale"] = !changed.empty();
+    if (!changed.empty()) {
+        json changed_paths = json::array();
+        for (const auto& file : changed) changed_paths.push_back(file.path);
+        report["changed_files"] = std::move(changed_paths);
+    }
+    report["ran_at"] = isoTimestamp(started_at_ms);
+    // Which engine ran them, as the other tools that start their own Godot say.
+    const auto sessions = std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(ipc);
+    const auto attached = sessions ? sessions->observableSession()
+                                   : std::optional<runtime::SessionDescriptor>{};
+    const auto configured = offline::resolveGodotExecutableDetailed();
+    versions::annotateConfiguredEngine(report, configured.configured, configured.configured_rejected);
+    versions::annotateCheckEngine(report, offline::engineVersionFromOutput(run.value().output),
+                                  configured.executable,
+                                  attached.has_value() ? attached->engine_version : std::string());
+
+    const auto record_path = runtime::scenarioRecordDirectory(root.value()) / (name + ".json");
+    fs::create_directories(record_path.parent_path(), error);
+    auto written = error ? Result<void>(Error(500, error.message()))
+                         : files::writeFileAtomically(
+                               record_path, report.dump(2, ' ', false, json::error_handler_t::replace));
+    if (written.isOk()) {
+        report["record"] = ".didi/scenarios/" + name + ".json";
+    } else {
+        report["record"] = nullptr;
+        report["record_error"] = "The record could not be written, so godot://project/scenarios will not "
+                                 "list this run: " + written.error().message;
+    }
+    if (verdict.verdict == "pass") return CallToolResult::successJson(report);
+    report["error"] = testRunError(verdict, request.value().timeout_seconds);
+    auto result = CallToolResult::successJson(report);
+    result.isError = true;
+    return result;
 }
 
 // The refusal both export tools give for a presets file that is there and

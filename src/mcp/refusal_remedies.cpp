@@ -284,6 +284,18 @@ const std::map<std::string, Rule>& rules() {
         {"scenario_failed", [](const Refusal&) { return field("steps"); }},
         // The game a scenario started may still be running. The site names the
         // session when it had one; this is for when it did not.
+        // project_run_tests (Q9 part 2). The site names the remedy for each;
+        // these are for a refusal that reached the floor without one.
+        {"tests_failed", [](const Refusal&) {
+            return noRemedy("The failing tests are named in failed_tests; change the code or the test.");
+        }},
+        {"no_tests", [](const Refusal&) { return field("paths"); }},
+        {"scripts_did_not_load", [](const Refusal&) {
+            return noRemedy("A script in scripts_did_not_load does not parse; fix it first.");
+        }},
+        {"project_not_imported", [](const Refusal&) {
+            return noRemedy("Open the project in the Godot editor once, or run godot --headless --import.");
+        }},
         {"teardown_failed", [](const Refusal&) {
             return nextCall("runtime_list_sessions", json::object(),
                             "Find the game the scenario started and stop it with runtime_stop.");

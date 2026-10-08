@@ -52,6 +52,7 @@
     "didi_control_room": "A dashboard of this server's own state: its log tail, uptime and request history, which differ on every run.",
     "nav_query_path": "The fixture has no navigation region, and a path query needs a baked navigation mesh on a map the NavigationServer has synchronised.",
     "project_get_uid_map": "Maps every uid in the project, the addon's included, and a fresh copy mints new uids for the addon's SVGs when it imports them.",
+    "project_run_tests": "Runs the project's GUT or GdUnit4 tests in a Godot of its own, and the fixture has no test framework; tests/test_runner.ps1 runs it against one on every engine line.",
     "project_verify_changes": "Runs the game on a scratch copy of the project with the proposed changes applied, which is a launch rather than a read of the fixture.",
     "runtime_read_logs": "Returns the server and extension log stream since the editor started, so how many records it holds depends on how far startup got before the call.",
     "runtime_read_output": "Returns the editor's own console output since it started, so how many records it holds depends on how far startup got before the call.",

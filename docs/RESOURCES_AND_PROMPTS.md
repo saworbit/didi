@@ -94,10 +94,13 @@ Example shape:
 
 - Mode: `local`. It reads files, so it answers with no engine at all.
 - MIME type: `application/json`.
-- The last run of each `runtime_run_scenario` name (Q9), newest first, read
-  from `.didi/scenarios/`. Each entry carries `name`, `verdict`, `ran_at`,
-  `scene_path`, `assertions`, `frames`, `record` (the file holding the whole
-  answer), and `stale`.
+- The last run of each `runtime_run_scenario` and `project_run_tests` name
+  (Q9), newest first, read from `.didi/scenarios/`. Each entry carries `name`,
+  `kind` (`scenario` or `tests`), `verdict`, `ran_at`, `record` (the file
+  holding the whole answer) and `stale`; a scenario adds `scene_path`,
+  `assertions` and `frames`, and a test run adds `framework`, `paths` and
+  `counts`. The two tools share the names, so a run replaces the last run of
+  its name whichever tool made it.
 - `stale` is worked out on this read. Each record holds the SHA-256 of the
   files the run was true for; a file whose bytes differ now, that is missing
   now, or that was missing then and exists now, is named in `changed_files`

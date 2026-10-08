@@ -63,6 +63,7 @@
                     "project_list_export_presets",
                     "project_list_resources",
                     "project_rename_references",
+                    "project_run_tests",
                     "project_search_symbols",
                     "project_search_text",
                     "project_set_setting",
@@ -2167,7 +2168,7 @@
             "subscribable": false
           }
         },
-        "description": "The last run of each runtime_run_scenario, newest first, with whether a file it ran against has changed since.",
+        "description": "The last run of each runtime_run_scenario and project_run_tests, newest first, with whether a file it ran against has changed since.",
         "mimeType": "application/json",
         "name": "Scenario Results",
         "uri": "godot://project/scenarios"
@@ -6653,6 +6654,72 @@
         },
         "name": "project_rename_references",
         "title": "Rename a resource everywhere"
+      },
+      "project_run_tests": {
+        "_meta": {
+          "didi": {
+            "confirmationsSkipped": false,
+            "currentMode": "local",
+            "editorConnected": false,
+            "executionModes": [
+              "local"
+            ],
+            "implemented": true,
+            "legacy": false,
+            "liveAvailable": false
+          }
+        },
+        "annotations": {
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": true,
+          "readOnlyHint": true
+        },
+        "description": "Runs the project's GUT or GdUnit4 tests in a headless Godot and returns a result per test, read from the JUnit report rather than the exit code. verdict is pass only when tests ran, one passed, none failed and every test script loaded.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "framework": {
+              "default": "auto",
+              "description": "auto runs whichever of the two the project has.",
+              "enum": [
+                "auto",
+                "gut",
+                "gdunit4"
+              ],
+              "type": "string"
+            },
+            "name": {
+              "default": "tests",
+              "description": "Recorded as .didi/scenarios/<name>.json.",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+              "type": "string"
+            },
+            "paths": {
+              "description": "res:// directories or .gd files. Default res://test, or GUT's .gutconfig.json.",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 32,
+              "type": "array"
+            },
+            "request_id": {
+              "description": "Runs the call as a job; repeating it with this request_id reads the result.",
+              "minLength": 8,
+              "type": "string"
+            },
+            "timeout_seconds": {
+              "default": 120,
+              "description": "How long the framework may run before it is stopped.",
+              "maximum": 900,
+              "minimum": 5,
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        },
+        "name": "project_run_tests",
+        "title": "Run the project's tests"
       },
       "project_search_symbols": {
         "_meta": {

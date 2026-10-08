@@ -1473,10 +1473,36 @@ which is the round trip, not the game.
 **What it does not do.** It does not judge anything it was not asked: the verdict
 is the scenario's assertions and nothing else, and `verdict: "pass"` means every
 step ran, every assertion held and the game was stopped. It does not run GUT or
-GdUnit4; that is the second half of Q9 and its own name. It does not click
+GdUnit4; `project_run_tests`, below, does. It does not click
 Controls by position, which `ui_list_controls` and `runtime_inject_input` already
 do for a caller that wants them (#1189 is that gap), and it does not press input
 into a paused game's always-processing UI (#1191).
+
+### ACCEPTED (IMPLEMENTED): `project_run_tests`
+
+| Field | Value |
+| :--- | :--- |
+| **Name** | `project_run_tests` |
+| **Failing workflow** | *"Make the player double-jump and prove it works"*, in a project that already proves its behaviour with GUT or GdUnit4. The agent has no way to run the project's own tests. It can start a Godot with `runtime_launch` and read what it printed, and then it has to guess. Both frameworks have an exit code that lies in the direction that matters: measured on 4.7.2, GUT exits 0 when it found no tests and exits 0 without writing any report when the project was never imported, GdUnit4 exits 0 when it found no tests, and a test file that does not parse is left out of GUT's report altogether while the run exits on whatever the other tests did. So "exit 0" is reported as "the tests pass" for runs that tested nothing. |
+| **Execution modes** | `local`. It starts a headless Godot of its own on the selected project, as `csharp_check_build` and `shader_check_compile` start theirs, and needs no editor and no session. |
+| **Safety class** | `read`, with `openWorldHint: true`. It runs the project's own test code, so what it reaches is decided by the project, the same as `csharp_check_build`. It changes nothing in the project; it writes the framework's report and its own record under `.didi/`. |
+| **Proving test** | Native: `TestReports.*` in `tests/test_test_reports.cpp` covers framework detection, the arguments each framework is given, JUnit parsing of reports both frameworks wrote on 4.5.1, 4.6.2 and 4.7.2, and the verdict: no tests, no report, a script that did not load, an exit code the report contradicts and a test with no assertion can never pass. Live: the Godot integration harness runs a project whose framework follows GUT's command-line contract on all three engine lines and requires a per-test result, a failing test named with its message, and a test file that does not parse to fail the run. The real GUT 9.7.1 and GdUnit4 6.2.2 were run through the tool the same way on all three lines before it shipped, and the reports they wrote are the native tests' fixtures. |
+| **Reviewer** | Unassigned. It is a read in the same sense `csharp_check_build` is: it runs the project's tests, which are project code and can do anything project code can. It adds no engine binding and no bridge method. |
+
+**Why the report and not the exit code.** Both frameworks write JUnit XML, and
+the verdict comes from it: `pass` needs a report that parsed, at least one test
+that passed, no failure and no error, and no script error in the output. The
+exit code is kept and compared, and a report it contradicts is an `error`
+rather than either answer.
+
+**Why not inside the editor.** Both frameworks have an editor panel, and both
+run headless from the command line. The command line is the path each
+documents for CI, so it is the one whose behaviour is defined, and a headless
+run cannot disturb the editor the user is working in.
+
+**What it does not do.** It does not install a framework, choose one for the
+project, or rewrite a test. It runs one of the two it finds. It does not run a
+C# test framework.
 
 ## Deprecating a name
 

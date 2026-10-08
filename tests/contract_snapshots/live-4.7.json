@@ -3568,6 +3568,14 @@
             }
           }
         },
+        "project_run_tests": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
         "project_search_symbols": {
           "_meta": {
             "didi": {

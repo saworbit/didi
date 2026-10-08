@@ -21,6 +21,7 @@
     "project_list_export_presets": {"unbounded": "Every preset in the file; a file over 1 MiB is refused, not cut."},
     "project_list_input_actions": {"unbounded": "Every action the project declares, with no cap on the list."},
     "project_list_resources": {"bounded": "the 20000-file resource index, and a directory walk that stops on an error"},
+    "project_run_tests": {"bounded": "1000 tests listed, 1 MiB of output and a 16 MiB report; truncated says when one bit"},
     "project_search_symbols": {"bounded": "max_results, and the scan's file and byte limits"},
     "project_search_text": {"bounded": "max_results, and the scan's file and byte limits"},
     "project_verify_changes": {"bounded": "32 attributed error lines per check, 4096-byte details, and 64 untracked names"},

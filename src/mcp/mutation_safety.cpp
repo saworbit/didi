@@ -158,7 +158,7 @@ const std::unordered_set<std::string_view> kRunsProjectCode = {
     "runtime_restore_checkpoint", "runtime_recover_editor",
     "csharp_check_build", "shader_check_compile", "project_export",
     "gridmap_export_mesh_library", "runtime_launch", "script_check_syntax",
-    "runtime_run_scenario"
+    "runtime_run_scenario", "project_run_tests"
 };
 
 // Tools that change server state without touching the project. They are not
