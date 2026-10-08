@@ -1,9 +1,11 @@
 #include "didi/mcp/mcp_protocol.hpp"
+#include "didi/tools/game_launch.hpp"
 #include "didi/tools/phase7_live_forward.hpp"
 #include "didi/mcp/mutation_safety.hpp"
 #include "didi/common/ipc_channel.hpp"
 #include "didi/common/engine_version.hpp"
 #include "didi/common/project_path.hpp"
+#include "didi/common/scene_node_path.hpp"
 #include "didi/common/logger.hpp"
 #include "didi/common/version.hpp"
 #include "didi/gdextension/expression_sandbox.hpp"
@@ -87,29 +89,7 @@ std::optional<std::string> validateRuntimePath(const std::string& path) {
 }
 
 std::optional<std::string> validateExpressionContextPath(const std::string& path) {
-    if (path.empty() || path.size() > 1024 || path.find('\0') != std::string::npos) {
-        return "context_node must be a non-empty path of at most 1024 bytes";
-    }
-    if (path != "/root" && path.rfind("/root/", 0) != 0) {
-        return "context_node must be a canonical absolute path beneath /root";
-    }
-    if (path.back() == '/' || path.find("//") != std::string::npos ||
-        path.find('\\') != std::string::npos || path.find(':') != std::string::npos) {
-        return "context_node must be a canonical absolute NodePath";
-    }
-    size_t start = 1;
-    while (start <= path.size()) {
-        const auto end = path.find('/', start);
-        const auto segment = path.substr(start, end == std::string::npos
-                                                   ? std::string::npos
-                                                   : end - start);
-        if (segment.empty() || segment == "." || segment == ".." || segment.front() == '%') {
-            return "context_node may not contain aliases or relative segments";
-        }
-        if (end == std::string::npos) break;
-        start = end + 1;
-    }
-    return std::nullopt;
+    return paths::runtimeContextPathProblem(path);
 }
 
 // subject is the session a call named, when it named one. Its error is about
@@ -425,6 +405,48 @@ CallToolResult handleEvalGdscript(const json& args, std::shared_ptr<ipc::IIpcCli
     return forwardLiveRuntime("eval_gdscript", "runtime.evalGdscript", args, ipc);
 }
 
+std::string launchedProjectPath() {
+    // The project the game was started on, spelled the way a session
+    // descriptor spells its project_path. A game from another project that
+    // happened to start after this call did is not the one it started, and
+    // matching on time alone took it (#1167).
+    std::error_code canonical_error;
+    auto project_root = std::filesystem::weakly_canonical(std::filesystem::current_path(), canonical_error);
+    if (canonical_error) project_root = std::filesystem::current_path().lexically_normal();
+    return paths::nativePathToUtf8(project_root);
+}
+
+json awaitLaunchedGameSession(const std::shared_ptr<runtime::IRuntimeSessionClient>& sessions,
+                              uint64_t spawned_pid, int64_t launched_at_ms,
+                              std::chrono::steady_clock::time_point deadline) {
+    if (!sessions) return nullptr;
+    const auto this_project = launchedProjectPath();
+    while (std::chrono::steady_clock::now() < deadline) {
+        auto listed = sessions->listSessions(this_project);
+        if (listed.isOk() && listed.value().is_object() && listed.value()["sessions"].is_array()) {
+            json by_time;
+            for (const auto& entry : listed.value()["sessions"]) {
+                if (entry.value("kind", std::string()) != "game") continue;
+                if (entry.value("project_path", std::string()) != this_project) continue;
+                // The pid when it is ours, which it is for a direct launch.
+                if (entry.value("pid", uint64_t{0}) == spawned_pid) return entry;
+                // It is not for a Godot that launches the engine and waits -- a
+                // godot.cmd wrapper, or Godot's own Windows console build --
+                // where the game is a grandchild with a pid of its own. A game
+                // session on this project that started after this call did is
+                // the one this call started.
+                if (by_time.is_null() &&
+                    entry.value("started_at_ms", int64_t{0}) >= launched_at_ms) {
+                    by_time = entry;
+                }
+            }
+            if (!by_time.is_null()) return by_time;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    return nullptr;
+}
+
 CallToolResult handleExecuteTestSession(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     if (!args.is_object()) {
         return CallToolResult::errorJson(400, "runtime_launch arguments must be an object");
@@ -516,42 +538,9 @@ CallToolResult handleExecuteTestSession(const json& args, std::shared_ptr<ipc::I
     if (detach && session_res.pid != 0) {
         const auto deadline =
             std::chrono::steady_clock::now() + std::chrono::seconds(timeout_sec);
-        // The project the game was started on, spelled the way a session
-        // descriptor spells its project_path. A game from another project that
-        // happened to start after this call did is not the one it started, and
-        // matching on time alone took it (#1167).
-        std::error_code canonical_error;
-        auto project_root = std::filesystem::weakly_canonical(std::filesystem::current_path(), canonical_error);
-        if (canonical_error) project_root = std::filesystem::current_path().lexically_normal();
-        const auto this_project = paths::nativePathToUtf8(project_root);
-        json published;
+        json published = awaitLaunchedGameSession(sessions_for_detach, session_res.pid,
+                                                   launched_at_ms, deadline);
         std::string attach_error;
-        while (std::chrono::steady_clock::now() < deadline) {
-            if (sessions_for_detach) {
-                auto listed = sessions_for_detach->listSessions(this_project);
-                if (listed.isOk() && listed.value().is_object() &&
-                    listed.value()["sessions"].is_array()) {
-                    for (const auto& entry : listed.value()["sessions"]) {
-                        if (entry.value("kind", std::string()) != "game") continue;
-                        if (entry.value("project_path", std::string()) != this_project) continue;
-                        // The pid when it is ours, which it is for a direct
-                        // launch. It is not for a Godot that launches the
-                        // engine and waits -- a godot.cmd wrapper, or Godot's
-                        // own Windows console build -- where the game is a
-                        // grandchild with a pid of its own. A game session on
-                        // this project that started after this call did is the
-                        // one this call started.
-                        if (entry.value("pid", uint64_t{0}) == session_res.pid ||
-                            entry.value("started_at_ms", int64_t{0}) >= launched_at_ms) {
-                            published = entry;
-                            break;
-                        }
-                    }
-                }
-            }
-            if (!published.is_null()) break;
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        }
         if (!published.is_null()) {
             // The pid that matters is the game's, not the launcher's.
             result["pid"] = published["pid"];

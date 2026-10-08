@@ -158,6 +158,7 @@ set(CORE_SOURCES
     src/common/image_diff.cpp
     src/common/capture_cache.cpp
     src/common/secure_random.cpp
+    src/common/sha256.cpp
     src/common/ipc_channel_win32.cpp
     src/mcp/jsonrpc.cpp
     src/mcp/mcp_server.cpp
