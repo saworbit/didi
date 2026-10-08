@@ -256,7 +256,7 @@ constexpr const char* kTasksExtension = "io.modelcontextprotocol/tasks";
 bool runsAsJob(const std::string& canonical) {
     return canonical == "project_export" || canonical == "csharp_check_build" ||
            canonical == "asset_reimport" || canonical == "editor_reload_project" ||
-           canonical == "runtime_run_scenario";
+           canonical == "runtime_run_scenario" || canonical == "project_run_tests";
 }
 
 // Whether this request declared the tasks extension in its own capabilities.

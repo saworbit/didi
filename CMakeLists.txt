@@ -213,6 +213,7 @@ set(CORE_SOURCES
     src/offline/project_file_lock.cpp
     src/offline/import_options.cpp
     src/offline/test_runner.cpp
+    src/offline/test_reports.cpp
     src/offline/process_runner.cpp
     src/offline/deep_domain_support.cpp
     src/tools/visual_tools.cpp
@@ -422,6 +423,7 @@ set(TEST_SOURCES
     tests/test_invariant_watch.cpp
     tests/test_scene_exploration.cpp
     tests/test_scenario_runner.cpp
+    tests/test_test_reports.cpp
     tests/test_segmentation.cpp
     tests/test_runtime_output.cpp
     tests/test_expression_sandbox.cpp

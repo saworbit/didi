@@ -335,6 +335,8 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
         {"runtime_run_scenario.steps",
          "In order: wait, wait_until, press, assert, assert_output, capture. At least one assert, "
          "or an assert_output that requires a line."},
+        {"project_run_tests.timeout_seconds",
+         "How long the framework may run before it is stopped."},
         {"runtime_run_scenario.timeout_seconds",
          "The whole run, launch and stop included."},
         {"runtime_list_sessions.project_path",
