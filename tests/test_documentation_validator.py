@@ -1002,10 +1002,10 @@ A summary for the release notes.
         self.assertTrue(any("must list every version section" in error for error in errors), errors)
 
     def test_changelog_glance_unreleased_row_matches_the_surface(self):
-        errors = VALIDATOR.validate_changelog(self.CHANGELOG, expected=(121, 118, 3))
+        errors = VALIDATOR.validate_changelog(self.CHANGELOG, expected=(122, 119, 3))
 
         self.assertIn(
-            "CHANGELOG.md: the [Unreleased] glance row must say '118 of 121' tools implemented",
+            "CHANGELOG.md: the [Unreleased] glance row must say '119 of 122' tools implemented",
             errors,
         )
 

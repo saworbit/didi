@@ -79,6 +79,7 @@
                     "runtime_recover_editor",
                     "runtime_recovery_status",
                     "runtime_restore_checkpoint",
+                    "runtime_run_scenario",
                     "scene_get_hierarchy",
                     "script_check_syntax",
                     "script_create",
@@ -2152,6 +2153,24 @@
         "mimeType": "application/json",
         "name": "Change Journal",
         "uri": "godot://project/journal"
+      },
+      "godot://project/scenarios": {
+        "_meta": {
+          "didi": {
+            "currentMode": "local",
+            "editorConnected": false,
+            "executionModes": [
+              "local"
+            ],
+            "implemented": true,
+            "liveAvailable": false,
+            "subscribable": false
+          }
+        },
+        "description": "The last run of each runtime_run_scenario, newest first, with whether a file it ran against has changed since.",
+        "mimeType": "application/json",
+        "name": "Scenario Results",
+        "uri": "godot://project/scenarios"
       },
       "godot://project/tree": {
         "_meta": {
@@ -8833,6 +8852,148 @@
         },
         "name": "runtime_restore_checkpoint",
         "title": "Restore a checkpoint"
+      },
+      "runtime_run_scenario": {
+        "_meta": {
+          "didi": {
+            "confirmationsSkipped": false,
+            "currentMode": "local",
+            "editorConnected": false,
+            "executionModes": [
+              "local"
+            ],
+            "implemented": true,
+            "legacy": false,
+            "liveAvailable": false
+          }
+        },
+        "annotations": {
+          "destructiveHint": true,
+          "idempotentHint": false,
+          "openWorldHint": true,
+          "readOnlyHint": false
+        },
+        "description": "Proves a behaviour in one call: runs scene_path in a paused game of its own, steps it frame by frame through steps, and stops it. verdict is pass only when every step ran and every assertion held; a scenario with no assertion is refused. godot://project/scenarios marks a pass stale once a file it ran against changes.",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "dry_run": {
+              "default": false,
+              "description": "Return a non-mutating change preview instead of executing.",
+              "type": "boolean"
+            },
+            "headless": {
+              "default": true,
+              "description": "false renders frames, which a capture step needs.",
+              "type": "boolean"
+            },
+            "name": {
+              "description": "Recorded as .didi/scenarios/<name>.json.",
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+              "type": "string"
+            },
+            "request_id": {
+              "description": "Runs the call as a job; repeating it with this request_id reads the result.",
+              "minLength": 8,
+              "type": "string"
+            },
+            "scene_path": {
+              "description": "The res:// scene the game starts in.",
+              "maxLength": 1024,
+              "minLength": 1,
+              "type": "string"
+            },
+            "steps": {
+              "description": "In order: wait, wait_until, press, assert, assert_output, capture. At least one assert, or an assert_output that requires a line.",
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "absent": {
+                    "description": "assert_output: require that no such line appeared.",
+                    "type": "boolean"
+                  },
+                  "action": {
+                    "description": "press: an InputMap action.",
+                    "type": "string"
+                  },
+                  "context_node": {
+                    "type": "string"
+                  },
+                  "expression": {
+                    "description": "assert, wait_until: a sandbox expression such as node.get(\"position\").y; true, or a number within minimum and maximum.",
+                    "maxLength": 512,
+                    "type": "string"
+                  },
+                  "frames": {
+                    "description": "wait: frames to run. press: frames held, default 1. wait_until: at most.",
+                    "maximum": 600,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "kind": {
+                    "enum": [
+                      "wait",
+                      "wait_until",
+                      "press",
+                      "assert",
+                      "assert_output",
+                      "capture"
+                    ],
+                    "type": "string"
+                  },
+                  "label": {
+                    "maxLength": 64,
+                    "type": "string"
+                  },
+                  "level": {
+                    "enum": [
+                      "debug",
+                      "info",
+                      "warning",
+                      "error"
+                    ],
+                    "type": "string"
+                  },
+                  "maximum": {
+                    "type": "number"
+                  },
+                  "minimum": {
+                    "type": "number"
+                  },
+                  "text": {
+                    "description": "assert_output: a line of the game's output containing this.",
+                    "maxLength": 256,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind"
+                ],
+                "type": "object"
+              },
+              "maxItems": 64,
+              "minItems": 1,
+              "type": "array"
+            },
+            "timeout_seconds": {
+              "default": 60,
+              "description": "The whole run, launch and stop included.",
+              "maximum": 300,
+              "minimum": 5,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "name",
+            "scene_path",
+            "steps"
+          ],
+          "type": "object"
+        },
+        "name": "runtime_run_scenario",
+        "title": "Prove a behaviour in one run"
       },
       "runtime_set_paused": {
         "_meta": {

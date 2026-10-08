@@ -342,6 +342,7 @@
         "runtime_recover_editor": "<absent>",
         "runtime_recovery_status": "<absent>",
         "runtime_restore_checkpoint": "<absent>",
+        "runtime_run_scenario": "<absent>",
         "runtime_set_paused": {
           "_meta": {
             "didi": {
