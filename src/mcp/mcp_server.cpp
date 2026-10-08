@@ -255,7 +255,8 @@ constexpr const char* kTasksExtension = "io.modelcontextprotocol/tasks";
 // minutes over, past the bridge's fifteen-second wait for any one command.
 bool runsAsJob(const std::string& canonical) {
     return canonical == "project_export" || canonical == "csharp_check_build" ||
-           canonical == "asset_reimport" || canonical == "editor_reload_project";
+           canonical == "asset_reimport" || canonical == "editor_reload_project" ||
+           canonical == "runtime_run_scenario";
 }
 
 // Whether this request declared the tasks extension in its own capabilities.

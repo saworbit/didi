@@ -42,6 +42,9 @@ const std::unordered_set<std::string_view> kMutations = {
     // of a state change as anything else here. Reversible the same way, so a
     // dry run and no token.
     "runtime_explore_scene",
+    // Starts a game, presses its actions and stops it before answering. Its
+    // only write is its own record under .didi, so a dry run and no token (Q9).
+    "runtime_run_scenario",
     // Reversible through the editor UndoRedo stack, the same as
     // scene_set_property, so it gets a dry run and no confirmation token.
     "shader_set_uniform",
@@ -154,7 +157,8 @@ bool overwriteTargetExists(const ResolvedToolBinding& binding, const json& argum
 const std::unordered_set<std::string_view> kRunsProjectCode = {
     "runtime_restore_checkpoint", "runtime_recover_editor",
     "csharp_check_build", "shader_check_compile", "project_export",
-    "gridmap_export_mesh_library", "runtime_launch", "script_check_syntax"
+    "gridmap_export_mesh_library", "runtime_launch", "script_check_syntax",
+    "runtime_run_scenario"
 };
 
 // Tools that change server state without touching the project. They are not

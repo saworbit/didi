@@ -37,6 +37,7 @@
     "runtime_launch": {"none": "It starts a game process, and the answer says how to reach it and how to end it."},
     "runtime_recover_editor": {"none": "It restarts the managed editor on the saved files, which is the whole of its work."},
     "runtime_restore_checkpoint": {"none": "It stops the managed editor before it replaces the files, so no editor holds an old copy of them."},
+    "runtime_run_scenario": {"none": "It stops the game it started before it answers, and the only file it writes is its own record under .didi."},
     "runtime_set_paused": {"none": "It drives a running game, whose state nothing saves by design."},
     "runtime_step": {"none": "It drives a running game, whose state nothing saves by design."},
     "runtime_stop": {"none": "It ends a game process, which leaves nothing behind to save."},

@@ -279,6 +279,15 @@ const std::map<std::string, Rule>& rules() {
         }},
         {"not_a_packed_scene", [](const Refusal&) { return field("scene_path"); }},
         {"verification_failed", [](const Refusal&) { return field("changes"); }},
+        // A scenario's assertion did not hold: the behaviour, or the step that
+        // looked for it, is what changes (Q9).
+        {"scenario_failed", [](const Refusal&) { return field("steps"); }},
+        // The game a scenario started may still be running. The site names the
+        // session when it had one; this is for when it did not.
+        {"teardown_failed", [](const Refusal&) {
+            return nextCall("runtime_list_sessions", json::object(),
+                            "Find the game the scenario started and stop it with runtime_stop.");
+        }},
         {"not_a_shader_material", [](const Refusal&) { return field("property_name"); }},
         {"not_a_translation", [](const Refusal&) { return field("value"); }},
         {"no_script_attached", [](const Refusal&) { return field("target_node"); }},

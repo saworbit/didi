@@ -9,7 +9,7 @@
 [![CI](https://github.com/saworbit/didi/actions/workflows/ci.yml/badge.svg)](https://github.com/saworbit/didi/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/saworbit/didi/actions/workflows/codeql.yml/badge.svg)](https://github.com/saworbit/didi/actions/workflows/codeql.yml)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/saworbit/didi/badge)](https://scorecard.dev/viewer/?uri=github.com/saworbit/didi)
-[![Tests](https://img.shields.io/badge/tests-1639-2ea043?logo=pytest&logoColor=white)](docs/TEST_INVENTORY.md)
+[![Tests](https://img.shields.io/badge/tests-1657-2ea043?logo=pytest&logoColor=white)](docs/TEST_INVENTORY.md)
 [![Release](https://img.shields.io/github/v/release/saworbit/didi?logo=github&color=blue)](https://github.com/saworbit/didi/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Godot Engine](https://img.shields.io/badge/Godot-4.5%2B-478cbf?logo=godotengine&logoColor=white)](https://godotengine.org/)
@@ -72,7 +72,7 @@ a useful report contains.
 | 📐 [**Design Principles**](docs/DESIGN_PRINCIPLES.md) | **Developers / Contributors** | The rules the tool surface follows, the evidence for each, and what Didi will not build. |
 | 🧪 [**Phase 7 API Feasibility Evidence**](docs/PHASE_7_API_FEASIBILITY.md) | **Developers / Governance** | Reproducible Godot 4.5.1/4.7.2 feasibility results and the exact three blocked contracts. |
 | 📋 [**Phase 7 Approved Executable Plan**](docs/PHASE_7_IMPLEMENTATION_PLAN.md) | **Developers / Governance** | Approved atomic 83/83 plan, stopped at its feasibility gate. |
-| 🛠️ [**Tool Reference Manual**](docs/TOOL_REFERENCE.md) | **Developers / LLMs** | Current behavior and limits for 120 canonical tools plus 10 legacy names. |
+| 🛠️ [**Tool Reference Manual**](docs/TOOL_REFERENCE.md) | **Developers / LLMs** | Current behavior and limits for 121 canonical tools plus 10 legacy names. |
 | 🏛️ [**Architecture & System Topology**](docs/ARCHITECTURE.md) | **Engineers / Architects** | Deep-dive into C++20 design, dual execution topology, threading safety, and named-pipe IPC. |
 | 🔬 [**Token Efficiency Analysis**](docs/research/TOKEN_EFFICIENCY_EXPLORATION.md) | **Engineers / LLMs** | Token footprint, tool schemas, and response economy vs typical Godot MCP bridges. |
 | 📦 [**Dynamic Resources & Prompts**](docs/RESOURCES_AND_PROMPTS.md) | **Developers / LLMs** | Technical specs for `godot://...` resources and prompt workflows. |
@@ -116,7 +116,7 @@ a useful report contains.
 ┌─────────────────────────────────────────────────────────────┐
 │        Didi (C++ MCP Core Engine - didi / didi.exe)         │
 │  - JSON-RPC 2.0 Dispatcher (MCP 2024-11-05 standard)       │
-│  - Registry (120 canonical tools + 10 legacy names)          │
+│  - Registry (121 canonical tools + 10 legacy names)          │
 │  - Dynamic Resources (godot://project/tree, editor/state)   │
 │  - IPC Session Manager (Named Pipes / Local IPC)            │
 │  - Offline Fallback Engine (GDScript AST, .tscn parser)     │
@@ -137,9 +137,9 @@ a useful report contains.
 
 ---
 
-## 🛠️ Protocol Surface (120 Canonical Tools)
+## 🛠️ Protocol Surface (121 Canonical Tools)
 
-The 120 canonical names are the stable protocol surface, with 10 additional legacy registrations (130 total). The implementation remains 117/120 canonical tools, and all 3 Phase 7 names remain registered but unimplemented. Availability is explicit rather than implied: inspect `_meta.didi.executionModes`, `implemented`, `currentMode`, `liveAvailable`, `editorConnected`, and optional selected `sessionKind` from `tools/list`. `editorConnected` is true only for an editor route, while `liveAvailable` also requires that the selected editor/game kind is allowed for that exact definition. Phase 6 keeps the surface stable while requiring an explicit Godot project, adding project-keyed endpoints and one-client runtime locks, and exposing dry-run/confirmation controls on mutations. The coordination tools are the exception to the one-client picture: they are how separate agent processes share decisions and divide work, since each MCP client runs its own `didi` and nothing is shared in memory. Every definition also carries specification `annotations`: `readOnlyHint` describes tool intent using the same classification that drives `dry_run`. In managed mode, an ordinary authorized read can trigger the single editor restart and execute project startup code, so read-only auto-approval must account for that effect. Successful JSON results carry `structuredContent` alongside the text block, and a client that reads only `structuredContent` can decline the copy ([response economy](docs/API_SPECIFICATION.md#response-economy)).
+The 121 canonical names are the stable protocol surface, with 10 additional legacy registrations (131 total). The implementation remains 118/121 canonical tools, and all 3 Phase 7 names remain registered but unimplemented. Availability is explicit rather than implied: inspect `_meta.didi.executionModes`, `implemented`, `currentMode`, `liveAvailable`, `editorConnected`, and optional selected `sessionKind` from `tools/list`. `editorConnected` is true only for an editor route, while `liveAvailable` also requires that the selected editor/game kind is allowed for that exact definition. Phase 6 keeps the surface stable while requiring an explicit Godot project, adding project-keyed endpoints and one-client runtime locks, and exposing dry-run/confirmation controls on mutations. The coordination tools are the exception to the one-client picture: they are how separate agent processes share decisions and divide work, since each MCP client runs its own `didi` and nothing is shared in memory. Every definition also carries specification `annotations`: `readOnlyHint` describes tool intent using the same classification that drives `dry_run`. In managed mode, an ordinary authorized read can trigger the single editor restart and execute project startup code, so read-only auto-approval must account for that effect. Successful JSON results carry `structuredContent` alongside the text block, and a client that reads only `structuredContent` can decline the copy ([response economy](docs/API_SPECIFICATION.md#response-economy)).
 
 | Domain | Key Tools | Current execution |
 | :--- | :--- | :--- |
@@ -150,7 +150,7 @@ The 120 canonical names are the stable protocol surface, with 10 additional lega
 | **5. Physics, Animation & Navigation (10)** | `physics_raycast_query`, `spatial_query_raycast_batch`, `spatial_query_clearance`, `spatial_query_frustum`, `physics_simulate_step`, `nav_bake_mesh`, `nav_query_path`, `anim_list_tracks`, `anim_play_track`, `anim_add_library` | Raycasts, batches of up to 64 rays, shape sweeps, frustum queries and path queries run live against the existing worlds in the editor or a game; animation listing reads an AnimationPlayer's library in either, playback is a game-only transient call, and adding a library is an editor-only UndoRedo mutation. Physics stepping and navigation baking remain unimplemented. |
 | **6. Tilemaps & GridMaps (3)** | `tilemap_set_cells`, `tilemap_get_used_rect`, `gridmap_set_cells` | Editor-only live batch editing with whole-request preflight, one UndoRedo action, and read-only TileMapLayer used bounds. |
 | **7. Resources & Files (13)** | `resource_create`, `resource_inspect`, `project_list_resources`, `project_get_uid_map`, `project_audit_assets`, `project_analyze_impact`, `project_search_text`, `project_search_symbols`, `project_verify_changes`, `project_apply_changes`, `project_rename_references`, `asset_reimport`, `asset_configure_import` | File/resource inspection, bounded search, impact analysis, and conservative `.import` health diagnostics are offline. A multi-file proposal is checked in an isolated git worktree before anything reaches the working tree, and applied only if it passes. Source-asset reimport is editor-only and waits for stable idle; `asset_configure_import` sets an audio import's loop options, reimports, and checks what the engine loads, editor only. |
-| **8. Runtime & Debug (6)** | `runtime_launch`, `runtime_inject_input`, `runtime_get_call_stack`, `runtime_read_profiler`, `runtime_watch_invariants`, `runtime_explore_scene` | Process launch is implemented offline; the profiler samples `Performance` monitors live over a bounded window; input injection dispatches explicit press and release events into a game session. Invariant watching and scene exploration sample a running game every frame for a bounded window; exploration also presses InputMap actions on a seeded schedule. Call stack remains unimplemented. |
+| **8. Runtime & Debug (7)** | `runtime_launch`, `runtime_inject_input`, `runtime_get_call_stack`, `runtime_read_profiler`, `runtime_watch_invariants`, `runtime_explore_scene`, `runtime_run_scenario` | Process launch is implemented offline; the profiler samples `Performance` monitors live over a bounded window; input injection dispatches explicit press and release events into a game session. Invariant watching and scene exploration sample a running game every frame for a bounded window; exploration also presses InputMap actions on a seeded schedule. `runtime_run_scenario` proves a behaviour in one call: it starts its own game at a fixed frame rate, steps it frame by frame through presses and assertions, stops it, and records the files the verdict was true for. Call stack remains unimplemented. |
 | **9. Editor Lifecycle (4)** | `editor_undo`, `editor_redo`, `editor_save_scene`, `editor_reload_project` | Implemented live. Reload rescans every project folder and answers once the editor has applied the scan. |
 | **10. Project Wiring (21)** | Script attach/detach; autoload, InputMap, and setting management; groups; scene create/open/close/pack; `audio_list_buses`, `audio_configure_bus`, `audio_add_bus` | Implemented live with UndoRedo, ProjectSettings persistence, typed events, overwrite guards, and normalized `res://` paths. Settings and autoloads also read offline, and a setting can be written with no editor. Audio buses are listed live or from the layout file, configured live, and added only in an editor, which writes the layout itself. |
 | **11. Runtime Sessions (11)** | `runtime_list_sessions`, attach/detach/get, logs and output, pause/step/stop/tree, `eval_gdscript` | Four local session-management tools plus seven live tools. Attachment is deterministic or explicit and always authenticated; evaluation is a strict read-only expression subset, not arbitrary GDScript. |
@@ -188,12 +188,12 @@ Didi now refuses startup without `--project <root>` or `DIDI_PROJECT_ROOT`, and 
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `117/120`
+**Canonical implementation:** `118/121`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phases 1-6 established the implementation baseline. Phase 7 is `PARTIAL_DELIVERY`: the 2026-08-29 gate on Godot 4.5.1 and 4.7.2 found 15/18 names implementation-feasible and 3/18 API-blocked under the approved contracts. All 15 feasible names are now delivered; the implementation is 117/120 canonical tools and only the 3 API-blocked names remain registered but unimplemented.
+Phases 1-6 established the implementation baseline. Phase 7 is `PARTIAL_DELIVERY`: the 2026-08-29 gate on Godot 4.5.1 and 4.7.2 found 15/18 names implementation-feasible and 3/18 API-blocked under the approved contracts. All 15 feasible names are now delivered; the implementation is 118/121 canonical tools and only the 3 API-blocked names remain registered but unimplemented.
 
 Governance selected partial delivery: feasible tools ship only after their own production evidence, while `implemented: false` keeps unavailable names honest. The three API-blocked contracts remain `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`.
 

@@ -3021,6 +3021,14 @@
             }
           }
         },
+        "godot://project/scenarios": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
         "godot://project/tree": {
           "_meta": {
             "didi": {
@@ -3752,6 +3760,14 @@
           }
         },
         "runtime_restore_checkpoint": {
+          "_meta": {
+            "didi": {
+              "editorConnected": true,
+              "sessionKind": "editor"
+            }
+          }
+        },
+        "runtime_run_scenario": {
           "_meta": {
             "didi": {
               "editorConnected": true,

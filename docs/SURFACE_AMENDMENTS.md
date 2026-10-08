@@ -1445,6 +1445,39 @@ checked close from an unchecked one instead of inferring it from the engine
 version, and a future engine that drops the bind degrades to the refusal rather
 than to a silent discard.
 
+### ACCEPTED (IMPLEMENTED): `runtime_run_scenario`
+
+| Field | Value |
+| :--- | :--- |
+| **Name** | `runtime_run_scenario` |
+| **Failing workflow** | *"Make the player double-jump and prove it works."* The agent writes the controller and then has to assemble the proof itself: launch the game, attach to it, pause it, press jump, step, press again, step, read the position, read the output, stop the game. That is ten calls in an order each agent invents, and three things go wrong in it. A run with no check in it ends the same way as one that checked something, so "it launched and exited cleanly" is reported as "it works". Godot runs physics ticks from wall-clock time, so a frame stepped after a slow round trip runs several ticks: measured on 4.5.1, 4.6.2 and 4.7.2 with a 100 ms frame, 5 to 6 ticks a frame, and the same hand-built loop passes on one machine and fails on a slower one. And nothing records what a pass was true for, so a pass from before the controller was edited reads exactly like one from after. |
+| **Execution modes** | Starts its own game, like `runtime_launch`, so it needs no editor and no attached session, and it never changes which session the caller has selected. Game only: it drives the game it launched through the bridge methods a game session already admits (`runtime.setPaused`, `runtime.step`, `runtime.injectInput`, `runtime.evalGdscript`, `runtime.getOutput`, `vision.captureViewport`, `runtime.stop`). There is no offline answer: a behaviour is something a running game does. |
+| **Safety class** | `create/set`. It starts a process that runs the project's own code and presses the project's own input actions, so it is a mutation with `dry_run` and `openWorldHint: true`, the same class as `runtime_launch` and `runtime_inject_input`. No confirmation token: it writes nothing to the project, only its record under `.didi/scenarios/`, and the game it starts is stopped before it answers. It belongs with those two under the first-use gate #1205 proposes. |
+| **Proving test** | Native: `ScenarioRunner.*` in `tests/test_scenario_runner.cpp`, against a fake driver: a scenario with no positive assertion is refused, a run whose assertions were never reached cannot pass, teardown runs after a failed launch step, a failed assertion, an engine error, a cancellation and a deadline, a failed teardown fails a run whose assertions held, a null or non-boolean value fails an unbounded assertion, and a recorded file that changed marks the record stale. Live: the Godot integration harness runs the double-jump exercise against a fixture player on all three engine lines and requires `verdict: "pass"` with its evidence in one call, requires the same scenario with one press instead of two to fail on the assertion it names, requires an edit to the player script to mark the stored pass stale, and requires that no game session is left behind and the editor's selection has not moved. |
+| **Reviewer** | Unassigned. It is a mutation, so it is worth saying what it reaches: one Godot process it starts on the selected project with the engine `GODOT_BIN` names, the input actions the scenario names, which the game's InputMap must define, and the read-only expression sandbox `eval_gdscript` and `runtime_watch_invariants` already use. It adds no engine binding and no bridge method, and it reuses `runtime_launch`'s process start. |
+
+**Why launch and stop are not steps.** Q9 lists launch and stop among the steps.
+They are the scenario's frame instead: every scenario launches one game first and
+stops it last, and the author cannot leave either out. A teardown that is a step
+is a teardown an author can forget, and P7 says teardown runs on every path. The
+same reasoning rules out running a scenario against a game the caller already
+has: the runner would have to leave that game in some state, and no state it
+leaves is the one the caller had.
+
+**Why a fixed frame rate.** The game is started with `--fixed-fps` set to the
+project's `physics/common/physics_ticks_per_second`, so one stepped frame is one
+physics tick on every machine, and `frames` in a scenario means ticks. Without it
+the number of ticks a stepped frame runs is the wall-clock time of that frame,
+which is the round trip, not the game.
+
+**What it does not do.** It does not judge anything it was not asked: the verdict
+is the scenario's assertions and nothing else, and `verdict: "pass"` means every
+step ran, every assertion held and the game was stopped. It does not run GUT or
+GdUnit4; that is the second half of Q9 and its own name. It does not click
+Controls by position, which `ui_list_controls` and `runtime_inject_input` already
+do for a caller that wants them (#1189 is that gap), and it does not press input
+into a paused game's always-processing UI (#1191).
+
 ## Deprecating a name
 
 Removal is also an amendment. Didi follows the MCP feature lifecycle: a name

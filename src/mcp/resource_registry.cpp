@@ -3,6 +3,7 @@
 #include "didi/mcp/control_room_app.hpp"
 #include "didi/offline/blackboard.hpp"
 #include "didi/offline/resource_indexer.hpp"
+#include "didi/runtime/scenario_runner.hpp"
 #include "didi/runtime/session_client.hpp"
 #include <algorithm>
 #include <filesystem>
@@ -455,6 +456,26 @@ void ResourceRegistry::registerAllDefaultResources() {
             .dump(-1, ' ', false, json::error_handler_t::replace);
     };
     registerResource(std::move(change_journal));
+
+    // godot://project/scenarios (Q9). Every scenario's last run as recorded
+    // under .didi/scenarios, each checked again on this read against the files
+    // it ran against: a pass is true for those bytes and stale for any other.
+    ResourceDefinition scenarios;
+    scenarios.uri = "godot://project/scenarios";
+    scenarios.name = "Scenario Results";
+    scenarios.description =
+        "The last run of each runtime_run_scenario, newest first, with whether a file it ran against has changed since.";
+    scenarios.mimeType = "application/json";
+    scenarios.capability = {{"offline_fallback"}, true, {}, "local"};
+    scenarios.readHandler = []() -> Result<std::string> {
+        std::error_code error;
+        const auto root = std::filesystem::weakly_canonical(std::filesystem::current_path(error), error);
+        if (error) return Error(500, "The project directory cannot be read.");
+        auto view = runtime::scenarioRecordsView(root);
+        view["execution_mode"] = "local";
+        return view.dump(-1, ' ', false, json::error_handler_t::replace);
+    };
+    registerResource(std::move(scenarios));
 
     // 3. godot://runtime/logs
     ResourceDefinition runtime_logs;

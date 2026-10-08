@@ -332,6 +332,11 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
          "Extra command-line arguments passed to the engine."},
         {"execute_test_session.timeout_seconds",
          "How long the run may take before it is abandoned."},
+        {"runtime_run_scenario.steps",
+         "In order: wait, wait_until, press, assert, assert_output, capture. At least one assert, "
+         "or an assert_output that requires a line."},
+        {"runtime_run_scenario.timeout_seconds",
+         "The whole run, launch and stop included."},
         {"runtime_list_sessions.project_path",
          "Only list sessions belonging to this project root. A session on another project is "
          "not one this server can use."},
