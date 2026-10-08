@@ -1,17 +1,17 @@
 # Didi MCP Tool Reference
 
-Didi exposes 120 canonical tool names plus 10 legacy names (130 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
+Didi exposes 121 canonical tool names plus 10 legacy names (131 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
 
 The `_meta.didi` object returned by `tools/list` is authoritative. A registered tool with `implemented: false` is unavailable and returns an MCP tool error. Every tool carries `legacy`, and the ten legacy registrations carry `legacy: true`; the eight of those that resolve to a differently named tool also carry `canonical` and name it in a closing sentence of their description. Ten of the listed names are duplicates, and without that an agent has no way to tell which of two identical listings to call, or why error data names a `canonical_tool` it cannot find.
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `117/120`
+**Canonical implementation:** `118/121`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `PARTIAL_DELIVERY`. The implementation is 117/120 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+Phase 7 is `PARTIAL_DELIVERY`. The implementation is 118/121 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 The current source/Unreleased connection guide is returned in
 `initialize` and `server/discover` as `result.instructions`. It routes common
@@ -1484,6 +1484,49 @@ An action the project does not define fails the run rather than being skipped, b
 **A paused game is refused rather than explored.** A paused `SceneTree` does not hand an injected event to a node that pauses, so `runtime_inject_input` queues the event and gives it to `Input` when the tree resumes. Every frame of a paused window is a frame in which nothing this run pressed could have moved anything, which is the probe-read rule with a different subject: a window that could not have moved is not a window in which nothing moved. It refuses with `409` and `data.code: paused_game_session`, and names `runtime_set_paused` as the way out. Reaching it is ordinary rather than exotic, because `pause_on_stuck` defaults to `true` and this tool's own output on a stuck interval is the input state of the next call. A pause that arrives after the window opens is caught on the next press, and a release is queued behind that press so a refused run leaves no action down in the frame the tree resumes.
 
 **A press the engine refused ends the run under the engine's own code.** The third way a run ends without a report is the bridge refusing a press mid-window. That refusal used to arrive as a bare `400`, which the error-data floor names `invalid_arguments` -- the same answer a request that was malformed before the run started gets, and the caller's mistake rather than the engine's. The run reports it under the status and `data` the bridge published, so a full input queue still reads `409` and `data.code: input_queue_full`, and adds `data.action` naming the action it was holding. A bridge that refused without publishing a code of its own is reported as `press_refused`, and a refusal carrying nothing at all is a `500`, because a call that failed for a reason nobody recorded is this server's problem and not a malformed request.
+
+### `runtime_run_scenario` — Offline (starts its own game)
+
+Proves a behaviour in one call and returns the proof: a verdict, the values it read, the lines it matched, and the files it was true for. It launches `scene_path` in a game of its own, pauses it, runs the steps one frame at a time, and stops the game before it answers. It needs no editor and no attached session, and it never changes which session this server has selected: the game is driven over a route of its own. Q9 in [the build queue](BUILD_QUEUE.md#q9-proof-in-one-call).
+
+- `name` (`string`, required): 1 to 64 letters, digits, `_` or `-`. The run is recorded as `.didi/scenarios/<name>.json`, replacing the last run of that name.
+- `scene_path` (`string`, required): the `res://` `.tscn` or `.scn` the game starts in.
+- `steps` (`array`, required, 1 to 64), run in order. Each step has a `kind` and an optional `label`:
+
+| kind | takes | does |
+| --- | --- | --- |
+| `wait` | `frames` (1 to 600) | Runs that many frames. |
+| `press` | `action`, `frames` (default 1) | Presses an InputMap action, holds it for `frames` frames, and releases it in the frame after. |
+| `wait_until` | `expression`, `context_node`, `minimum`, `maximum`, `frames` | Runs frames until the condition holds, checking before the first. Fails the run if it has not held after `frames` frames. |
+| `assert` | `expression`, `context_node`, `minimum`, `maximum` | Holds when the expression is `true`, or, with either bound, when it is a finite number within them. |
+| `assert_output` | `text`, `level`, `absent` | Holds when a line of the game's output since it started contains `text`, at `level` or above. With `absent: true`, holds when none does. |
+| `capture` | none | Captures the root viewport and keeps it as `.didi/scenarios/<name>/capture-<step>.png`. Needs `headless: false`. |
+
+- `headless` (`boolean`, default `true`).
+- `timeout_seconds` (`integer`, 5 to 300, default 60): the whole run, launch and stop included.
+- `request_id`: runs it as a job, like `project_export`.
+
+Expressions are the read-only sandbox `eval_gdscript` uses, evaluated against `context_node`: `node.get("position").y` reads a native property, and a script's own variables are refused.
+
+**Frames are physics ticks.** The game runs with `--fixed-fps` set to the project's `physics/common/physics_ticks_per_second`, so one frame advances physics by exactly one tick on any machine. Without it, Godot runs as many ticks in a frame as that frame's wall-clock time covers, which is the round trip between calls rather than the game: 5 to 6 ticks for a 100 ms frame, measured on 4.5.1, 4.6.2 and 4.7.2. The game is paused from the moment the runner takes it, so a press lands in the next frame the runner steps, and `game.fixed_fps` says the rate it ran at. What happens before the pause is not: the game runs from its first frame until the runner's pause lands, and a fixed rate runs it as fast as the machine allows (Godot ignores `--max-fps` beside `--fixed-fps`), so that was anything from 1 to 2947 frames in one session's measurements. Start with a `wait_until` on the state you need rather than a guessed `wait`, and assert what a timer did against state, not against a frame count.
+
+**What is refused before a game starts.** A scenario with no assertion, because it proves nothing. A scenario whose only assertions are `assert_output` with `absent: true`, because a game that never ran its loop passes those too. A `capture` with `headless: true`, with `retry_with: {"headless": false}`. An expression the sandbox refuses, a `context_node` that is not a canonical path under `/root`, a field of another kind of step, and more than 3600 frames in all. A `scene_path` that is not a file in the project is `404`.
+
+**The verdict.** `verdict` is `pass` only when every step ran, every assertion held, and the game was stopped. It is `fail` when a check did not hold: an `assert`, an `assert_output`, or a `wait_until` that never held. It is `error` when the run could not say either way: the game did not start or publish a session, a step was refused by the engine (an action the InputMap does not define, a node that is not there), the job was cancelled, `timeout_seconds` passed, or the game was still published 10 seconds after it was asked to stop. A run stops at the first step that fails, and the steps after it read `not_run`.
+
+A run that did not pass answers `isError: true` with the whole report and an `error` beside it, the way `project_apply_changes` answers a proposal its check rejected: `422` with `data.code: "scenario_failed"`, `field: "steps"` and the `step` for a check that did not hold; the engine's own status and code with the `step` for a step it refused; `409` `teardown_failed` with the session to stop for a game that may still be running.
+
+The answer carries:
+
+- `verdict`, `summary`, and `failure` (`stage`, `reason`, `message`, `step`, `kind`, and the engine's `cause`).
+- `steps`: each with its `outcome` (`done`, `held`, `failed`, `error`, `interrupted` or `not_run`), the frames it ran, `at_frame`, and what it read: `value` and `value_type` for an expression, `matched` for an output line, `capture` for a frame.
+- `assertions` (`total`, `held`, `failed`, `not_run`) and `frames`.
+- `game`: `pid`, `session_id`, `engine_version`, `build_id`, `fixed_fps`, `headless`.
+- `teardown`: `ok`, `stop_requested`, `session_gone`, `waited_ms`.
+- `files`: the SHA-256 of `project.godot`, the scene, the project's autoloads, and every script, scene and text resource they reach, read as the run started. `files_truncated` past 256. `stale` is `true` when one of them changed while the run was going.
+- `record`: where the run was written, or `null` with `record_error`.
+
+[`godot://project/scenarios`](RESOURCES_AND_PROMPTS.md#godotprojectscenarios) lists the last run of each name and reads those hashes again: a pass is true for the bytes it ran against and `stale` for any other.
 
 ### `runtime_read_profiler` — Live (editor or game)
 
