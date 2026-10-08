@@ -191,6 +191,7 @@
         "project_remove_autoload": "<absent>",
         "project_remove_input_action": "<absent>",
         "project_rename_references": "<absent>",
+        "project_run_tests": "<absent>",
         "project_search_symbols": {
           "_meta": {
             "didi": {
