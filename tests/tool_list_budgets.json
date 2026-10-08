@@ -6,7 +6,7 @@
     "note": "main before Q4 (15c8458), 2026-09-28"
   },
   "budgets": {
-    "full": 208800,
+    "full": 210200,
     "core": 96900
   },
   "raises": [
@@ -41,6 +41,14 @@
         208800
       ],
       "why": "Q9 part 1 (#1206): runtime_run_scenario, which proves a behaviour in one call, with its step vocabulary as one closed item schema (kind, frames, action, expression, context_node, minimum, maximum, text, level, absent, label) and a request_id because it runs as a job. It is not in core, so core does not move. Measured 208,435 full with that change, against 205,666 on main: 2,768 bytes, all of it the new entry."
+    },
+    {
+      "date": "2026-10-09",
+      "full": [
+        208800,
+        210200
+      ],
+      "why": "Q9 part 2 (#1206): project_run_tests, which runs the project's GUT or GdUnit4 tests and judges the JUnit report, with framework, paths, name, timeout_seconds and a request_id because it runs as a job. It is not in core, so core does not move. Measured 209,837 full with that change, against 208,435 on main: 1,402 bytes, the new entry and its separator."
     }
   ]
 }
