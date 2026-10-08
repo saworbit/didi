@@ -200,6 +200,10 @@
       "exempt": "Managed mode only, which the live harness does not start; tests/test_managed_recovery_live.py drives it without comparing the answer with the engine.",
       "issue": 1020
     },
+    "runtime_run_scenario": {
+      "exempt": "Starts and stops a game of its own, so the conformance cases have no session to witness it in; tests/scenario_runner.ps1 compares its verdict with the controller it ran and its teardown with runtime_list_sessions.",
+      "issue": 1020
+    },
     "runtime_set_paused": {
       "observed": [
         "paused"

@@ -447,7 +447,7 @@ static void test_tool_registry_default_tools() {
     reg.registerAllDefaultTools();
     auto tools = reg.listTools();
 
-    ASSERT_EQ(tools.size(), 130u);
+    ASSERT_EQ(tools.size(), 131u);
     const std::unordered_set<std::string> legacy_names = {
         "get_scene_hierarchy", "capture_viewport", "analyze_script_diagnostics",
         "patch_script_symbols", "create_visual_test_lab", "query_project_resources",
@@ -459,7 +459,7 @@ static void test_tool_registry_default_tools() {
         if (legacy_names.count(tool.name) == 0) ++canonical_count;
     }
     ASSERT_EQ(legacy_names.size(), 10u);
-    ASSERT_EQ(canonical_count, 120u);
+    ASSERT_EQ(canonical_count, 121u);
 
     // Domain 1: Scene Tree & Node Manipulation
     ASSERT_TRUE(reg.getTool("scene_get_hierarchy") != nullptr);
@@ -592,7 +592,7 @@ static void test_phase7_input_alias_keeps_invoked_entry_with_canonical_contract(
         if (legacy_names.count(tool.name) != 0) continue;
         tool.capability.implemented ? ++implemented : ++unimplemented;
     }
-    ASSERT_EQ(implemented, 117u);
+    ASSERT_EQ(implemented, 118u);
     ASSERT_EQ(unimplemented, 3u);
 }
 
@@ -7394,10 +7394,12 @@ static void test_resource_registry() {
     reg.registerAllDefaultResources();
     auto resources = reg.listResources();
 
-    ASSERT_EQ(resources.size(), 7);
+    ASSERT_EQ(resources.size(), 8);
     ASSERT_TRUE(reg.getResource("godot://project/tree") != nullptr);
     // The change journal (Q15): a file read, judged live when an editor is there.
     ASSERT_TRUE(reg.getResource("godot://project/journal") != nullptr);
+    // Scenario results (Q9): a file read, so it answers with no engine at all.
+    ASSERT_TRUE(reg.getResource("godot://project/scenarios") != nullptr);
     ASSERT_EQ(reg.getResource("godot://project/journal")->toJson()["_meta"]["didi"]["executionModes"],
               didi::json::array({"live", "offline_fallback"}));
     ASSERT_TRUE(reg.getResource("godot://editor/state") != nullptr);
