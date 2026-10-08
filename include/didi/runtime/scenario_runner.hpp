@@ -161,10 +161,18 @@ inline constexpr size_t kMaxScenarioFiles = 256;
 
 // project.godot, the scene, the project's autoloads, and every script, scene
 // and text resource they reach: ext_resource lines in scenes and resources,
-// res:// string literals in scripts and shaders. Textures, audio and other
-// assets are not followed. Sorted by path.
+// res:// string literals in scripts and shaders, and the scripts behind the
+// class_name identifiers a script uses. Textures, audio and other assets are
+// not followed. Sorted by path.
 ScenarioFiles collectScenarioFiles(const std::filesystem::path& project_root,
                                    const std::string& scene_path);
+
+// The same, from any set of starting files: the test scripts a test run names,
+// for project_run_tests. A .gd file also reaches every script whose class_name
+// it uses. Nothing under addons/ is followed into unless it is a starting file
+// or an autoload.
+ScenarioFiles collectProofFiles(const std::filesystem::path& project_root,
+                                const std::vector<std::string>& seeds);
 
 // The files of `recorded` whose bytes differ now, or that are missing now, or
 // that were missing then and exist now.

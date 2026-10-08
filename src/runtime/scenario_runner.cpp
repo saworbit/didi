@@ -13,6 +13,7 @@
 #include <exception>
 #include <fstream>
 #include <iterator>
+#include <map>
 #include <regex>
 #include <set>
 #include <sstream>
@@ -735,6 +736,61 @@ std::vector<std::string> referencesIn(const std::string& path, const std::string
     return found;
 }
 
+// The scripts a project names with class_name, so a script that uses a class
+// by name reaches the file it is in. Tests reach the code under test this way
+// far more often than through a res:// literal. addons/ is left out: a
+// framework's or plugin's own classes would fill the record with files the
+// project did not write.
+std::map<std::string, std::string> classNameIndex(const fs::path& root) {
+    static const std::regex declared(R"(^[ \t]*class_name[ \t]+([A-Za-z_][A-Za-z0-9_]*))");
+    std::map<std::string, std::string> index;
+    std::error_code error;
+    size_t visited = 0;
+    for (fs::recursive_directory_iterator it(root, fs::directory_options::skip_permission_denied, error), end;
+         !error && it != end && visited < 10000; it.increment(error)) {
+        const auto name = paths::projectPathToUtf8(it->path().filename());
+        std::error_code type_error;
+        if (it->is_directory(type_error)) {
+            if (it.depth() == 0 && (name == "addons" || name.rfind("build", 0) == 0)) {
+                it.disable_recursion_pending();
+            } else if (!name.empty() && name.front() == '.') {
+                it.disable_recursion_pending();
+            }
+            continue;
+        }
+        if (it->path().extension() != ".gd") continue;
+        ++visited;
+        const auto bytes = readBytes(it->path());
+        if (!bytes || bytes->size() > 512 * 1024) continue;
+        // Line by line: std::regex::multiline is not in every standard
+        // library this builds with.
+        std::istringstream lines(*bytes);
+        std::string line;
+        while (std::getline(lines, line)) {
+            std::smatch match;
+            if (std::regex_search(line, match, declared)) {
+                const auto relative = it->path().lexically_relative(root);
+                index.emplace(match[1].str(), "res://" + paths::projectPathToUtf8(relative.generic_string()));
+                break;
+            }
+        }
+    }
+    return index;
+}
+
+std::vector<std::string> classesUsedIn(const std::string& bytes, const std::map<std::string, std::string>& index) {
+    std::vector<std::string> used;
+    if (index.empty()) return used;
+    static const std::regex identifier(R"([A-Za-z_][A-Za-z0-9_]*)");
+    std::set<std::string> seen;
+    for (std::sregex_iterator it(bytes.begin(), bytes.end(), identifier), end; it != end; ++it) {
+        const auto word = it->str();
+        const auto found = index.find(word);
+        if (found != index.end() && seen.insert(word).second) used.push_back(found->second);
+    }
+    return used;
+}
+
 std::string currentDigest(const fs::path& root, const std::string& path) {
     const auto file = fileUnder(root, path);
     if (!file) return {};
@@ -872,21 +928,29 @@ ValueJudgement judgeValue(const json& value, const std::optional<double>& minimu
     return {false, value.is_null() ? "no_value" : "not_a_boolean"};
 }
 
-ScenarioFiles collectScenarioFiles(const fs::path& project_root, const std::string& scene_path) {
+ScenarioFiles collectProofFiles(const fs::path& project_root, const std::vector<std::string>& seeds) {
     ScenarioFiles collected;
     std::set<std::string> seen;
+    std::set<std::string> seeded(seeds.begin(), seeds.end());
     std::deque<std::string> pending = {"project.godot"};
-    // Autoloads run before the scene does, whatever scene it is.
+    // Autoloads run before anything a run starts, whatever it starts.
     auto autoloads = offline::readProjectAutoloads(project_root);
     if (autoloads.isOk()) {
-        for (const auto& autoload : autoloads.value()) pending.push_back(autoload.path);
+        for (const auto& autoload : autoloads.value()) {
+            pending.push_back(autoload.path);
+            seeded.insert(autoload.path);
+        }
     }
-    pending.push_back(scene_path);
+    for (const auto& seed : seeds) pending.push_back(seed);
+    const auto classes = classNameIndex(project_root);
     while (!pending.empty()) {
         const auto path = pending.front();
         pending.pop_front();
         if (!seen.insert(path).second) continue;
         if (path != "project.godot" && !followed(path)) continue;
+        // What a run names is recorded wherever it is; what those files reach
+        // under addons/ is the framework's or a plugin's, not the project's.
+        if (!seeded.count(path) && path.rfind("res://addons/", 0) == 0) continue;
         const auto file = fileUnder(project_root, path);
         if (!file) continue;
         if (collected.files.size() >= kMaxScenarioFiles) {
@@ -899,10 +963,19 @@ ScenarioFiles collectScenarioFiles(const fs::path& project_root, const std::stri
         for (auto& reference : referencesIn(path, *bytes)) {
             if (!seen.count(reference)) pending.push_back(std::move(reference));
         }
+        if (lowerExtension(path) == "gd") {
+            for (auto& reference : classesUsedIn(*bytes, classes)) {
+                if (!seen.count(reference)) pending.push_back(std::move(reference));
+            }
+        }
     }
     std::sort(collected.files.begin(), collected.files.end(),
               [](const ScenarioFile& left, const ScenarioFile& right) { return left.path < right.path; });
     return collected;
+}
+
+ScenarioFiles collectScenarioFiles(const fs::path& project_root, const std::string& scene_path) {
+    return collectProofFiles(project_root, {scene_path});
 }
 
 std::vector<ScenarioFile> changedScenarioFiles(const fs::path& project_root,
@@ -980,11 +1053,21 @@ json scenarioRecordsView(const fs::path& project_root) {
         const auto changed = changedScenarioFiles(project_root, files);
         json changed_paths = json::array();
         for (const auto& file : changed) changed_paths.push_back(file.path);
+        // A scenario, or a run of the project's tests (project_run_tests),
+        // which records under the same names.
+        const std::string kind = record.value("kind", std::string("scenario"));
+        listed["kind"] = kind;
         listed["verdict"] = record.value("verdict", json());
         listed["ran_at"] = record.value("ran_at", json());
-        listed["scene_path"] = record.value("scene_path", json());
-        listed["assertions"] = record.value("assertions", json());
-        listed["frames"] = record.value("frames", json());
+        if (kind == "tests") {
+            listed["framework"] = record.value("framework", json());
+            listed["paths"] = record.value("paths", json());
+            listed["counts"] = record.value("counts", json());
+        } else {
+            listed["scene_path"] = record.value("scene_path", json());
+            listed["assertions"] = record.value("assertions", json());
+            listed["frames"] = record.value("frames", json());
+        }
         // A record that names no files cannot say what it was true for, so it
         // is stale rather than fresh by default.
         listed["stale"] = !changed.empty() || files.empty() || malformed ||
