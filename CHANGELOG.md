@@ -57,7 +57,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Added
 
-- `2026-10-08` `runtime_run_scenario` proves a behaviour in one call: it drives its own game frame by frame, checks it, stops it, and records the files a pass was true for. [#1206](https://github.com/saworbit/didi/issues/1206)
+- `2026-10-08` `runtime_run_scenario` proves a behaviour in one call: it drives its own game frame by frame, checks it, stops it, and records the files a pass was true for. [#1206](https://github.com/saworbit/didi/issues/1206) · [PR #1210](https://github.com/saworbit/didi/pull/1210)
 - `2026-10-04` Transforms, rectangles, packed arrays and typed arrays can be read and written as JSON, so none of them is patched into scene text. [#1133](https://github.com/saworbit/didi/issues/1133) · [PR #1182](https://github.com/saworbit/didi/pull/1182)
 - `2026-10-04` A `source_text` check beside an open editor asks its language server. [#1142](https://github.com/saworbit/didi/issues/1142) · [PR #1176](https://github.com/saworbit/didi/pull/1176)
 - `2026-10-04` `editor_reload_project` runs as a job, so a slow scan can be waited out. [#1157](https://github.com/saworbit/didi/issues/1157) · [PR #1174](https://github.com/saworbit/didi/pull/1174)
