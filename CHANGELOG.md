@@ -23,7 +23,7 @@ executable status of each current registration, use
 
 | Version | Released | What it brought | Added | Changed | Fixed | Breaking | Tools implemented |
 | :--- | :--- | :--- | ---: | ---: | ---: | ---: | :--- |
-| [Unreleased](#unreleased) | not yet | Everything merged since 2.0.1 |  |  |  |  | 118 of 121 |
+| [Unreleased](#unreleased) | not yet | Everything merged since 2.0.1 |  |  |  |  | 119 of 122 |
 | [2.0.1](#201---2026-09-23) | 2026-09-23 | Correctness fixes to 2.0.0, and release archives that stand on their own | 10 | 3 | 182 | 6 | 113 of 116 |
 | [2.0.0](#200---2026-09-13) | 2026-09-13 | Error codes, handshake checks and schema strictness corrected across the surface | 4 | 0 | 93 | 10 | 113 of 116 |
 | [1.8.0](#180---2026-09-10) | 2026-09-10 | Test and CI reliability, fuzz targets, and faster impact analysis | 4 | 7 | 13 | 0 | 112 of 115 |
@@ -45,18 +45,19 @@ release changed, which is why it lives here and not in a version section.
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `118/121`
+**Canonical implementation:** `119/122`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Discovery now exposes 121 canonical tools plus 10 legacy registrations (131 total). 118 canonical tools are implemented and 3 remain unimplemented.
-The three Phase 7 blockers are unchanged; the newest name is `runtime_run_scenario`, recorded in [Surface Amendments](docs/SURFACE_AMENDMENTS.md).
+Discovery now exposes 122 canonical tools plus 10 legacy registrations (132 total). 119 canonical tools are implemented and 3 remain unimplemented.
+The three Phase 7 blockers are unchanged; the newest name is `project_run_tests`, recorded in [Surface Amendments](docs/SURFACE_AMENDMENTS.md).
 
 Full write-ups for these entries: [as first written](https://github.com/saworbit/didi/blob/fd9d0e5e8517143c0e892166c225485a840b2d87/CHANGELOG.md#unreleased).
 
 ### Added
 
+- `2026-10-09` `project_run_tests` runs the project's GUT or GdUnit4 tests headless and judges the JUnit report, so a run that tested nothing cannot pass. [#1206](https://github.com/saworbit/didi/issues/1206)
 - `2026-10-08` `runtime_run_scenario` proves a behaviour in one call: it drives its own game frame by frame, checks it, stops it, and records the files a pass was true for. [#1206](https://github.com/saworbit/didi/issues/1206) · [PR #1210](https://github.com/saworbit/didi/pull/1210)
 - `2026-10-04` Transforms, rectangles, packed arrays and typed arrays can be read and written as JSON, so none of them is patched into scene text. [#1133](https://github.com/saworbit/didi/issues/1133) · [PR #1182](https://github.com/saworbit/didi/pull/1182)
 - `2026-10-04` A `source_text` check beside an open editor asks its language server. [#1142](https://github.com/saworbit/didi/issues/1142) · [PR #1176](https://github.com/saworbit/didi/pull/1176)

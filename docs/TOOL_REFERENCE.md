@@ -1,17 +1,17 @@
 # Didi MCP Tool Reference
 
-Didi exposes 121 canonical tool names plus 10 legacy names (131 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
+Didi exposes 122 canonical tool names plus 10 legacy names (132 registrations). This reference describes the current implementation, not just the intended protocol surface. See [Current Capability Matrix](CAPABILITIES.md) for mode semantics and important limitations.
 
 The `_meta.didi` object returned by `tools/list` is authoritative. A registered tool with `implemented: false` is unavailable and returns an MCP tool error. Every tool carries `legacy`, and the ten legacy registrations carry `legacy: true`; the eight of those that resolve to a differently named tool also carry `canonical` and name it in a closing sentence of their description. Ten of the listed names are duplicates, and without that an agent has no way to tell which of two identical listings to call, or why error data names a `canonical_tool` it cannot find.
 
 <!-- phase7-current-status:start -->
 **Status:** `PARTIAL_DELIVERY`
-**Canonical implementation:** `118/121`
+**Canonical implementation:** `119/122`
 **Phase 7 registrations:** `3/18` unimplemented
 **Feasibility:** `15/18` implementation-feasible; `3/18` API-blocked
 <!-- phase7-current-status:end -->
 
-Phase 7 is `PARTIAL_DELIVERY`. The implementation is 118/121 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
+Phase 7 is `PARTIAL_DELIVERY`. The implementation is 119/122 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. See [evidence](PHASE_7_API_FEASIBILITY.md) and the [approved plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 
 The current source/Unreleased connection guide is returned in
 `initialize` and `server/discover` as `result.instructions`. It routes common
@@ -1900,6 +1900,34 @@ Each uniform carries its declared Godot type, its declared `hint`, its effective
 A uniform whose type has no JSON spelling is still reported by name and type, with a null value, rather than failing the whole read. A null value also appears where neither the material nor the rendering server could supply one, which is what a session with no renderer looks like: it means the value could not be read, not that the uniform has none. A material slot holding something that is not a `ShaderMaterial` is refused and names what it found, since an empty uniform list would read as a shader with nothing to set. At most 256 uniforms are returned, with `uniform_count` and `truncated` reported separately.
 
 Setting a uniform is `shader_set_uniform`, above.
+
+### `project_run_tests` — Offline
+
+Runs the project's own GUT or GdUnit4 tests in a headless Godot and returns a result per test, read from the JUnit XML the framework writes. It needs no editor and no session. Q9 in [the build queue](BUILD_QUEUE.md#q9-proof-in-one-call).
+
+- `framework` (`auto`, `gut` or `gdunit4`, default `auto`): `auto` runs whichever is in `addons/` (`addons/gut/gut_cmdln.gd` or `addons/gdUnit4/bin/GdUnitCmdTool.gd`). A project with both has to name one, and one the project does not have is `404`.
+- `paths` (`array` of `res://` directories or `.gd` files, at most 32): default `res://test`, or for GUT with no `res://test`, the directories in its `.gutconfig.json`.
+- `name` (`string`, default `tests`): the run is recorded as `.didi/scenarios/<name>.json`, beside `runtime_run_scenario`'s records.
+- `timeout_seconds` (`integer`, 5 to 900, default 120).
+- `request_id`: runs it as a job.
+
+GUT is given `-gexit`, `-gdir` and `-ginclude_subdirs` for directories, `-gtest` for files, and `-gjunit_xml_file`; GdUnit4 is given `--ignoreHeadlessMode`, one `-a` per path, and `-rd` with `-rc 1`. The report goes under `.didi/tests/<name>/`, emptied before each run so an older report is never read as this one.
+
+**The verdict is the report's, not the exit code's.** Measured on 4.7.2, GUT exits `0` when it found no tests, and exits `0` without writing any report when the project was never imported; GdUnit4 exits `0` when it found no tests. So `verdict` is:
+
+- `pass`: the report parsed, at least one test passed, none failed or errored, every test script loaded, and the exit code agrees.
+- `fail`: a test failed. `failed_tests` names each, and `tests` carries its `message`, its `file` and, where the framework says, its `line`.
+- `error`: anything that is neither. `reason` says which: `no_tests` (nothing ran), `nothing_proved` (every test was skipped or asserted nothing), `no_report` (the framework wrote none; with `not_imported: true` when its classes do not exist yet, which is fixed by opening the project in the editor once or running `godot --headless --import`), `report_unreadable`, `exit_code_disagrees`, `scripts_did_not_load`, `timeout`, `cancelled`.
+
+**A test file that does not parse fails the run.** GUT leaves it out of its report and exits on whatever the other tests did, and GdUnit4 stops and writes nothing. Both print Godot's `SCRIPT ERROR: Parse Error` with the file and line, so `scripts_did_not_load` lists them and the run cannot pass. A script under `addons/` outside the tested paths is listed in `addon_scripts_did_not_load` instead and does not stop a pass: GUT 9.7.1 has two files that do not parse on 4.5.1 and 4.6.2, and its tests run all the same.
+
+`counts` has `total`, `passed`, `failed`, `errors`, `skipped` and `no_assertions`. GUT marks a test that asserted nothing, and it is counted there rather than as a pass. A run that did not pass carries `output_tail`, the last lines Godot printed.
+
+A run that did not pass answers `isError: true` with the report and an `error` beside it: `422 tests_failed`, `422 no_tests` with `field: "paths"`, `422 scripts_did_not_load`, `409 project_not_imported`, `504 timeout` with `retry_with` a longer `timeout_seconds`.
+
+Like `runtime_run_scenario`, the answer records the SHA-256 of `project.godot`, the autoloads, the test scripts and every script they reach, through `res://` literals and the `class_name` identifiers they use; nothing under `addons/` is followed. [`godot://project/scenarios`](RESOURCES_AND_PROMPTS.md#godotprojectscenarios) lists the run with `kind: "tests"` and marks it `stale` when one of those files changes.
+
+It runs the project's own test code, which can do anything project code can, so it carries `openWorldHint: true`, as `csharp_check_build` does.
 
 ### `shader_check_compile` — Offline
 
