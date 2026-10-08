@@ -255,6 +255,35 @@ board is: each client runs its own server, and the harness starts one per batch.
   own Undo only when that takes exactly this action, and reads the histories
   again afterwards.
 
+## 6c. Proof runs
+
+Two tools answer "does it work" with a result rather than a claim (Q9, P7).
+Both start a Godot of their own, need no editor and no session, and write a
+record of what they ran against.
+
+- **Scenarios**: `runtime_run_scenario` launches the scene with `--fixed-fps`
+  at the project's physics tick rate, through `runtime_launch`'s own process
+  start, and finds the session that game publishes. It opens a route to that
+  session alone (`openSessionRoute`), so the caller's selected session never
+  moves, pauses the game, and drives it with bridge methods a game already
+  admits: `runtime.step`, `runtime.injectInput`, `runtime.evalGdscript`,
+  `runtime.getOutput`, `vision.captureViewport`, `runtime.stop`. The run loop
+  in `src/runtime/scenario_runner.cpp` is pure and talks to the game through
+  `IScenarioDriver`; `src/tools/scenario_tools.cpp` is the driver over the
+  bridge. Teardown runs on every path and confirms the session is gone (a
+  crashed game's descriptor counts as gone when it reads `alive: false`).
+- **Tests**: `project_run_tests` runs GUT or GdUnit4 from the command line, as
+  `shader_check_compile` runs its helper, and judges the JUnit XML the
+  framework writes rather than its exit code. The rules and the parser are in
+  `src/offline/test_reports.cpp`; the handler is in
+  `src/tools/deep_domain_tools.cpp`.
+- **Records**: each run is written to `.didi/scenarios/<name>.json` with the
+  SHA-256 of `project.godot`, the autoloads, and every script, scene and text
+  resource the run reached, through `ext_resource` lines, `res://` literals and
+  `class_name` identifiers, leaving `addons/` out unless a run names it.
+  `godot://project/scenarios` hashes them again on every read, so staleness is
+  never stored, only computed.
+
 ---
 
 ## 7. Phase 3 session router and runtime bridge

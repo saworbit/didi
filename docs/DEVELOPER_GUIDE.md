@@ -330,6 +330,36 @@ around. What can be undone on its own is decided in
 `tests/test_undo_ledger.cpp` holds the rules; `tests/change_journal.ps1` checks
 the editor agrees.
 
+### Proof runs
+
+`runtime_run_scenario` and `project_run_tests` (Q9) keep their rules apart from
+the processes they start, so the rules are native-tested and the processes are
+harness-tested.
+
+- A new scenario step is a `ScenarioStep::Kind` in
+  `include/didi/runtime/scenario_runner.hpp`, a case in `parseStep` (its own
+  fields, refused by name on any other kind of step) and in `Run::runStep`, and
+  a row in the tool's item schema. `tests/test_scenario_runner.cpp` drives a
+  fake game (`FakeGame`) frame by frame, so a step's frame accounting can be
+  checked exactly. A step must not be able to reach a pass on its own:
+  `ScenarioStep::provesSomething` decides what counts as an assertion.
+- The verdict for a test run is `offline::judgeTestRun`. Its fixtures in
+  `tests/test_test_reports.cpp` are reports the real GUT 9.7.1 and GdUnit4
+  6.2.2 wrote; keep new ones real rather than written by hand.
+  `tools/vibe/probes/test_frameworks.py` runs the real frameworks through the
+  tool on every engine line, and `tools/vibe/probes/fixed_fps_ticks.py`
+  re-measures why scenarios run at a fixed rate.
+- The live harness has `tests/scenario_runner.ps1`, a double-jump fixture in
+  `tests/godot_smoke/scenario_runner/`, and `tests/test_runner.ps1`, which runs
+  against `tests/test_runner_fixture`: a stand-in at `addons/gut` that follows
+  GUT's command-line contract, since CI has no framework. Keep the stand-in to
+  that contract, and change it only with the probe's evidence of what GUT does.
+- `project_run_tests` is a read, so it has a `bounded` entry in
+  `tests/bounded_reads.json` and an `excluded` reason in
+  `tests/contract_snapshots/calls.json`. `CallSet` reads the committed
+  `offline.json`, so a new read-only tool only fails it once the snapshots are
+  regenerated: run the Python suite again after regenerating.
+
 ### Bounded reads
 
 Every read-only tool has an entry in `tests/bounded_reads.json`: `bounded`,
