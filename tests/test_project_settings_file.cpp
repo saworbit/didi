@@ -1,12 +1,12 @@
 #include "didi/offline/project_settings_file.hpp"
 #include "didi/offline/project_file_lock.hpp"
 
-#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <functional>
 #include <limits>
+#include <mutex>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -469,24 +469,38 @@ void refuses_to_rewrite_a_key_the_engine_built_from_two_lines() {
 // open file, not per process. Without it the cycles overlapped: a write landed
 // between another's read and its replace and was lost, or on Windows the replace
 // met the other's open file and failed (#929). Every write succeeds and every
-// key is in the file.
+// key is in the file. A failure names each refusal, because a lock wait that
+// ran out on a slow runner (409 project_file_busy, retryable) and the #929
+// race coming back read the same as a bare count (#1214).
 void concurrent_writers_all_land() {
     ProjectFixture project("concurrent", kBare);
     constexpr int kWriters = 4;
     constexpr int kEach = 10;
-    std::atomic<int> failed{0};
+    std::mutex failures_mutex;
+    std::vector<std::string> failures;
     std::vector<std::thread> writers;
     for (int writer = 0; writer < kWriters; ++writer) {
-        writers.emplace_back([&project, &failed, writer] {
+        writers.emplace_back([&project, &failures_mutex, &failures, writer] {
             for (int index = 0; index < kEach; ++index) {
                 const auto name = "custom/w" + std::to_string(writer) + "_" + std::to_string(index);
-                if (writeProjectSetting(project.root(), name, index, false).isErr()) ++failed;
+                const auto write = writeProjectSetting(project.root(), name, index, false);
+                if (write.isOk()) continue;
+                const std::lock_guard<std::mutex> guard(failures_mutex);
+                failures.push_back(name + ": " + std::to_string(write.error().code) + " " +
+                                   (write.error().data.is_object()
+                                        ? write.error().data.value("code", std::string("(no code)"))
+                                        : std::string("(no code)")) +
+                                   " " + write.error().message);
             }
         });
     }
     for (auto& thread : writers) thread.join();
 
-    ASSERT_EQ(failed.load(), 0);
+    if (!failures.empty()) {
+        std::string report = std::to_string(failures.size()) + " write(s) failed under contention:";
+        for (const auto& failure : failures) report += "\n  " + failure;
+        throw std::runtime_error(report);
+    }
     const auto contents = project.read();
     for (int writer = 0; writer < kWriters; ++writer) {
         for (int index = 0; index < kEach; ++index) {
