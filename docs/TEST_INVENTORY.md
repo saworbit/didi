@@ -10,14 +10,14 @@ Every number here is derived from the suites themselves rather than written down
 
 | Measure | Count |
 | --- | ---: |
-| Automated tests | **1682** |
-| Live-harness assertions | 1560 |
+| Automated tests | **1685** |
+| Live-harness assertions | 1570 |
 
 The badge in the [README](../README.md) shows the automated test total. Harness assertions are counted separately because they are assertions inside one live scenario, not independently runnable cases; adding them together would flatter the number.
 
 ## Native C++ suite (`didi_tests`)
 
-**1097 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
+**1100 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
 
 | Suite | Tests |
 | --- | ---: |
@@ -65,13 +65,14 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `ProjectSearch` | 17 |
 | `Prompts` | 1 |
 | `PropertyPaths` | 13 |
+| `ProtocolServers` | 1 |
 | `RefusalRemedies` | 13 |
 | `ReimportJob` | 13 |
 | `RepeatedFailures` | 5 |
 | `ResourceIndexer` | 13 |
 | `Resources` | 2 |
 | `ResponseEconomy` | 18 |
-| `RuntimeLaunch` | 12 |
+| `RuntimeLaunch` | 13 |
 | `RuntimeLogs` | 12 |
 | `RuntimeOutput` | 6 |
 | `RuntimeRouting` | 65 |
@@ -98,7 +99,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `phase7` | 1 |
 | `phase7b_anim` | 6 |
 | `phase7b_spatial` | 8 |
-| `phase7c_input` | 6 |
+| `phase7c_input` | 7 |
 | `phase7c_profiler` | 10 |
 | `project_settings_file` | 18 |
 | `resource_create` | 5 |
@@ -154,7 +155,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 
 ## Live Godot harness (`tests/*.ps1`)
 
-**1560 assertions.** Derived from `Assert-True` call sites. The harness is one long live scenario rather than a set of named cases, so this counts assertions and says so.
+**1570 assertions.** Derived from `Assert-True` call sites. The harness is one long live scenario rather than a set of named cases, so this counts assertions and says so.
 
 | File | Assertions |
 | --- | ---: |
@@ -165,8 +166,8 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `phase7_success.ps1` | 2 |
 | `refusal_remedies.ps1` | 3 |
 | `reimport_job.ps1` | 19 |
-| `run_godot_integration.ps1` | 1389 |
-| `scenario_runner.ps1` | 27 |
+| `run_godot_integration.ps1` | 1397 |
+| `scenario_runner.ps1` | 29 |
 | `scene_tab_reload.ps1` | 26 |
 | `test_runner.ps1` | 15 |
 | `typed_object_layer.ps1` | 39 |
