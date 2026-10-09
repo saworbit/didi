@@ -361,6 +361,29 @@ harness-tested.
   `offline.json`, so a new read-only tool only fails it once the snapshots are
   regenerated: run the Python suite again after regenerating.
 
+### Performance verdicts
+
+`runtime_read_profiler`'s verdict (Q16) is split the same way: pure rules,
+native-tested; the timing, harness-tested.
+
+- The rules are `judgePerformance` in `src/runtime/performance_verdict.cpp`.
+  `tests/test_performance_verdict.cpp` replays frames probed on real engines;
+  the numbers in it are measurements, so take new ones from a probe rather than
+  inventing them. A change to a threshold must keep the idle vsync game at
+  `none` and the shader game at `gpu`.
+- The live half is `tests/performance_verdicts.ps1` with
+  `tests/godot_smoke/perf_cpu.tscn`, `perf_gpu.tscn` and `perf_physics.tscn`.
+  The fixtures grow their load until a frame takes three 60 Hz frames, because
+  a load that binds a GPU machine leaves CI's software renderer idle, or the
+  reverse. Assert verdicts there, never timings.
+- The verdict is in `$defs.performance_verdict` of
+  `schemas/phase7/runtime_read_profiler.schema.json`, and
+  `tools/phase7_success.py` holds every live answer to it.
+- `tools/vibe/probes/frame_timing.py` re-asks each engine line for the facts
+  the verdict is built on, and `tools/vibe/probes/profiler_verdicts.py` drives
+  the fixtures through the tool windowed, headless, with a separate render
+  thread, and stopped mid-read.
+
 ### Bounded reads
 
 Every read-only tool has an entry in `tests/bounded_reads.json`: `bounded`,
