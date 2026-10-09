@@ -6,6 +6,9 @@ extends Node2D
 # load until a frame takes three 60 Hz frames, then hold it: a fast GPU needs a
 # far heavier shader than a CI runner's software renderer, and a fast CPU far
 # more bodies, so a fixed load is bound on one machine and idle on the next.
+# The bodies never sleep: a pile allowed to settle fell from 170 ms frames to
+# 21 ms within fifteen seconds of saying ready (4.5.1), and CI's 4.5.1 runner
+# then read it as keeping to its budget.
 # editor_description reads "ready" once the load holds, because the expression
 # sandbox reads native properties only.
 
@@ -109,6 +112,7 @@ func _add_bodies() -> void:
 		var shape := CollisionShape2D.new()
 		shape.shape = _circle
 		body.add_child(shape)
+		body.can_sleep = false
 		body.position = Vector2(30 + index * 7.2, 600 - _rows * 24)
 		add_child(body)
 	_bodies += BODIES_PER_STEP
