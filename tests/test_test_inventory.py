@@ -149,6 +149,30 @@ class PowerShellAssertionCountingTests(unittest.TestCase):
         self.assertGreater(suite.total, 0)
 
 
+class ResolveTestBinaryTests(unittest.TestCase):
+    def test_flag_wins_over_the_environment(self):
+        # DIDI_TEST_BINARY names the server for the Python suites, so a shell
+        # that runs both has it set to didi.exe. A path typed on the command
+        # line is the one the person meant (#1194).
+        with tempfile.TemporaryDirectory() as directory:
+            server = Path(directory) / "didi.exe"
+            tests = Path(directory) / "didi_tests.exe"
+            server.write_bytes(b"")
+            tests.write_bytes(b"")
+            with mock.patch.dict(os.environ, {"DIDI_TEST_BINARY": str(server)}):
+                self.assertEqual(inventory.resolve_test_binary(str(tests)), tests)
+                self.assertEqual(inventory.resolve_test_binary(None), server)
+
+    def test_a_binary_with_no_test_registry_names_the_override(self):
+        # The Python interpreter refuses --list the way the server does.
+        with self.assertRaises(inventory.InventoryError) as raised:
+            inventory.native_test_names(Path(sys.executable))
+        message = str(raised.exception)
+        self.assertIn(str(Path(sys.executable)), message)
+        self.assertIn("--test-binary", message)
+        self.assertIn("DIDI_TEST_BINARY", message)
+
+
 class NativeGroupingTests(unittest.TestCase):
     def test_dotted_names_group_by_their_suite(self):
         self.assertEqual(inventory.native_suite_prefix("Tools.DefaultRegistration"), "Tools")

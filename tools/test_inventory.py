@@ -112,14 +112,16 @@ class InventoryError(RuntimeError):
 def resolve_test_binary(explicit: str | None = None) -> Path:
     """Return the ``didi_tests`` binary to interrogate.
 
-    ``DIDI_TEST_BINARY`` wins, then ``--test-binary``, then the build
+    ``--test-binary`` wins, then ``DIDI_TEST_BINARY``, then the build
     directories. CI sets the environment variable to the binary it has just
     built, which is the only way to be certain the count describes the code
-    under review rather than whatever was lying around.
+    under review rather than whatever was lying around. The flag comes first
+    because the Python suites read the same variable as the server binary, so
+    a shell that ran them names didi.exe there (#1194).
     """
 
     from_env = os.environ.get("DIDI_TEST_BINARY")
-    for candidate in (from_env, explicit):
+    for candidate in (explicit, from_env):
         if not candidate:
             continue
         path = Path(candidate)
@@ -158,7 +160,9 @@ def native_test_names(binary: Path) -> list[str]:
 
     if completed.returncode != 0:
         raise InventoryError(
-            f"{binary} --list exited {completed.returncode}: "
+            f"{binary} --list exited {completed.returncode}, so it is not a didi_tests "
+            "binary. DIDI_TEST_BINARY also names the server for the Python suites; "
+            "pass --test-binary to name didi_tests here. It answered: "
             f"{completed.stderr.strip() or '(no stderr)'}"
         )
 
@@ -498,7 +502,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--test-binary",
-        help="Path to didi_tests. Defaults to DIDI_TEST_BINARY, then the build directories.",
+        help="Path to didi_tests. Wins over DIDI_TEST_BINARY, then the build directories are searched.",
     )
     parser.add_argument(
         "--no-native",
