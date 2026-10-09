@@ -36,7 +36,9 @@ The `README.md` inside the archive has the notes for that platform. On macOS, cl
 
 ## 🎮 Step 2: Enable the Godot Plugin
 
-> **One command does Steps 2 and 3.** From the build directory, or the archive's `bin` folder:
+> **One command does Steps 2 and 3** in a source build or a release after 2.0.1. The 2.0.1
+> archive has no `setup` or `doctor` command, so with it, follow the steps below by hand.
+> From the build directory, or the archive's `bin` folder:
 >
 > ```
 > didi setup --project D:/my_game --client cursor --godot C:/Godot/Godot_v4.7.2-stable_win64.exe
