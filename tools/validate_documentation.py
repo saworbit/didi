@@ -1937,6 +1937,92 @@ def validate_capability_name_tables(
     return errors
 
 
+# Every hand-written list of a name set the manifest publishes, by document.
+# Group "names" is the stretch holding the list, and every backticked tool name
+# in it is a member. The counts were checked against the binary and these were
+# not, so the two tools Q9 added sat outside both lists until a docs pass (#1215).
+OPEN_WORLD_LIST = re.compile(
+    r"`openWorldHint` is true for (?P<names>.*?),? and false for other tools"
+)
+TOOL_SET_LISTS: dict[str, tuple[str, tuple[tuple[str, re.Pattern[str]], ...]]] = {
+    "open_world": (
+        "openWorldHint list",
+        (
+            ("docs/CAPABILITIES.md", OPEN_WORLD_LIST),
+            ("docs/LLM_INSTRUCTIONS.md", OPEN_WORLD_LIST),
+            ("docs/TOOL_REFERENCE.md", OPEN_WORLD_LIST),
+        ),
+    ),
+    "jobs": (
+        "job list",
+        (
+            ("docs/CAPABILITIES.md", re.compile(r"^- (?P<names>`.*?) run as jobs when", re.M)),
+            (
+                "docs/API_SPECIFICATION.md",
+                re.compile(
+                    r"^### Jobs and the tasks extension\n(?P<names>.*?)"
+                    r"^Each can now run as a \*\*job\*\*",
+                    re.M | re.S,
+                ),
+            ),
+        ),
+    ),
+}
+# The API specification counts the job tools in words as well as listing them.
+JOB_COUNT_SENTENCE = re.compile(r"\*\*`request_id`\.\*\* All (?P<count>\w+) tools take")
+NUMBER_WORDS = {
+    2: "two", 3: "three", 4: "four", 5: "five", 6: "six", 7: "seven", 8: "eight",
+    9: "nine", 10: "ten", 11: "eleven", 12: "twelve",
+}
+
+
+def validate_tool_set_lists(root: Path, names: dict[str, list[str]]) -> list[str]:
+    """Hold each documented list of a manifest name set to that set.
+
+    An older binary that does not publish a set is not an error; the check for
+    that set has nothing to compare against.
+    """
+    errors: list[str] = []
+    for key, (label, lists) in TOOL_SET_LISTS.items():
+        members = names.get(key)
+        if members is None:
+            continue
+        expected = set(members)
+        for relative_path, pattern in lists:
+            path = root / relative_path
+            if not path.is_file():
+                errors.append(f"{relative_path}: not found, and it holds the {label}")
+                continue
+            match = pattern.search(path.read_text(encoding="utf-8"))
+            if match is None:
+                errors.append(f"{relative_path}: cannot find the {label}")
+                continue
+            documented = set(BACKTICKED_NAME.findall(match.group("names")))
+            missing = sorted(expected - documented)
+            extra = sorted(documented - expected)
+            if missing:
+                errors.append(
+                    f"{relative_path}: the {label} omits {', '.join(missing)}, which the "
+                    "binary puts in that set"
+                )
+            if extra:
+                errors.append(
+                    f"{relative_path}: the {label} names {', '.join(extra)}, which the "
+                    "binary does not put in that set"
+                )
+        if key == "jobs":
+            path = root / "docs" / "API_SPECIFICATION.md"
+            text = path.read_text(encoding="utf-8") if path.is_file() else ""
+            counted = JOB_COUNT_SENTENCE.search(text)
+            wanted = NUMBER_WORDS.get(len(expected), str(len(expected)))
+            if counted is not None and counted.group("count") != wanted:
+                errors.append(
+                    f"docs/API_SPECIFICATION.md: says all {counted.group('count')} tools take "
+                    f"request_id, and the binary runs {wanted} as jobs"
+                )
+    return errors
+
+
 TOOL_REFERENCE_HEADING = re.compile(r"^### (.+)$", re.MULTILINE)
 BACKTICKED_NAME = re.compile(r"`([a-z0-9_]+)`")
 
@@ -2275,6 +2361,7 @@ def validate_repository(root: Path, tool_manifest: Path | None = None) -> list[s
                 manifest_counts["unimplemented"],
             )
             errors.extend(validate_capability_name_tables(root, manifest_names))
+            errors.extend(validate_tool_set_lists(root, manifest_names))
             errors.extend(validate_documented_request_shapes(root, manifest_required))
             if manifest_triple != CANONICAL_IMPLEMENTATION_COUNTS:
                 errors.append(

@@ -1498,7 +1498,9 @@ json ToolManifest::toJson() const {
             {"implemented", implemented},
             {"unimplemented", unimplemented},
             {"mutating", mutating},
-            {"core", core}
+            {"core", core},
+            {"open_world", open_world},
+            {"jobs", jobs}
         }},
         {"required", required},
         // Every error code the remedy table answers (Q6), so a test can hold
@@ -1552,6 +1554,16 @@ bool ToolRegistry::inProfile(const std::string& name, ToolProfile profile) const
     return profile == ToolProfile::Full || coreProfileTools().count(name) > 0;
 }
 
+// Two run an offline helper that can take minutes, during which the stdio loop
+// answered nothing else. Two wait for the editor to apply a scan, which a slow
+// editor can take minutes over, past the bridge's fifteen-second wait for any
+// one command. Two start a Godot of their own and run it to the end (Q9).
+bool toolRunsAsJob(const std::string& canonical) {
+    return canonical == "project_export" || canonical == "csharp_check_build" ||
+           canonical == "asset_reimport" || canonical == "editor_reload_project" ||
+           canonical == "runtime_run_scenario" || canonical == "project_run_tests";
+}
+
 ToolManifest ToolRegistry::buildManifest() const {
     ToolManifest manifest;
     for (const auto& kv : m_tools) {
@@ -1564,9 +1576,10 @@ ToolManifest ToolRegistry::buildManifest() const {
         if (tool.capability.implemented) {
             manifest.implemented.push_back(tool.name);
             if (coreProfileTools().count(tool.name)) manifest.core.push_back(tool.name);
-            if (MutationSafety::isMutation(resolveAliasBinding(tool.name, json::object()))) {
-                manifest.mutating.push_back(tool.name);
-            }
+            const auto binding = resolveAliasBinding(tool.name, json::object());
+            if (MutationSafety::isMutation(binding)) manifest.mutating.push_back(tool.name);
+            if (toolRunsProjectControlledCode(binding)) manifest.open_world.push_back(tool.name);
+            if (toolRunsAsJob(tool.name)) manifest.jobs.push_back(tool.name);
             std::vector<std::string> required;
             const auto& schema = tool.inputSchema;
             if (schema.is_object() && schema.contains("required") &&
@@ -1590,6 +1603,8 @@ ToolManifest ToolRegistry::buildManifest() const {
     std::sort(manifest.unimplemented.begin(), manifest.unimplemented.end());
     std::sort(manifest.mutating.begin(), manifest.mutating.end());
     std::sort(manifest.core.begin(), manifest.core.end());
+    std::sort(manifest.open_world.begin(), manifest.open_world.end());
+    std::sort(manifest.jobs.begin(), manifest.jobs.end());
     return manifest;
 }
 

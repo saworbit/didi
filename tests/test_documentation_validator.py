@@ -2482,5 +2482,89 @@ Phase 7A-7C define the approved contracts for editor authoring. Their implementa
             self.assertEqual(set(), forbidden_keys & declared_keys, relative_path)
 
 
+class ToolSetListTests(unittest.TestCase):
+    """The hand-written lists of the openWorldHint and job tools (#1215).
+
+    Every count is checked against the binary, and these lists were not, so
+    the two tools Q9 added sat outside both until a docs pass caught them.
+    """
+
+    OPEN_WORLD = ["project_export", "runtime_launch"]
+    JOBS = ["asset_reimport", "project_export"]
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+        self.addCleanup(self.temporary.cleanup)
+        sentence = (
+            "`openWorldHint` is true for `project_export` and `runtime_launch`, "
+            "and false for other tools.\n"
+        )
+        for relative in ("docs/LLM_INSTRUCTIONS.md", "docs/TOOL_REFERENCE.md"):
+            self.write(relative, sentence)
+        self.write(
+            "docs/CAPABILITIES.md",
+            sentence + "- `project_export` and `asset_reimport` run as jobs when given a "
+            "`request_id`.\n",
+        )
+        self.write(
+            "docs/API_SPECIFICATION.md",
+            "### Jobs and the tasks extension\n\n`project_export` runs a helper, and "
+            "`asset_reimport` waits for a scan.\nEach can now run as a **job**: the same "
+            "call.\n\n**`request_id`.** All two tools take an optional `request_id`.\n",
+        )
+
+    def write(self, relative: str, text: str) -> None:
+        path = self.root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    def names(self, **overrides):
+        names = {"open_world": list(self.OPEN_WORLD), "jobs": list(self.JOBS)}
+        names.update(overrides)
+        return names
+
+    def test_lists_naming_each_set_pass(self):
+        self.assertEqual(VALIDATOR.validate_tool_set_lists(self.root, self.names()), [])
+
+    def test_a_tool_added_to_a_set_fails_every_list_that_omits_it(self):
+        errors = VALIDATOR.validate_tool_set_lists(
+            self.root, self.names(open_world=self.OPEN_WORLD + ["project_run_tests"],
+                                  jobs=self.JOBS + ["project_run_tests"]))
+        for relative in ("docs/CAPABILITIES.md", "docs/LLM_INSTRUCTIONS.md",
+                         "docs/TOOL_REFERENCE.md"):
+            self.assertTrue(any(e.startswith(relative) and "openWorldHint" in e
+                                and "project_run_tests" in e for e in errors), errors)
+        for relative in ("docs/CAPABILITIES.md", "docs/API_SPECIFICATION.md"):
+            self.assertTrue(any(e.startswith(relative) and "job" in e
+                                and "project_run_tests" in e for e in errors), errors)
+
+    def test_a_tool_removed_from_a_set_fails_every_list_that_names_it(self):
+        errors = VALIDATOR.validate_tool_set_lists(
+            self.root, self.names(open_world=["runtime_launch"], jobs=["asset_reimport"]))
+        self.assertEqual(
+            sum(1 for e in errors if "project_export" in e and "openWorldHint" in e), 3, errors)
+        self.assertEqual(
+            sum(1 for e in errors if "project_export" in e and "job list" in e), 2, errors)
+
+    def test_a_spelled_count_of_the_job_tools_must_match(self):
+        path = self.root / "docs" / "API_SPECIFICATION.md"
+        path.write_text(path.read_text(encoding="utf-8").replace("All two tools", "All six tools"),
+                        encoding="utf-8")
+        errors = VALIDATOR.validate_tool_set_lists(self.root, self.names())
+        self.assertTrue(any(e.startswith("docs/API_SPECIFICATION.md") and "six" in e
+                            for e in errors), errors)
+
+    def test_a_list_that_cannot_be_found_is_an_error(self):
+        self.write("docs/LLM_INSTRUCTIONS.md", "Nothing about annotations here.\n")
+        errors = VALIDATOR.validate_tool_set_lists(self.root, self.names())
+        self.assertTrue(any(e.startswith("docs/LLM_INSTRUCTIONS.md") and "cannot find" in e
+                            for e in errors), errors)
+
+    def test_an_older_manifest_without_the_sets_checks_nothing(self):
+        self.write("docs/LLM_INSTRUCTIONS.md", "Nothing about annotations here.\n")
+        self.assertEqual(VALIDATOR.validate_tool_set_lists(self.root, {}), [])
+
+
 if __name__ == "__main__":
     unittest.main()

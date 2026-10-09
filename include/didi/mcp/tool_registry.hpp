@@ -49,6 +49,11 @@ struct ToolManifest {
     // surface; this is here so tests can check the profile against the trial
     // data and the handshake guide it is derived from.
     std::vector<std::string> core;
+    // Implemented canonical names that carry openWorldHint, and those that run
+    // as a job when given a request_id. The docs list both sets by name, and
+    // tools/validate_documentation.py holds each list to these (#1215).
+    std::vector<std::string> open_world;
+    std::vector<std::string> jobs;
     // Required request fields per implemented canonical tool, so documentation
     // can be checked against the schema a caller actually has to satisfy
     // rather than against prose about it. dry_run is excluded: it is on every
@@ -57,6 +62,11 @@ struct ToolManifest {
 
     json toJson() const;
 };
+
+// The tools that run as a job when the call carries a request_id, or when the
+// client declares the tasks extension (Q8). Each takes request_id in its
+// schema, and nothing else does.
+bool toolRunsAsJob(const std::string& canonical);
 
 class ToolRegistry {
 public:

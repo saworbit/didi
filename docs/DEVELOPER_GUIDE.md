@@ -244,8 +244,9 @@ nothing; it enters in `McpServer::responseEconomyFor`, beside the declarations.
 A long tool call can run as a job (Q8,
 [API specification](API_SPECIFICATION.md#jobs-and-the-tasks-extension)).
 `McpServer::handleRequest` decides it for `tools/call` before any confirmation
-path, through `runsAsJob`, and every route to the registry ends in its `respond`
-lambda, so a new route there must end in it too. The job runs
+path, through `toolRunsAsJob` in `src/mcp/tool_registry.cpp`, and every route
+to the registry ends in its `respond` lambda, so a new route there must end in
+it too. The manifest publishes that set as `names.jobs`. The job runs
 `ToolRegistry::callTool` itself on a thread of its own, held by `JobStore` in
 `src/mcp/jobs.cpp`, so a job's answer is exactly the synchronous one. That makes
 a handler that becomes a job tool run beside the stdio loop: it must not keep
