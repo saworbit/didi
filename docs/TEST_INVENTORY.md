@@ -10,14 +10,14 @@ Every number here is derived from the suites themselves rather than written down
 
 | Measure | Count |
 | --- | ---: |
-| Automated tests | **1678** |
-| Live-harness assertions | 1559 |
+| Automated tests | **1682** |
+| Live-harness assertions | 1560 |
 
 The badge in the [README](../README.md) shows the automated test total. Harness assertions are counted separately because they are assertions inside one live scenario, not independently runnable cases; adding them together would flatter the number.
 
 ## Native C++ suite (`didi_tests`)
 
-**1094 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
+**1097 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
 
 | Suite | Tests |
 | --- | ---: |
@@ -40,7 +40,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `ExportPresetAdd` | 11 |
 | `ExpressionSandbox` | 7 |
 | `FollowUps` | 5 |
-| `GDScript` | 24 |
+| `GDScript` | 26 |
 | `GodotObject` | 2 |
 | `Hierarchy` | 9 |
 | `IPC` | 31 |
@@ -65,7 +65,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `ProjectSearch` | 17 |
 | `Prompts` | 1 |
 | `PropertyPaths` | 13 |
-| `RefusalRemedies` | 12 |
+| `RefusalRemedies` | 13 |
 | `ReimportJob` | 13 |
 | `RepeatedFailures` | 5 |
 | `ResourceIndexer` | 13 |
@@ -111,7 +111,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 
 ## Python contract suites (`tests/test_*.py`)
 
-**584 tests.** Derived from `test_*` methods on every `unittest.TestCase` subclass, read with `ast`.
+**585 tests.** Derived from `test_*` methods on every `unittest.TestCase` subclass, read with `ast`.
 
 | File | Tests |
 | --- | ---: |
@@ -143,7 +143,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `test_phase7_plan_ownership.py` | 10 |
 | `test_phase7_schema_contract.py` | 6 |
 | `test_phase7_signal_admission.py` | 3 |
-| `test_refusal_codes.py` | 10 |
+| `test_refusal_codes.py` | 11 |
 | `test_refusal_remedies.py` | 5 |
 | `test_stdio_process.py` | 2 |
 | `test_test_inventory.py` | 27 |
@@ -154,7 +154,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 
 ## Live Godot harness (`tests/*.ps1`)
 
-**1559 assertions.** Derived from `Assert-True` call sites. The harness is one long live scenario rather than a set of named cases, so this counts assertions and says so.
+**1560 assertions.** Derived from `Assert-True` call sites. The harness is one long live scenario rather than a set of named cases, so this counts assertions and says so.
 
 | File | Assertions |
 | --- | ---: |
@@ -165,7 +165,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `phase7_success.ps1` | 2 |
 | `refusal_remedies.ps1` | 3 |
 | `reimport_job.ps1` | 19 |
-| `run_godot_integration.ps1` | 1388 |
+| `run_godot_integration.ps1` | 1389 |
 | `scenario_runner.ps1` | 27 |
 | `scene_tab_reload.ps1` | 26 |
 | `test_runner.ps1` | 15 |
