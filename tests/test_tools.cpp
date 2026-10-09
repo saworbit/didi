@@ -8143,6 +8143,21 @@ static void test_a_number_no_float_property_can_hold_is_refused() {
 // The message is the only thing that changes. This pins the accept/reject set
 // so a future edit to the wording cannot quietly start coercing a string into
 // a number, which is the false success #213 to #217 were about.
+// An int-keyed Dictionary reads back with its keys as the decimal strings
+// they were sent as, so only that spelling is taken (#1195).
+static void test_dictionary_int_keys_round_trip() {
+    using didi::godot::dictionaryIntKey;
+    ASSERT_EQ(dictionaryIntKey("3").value_or(-1), 3);
+    ASSERT_EQ(dictionaryIntKey("0").value_or(-1), 0);
+    ASSERT_EQ(dictionaryIntKey("-12").value_or(0), -12);
+    ASSERT_EQ(dictionaryIntKey("9223372036854775807").value_or(0), INT64_MAX);
+    ASSERT_EQ(dictionaryIntKey("-9223372036854775808").value_or(0), INT64_MIN);
+    for (const char* refused : {"", "-", "+3", "03", "-0", " 3", "3 ", "3.0", "1e3", "0x10",
+                                "9223372036854775808", "-9223372036854775809", "three"}) {
+        ASSERT_TRUE(!dictionaryIntKey(refused).has_value());
+    }
+}
+
 static void test_property_type_acceptance_set_is_unchanged() {
     using didi::godot::PropertyTypeMatch;
     using didi::godot::matchJsonToPropertyType;
@@ -8181,11 +8196,16 @@ static void test_property_type_acceptance_set_is_unchanged() {
     ASSERT_TRUE(matchJsonToPropertyType(didi::json(nullptr), GDEXTENSION_VARIANT_TYPE_NIL) ==
                 PropertyTypeMatch::Compatible);
 
+    // A Dictionary is inside it since #1195: a JSON object, its keys and
+    // values checked against the dictionary the property holds as it is built.
+    ASSERT_TRUE(matchJsonToPropertyType(didi::json::object(), GDEXTENSION_VARIANT_TYPE_DICTIONARY) ==
+                PropertyTypeMatch::Compatible);
+    ASSERT_TRUE(matchJsonToPropertyType(didi::json::array(), GDEXTENSION_VARIANT_TYPE_DICTIONARY) ==
+                PropertyTypeMatch::Incompatible);
+
     // Outside the contract, which is a different rejection from a type mismatch
     // and stays that way. Arrays and Rect2 were the examples here until Q7
-    // part 2 brought them in.
-    ASSERT_TRUE(matchJsonToPropertyType(didi::json::object(), GDEXTENSION_VARIANT_TYPE_DICTIONARY) ==
-                PropertyTypeMatch::UnsupportedPropertyType);
+    // part 2 brought them in, and Dictionary until #1195.
     ASSERT_TRUE(matchJsonToPropertyType(didi::json(nullptr), GDEXTENSION_VARIANT_TYPE_CALLABLE) ==
                 PropertyTypeMatch::UnsupportedPropertyType);
     ASSERT_TRUE(matchJsonToPropertyType(didi::json(1), GDEXTENSION_VARIANT_TYPE_RID) ==
@@ -10112,6 +10132,7 @@ struct RegisterToolTests {
                      test_property_type_mismatch_names_every_scalar_type_in_words);
         registerTest("Tools.PropertyTypeAcceptanceUnchanged",
                      test_property_type_acceptance_set_is_unchanged);
+        registerTest("Tools.DictionaryIntKeysRoundTrip", test_dictionary_int_keys_round_trip);
         registerTest("Tools.RealRangeRefusal",
                      test_a_number_no_float_property_can_hold_is_refused);
         registerTest("Tools.PropertyContractVectorsColorsResources",

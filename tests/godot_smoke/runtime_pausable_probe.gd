@@ -6,6 +6,9 @@ extends Node2D
 # is the difference #594 is about: an event dispatched while paused reached
 # this node never, and a held one reaches it in the stepped frame.
 #
+# Its process_mode is PAUSABLE in runtime_main.tscn. Left to inherit, it took
+# the root's ALWAYS, and an event sent during a pause reached it (#1191).
+#
 # The counts go into native integer properties, because the expression
 # sandbox reads those and nothing script-defined.
 var input_events: int = 0

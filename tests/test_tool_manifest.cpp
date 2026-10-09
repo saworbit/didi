@@ -153,6 +153,46 @@ static void test_manifest_mutating_is_the_implemented_dry_run_set() {
     ASSERT_TRUE(!contains(manifest.mutating, "runtime_attach_session"));
 }
 
+// The docs name the tools that carry openWorldHint and the tools that run as
+// jobs, by hand, in several places. The manifest publishes both sets so the
+// documentation validator can hold every list to them (#1215). Each set comes
+// from what a client sees: the annotation for one, and the request_id argument
+// for the other, which only a job tool takes.
+static void test_manifest_open_world_is_the_annotated_set() {
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    const auto manifest = registry.buildManifest();
+    for (const auto& name : manifest.implemented) {
+        const auto* tool = registry.getTool(name);
+        ASSERT_TRUE(tool != nullptr);
+        const bool open_world = tool->toJson()["annotations"]["openWorldHint"].get<bool>();
+        ASSERT_EQ(contains(manifest.open_world, name), open_world);
+    }
+    ASSERT_TRUE(contains(manifest.open_world, "runtime_launch"));
+    ASSERT_TRUE(!contains(manifest.open_world, "scene_get_hierarchy"));
+    ASSERT_TRUE(std::is_sorted(manifest.open_world.begin(), manifest.open_world.end()));
+    ASSERT_EQ(manifest.toJson()["names"]["open_world"].size(), manifest.open_world.size());
+}
+
+static void test_manifest_jobs_are_the_request_id_set() {
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    const auto manifest = registry.buildManifest();
+    for (const auto& name : manifest.implemented) {
+        const auto* tool = registry.getTool(name);
+        ASSERT_TRUE(tool != nullptr);
+        const auto& schema = tool->inputSchema;
+        const bool takes_request_id = schema.is_object() && schema.contains("properties") &&
+                                      schema.at("properties").contains("request_id");
+        ASSERT_EQ(contains(manifest.jobs, name), takes_request_id);
+        ASSERT_EQ(didi::mcp::toolRunsAsJob(name), takes_request_id);
+    }
+    ASSERT_TRUE(contains(manifest.jobs, "project_export"));
+    ASSERT_TRUE(!contains(manifest.jobs, "scene_get_hierarchy"));
+    ASSERT_TRUE(std::is_sorted(manifest.jobs.begin(), manifest.jobs.end()));
+    ASSERT_EQ(manifest.toJson()["names"]["jobs"].size(), manifest.jobs.size());
+}
+
 // Manifest name lists are sorted, so the generated artifact is stable across
 // runs and platforms and can be diffed in CI.
 static void test_manifest_names_are_sorted() {
@@ -920,6 +960,10 @@ struct RegisterToolManifestTests {
                      test_manifest_names_are_sorted);
         registerTest("tool_manifest.mutating_is_implemented_dry_run_set",
                      test_manifest_mutating_is_the_implemented_dry_run_set);
+        registerTest("tool_manifest.open_world_is_annotated_set",
+                     test_manifest_open_world_is_the_annotated_set);
+        registerTest("tool_manifest.jobs_are_request_id_set",
+                     test_manifest_jobs_are_the_request_id_set);
         registerTest("tool_annotations.read_only_tools",
                      test_read_only_tools_are_annotated_read_only);
         registerTest("tool_annotations.project_code_is_open_world",

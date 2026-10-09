@@ -922,6 +922,16 @@ try {
         (Tool-Request 2475 "runtime_step" @{ frames = 1 }),
         (Tool-Request 2476 "eval_gdscript" @{ expression = "node.get('process_priority')"; context_node = "/root/RuntimeRoot/Spatial/AnimTarget/PausableProbe" }),
         (Tool-Request 2477 "eval_gdscript" @{ expression = "node.get('process_physics_priority')"; context_node = "/root/RuntimeRoot/Spatial/AnimTarget/PausableProbe" }),
+        # A pause menu processes while paused and has to be operable without
+        # stepping the game. Sent with paused_delivery now, the batch reaches
+        # the root, which processes while paused, and not the probe that
+        # pauses, and no frame runs (#1191).
+        (Tool-Request 2560 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot"; max_depth = 1 }),
+        (Tool-Request 2561 "runtime_inject_input" @{ paused_delivery = "now"; events = @(
+            @{ type = "action"; action_name = "ui_cancel"; pressed = $true },
+            @{ type = "action"; action_name = "ui_cancel"; pressed = $false }) }),
+        (Tool-Request 2562 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot"; max_depth = 1 }),
+        (Tool-Request 2563 "eval_gdscript" @{ expression = "node.get('process_priority')"; context_node = "/root/RuntimeRoot/Spatial/AnimTarget/PausableProbe" }),
         (Tool-Request 367 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot/RuntimeChild/Nested"; max_depth = 1 }),
         (Tool-Request 379 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot/RuntimeChild"; max_depth = 1 }),
         (Tool-Request 307 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot"; max_depth = 17 }),
@@ -1419,6 +1429,9 @@ try {
     Assert-True ($beforeStepEval.value -eq $beforeStep) "Pre-step expression observed $($beforeStepEval.value), not live frame $beforeStep."
     Assert-True ($afterStepEval.value -eq ($beforeStepEval.value + 1) -and $afterStepEval.value -eq $afterStep) "Native scalar expression did not advance exactly once with the processed frame."
     Assert-True ($step.frames -eq 1 -and $step.paused -eq $true -and $afterStepTree.paused -eq $true) "Step did not finish re-paused."
+    # This game runs in real time, so the step says a frame is not a tick and
+    # counts what the frame ran (#1209).
+    Assert-True ($null -ne $step.PSObject.Properties["fixed_fps"] -and $null -eq $step.fixed_fps -and $step.physics_ticks -ge 0) "A step of a real-time game did not say it has no fixed rate and count its ticks: $($step | ConvertTo-Json -Compress)"
     Assert-True ($beforeStepEval.context_node -eq "/root/RuntimeRoot" -and $afterStepEval.context_node -eq "/root/RuntimeRoot" -and $beforeStepEval.session_kind -eq "game" -and $afterStepEval.session_kind -eq "game") "Live frame expressions used incorrect game context or provenance."
     $multiStep = Tool-Payload $runtimeById[364]
     $multiStepEval = Tool-Payload $runtimeById[365]
@@ -1468,6 +1481,12 @@ try {
     $pausableAfter = (Tool-Payload $runtimeById[2476]).value
     Assert-True ($pausableAfter -eq ($pausableBefore + 2)) "A node that pauses observed $($pausableAfter - $pausableBefore) held events in the stepped frame, expected 2."
     Assert-True ((Tool-Payload $runtimeById[2477]).value -eq ($cancelBefore + 1)) "is_action_just_pressed did not see the held press in the stepped frame."
+    $whilePausedBefore = Tool-Payload $runtimeById[2560]
+    $whilePaused = Tool-Payload $runtimeById[2561]
+    $whilePausedAfter = Tool-Payload $runtimeById[2562]
+    Assert-True ($whilePaused.outcome -eq "completed" -and $whilePaused.delivery -eq "while_paused" -and $whilePaused.paused -eq $true -and $whilePaused.dispatched_event_count -eq 2 -and $whilePaused.queued_event_count -eq 0) "A batch sent with paused_delivery now was not reported as delivered while paused: $($whilePaused | ConvertTo-Json -Compress)"
+    Assert-True (((Runtime-InputCounter $whilePausedAfter) - (Runtime-InputCounter $whilePausedBefore)) -eq 2 -and (Runtime-FrameCounter $whilePausedAfter) -eq (Runtime-FrameCounter $whilePausedBefore) -and $whilePausedAfter.paused -eq $true) "A batch sent while paused did not reach the node that processes while paused, or a frame ran: $((Runtime-InputCounter $whilePausedBefore))->$((Runtime-InputCounter $whilePausedAfter)) input, $((Runtime-FrameCounter $whilePausedBefore))->$((Runtime-FrameCounter $whilePausedAfter)) frames"
+    Assert-True ((Tool-Payload $runtimeById[2563]).value -eq $pausableAfter) "A batch sent while paused reached a node that pauses."
     $gameMix = Tool-Payload $runtimeById[2485]
     Assert-True ($gameMix.execution_mode -eq "live" -and $gameMix.session.kind -eq "game" -and @($gameMix.buses).Count -ge 1) "audio_list_buses did not answer for the game's own mix: $($runtimeById[2485].result.content[0].text)"
     $gameMute = Tool-Payload $runtimeById[2486]
@@ -1480,6 +1499,12 @@ try {
     $gameButtonPath = "/root/RuntimeRoot/Spatial/AnimTarget/GameButton"
     $gameControls = @((Tool-Payload $runtimeById[2490]).controls | Where-Object { $_.node_path -eq $gameButtonPath })
     Assert-True ($gameControls.Count -eq 1) "ui_list_controls in the game did not list the fixture button."
+    # The window-pixel rectangle runtime_inject_input aims at. This game is not
+    # stretched, so it is the viewport rectangle; a stretched one scales it
+    # (#1189).
+    $gameRect = $gameControls[0].global_rect
+    $gameScreenRect = $gameControls[0].screen_rect
+    Assert-True ($null -ne $gameScreenRect -and [math]::Abs($gameScreenRect.position.x - $gameRect.position.x) -lt 0.01 -and [math]::Abs($gameScreenRect.position.y - $gameRect.position.y) -lt 0.01 -and [math]::Abs($gameScreenRect.size.x - $gameRect.size.x) -lt 0.01 -and [math]::Abs($gameScreenRect.size.y - $gameRect.size.y) -lt 0.01) "ui_list_controls in an unstretched game did not report a screen_rect equal to its global_rect: $($gameControls[0] | ConvertTo-Json -Compress -Depth 4)"
     $gameHit = Tool-Payload $runtimeById[2491]
     Assert-True ($null -ne $gameHit.topmost -and $gameHit.topmost.node_path -eq $gameButtonPath) "ui_hit_test in the game did not name the button under the point: $($gameHit | ConvertTo-Json -Compress -Depth 4)"
     Assert-True ($gameHit.root_path -eq "/root/RuntimeRoot/Spatial") "ui_hit_test in the game did not report the subtree it covered: $($gameHit.root_path)"
@@ -2914,6 +2939,9 @@ try {
         (Tool-Request 2402 "scene_open" @{ scene_path = "res://main.tscn" }),
         (Tool-Request 2403 "scene_instantiate_node" @{ node_type = "Node"; parent_path = "/root/SmokeRoot"; name = "CallProbe" }),
         (Tool-Request 2404 "script_attach_to_node" @{ target_node = "/root/SmokeRoot/CallProbe"; script_path = "res://call_probe.gd" }),
+        # A second script on a node that holds one is refused before anything
+        # changes, naming the script it holds and the call that frees it (#1193).
+        (Tool-Request 2428 "script_attach_to_node" @{ target_node = "/root/SmokeRoot/CallProbe"; script_path = "res://plain_probe.gd" }),
         # A plain method, and the value it returned.
         (Tool-Request 2405 "scene_call_method" @{ target_node = "/root/SmokeRoot/CallProbe"; method_name = "add_numbers"; arguments = @(2, 3) }),
         (Tool-Request 2406 "scene_call_method" @{ target_node = "/root/SmokeRoot/CallProbe"; method_name = "describe"; arguments = @() }),
@@ -3022,10 +3050,10 @@ try {
     Assert-True ((Tool-Payload $callById[2408]).value -eq 1) "The coroutine was reported as finished without its side effect having happened."
 
     foreach ($refusal in @(
-        @{ Id = 2409; What = "a leading-underscore method"; Match = "underscore" },
-        @{ Id = 2410; What = "an engine method"; Match = "script declares" },
-        @{ Id = 2411; What = "the wrong argument count"; Match = "argument" },
-        @{ Id = 2412; What = "an argument of the wrong type"; Match = "parameter type" },
+        @{ Id = 2409; What = "a leading-underscore method"; Match = "underscore"; Code = "method_private" },
+        @{ Id = 2410; What = "an engine method"; Match = "script declares"; Code = "method_not_declared" },
+        @{ Id = 2411; What = "the wrong argument count"; Match = "argument"; Code = "argument_count_mismatch" },
+        @{ Id = 2412; What = "an argument of the wrong type"; Match = "parameter type"; Code = "argument_type_mismatch" },
         @{ Id = 2415; What = "a script that is not a @tool script"; Match = "@tool"; Code = "script_not_tool" },
         @{ Id = 2416; What = "a node with no script"; Match = "no script"; Code = "node_has_no_script" })) {
         Assert-True $callById[$refusal.Id].result.isError "scene_call_method accepted $($refusal.What)."
@@ -3038,6 +3066,10 @@ try {
             Assert-True ($refusalData.code -eq $refusal.Code -and $refusalText -notmatch "export_presets") "The refusal of $($refusal.What) did not carry its own code and fix: $refusalText"
         }
     }
+
+    $attachAgain = ($callById[2428].result.content | Where-Object { $_.type -eq "text" } | Select-Object -First 1).text
+    $attachAgainData = ($attachAgain | ConvertFrom-Json).error.data
+    Assert-True ($callById[2428].result.isError -and $attachAgainData.code -eq "script_already_attached" -and $attachAgainData.script_path -eq "res://call_probe.gd" -and $attachAgainData.next_call.tool -eq "script_detach_from_node") "A second script on a node that holds one did not name the script it holds and the call that frees it: $attachAgain"
 
     # The editor's InputMap after an input action was written, and after it was
     # removed: the 3D viewport's own actions are still there, and the project's
@@ -3551,6 +3583,7 @@ try {
 
     $listedPaths = @($uiList.controls.node_path)
     Assert-True ($listedPaths.Count -ge 4) "ui_list_controls did not list the fixture Controls."
+    Assert-True (@($uiList.controls | Where-Object { $null -ne $_.PSObject.Properties["screen_rect"] }).Count -eq 0) "ui_list_controls in the editor reported a screen_rect, which only a game can be clicked through."
     Assert-True (@($listedPaths -match "/TopControl$").Count -eq 1) "ui_list_controls omitted TopControl."
     # MOUSE_FILTER_IGNORE hides a Control from hit-testing, not from existing.
     Assert-True (@($listedPaths -match "/IgnoredControl$").Count -eq 1) "ui_list_controls dropped a Control that only ignores the mouse."
@@ -4775,11 +4808,14 @@ try {
     # comes before the assertions so a failure cannot leave a game behind.
     $detachRequests = @(
         (@{ jsonrpc = "2.0"; id = 5640; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
-        (Tool-Request 5641 "runtime_launch" @{ scene_path = "res://runtime_main.tscn"; timeout_seconds = 30; headless = $true; detach = $true }),
+        # At the project's fixed rate, so each stepped frame is one physics
+        # tick, which the steps below count (#1209).
+        (Tool-Request 5641 "runtime_launch" @{ scene_path = "res://runtime_main.tscn"; timeout_seconds = 30; headless = $true; detach = $true; fixed_fps = $true }),
         (Tool-Request 5642 "runtime_list_sessions" @{}),
         (Tool-Request 5643 "runtime_get_tree" @{ max_depth = 2 }),
         (Tool-Request 5644 "runtime_set_paused" @{ paused = $true }),
         (Tool-Request 5645 "runtime_step" @{ frames = 2 }),
+        (Tool-Request 5647 "runtime_step" @{ frames = 10 }),
         (Tool-Request 5646 "runtime_stop" @{ exit_code = 0 })
     )
     # The console build for this block, when the download has one. Godot ships
@@ -4843,6 +4879,11 @@ try {
     Assert-True ((Tool-Payload $detachById[5643]).node_count -ge 1) "The detached game reported an empty tree."
     Assert-True ((Tool-Payload $detachById[5644]).paused -eq $true) "The detached game could not be paused."
     Assert-True ((Tool-Payload $detachById[5645]).frames -eq 2) "The detached game could not be stepped."
+    Assert-True ($detached.fixed_fps -eq 60) "A launch asked for the project's fixed rate did not report it: $($detached.fixed_fps)"
+    foreach ($fixedStep in @(@{ Id = 5645; Frames = 2 }, @{ Id = 5647; Frames = 10 })) {
+        $stepped = Tool-Payload $detachById[$fixedStep.Id]
+        Assert-True ($stepped.fixed_fps -eq 60 -and $stepped.physics_ticks -eq $fixedStep.Frames) "A game at a fixed rate did not run one physics tick per stepped frame: $($stepped | ConvertTo-Json -Compress)"
+    }
     Assert-True ((Tool-Payload $detachById[5646]).shutdown_requested -eq $true) "The detached game did not accept a stop."
 
     # And it is gone, which is the other half of leaving a process running: this

@@ -79,6 +79,45 @@ void test_runtime_launch_rejects_timeout_outside_public_range() {
     ASSERT_TRUE(result.isError);
 }
 
+// A stepped frame is one physics tick only at a fixed rate, so runtime_launch
+// can ask for one: true is the project's tick rate, a number is that rate. The
+// answer says what the game runs at, and a rate given twice is refused rather
+// than left to whichever Godot reads last (#1209).
+void test_runtime_launch_fixed_fps() {
+    ScopedEnvironmentVariable godot_bin("GODOT_BIN");
+    godot_bin.set(commandShell());
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    const auto launch = [&](didi::json fixed_fps, std::vector<std::string> extra) {
+        didi::json args = {{"headless", false}, {"timeout_seconds", 5}, {"extra_args", extra}};
+        if (!fixed_fps.is_null()) args["fixed_fps"] = fixed_fps;
+        return registry.callTool("runtime_launch", args);
+    };
+    const auto shell = successfulShellArguments();
+
+    const auto project_rate = launch(true, shell);
+    ASSERT_TRUE(!project_rate.isError);
+    ASSERT_EQ(didi::json::parse(project_rate.content[0].text)["fixed_fps"], 60);
+    const auto given_rate = launch(30, shell);
+    ASSERT_TRUE(!given_rate.isError);
+    ASSERT_EQ(didi::json::parse(given_rate.content[0].text)["fixed_fps"], 30);
+    const auto real_time = launch(false, shell);
+    ASSERT_TRUE(!real_time.isError);
+    ASSERT_TRUE(didi::json::parse(real_time.content[0].text)["fixed_fps"].is_null());
+
+    for (const auto& bad : {didi::json(0), didi::json(1001), didi::json("60")}) {
+        const auto refused = launch(bad, shell);
+        ASSERT_TRUE(refused.isError);
+        ASSERT_TRUE(refused.content[0].text.find("fixed_fps") != std::string::npos);
+    }
+    auto twice = shell;
+    twice.push_back("--fixed-fps");
+    twice.push_back("60");
+    const auto doubled = launch(true, twice);
+    ASSERT_TRUE(doubled.isError);
+    ASSERT_TRUE(doubled.content[0].text.find("extra_args") != std::string::npos);
+}
+
 void test_resolver_finds_documented_godot_451_layout() {
     ScopedEnvironmentVariable godot_bin("GODOT_BIN");
     ScopedEnvironmentVariable godot_path("GODOT_PATH");
@@ -508,6 +547,7 @@ struct RegisterTestRunnerTests {
                      test_a_crash_keeps_its_location_and_names_itself_in_the_summary);
         registerTest("RuntimeLaunch.TimeoutSchema", test_runtime_launch_schema_bounds_timeout);
         registerTest("RuntimeLaunch.TimeoutValidation", test_runtime_launch_rejects_timeout_outside_public_range);
+        registerTest("RuntimeLaunch.FixedFps", test_runtime_launch_fixed_fps);
         registerTest("RuntimeLaunch.Godot451Discovery", test_resolver_finds_documented_godot_451_layout);
         registerTest("RuntimeLaunch.AnEngineThatWillNotStartIsEngineUnavailable",
                      test_an_engine_that_will_not_start_is_engine_unavailable);

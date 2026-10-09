@@ -258,6 +258,38 @@ function Get-ObservedPostStateCases {
                Agree "value" $s.call.value $s.witness.returned
                Agree "applied" $s.call.applied (@($s.witness.returned).Count -eq 2) }
            Expect = { param($s) Expect "typed" 5 $s.typed.returned.builtin } },
+        # Dictionaries on a script that is not a tool (#1195): an untyped one
+        # takes scalars, a typed one is built with the key and value types it
+        # holds, and an int key travels as the digits of a string.
+        @{ Tool = "scene_set_property"; Session = "editor"; Steps = @(
+            (Step "script" "script_create" @{ script_path = "res://observed_tables.gd"; source_text = "extends Node`n`n@export var tags: Dictionary = {}`n@export var scores: Dictionary[String, int] = {}`n@export var waypoints: Dictionary[int, Vector2] = {}`n"; overwrite = $true }),
+            (Step "tabled" "scene_instantiate_node" @{ node_type = "Node"; parent_path = $observedRoot; name = "Tabled" }),
+            (Step "attach" "script_attach_to_node" @{ target_node = "$observedRoot/Tabled"; script_path = "res://observed_tables.gd" }),
+            (Step "call" "scene_set_property" @{ target_node = "$observedRoot/Tabled"; property_name = "tags"; value = @{ speed = 3; label = "fast"; on = $true } }),
+            (Witness "witness" "property" @("Tabled", "tags")))
+           Agree = { param($s)
+               Agree "value" $s.call.value $s.witness.returned
+               Agree "applied" $s.call.applied ($s.witness.returned.label -eq "fast") } },
+        @{ Tool = "scene_set_property"; Session = "editor"; Steps = @(
+            (Step "call" "scene_set_property" @{ target_node = "$observedRoot/Tabled"; property_name = "scores"; value = @{ ada = 3; bob = 5 } }),
+            (Witness "witness" "property" @("Tabled", "scores")),
+            (Witness "typed" "dictionary_type" @("Tabled", "scores")))
+           Agree = { param($s)
+               Agree "value" $s.call.value $s.witness.returned
+               Agree "applied" $s.call.applied ($s.witness.returned.bob -eq 5) }
+           Expect = { param($s)
+               Expect "key type" 4 $s.typed.returned.key_builtin
+               Expect "value type" 2 $s.typed.returned.value_builtin } },
+        @{ Tool = "scene_set_property"; Session = "editor"; Steps = @(
+            (Step "call" "scene_set_property" @{ target_node = "$observedRoot/Tabled"; property_name = "waypoints"; value = @{ "1" = @{ x = 4; y = 8 }; "-2" = @{ x = 0.5; y = 0 } } }),
+            (Witness "witness" "property" @("Tabled", "waypoints")),
+            (Witness "typed" "dictionary_type" @("Tabled", "waypoints")))
+           Agree = { param($s)
+               Agree "value" $s.call.value $s.witness.returned
+               Agree "applied" $s.call.applied ($s.witness.returned."1".y -eq 8) }
+           Expect = { param($s)
+               Expect "key type" 2 $s.typed.returned.key_builtin
+               Expect "value type" 5 $s.typed.returned.value_builtin } },
         @{ Tool = "scene_instantiate_node"; Session = "editor"; Steps = @(
             (Witness "before" "children" @(".")),
             (Step "call" "scene_instantiate_node" @{ node_type = "Node3D"; parent_path = $observedRoot; name = "Spawned" }),

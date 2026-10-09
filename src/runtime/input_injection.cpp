@@ -231,12 +231,17 @@ const char* InjectedInputEvent::kindName() const {
 
 Result<std::vector<InjectedInputEvent>> parseInputInjectionRequest(const json& params) {
     if (!params.is_object()) return Error::invalidArgument("Input injection params must be an object");
-    if (!onlyKeys(params, {"events", "target_context"})) {
+    if (!onlyKeys(params, {"events", "target_context", "paused_delivery"})) {
         return Error::invalidArgument("Input injection request contains an unknown property");
     }
     if (params.contains("target_context") &&
         (!params["target_context"].is_string() || params["target_context"] != "game_input")) {
         return Error::invalidArgument("target_context must be \"game_input\"");
+    }
+    if (params.contains("paused_delivery") &&
+        (!params["paused_delivery"].is_string() ||
+         (params["paused_delivery"] != "hold" && params["paused_delivery"] != "now"))) {
+        return Error::invalidArgument("paused_delivery must be \"hold\" or \"now\"");
     }
     if (!params.contains("events") || !params["events"].is_array()) {
         return Error::invalidArgument("events is required and must be an array");
@@ -257,6 +262,10 @@ Result<std::vector<InjectedInputEvent>> parseInputInjectionRequest(const json& p
         parsed.push_back(std::move(result.value()));
     }
     return parsed;
+}
+
+bool deliversWhilePaused(const json& params) {
+    return params.is_object() && params.value("paused_delivery", std::string("hold")) == "now";
 }
 
 } // namespace runtime

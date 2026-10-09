@@ -766,6 +766,9 @@ bool propertyTypeAcceptsJson(const json& value, GDExtensionVariantType type) {
             // What its elements may be depends on the array the property holds
             // now, typed or not, so they are checked when the value is built.
             return value.is_array();
+        case GDEXTENSION_VARIANT_TYPE_DICTIONARY:
+            // The same for a dictionary's keys and values (#1195).
+            return value.is_object();
         default:
             break;
     }
@@ -1330,6 +1333,113 @@ Result<VariantValue> makeArrayForProperty(const std::string& property_name, cons
                             {&items.value(), &builtin.value(), &class_name.value(), &script.value()});
 }
 
+// A Dictionary property's new value (#1195). A typed one, Dictionary[String,
+// int], keeps what it holds when handed an untyped dictionary, with no error,
+// as a typed Array does (measured on 4.5.1, 4.6.2 and 4.7.2). So the new one is
+// made with the key and value types of the one the property holds, each value
+// built as its type. JSON keys are strings: they stay a String, become a
+// StringName for a StringName key, and a whole number for an int key. An
+// untyped dictionary takes scalar values, for the reason an untyped Array does.
+Result<VariantValue> makeDictionaryForProperty(const std::string& property_name, const json& value,
+                                               VariantValue& current) {
+    if (GodotApi::instance().variant_get_type(current.ptr()) != GDEXTENSION_VARIANT_TYPE_DICTIONARY) {
+        return Error::invalidArgument("Property \"" + property_name +
+                                      "\" holds no Dictionary to take key and value types from.");
+    }
+    const auto typed = [&](const char* method) -> Result<GDExtensionVariantType> {
+        auto builtin = callVariant(current, method);
+        if (builtin.isErr()) return builtin.error();
+        auto number = scalarFromVariant<int64_t>(builtin.value(), GDEXTENSION_VARIANT_TYPE_INT);
+        if (number.isErr()) return number.error();
+        return static_cast<GDExtensionVariantType>(number.value());
+    };
+    auto key_type = typed("get_typed_key_builtin");
+    if (key_type.isErr()) return key_type.error();
+    auto value_type = typed("get_typed_value_builtin");
+    if (value_type.isErr()) return value_type.error();
+    const auto key = key_type.value();
+    const auto element = value_type.value();
+    if (key != GDEXTENSION_VARIANT_TYPE_NIL && key != GDEXTENSION_VARIANT_TYPE_STRING &&
+        key != GDEXTENSION_VARIANT_TYPE_STRING_NAME && key != GDEXTENSION_VARIANT_TYPE_INT) {
+        return Error::invalidArgument(
+            "Property \"" + property_name + "\" is a Dictionary keyed by " +
+            godotVariantTypeName(static_cast<int>(key)) +
+            ", and a JSON key is a string, which spells a String, StringName or int key only.");
+    }
+    std::string class_text;
+    if (element == GDEXTENSION_VARIANT_TYPE_OBJECT) {
+        auto class_name = callVariant(current, "get_typed_value_class_name");
+        if (class_name.isErr()) return class_name.error();
+        auto text = stringFromVariant(class_name.value(), GDEXTENSION_VARIANT_TYPE_STRING_NAME);
+        if (text.isErr()) return text.error();
+        class_text = text.value();
+    }
+    auto entries = makeJsonVariant(json::object());
+    if (entries.isErr()) return entries.error();
+    for (auto it = value.begin(); it != value.end(); ++it) {
+        const auto& key_text = it.key();
+        const auto& item = it.value();
+        const auto name = property_name + "[\"" + key_text + "\"]";
+        auto built_key = [&]() -> Result<VariantValue> {
+            if (key == GDEXTENSION_VARIANT_TYPE_INT) {
+                const auto number = dictionaryIntKey(key_text);
+                if (!number) {
+                    return Error::invalidArgument(
+                        "Property \"" + property_name + "\" is a Dictionary keyed by int, and the key \"" +
+                        key_text + "\" is not a whole number. Send each key as the number in a string, "
+                        "such as \"3\" or \"-1\".");
+                }
+                return makeScalar(GDEXTENSION_VARIANT_TYPE_INT, *number);
+            }
+            if (key == GDEXTENSION_VARIANT_TYPE_STRING_NAME) {
+                return makeJsonVariantForProperty(json(key_text), GDEXTENSION_VARIANT_TYPE_STRING_NAME);
+            }
+            return makeJsonVariant(json(key_text));
+        }();
+        if (built_key.isErr()) return built_key.error();
+        auto built = [&]() -> Result<VariantValue> {
+            if (element == GDEXTENSION_VARIANT_TYPE_NIL) {
+                if (!item.is_null() && !item.is_boolean() && !item.is_number() && !item.is_string()) {
+                    return Error::invalidArgument(
+                        "Property \"" + property_name + "\" is an untyped Dictionary, so it has no value "
+                        "type to turn the JSON " + jsonValueTypeName(item) + " at key \"" + key_text +
+                        "\" into, and Godot would keep it as a Dictionary or an Array rather than the "
+                        "vector or colour it may stand for. Send numbers, strings, booleans or null, or "
+                        "declare the property as a typed dictionary such as Dictionary[String, Vector2].");
+                }
+                return makeJsonVariant(item);
+            }
+            if (element == GDEXTENSION_VARIANT_TYPE_OBJECT) {
+                if (!propertyTypeAcceptsJson(item, element)) {
+                    return Error::invalidArgument(describePropertyTypeMismatch(name, item, element));
+                }
+                return makeResourceForProperty(name, item, class_text);
+            }
+            auto fits = validateJsonForPropertyType(name, item, element);
+            if (fits.isErr()) return fits.error();
+            return makeJsonVariantForProperty(item, element);
+        }();
+        if (built.isErr()) return built.error();
+        auto stored = callVariant(entries.value(), "set", {&built_key.value(), &built.value()});
+        if (stored.isErr()) return stored.error();
+    }
+    if (key == GDEXTENSION_VARIANT_TYPE_NIL && element == GDEXTENSION_VARIANT_TYPE_NIL) {
+        return std::move(entries.value());
+    }
+    auto key_builtin = callVariant(current, "get_typed_key_builtin");
+    auto key_class = callVariant(current, "get_typed_key_class_name");
+    auto key_script = callVariant(current, "get_typed_key_script");
+    auto value_builtin = callVariant(current, "get_typed_value_builtin");
+    auto value_class = callVariant(current, "get_typed_value_class_name");
+    auto value_script = callVariant(current, "get_typed_value_script");
+    for (const auto* part : {&key_builtin, &key_class, &key_script, &value_builtin, &value_class, &value_script}) {
+        if (part->isErr()) return part->error();
+    }
+    return constructBuiltin(GDEXTENSION_VARIANT_TYPE_DICTIONARY,
+                            {&entries.value(), &key_builtin.value(), &key_class.value(), &key_script.value(),
+                             &value_builtin.value(), &value_class.value(), &value_script.value()});
+}
+
 Result<json> variantToJson(VariantValue& value, int depth = 0, bool lenient = false) {
     if (depth > 16) return Error::invalidArgument("Godot Variant is nested more than 16 levels deep");
     auto& api = GodotApi::instance();
@@ -1386,11 +1496,24 @@ Result<json> variantToJson(VariantValue& value, int depth = 0, bool lenient = fa
                 auto key = callVariant(keys.value(), "get", {&index.value()});
                 if (key.isErr()) return key.error();
                 auto key_type = GodotApi::instance().variant_get_type(key.value().ptr());
-                if (key_type != GDEXTENSION_VARIANT_TYPE_STRING && key_type != GDEXTENSION_VARIANT_TYPE_STRING_NAME) {
-                    return Error::invalidArgument("Godot Dictionary contains a non-string key");
+                // An int key reads as the decimal string a write takes it as,
+                // so an int-keyed dictionary round-trips (#1195).
+                Result<std::string> key_text = std::string();
+                if (key_type == GDEXTENSION_VARIANT_TYPE_INT) {
+                    auto number = scalarFromVariant<int64_t>(key.value(), GDEXTENSION_VARIANT_TYPE_INT);
+                    if (number.isErr()) return number.error();
+                    key_text = std::to_string(number.value());
+                } else if (key_type == GDEXTENSION_VARIANT_TYPE_STRING ||
+                           key_type == GDEXTENSION_VARIANT_TYPE_STRING_NAME) {
+                    key_text = stringFromVariant(key.value(), key_type);
+                } else {
+                    return Error::invalidArgument("Godot Dictionary contains a key that is not a string or an int");
                 }
-                auto key_text = stringFromVariant(key.value(), key_type);
                 if (key_text.isErr()) return key_text.error();
+                if (output.contains(key_text.value())) {
+                    return Error::invalidArgument("Godot Dictionary holds the key \"" + key_text.value() +
+                                                  "\" as both a string and an int, which JSON cannot tell apart");
+                }
                 auto item = callVariant(value, "get", {&key.value()});
                 if (item.isErr()) return item.error();
                 auto converted = variantToJson(item.value(), depth + 1, lenient);
@@ -2992,6 +3115,8 @@ std::optional<json> refuseInstanceCycle(GDExtensionObjectPtr root, const std::st
                        detail);
 }
 
+std::string resourcePathOf(GDExtensionObjectPtr resource);
+
 struct AttachableScript {
     VariantValue script;
     GDExtensionObjectPtr object{nullptr};
@@ -3010,7 +3135,14 @@ Result<AttachableScript> loadAttachableScript(GDExtensionObjectPtr node,
         auto existing = objectFromVariant(old_script.value());
         if (existing.isErr()) return existing.error();
         if (existing.value()) {
-            return Error(409, "Target node already has a script; detach it before attaching another");
+            const auto held = resourcePathOf(existing.value());
+            json data = {{"code", "script_already_attached"}, {"retryable", false}};
+            if (!held.empty()) data["script_path"] = held;
+            return Error(409,
+                         "Target node already has a script" +
+                             (held.empty() ? std::string() : " (" + held + ")") +
+                             "; detach it with script_detach_from_node before attaching another",
+                         std::move(data));
         }
     }
     if (!resourceFileExists(script_path)) {
@@ -4488,6 +4620,8 @@ Result<PreparedWrite> prepareWrite(GDExtensionObjectPtr root, const std::string&
         ? makeResourceForProperty(write.property, value, write.resolved.descriptor.class_name)
         : property_type == GDEXTENSION_VARIANT_TYPE_ARRAY
         ? makeArrayForProperty(write.property, value, old_value.value())
+        : property_type == GDEXTENSION_VARIANT_TYPE_DICTIONARY
+        ? makeDictionaryForProperty(write.property, value, old_value.value())
         : makeJsonVariantForProperty(value, property_type);
     if (new_value.isErr()) return new_value.error();
     write.requested = value;
@@ -6413,11 +6547,12 @@ json GodotBridge::callScriptMethod(const json& params,
     // state in a way no caller intends, so the prefix is refused whatever the
     // script declares.
     if (method_name.front() == '_') {
-        return fail(403,
-                    "Refusing to call \"" + method_name +
-                        "\". A leading underscore is Godot's mark for an engine callback or a "
-                        "script's private helper, and calling one by hand corrupts node state. "
-                        "Expose the behaviour under a name without the underscore.");
+        return errorJson(403,
+                         "Refusing to call \"" + method_name +
+                             "\". A leading underscore is Godot's mark for an engine callback or a "
+                             "script's private helper, and calling one by hand corrupts node state. "
+                             "Expose the behaviour under a name without the underscore.",
+                         json{{"code", "method_private"}, {"field", "method_name"}});
     }
     const auto arguments = params.value("arguments", json::array());
     if (!arguments.is_array() || arguments.size() > 8) {
@@ -6451,7 +6586,10 @@ json GodotBridge::callScriptMethod(const json& params,
         }
     }
     try {
-        if (arguments.dump().size() > 8u * 1024u) return fail(413, "arguments exceed 8 KiB");
+        if (arguments.dump().size() > 8u * 1024u) {
+            return errorJson(413, "arguments exceed 8 KiB",
+                             json{{"code", "arguments_too_large"}, {"field", "arguments"}});
+        }
     } catch (const json::exception&) {
         return fail(400, "arguments are not valid JSON text");
     }
@@ -6523,22 +6661,29 @@ json GodotBridge::callScriptMethod(const json& params,
         if (name == method_name) chosen = rendered.value();
     }
     if (!chosen.has_value()) {
-        return fail(404,
-                    "\"" + method_name + "\" is not a method this node's script declares. "
-                    "scene_call_method calls project methods only. Declared: " +
-                    declared.dump() +
-                    (typedToolForEngineMethod(method_name).empty()
-                         ? std::string()
-                         : ". For the engine's " + method_name + ", use " +
-                               typedToolForEngineMethod(method_name) + "."));
+        return errorJson(404,
+                         "\"" + method_name + "\" is not a method this node's script declares. "
+                         "scene_call_method calls project methods only. Declared: " +
+                             declared.dump() +
+                             (typedToolForEngineMethod(method_name).empty()
+                                  ? std::string()
+                                  : ". For the engine's " + method_name + ", use " +
+                                        typedToolForEngineMethod(method_name) + "."),
+                         json{{"code", "method_not_declared"},
+                              {"field", "method_name"},
+                              {"declared", declared}});
     }
 
     const auto declared_arguments = chosen->value("args", json::array());
     if (!declared_arguments.is_array()) return fail(500, "Godot returned an unreadable method list");
     if (declared_arguments.size() != arguments.size()) {
-        return fail(409, "\"" + method_name + "\" takes " +
-                             std::to_string(declared_arguments.size()) + " argument(s) and " +
-                             std::to_string(arguments.size()) + " were given");
+        return errorJson(409, "\"" + method_name + "\" takes " +
+                                  std::to_string(declared_arguments.size()) + " argument(s) and " +
+                                  std::to_string(arguments.size()) + " were given",
+                         json{{"code", "argument_count_mismatch"},
+                              {"field", "arguments"},
+                              {"expected", declared_arguments.size()},
+                              {"given", arguments.size()}});
     }
     // Each argument has to fit the parameter Godot declared, checked before
     // anything runs. A mismatch inside the engine is a crash or a silent
@@ -6573,8 +6718,12 @@ json GodotBridge::callScriptMethod(const json& params,
                 break;
         }
         if (!compatible) {
-            return fail(409, "argument " + std::to_string(index + 1) + " of \"" + method_name +
-                                 "\" does not fit the parameter type the script declares");
+            return errorJson(409, "argument " + std::to_string(index + 1) + " of \"" +
+                                      method_name +
+                                      "\" does not fit the parameter type the script declares",
+                             json{{"code", "argument_type_mismatch"},
+                                  {"field", "arguments"},
+                                  {"argument_index", index}});
         }
     }
 
@@ -6679,7 +6828,9 @@ json GodotBridge::callScriptMethod(const json& params,
                 {
                     std::lock_guard<std::mutex> lock(g_script_call_mutex);
                     if (g_script_calls.size() >= kMaxPendingScriptCalls) {
-                        return fail(429, "Too many coroutine calls are already being awaited");
+                        return errorJson(429, "Too many coroutine calls are already being awaited",
+                                         json{{"code", "await_limit_reached"},
+                                              {"retryable", true}});
                     }
                     await_id = g_next_script_call_id++;
                     ScriptCallWait entry;
@@ -7299,7 +7450,12 @@ json injectInput(const json& params, const std::string& session_kind) {
     }
     auto paused = liveSceneTreeIsPaused();
     if (paused.isErr()) return errorJson(paused.error().code, paused.error().message);
-    if (paused.value()) {
+    // A pause menu runs with PROCESS_MODE_ALWAYS, and a paused tree still
+    // hands input to nodes that process while paused, the way it hands them a
+    // person's click. Asked for, the batch goes to Input now: the menu sees
+    // it, a paused node does not, and no frame is stepped (#1191).
+    const bool deliver_while_paused = paused.value() && runtime::deliversWhilePaused(params);
+    if (paused.value() && !deliver_while_paused) {
         const size_t count = events.size();
         if (g_queuedInjectedInput.size() + count > kMaxQueuedInjectedEvents) {
             return bridgeError(409, "input_queue_full",
@@ -7342,8 +7498,14 @@ json injectInput(const json& params, const std::string& session_kind) {
     json answer = {{"dispatched_event_count", dispatched}, {"queued_event_count", 0},
                    {"event_types", std::move(event_types)},
                    {"outcome", "completed"}, {"rollback", "not_available"},
-                   {"paused", false}, {"delivery", "immediate"},
+                   {"paused", paused.value()},
+                   {"delivery", deliver_while_paused ? "while_paused" : "immediate"},
                    {"session_kind", session_kind}};
+    if (deliver_while_paused) {
+        answer["message"] = "The game stays paused. Nodes that process while paused, such as a "
+                            "PROCESS_MODE_ALWAYS pause menu, received these events; paused nodes "
+                            "did not, and no frame was stepped.";
+    }
     // parse_input_event only buffers an event. Input's state, and every
     // node's _input, see it when the engine next flushes, which it does at
     // least once a frame: asked of 4.5.1, 4.6.2 and 4.7.2 from a headless
@@ -8989,6 +9151,54 @@ Result<GDExtensionObjectPtr> resolveAnimationPlayer(const std::string& path, con
 // Editor or game. The rectangle is Control.get_global_rect, which is the
 // viewport-space rectangle ui_hit_test already reports for a hit, so the two
 // tools agree about where a Control is.
+// The rectangle a Control covers in its window, in the pixels an injected
+// mouse event carries. get_global_rect is in the viewport's own coordinates,
+// which a stretched project scales on the way to the window: drawn at
+// 1600x900 into a 1280x720 window, a button's centre sits at 0.8 of where
+// get_global_rect puts it, and a click aimed at the listed centre missed
+// (#1189). Viewport.get_screen_transform is that mapping, measured identical
+// on 4.5.1, 4.6.2 and 4.7.2. A rotated or skewed transform gives the
+// rectangle that bounds the four corners.
+Result<json> screenRectOf(GDExtensionObjectPtr control, const json& global_rect) {
+    auto viewport_value = callObject(control, "Node", "get_viewport", 3596683776LL);
+    if (viewport_value.isErr()) return viewport_value.error();
+    auto viewport = objectFromVariant(viewport_value.value());
+    if (viewport.isErr()) return viewport.error();
+    if (!viewport.value()) return Error::internal("The Control is not inside a viewport");
+    auto transform_value =
+        callObject(viewport.value(), "Viewport", "get_screen_transform", 3814499831LL);
+    if (transform_value.isErr()) return transform_value.error();
+    auto transform = variantToJson(transform_value.value());
+    if (transform.isErr()) return transform.error();
+    try {
+        const auto& t = transform.value();
+        const double xx = t.at("x").at("x").get<double>(), xy = t.at("x").at("y").get<double>();
+        const double yx = t.at("y").at("x").get<double>(), yy = t.at("y").at("y").get<double>();
+        const double ox = t.at("origin").at("x").get<double>();
+        const double oy = t.at("origin").at("y").get<double>();
+        const double px = global_rect.at("position").at("x").get<double>();
+        const double py = global_rect.at("position").at("y").get<double>();
+        const double sx = global_rect.at("size").at("x").get<double>();
+        const double sy = global_rect.at("size").at("y").get<double>();
+        double min_x = 0, min_y = 0, max_x = 0, max_y = 0;
+        bool first = true;
+        for (const auto& [cx, cy] : {std::pair<double, double>{px, py}, {px + sx, py},
+                                     {px, py + sy}, {px + sx, py + sy}}) {
+            const double wx = xx * cx + yx * cy + ox;
+            const double wy = xy * cx + yy * cy + oy;
+            min_x = first ? wx : std::min(min_x, wx);
+            min_y = first ? wy : std::min(min_y, wy);
+            max_x = first ? wx : std::max(max_x, wx);
+            max_y = first ? wy : std::max(max_y, wy);
+            first = false;
+        }
+        return json{{"position", {{"x", min_x}, {"y", min_y}}},
+                    {"size", {{"x", max_x - min_x}, {"y", max_y - min_y}}}};
+    } catch (const json::exception& error) {
+        return Error::internal(std::string("The screen transform could not be read: ") + error.what());
+    }
+}
+
 json uiListControls(const json& params, const std::string& session_kind) {
     if (!hasOnlyKeys(params, {"root_path", "max_results", "visible_only", "include_text",
                               "class_filter"})) {
@@ -9156,6 +9366,12 @@ json uiListControls(const json& params, const std::string& session_kind) {
                                       {"depth", depth},
                                       {"mouse_filter", filter_name},
                                       {"mouse_filter_value", mouse_filter.value()}};
+                        // In a game, where runtime_inject_input can click it.
+                        if (!editor) {
+                            auto screen_rect = screenRectOf(node, rect_json.value());
+                            if (screen_rect.isErr()) return screen_rect.error();
+                            entry["screen_rect"] = std::move(screen_rect.value());
+                        }
 
                         // Text lives on a different class for every widget that
                         // has it, so it is read as a property rather than through
@@ -16021,6 +16237,8 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 ? makeResourceForProperty(it.key(), it.value(), declared_class)
                 : property_type == GDEXTENSION_VARIANT_TYPE_ARRAY
                 ? makeArrayForProperty(it.key(), it.value(), current_value.value())
+                : property_type == GDEXTENSION_VARIANT_TYPE_DICTIONARY
+                ? makeDictionaryForProperty(it.key(), it.value(), current_value.value())
                 : makeJsonVariantForProperty(it.value(), property_type);
             if (property_value.isErr()) {
                 GodotApi::instance().object_destroy(node);
@@ -17291,6 +17509,28 @@ const std::map<std::string, std::string>& bridgeErrorSentenceTable() {
     return bridgeErrorSentences();
 }
 
+std::optional<int64_t> dictionaryIntKey(std::string_view text) {
+    const bool negative = !text.empty() && text.front() == '-';
+    const auto digits = negative ? text.substr(1) : text;
+    if (digits.empty() || digits.size() > 19) return std::nullopt;
+    if (digits.size() > 1 && digits.front() == '0') return std::nullopt;
+    if (negative && digits == "0") return std::nullopt;
+    uint64_t magnitude = 0;
+    for (const char c : digits) {
+        if (c < '0' || c > '9') return std::nullopt;
+        const auto digit = static_cast<uint64_t>(c - '0');
+        if (magnitude > (UINT64_MAX - digit) / 10) return std::nullopt;
+        magnitude = magnitude * 10 + digit;
+    }
+    const auto limit = static_cast<uint64_t>(INT64_MAX) + (negative ? 1u : 0u);
+    if (magnitude > limit) return std::nullopt;
+    if (negative) {
+        return magnitude == static_cast<uint64_t>(INT64_MAX) + 1u ? INT64_MIN
+                                                                 : -static_cast<int64_t>(magnitude);
+    }
+    return static_cast<int64_t>(magnitude);
+}
+
 PropertyTypeMatch matchJsonToPropertyType(const json& value, int godot_type) {
     // Delegates the accept/reject decision to propertyTypeAcceptsJson rather
     // than repeating it. Two copies of this rule already disagreed once: the
@@ -17314,6 +17554,7 @@ PropertyTypeMatch matchJsonToPropertyType(const json& value, int godot_type) {
         case GDEXTENSION_VARIANT_TYPE_COLOR:
         case GDEXTENSION_VARIANT_TYPE_OBJECT:
         case GDEXTENSION_VARIANT_TYPE_ARRAY:
+        case GDEXTENSION_VARIANT_TYPE_DICTIONARY:
             break;
         default:
             if (compoundMembers(static_cast<GDExtensionVariantType>(godot_type)) == nullptr &&

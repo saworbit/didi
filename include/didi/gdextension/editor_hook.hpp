@@ -328,6 +328,8 @@ private:
         // Input held during the pause and handed to Input when this step
         // resumed the tree, so the caller knows the stepped frame carried it.
         int64_t released_input_events{0};
+        // The engine's physics frame count as the step resumed the tree.
+        std::optional<int64_t> resumed_physics_frames;
     };
 
     // A capture that had to change the editor's main screen first.

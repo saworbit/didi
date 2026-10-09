@@ -249,16 +249,6 @@ constexpr const char* kClientInfoMetaKey = "io.modelcontextprotocol/clientInfo";
 // Long work as jobs (Q8 in docs/BUILD_QUEUE.md).
 constexpr const char* kTasksExtension = "io.modelcontextprotocol/tasks";
 
-// The tools that run as a job when asked to. Two run an offline helper that
-// can take minutes, during which the stdio loop answered nothing else. The
-// other two wait for the editor to apply a scan, which a slow editor can take
-// minutes over, past the bridge's fifteen-second wait for any one command.
-bool runsAsJob(const std::string& canonical) {
-    return canonical == "project_export" || canonical == "csharp_check_build" ||
-           canonical == "asset_reimport" || canonical == "editor_reload_project" ||
-           canonical == "runtime_run_scenario" || canonical == "project_run_tests";
-}
-
 // Whether this request declared the tasks extension in its own capabilities.
 // Only the request's own declaration counts: the extension forbids answering
 // a request with a task when that request did not declare it, whatever an
@@ -1054,7 +1044,7 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
         const auto* called_tool = ToolRegistry::instance().getTool(name);
         const std::string canonical =
             called_tool ? std::string(called_tool->canonical_name) : name;
-        const bool job_tool = runsAsJob(canonical);
+        const bool job_tool = toolRunsAsJob(canonical);
         std::optional<std::string> request_id;
         if (job_tool && arguments.is_object() && arguments.contains("request_id")) {
             if (!validRequestId(arguments["request_id"])) {

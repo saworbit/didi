@@ -4,6 +4,7 @@
 #include "didi/gdextension/crash_capture.hpp"
 #include "didi/gdextension/godot_bridge.hpp"
 #include "didi/gdextension/editor_hook.hpp"
+#include "didi/gdextension/runtime_bridge.hpp"
 #include "didi/gdextension/engine_output_logger.hpp"
 #include "didi/common/logger.hpp"
 #include "didi/common/project_path.hpp"
@@ -81,6 +82,11 @@ std::string fallbackCanonicalProjectPath() {
 static void didi_main_loop_frame() {
     reassertCrashCapture();
     EditorHook::instance().processQueue();
+}
+
+static void didi_main_loop_startup() {
+    // Before the first physics frame, which is the point of it (#1208).
+    if (!engineIsEditorHint()) pauseGameAtStartupIfRequested();
 }
 
 static void didi_main_loop_shutdown() {
@@ -201,6 +207,7 @@ GDE_EXPORT GDExtensionBool didi_library_init(GDExtensionInterfaceGetProcAddress 
     }
 
     GDExtensionMainLoopCallbacks main_loop_callbacks{};
+    main_loop_callbacks.startup_func = didi::godot::didi_main_loop_startup;
     main_loop_callbacks.frame_func = didi::godot::didi_main_loop_frame;
     main_loop_callbacks.shutdown_func = didi::godot::didi_main_loop_shutdown;
     if (!didi::godot::GodotApi::instance().registerMainLoop(main_loop_callbacks)) {

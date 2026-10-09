@@ -72,5 +72,10 @@ constexpr size_t kMaxInjectedRequestBytes = 32u * 1024u;
 // request exceeds the byte cap.
 Result<std::vector<InjectedInputEvent>> parseInputInjectionRequest(const json& params);
 
+// Whether a batch sent while the game is paused goes to Input at once rather
+// than being held for the first frame that processes. Only after
+// parseInputInjectionRequest accepted the request.
+bool deliversWhilePaused(const json& params);
+
 } // namespace runtime
 } // namespace didi

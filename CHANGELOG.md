@@ -57,6 +57,10 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Added
 
+- `2026-10-09` `scene_set_property` and `scene_instantiate_node` write `Dictionary` properties, typed ones included, and an int key reads back as its digits. [#1195](https://github.com/saworbit/didi/issues/1195)
+- `2026-10-09` `ui_list_controls` in a game reports `screen_rect`, the window pixels a click is aimed in, which a stretched project scales. [#1189](https://github.com/saworbit/didi/issues/1189)
+- `2026-10-09` `runtime_inject_input` takes `paused_delivery: "now"`, which operates a pause menu that processes while paused without stepping the game. [#1191](https://github.com/saworbit/didi/issues/1191)
+- `2026-10-09` `runtime_launch` takes `fixed_fps`, and `runtime_step` answers `fixed_fps` and the `physics_ticks` its frames ran. [#1209](https://github.com/saworbit/didi/issues/1209)
 - `2026-10-09` `project_run_tests` runs the project's GUT or GdUnit4 tests headless and judges the JUnit report, so a run that tested nothing cannot pass. [#1206](https://github.com/saworbit/didi/issues/1206) · [PR #1212](https://github.com/saworbit/didi/pull/1212)
 - `2026-10-08` `runtime_run_scenario` proves a behaviour in one call: it drives its own game frame by frame, checks it, stops it, and records the files a pass was true for. [#1206](https://github.com/saworbit/didi/issues/1206) · [PR #1210](https://github.com/saworbit/didi/pull/1210)
 - `2026-10-04` Transforms, rectangles, packed arrays and typed arrays can be read and written as JSON, so none of them is patched into scene text. [#1133](https://github.com/saworbit/didi/issues/1133) · [PR #1182](https://github.com/saworbit/didi/pull/1182)
@@ -113,6 +117,15 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Fixed
 
+- `2026-10-09` A scenario's game starts paused before its first physics frame, and `game.frames_before_pause` says how many ran. [#1208](https://github.com/saworbit/didi/issues/1208)
+- `2026-10-09` Six `scene_call_method` refusals carry codes of their own, and a codeless `fail(4xx)` in the bridge fails the refusal scan. [#1196](https://github.com/saworbit/didi/issues/1196)
+- `2026-10-09` `script_attach_to_node` on a node that holds a script answers `script_already_attached`, naming that script and `script_detach_from_node`. [#1193](https://github.com/saworbit/didi/issues/1193)
+- `2026-10-09` `script_check_syntax` accepts inline suites such as `if ready: start()`, and a lexical error beside a clean engine verdict is a warning, not an error. [#1188](https://github.com/saworbit/didi/issues/1188)
+- `2026-10-09` SECURITY.md records the re-read behind the second re-raise of the two process alerts. [#1201](https://github.com/saworbit/didi/issues/1201)
+- `2026-10-09` The Quickstart, admin and integration guides say `didi setup` and `didi doctor` are not in the 2.0.1 archive, and how to set up with it. [#1190](https://github.com/saworbit/didi/issues/1190)
+- `2026-10-09` The tool manifest publishes the `openWorldHint` and job tools, and the docs validator fails a list of either that misses one. [#1215](https://github.com/saworbit/didi/issues/1215)
+- `2026-10-09` A file replace that fails names the reason the system gave, and `project_settings_file.concurrent_writers` names each write that failed. [#1214](https://github.com/saworbit/didi/issues/1214)
+- `2026-10-09` `tools/test_inventory.py --test-binary` wins over `DIDI_TEST_BINARY`, and a binary with no test registry is refused with the override named. [#1194](https://github.com/saworbit/didi/issues/1194)
 - `2026-10-05` `didi setup` keeps a table a person adds under Codex's `mcp_servers.didi`, such as its `env`, instead of refusing the file. [#1144](https://github.com/saworbit/didi/issues/1144) · [PR #1186](https://github.com/saworbit/didi/pull/1186)
 - `2026-10-05` Eight refusals name the fix that applies instead of another, and the route failure and session-kind refusals read as proper sentences. [#1184](https://github.com/saworbit/didi/issues/1184) · [PR #1185](https://github.com/saworbit/didi/pull/1185)
 - `2026-10-04` A 422 from `script_attach_to_node` or `scene_call_method` names its own fix, not `export_presets.cfg`. [#1181](https://github.com/saworbit/didi/issues/1181) · [PR #1183](https://github.com/saworbit/didi/pull/1183)

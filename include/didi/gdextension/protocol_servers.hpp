@@ -30,4 +30,14 @@ std::vector<std::string> processArguments();
 // last occurrence wins, and nothing after `--` or `++` is an engine option.
 ProtocolPortOverrides protocolPortOverrides(const std::vector<std::string>& arguments);
 
+// The rate --fixed-fps sets, read the same way, or nothing when the game runs
+// in real time. Godot treats a value below 1 as no fixed rate.
+std::optional<int> fixedFpsArgument(const std::vector<std::string>& arguments);
+
+// Whether the game's own arguments, after `--` or `++`, carry the marker a
+// scenario run starts its game with, so the tree is paused before the first
+// physics frame (#1208).
+inline constexpr const char* kStartPausedArgument = "--didi-start-paused";
+bool startPausedRequested(const std::vector<std::string>& arguments);
+
 } // namespace didi::godot

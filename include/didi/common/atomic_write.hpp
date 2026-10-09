@@ -103,7 +103,8 @@ public:
         const auto error = renameWithRetry(m_temporary, m_target, kReplaceRetryBudget);
         if (error) {
             discard();
-            return Error::internal("Replacing the destination file failed; the original is unchanged");
+            return Error::internal("Replacing the destination file failed (" + error.message() +
+                                   "); the original is unchanged");
         }
         m_staged = false;
         return Result<void>::ok();

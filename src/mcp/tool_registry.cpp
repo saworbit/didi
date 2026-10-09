@@ -1498,7 +1498,9 @@ json ToolManifest::toJson() const {
             {"implemented", implemented},
             {"unimplemented", unimplemented},
             {"mutating", mutating},
-            {"core", core}
+            {"core", core},
+            {"open_world", open_world},
+            {"jobs", jobs}
         }},
         {"required", required},
         // Every error code the remedy table answers (Q6), so a test can hold
@@ -1552,6 +1554,16 @@ bool ToolRegistry::inProfile(const std::string& name, ToolProfile profile) const
     return profile == ToolProfile::Full || coreProfileTools().count(name) > 0;
 }
 
+// Two run an offline helper that can take minutes, during which the stdio loop
+// answered nothing else. Two wait for the editor to apply a scan, which a slow
+// editor can take minutes over, past the bridge's fifteen-second wait for any
+// one command. Two start a Godot of their own and run it to the end (Q9).
+bool toolRunsAsJob(const std::string& canonical) {
+    return canonical == "project_export" || canonical == "csharp_check_build" ||
+           canonical == "asset_reimport" || canonical == "editor_reload_project" ||
+           canonical == "runtime_run_scenario" || canonical == "project_run_tests";
+}
+
 ToolManifest ToolRegistry::buildManifest() const {
     ToolManifest manifest;
     for (const auto& kv : m_tools) {
@@ -1564,9 +1576,10 @@ ToolManifest ToolRegistry::buildManifest() const {
         if (tool.capability.implemented) {
             manifest.implemented.push_back(tool.name);
             if (coreProfileTools().count(tool.name)) manifest.core.push_back(tool.name);
-            if (MutationSafety::isMutation(resolveAliasBinding(tool.name, json::object()))) {
-                manifest.mutating.push_back(tool.name);
-            }
+            const auto binding = resolveAliasBinding(tool.name, json::object());
+            if (MutationSafety::isMutation(binding)) manifest.mutating.push_back(tool.name);
+            if (toolRunsProjectControlledCode(binding)) manifest.open_world.push_back(tool.name);
+            if (toolRunsAsJob(tool.name)) manifest.jobs.push_back(tool.name);
             std::vector<std::string> required;
             const auto& schema = tool.inputSchema;
             if (schema.is_object() && schema.contains("required") &&
@@ -1590,6 +1603,8 @@ ToolManifest ToolRegistry::buildManifest() const {
     std::sort(manifest.unimplemented.begin(), manifest.unimplemented.end());
     std::sort(manifest.mutating.begin(), manifest.mutating.end());
     std::sort(manifest.core.begin(), manifest.core.end());
+    std::sort(manifest.open_world.begin(), manifest.open_world.end());
+    std::sort(manifest.jobs.begin(), manifest.jobs.end());
     return manifest;
 }
 
@@ -3178,7 +3193,7 @@ void ToolRegistry::registerAllDefaultTools() {
                                 {"examples", json::array({json::object({{"position", json{{"x", 480}, {"y", 270}}},
                                                                         {"visible", true},
                                                                         {"text", "Score"}})})},
-                                {"description", "Initial property values, keyed by property name. Each value takes the JSON type matching the property on the new node: number for float (1.0, not \"1.0\"), integer for int, boolean for bool, string for String/StringName/NodePath, null for nil, {x,y} or {x,y,z} for Vector2/Vector2i/Vector3/Vector3i, {r,g,b} with optional a or a \"#rrggbb\" string for Color, and a res:// path for a Resource slot. Arrays are rejected."}}}
+                                {"description", "Initial property values, keyed by property name. Each value takes the JSON type matching the property on the new node: number for float (1.0, not \"1.0\"), integer for int, boolean for bool, string for String/StringName/NodePath, null for nil, {x,y} or {x,y,z} for Vector2/Vector2i/Vector3/Vector3i, {r,g,b} with optional a or a \"#rrggbb\" string for Color, a res:// path for a Resource slot, and an array or object for an Array or Dictionary."}}}
             }}
         };
         t.handler = [this](const json& args) { return handleSceneInstantiateNode(args, m_ipcClient); };
@@ -3500,7 +3515,7 @@ void ToolRegistry::registerAllDefaultTools() {
                                                      json{{"x", 480}, {"y", 270}},
                                                      json{{"r", 1}, {"g", 0.5}, {"b", 0}},
                                                      "res://tiles/arena_tileset.tres"})},
-                           {"description", "New property value, as the JSON type matching the Godot property: number for float (1.0, not \"1.0\"), integer for int, boolean for bool, string for String/StringName/NodePath, null for nil, {x,y} or {x,y,z} for vectors (whole numbers for the integer ones), {r,g,b} with optional a or \"#rrggbb\" for Color, Godot's own members for the rest (Rect2 {position,size}, Transform3D {basis,origin}), an array for an Array or packed array, and a res:// path for a Resource slot (null clears it). A member the type does not have is refused."}}},
+                           {"description", "New property value, as the JSON type matching the Godot property: number for float (1.0, not \"1.0\"), integer for int, boolean for bool, string for String/StringName/NodePath, null for nil, {x,y} or {x,y,z} for vectors (whole numbers for the integer ones), {r,g,b} with optional a or \"#rrggbb\" for Color, Godot's own members for the rest (Rect2 {position,size}, Transform3D {basis,origin}), an array for an Array or packed array, an object for a Dictionary, and a res:// path for a Resource slot (null clears it). A member the type does not have is refused."}}},
                 {"writes", {{"type", "array"}, {"minItems", 1}, {"maxItems", 64},
                             {"items", {{"type", "object"},
                                        {"properties", {{"target_node", {{"type", "string"}}},
@@ -4920,15 +4935,15 @@ void ToolRegistry::registerAllDefaultTools() {
                 {"headless", {{"type", "boolean"}, {"default", true}}},
                 {"break_on_error", {{"type", "boolean"}, {"default", true}, {"description", "Classify captured ERROR lines as failure after process exit; does not terminate the child early"}}},
                 {"extra_args", {{"type", "array"}, {"items", {{"type", "string"}}}}},
+                {"fixed_fps", {{"type", json::array({"boolean", "integer"})},
+                               {"description",
+                                "true for the project's tick rate, or 1 to 1000, so each stepped "
+                                "frame is one physics tick. Unpaused, it runs as fast as it can."}}},
                 {"detach", {{"type", "boolean"}, {"default", false},
                             {"description",
-                             "Start the game and leave it running instead of watching it to "
-                             "completion. The call returns once the game has published a session, "
-                             "which is what runtime_attach_session and the rest of the runtime "
-                             "tools route through. Nothing is "
-                             "captured: read a running game with runtime_read_output and end it "
-                             "with runtime_stop. Without this the call blocks, terminates the game "
-                             "at the timeout, and reports what it saw."}}}
+                             "Leave the game running and return once it has published a session. "
+                             "Nothing is captured: read it with runtime_read_output and end it with "
+                             "runtime_stop."}}}
             }}
         };
         t.description = "Starts a separate Godot process. Blocking by default: captures stdout/stderr, classifies errors after exit, and enforces a 1-120 second timeout. With detach: true it leaves the game running and answers with the session to drive it through.";
@@ -4948,10 +4963,9 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "runtime_inject_input";
-        t.description = "Dispatches action, key, mouse button, mouse motion and joypad events into the "
-                        "running game. A mouse event carries the viewport position it lands at. A batch "
-                        "injected while the game is paused is held and released into the first frame "
-                        "that processes, by runtime_step or runtime_set_paused.";
+        t.description = "Dispatches input events into the running game. A mouse event's position is in "
+                        "window pixels, as ui_list_controls' screen_rect is. While the game is paused a "
+                        "batch is held for the first frame that processes, unless paused_delivery is now.";
         t.inputSchema = {
             {"type", "object"},
             {"properties", {
@@ -5512,13 +5526,11 @@ void ToolRegistry::registerAllDefaultTools() {
         ToolDefinition t;
         t.name = "ui_list_controls";
         t.description =
-            "Lists live Control nodes under a root with the viewport-space rectangle each one "
-            "occupies, its class, visibility, mouse filter, and its text where it has any. In a "
-            "localised game text is the key the scene holds; displayed_text, present when it "
-            "differs, is the translation the player reads. Editor "
-            "or game, read-only, and no input is injected. This is how a caller finds a control "
-            "to act on; ui_hit_test answers the opposite question, which is what sits under a "
-            "point it already has.";
+            "Lists live Control nodes under a root with each one's viewport-space rectangle, "
+            "class, visibility, mouse filter and text. In a game, screen_rect is that rectangle in "
+            "the window pixels runtime_inject_input takes. In a localised game text is the key; "
+            "displayed_text, when it differs, is what the player reads. Read-only. ui_hit_test "
+            "answers the opposite question: what sits under a point.";
         t.inputSchema = {{"type", "object"}, {"properties", {
             {"root_path", {{"type", "string"}, {"maxLength", 1024},
                            {"description", "Where to start. Defaults to the edited scene root in an editor and /root in a game."}}},

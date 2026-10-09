@@ -99,4 +99,30 @@ ProtocolPortOverrides protocolPortOverrides(const std::vector<std::string>& argu
     return overrides;
 }
 
+std::optional<int> fixedFpsArgument(const std::vector<std::string>& arguments) {
+    std::optional<int> rate;
+    for (size_t index = 0; index < arguments.size(); ++index) {
+        const auto argument = trimmed(arguments[index]);
+        if (argument == "--" || argument == "++") break;
+        if (argument != "--fixed-fps") continue;
+        if (index + 1 >= arguments.size()) break;
+        const int value = godotToInt(trimmed(arguments[++index]));
+        rate = value > 0 ? std::optional<int>(value) : std::nullopt;
+    }
+    return rate;
+}
+
+bool startPausedRequested(const std::vector<std::string>& arguments) {
+    bool user_arguments = false;
+    for (const auto& raw : arguments) {
+        const auto argument = trimmed(raw);
+        if (!user_arguments) {
+            user_arguments = argument == "--" || argument == "++";
+            continue;
+        }
+        if (argument == kStartPausedArgument) return true;
+    }
+    return false;
+}
+
 } // namespace didi::godot

@@ -39,7 +39,8 @@ turn is unnecessary.
 project-scoped half of section 2 in one command, and `didi doctor --project
 <dir>` checks the result from outside the editor; see
 [Setting up a project](ADMIN_GUIDE.md#setting-up-a-project-didi-setup-and-didi-doctor).
-The steps below are the same thing by hand.
+The steps below are the same thing by hand, and the only way with the 2.0.1
+archive, which has neither command.
 
 1. Copy the `addons/didi` directory into your Godot project's root `addons/` folder:
    ```

@@ -82,7 +82,8 @@ the operator asked for and without the warning that says confirmations are off.
 ### Setting up a project: `didi setup` and `didi doctor`
 
 Two subcommands, named as the first argument, put Didi into a project and check
-it from outside the editor. Neither is a tool: they run before any client is
+it from outside the editor. They are in source builds and in releases after
+2.0.1; the 2.0.1 archive has neither. Neither is a tool: they run before any client is
 configured, which is the state no tool can reach. Both take `--project <dir>`
 explicitly, never from `DIDI_PROJECT_ROOT`, and both print one line per step, or
 a JSON report with `--json`. They exit `0` when nothing failed, `1` when a step

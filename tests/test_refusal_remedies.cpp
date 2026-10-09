@@ -18,6 +18,8 @@
 #include <functional>
 #include <stdexcept>
 #include <string>
+#include <utility>
+#include <vector>
 
 #define ASSERT_TRUE(cond) if (!(cond)) throw std::runtime_error("Assertion failed: " #cond);
 #define ASSERT_FALSE(cond) ASSERT_TRUE(!(cond))
@@ -116,11 +118,33 @@ static void test_a_422_names_its_own_fix() {
     ASSERT_TRUE(other["no_remedy"].get<std::string>().find("export_presets") == std::string::npos);
 }
 
+// scene_call_method's refusals and the attach refusal each carry a code of
+// their own, and the fix is keyed on it rather than on the tool and the
+// message (#1193, #1196).
+static void test_script_refusals_are_keyed_on_their_codes() {
+    for (const auto& [code, argument] : std::vector<std::pair<const char*, const char*>>{
+             {"method_private", "method_name"},
+             {"method_not_declared", "method_name"},
+             {"argument_count_mismatch", "arguments"},
+             {"argument_type_mismatch", "arguments"},
+             {"arguments_too_large", "arguments"}}) {
+        ASSERT_EQ(floored(409, "Something", {{"code", code}}, "scene_call_method")["field"], argument);
+    }
+    ASSERT_EQ(floored(429, "Too many coroutine calls are already being awaited",
+                      {{"code", "await_limit_reached"}}, "scene_call_method")["retry_after_ms"],
+              1000);
+    ASSERT_EQ(floored(409, "Target node already has a script",
+                      {{"code", "script_already_attached"}}, "script_attach_to_node")
+                  ["next_call"]["tool"],
+              "script_detach_from_node");
+}
+
 // A fix that applies. Each of these named another one: read the node paths for
 // a node that is there, fix a file's permissions for a method name, attach an
 // editor that was already attached (#1184).
 static void test_each_refusal_names_a_fix_that_applies() {
-    ASSERT_EQ(floored(403, "Refusing to call \"_private_helper\".", nullptr, "scene_call_method")["field"],
+    ASSERT_EQ(floored(403, "Refusing to call \"_private_helper\".", {{"code", "method_private"}},
+                      "scene_call_method")["field"],
               "method_name");
     ASSERT_EQ(floored(404, "\"free\" is not a method this node's script declares.", nullptr,
                       "scene_call_method")["field"],
@@ -372,6 +396,8 @@ struct RegisterRefusalRemedyTests {
         registerTest("RefusalRemedies.RemedyFollowsTheTool", test_the_remedy_follows_the_tool);
         registerTest("RefusalRemedies.A422NamesItsOwnFix", test_a_422_names_its_own_fix);
         registerTest("RefusalRemedies.EachRefusalNamesAFixThatApplies", test_each_refusal_names_a_fix_that_applies);
+        registerTest("RefusalRemedies.ScriptRefusalsKeyedOnTheirCodes",
+                     test_script_refusals_are_keyed_on_their_codes);
         registerTest("RefusalRemedies.NotFoundNamesWhereItIsListed",
                      test_a_not_found_names_the_list_that_holds_what_was_missing);
         registerTest("RefusalRemedies.SiteRemedyLeftAlone", test_a_site_remedy_is_left_alone);

@@ -78,6 +78,19 @@ func array_type(path: String, property_name: String) -> Variant:
 	return {"builtin": held.get_typed_builtin(), "class": String(held.get_typed_class_name())}
 
 
+## The key and value types of a Dictionary property. A typed dictionary keeps
+## what it holds when handed an untyped one, so a write that landed has to
+## leave it typed (#1195).
+func dictionary_type(path: String, property_name: String) -> Variant:
+	var node := _node(path)
+	if node == null:
+		return null
+	var held: Variant = node.get(property_name)
+	if typeof(held) != TYPE_DICTIONARY:
+		return null
+	return {"key_builtin": held.get_typed_key_builtin(), "value_builtin": held.get_typed_value_builtin()}
+
+
 ## A property reached by path, through get_indexed rather than through any
 ## code Didi shares (Q7).
 func property_path(path: String, indexed: String) -> Variant:
@@ -394,6 +407,13 @@ func _plain(value: Variant) -> Variant:
 			for item in value:
 				items.append(_plain(item))
 			return items
+		TYPE_DICTIONARY:
+			# Keys as the strings JSON has, an int as its decimal digits, and
+			# values the same way as everything else here (#1195).
+			var entries := {}
+			for key in value:
+				entries[str(key)] = _plain(value[key])
+			return entries
 		TYPE_STRING_NAME, TYPE_NODE_PATH:
 			return String(value)
 		TYPE_OBJECT:

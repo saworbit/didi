@@ -52,6 +52,11 @@ struct ProjectSettingRead {
 Result<ProjectSettingRead> readProjectSetting(const std::filesystem::path& project_root,
                                               const std::string& setting);
 
+// physics/common/physics_ticks_per_second, or Godot's 60 where the project
+// sets none or one outside 1 to 1000. A game at this fixed rate runs one
+// physics tick per frame.
+int projectPhysicsTicksPerSecond(const std::filesystem::path& project_root);
+
 // One entry under [autoload], in the shape the live tool publishes.
 //
 // Godot registers `autoload/<name>` and stores the script path, with a leading

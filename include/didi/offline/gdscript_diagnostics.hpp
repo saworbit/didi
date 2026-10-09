@@ -149,6 +149,12 @@ public:
     static void noteUnloadableManifest(std::vector<ScriptDiagnostic>& diagnostics,
                                        const std::string& manifest_problem);
 
+    // For a file the engine compiled and answered for. When none of the
+    // engine's own diagnostics is an error, an error from Didi's lexical rules
+    // is the rule disagreeing with the compiler, so it becomes a warning that
+    // says so and has_errors follows the engine (#1188).
+    static void deferLexicalErrorsToCleanEngine(std::vector<ScriptDiagnostic>& diagnostics);
+
     static json reflectClass(const std::string& class_name);
     // `max_symbols` bounds how many declarations come back, counted across all
     // six kinds, because the response is one thing rather than six. The result
