@@ -179,6 +179,7 @@ if (-not $fixtureRoot.StartsWith($buildRoot + [IO.Path]::DirectorySeparatorChar,
 . (Join-Path $PSScriptRoot 'reimport_job.ps1')
 . (Join-Path $PSScriptRoot 'scenario_runner.ps1')
 . (Join-Path $PSScriptRoot 'test_runner.ps1')
+. (Join-Path $PSScriptRoot 'performance_verdicts.ps1')
 Remove-TestDirectory -Path $fixtureRoot
 # Only what the fixture tracks. The Python suites run the server against
 # tests/godot_smoke and leave runtime state in its .didi/, which a whole copy
@@ -209,6 +210,14 @@ if (-not (Test-Path -LiteralPath $importWatchSource)) {
     throw "The import pass watch the integration needs is missing: $importWatchSource"
 }
 Copy-Item -LiteralPath $importWatchSource -Destination (Join-Path $fixtureRoot (Join-Path "addons" (Join-Path "didi" "didi_import_watch.gd"))) -Force
+
+# runtime_read_profiler times the parts of each frame for its verdict through
+# a third (Q16), and a game launched from the fixture loads it from there.
+$frameTimerSource = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot (Join-Path ".." (Join-Path "addons" (Join-Path "didi" "didi_frame_timer.gd")))))
+if (-not (Test-Path -LiteralPath $frameTimerSource)) {
+    throw "The frame timer the integration needs is missing: $frameTimerSource"
+}
+Copy-Item -LiteralPath $frameTimerSource -Destination (Join-Path $fixtureRoot (Join-Path "addons" (Join-Path "didi" "didi_frame_timer.gd"))) -Force
 
 # The addon script ships with a .uid sidecar, which makes it the one resource
 # the project files and the running engine are both certain to know. Read it
@@ -1429,6 +1438,12 @@ try {
     $gameProfile = Tool-Payload $runtimeById[390]
     Assert-True ($gameProfile.execution_mode -eq "live" -and $gameProfile.session_kind -eq "game") "runtime_read_profiler did not run against the game session."
     Assert-True ($gameProfile.samples_collected -eq 3) "runtime_read_profiler in the game did not collect every sample."
+    # A headless game never draws, and reports vsync on with no screen, so its
+    # verdict can say nothing about the GPU and cannot be held to a refresh
+    # rate (Q16).
+    $gameVerdict = $gameProfile.verdict
+    Assert-True ($null -ne $gameVerdict -and $gameVerdict.gpu_measured -eq $false -and $gameVerdict.bound -notin @("gpu", "contested")) "The headless game's verdict claimed a GPU it cannot measure: $($gameVerdict | ConvertTo-Json -Compress -Depth 6)"
+    Assert-True ($gameVerdict.budget_basis -eq "assumed_60_fps") "The headless game's budget was taken from a screen it does not have: $($gameVerdict | ConvertTo-Json -Compress -Depth 6)"
     $gameMetrics = @($gameProfile.metrics)
     Assert-True ($gameMetrics.Count -eq 5 -and $gameMetrics[0].name -eq "TIME_FPS" -and $gameMetrics[1].name -eq "PHYSICS_2D_ACTIVE_OBJECTS") "runtime_read_profiler game window is not in contract order."
     Assert-True ((Tool-Payload $runtimeById[303]).paused -eq $true) "Game pause was not verified."
@@ -4092,6 +4107,8 @@ try {
     Assert-True ($profile.session_kind -eq "editor") "runtime_read_profiler did not report the editor session."
     Assert-True ($profile.samples_requested -eq 5 -and $profile.samples_collected -eq 5) "runtime_read_profiler did not collect every requested sample."
     Assert-True ($profile.actual_elapsed_ms -ge 200) "runtime_read_profiler finished before the requested window elapsed."
+    # The editor's own frames are timed too, so its verdict is about the editor.
+    Assert-True ($profile.verdict.bound -in @("cpu", "gpu", "physics", "contested", "none", "unknown") -and $profile.verdict.next.Length -gt 0 -and $null -eq $profile.self_check) "runtime_read_profiler in the editor gave no verdict: $($profile.verdict | ConvertTo-Json -Compress -Depth 6)"
     $profileMetrics = @($profile.metrics)
     Assert-True ($profileMetrics.Count -eq 10) "runtime_read_profiler did not return all ten metrics."
     $expectedOrder = @("TIME_FPS", "TIME_PROCESS", "TIME_PHYSICS_PROCESS", "PHYSICS_2D_ACTIVE_OBJECTS", "PHYSICS_2D_COLLISION_PAIRS", "PHYSICS_3D_ACTIVE_OBJECTS", "PHYSICS_3D_COLLISION_PAIRS", "RENDER_TOTAL_OBJECTS_IN_FRAME", "RENDER_TOTAL_PRIMITIVES_IN_FRAME", "RENDER_TOTAL_DRAW_CALLS_IN_FRAME")
@@ -5739,6 +5756,10 @@ text = "Not a key"
 
     # Q9 part 2. Its own project, with a stand-in for GUT's runner.
     Invoke-TestRunnerBlock -BuildRoot $buildRoot
+
+    # Q16 in docs/BUILD_QUEUE.md. It starts and stops windowed games of its own
+    # beside the harness's headless one.
+    Invoke-PerformanceVerdictsBlock -FixtureRoot $fixtureRoot
 
     # Last, while the editor and the game are both still attached, so no block
     # after it depends on what its cases leave behind. Q2 in docs/BUILD_QUEUE.md.

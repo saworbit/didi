@@ -237,6 +237,10 @@ is the rest: `runtime_run_scenario` refuses a scenario with no assertion, stops
 its game on every path and records the files a pass was true for, and
 `project_run_tests` judges a test run by its report, so a run that tested
 nothing, or lost a test file to a parse error, cannot pass.
+[Q16](BUILD_QUEUE.md#q16-performance-verdicts) holds `runtime_read_profiler`'s
+verdict to the same rule: it names the GPU only from a GPU time that was
+measured, and its `self_check` stalls the game by a known amount to prove, on
+the machine in front of it, that the verdict sees where the time went.
 
 ## P8. Own the boundary, stay in scope, derive every fact
 

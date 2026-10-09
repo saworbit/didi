@@ -569,6 +569,12 @@ const std::map<std::string, Rule>& rules() {
                             "or close the program holding it. Then send the same call again.");
         }},
         {"profiler_read_active", [](const Refusal&) { return retryAfter(2000); }},
+        // A copy of the addon from before Q16 has no frame timer. Only the
+        // self-check needs one; the samples come back without it.
+        {"frame_timer_unavailable", [](const Refusal&) {
+            return noRemedy("Copy the built addon folder into the project again: this copy has no "
+                            "didi_frame_timer.gd. Without self_check the read still returns its samples.");
+        }},
         {"runtime_step_active", [](const Refusal&) { return retryAfter(500); }},
         {"scene_exploration_active", [](const Refusal&) { return retryAfter(5000); }},
         {"invariant_watch_active", [](const Refusal&) { return retryAfter(5000); }},

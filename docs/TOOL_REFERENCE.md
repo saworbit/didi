@@ -1534,17 +1534,32 @@ The answer carries:
 
 ### `runtime_read_profiler` — Live (editor or game)
 
-Samples `Performance` monitors over a bounded window and returns aggregates, so a stutter can be seen across time rather than in one frame. Delivered under the Phase 7C contract.
+Samples `Performance` monitors over a bounded window and returns aggregates, so a stutter can be seen across time rather than in one frame, and a verdict on what bounds the frame: the CPU, the GPU or physics. Delivered under the Phase 7C contract; the verdict is Build Queue item Q16.
 
 - `duration_ms` (`integer`, `0`..`5000`, default `1000`).
 - `sample_count` (`integer`, `1`..`120`, default `30`). `duration_ms: 0` requires `sample_count: 1`.
 - `categories` (`array`, 1..4 unique of `frame`, `process`, `physics`, `render`; default all four).
+- `self_check` (`boolean`, default `false`). After the samples, stall the game by a known amount and read again, to prove the verdict sees it. Described below.
 
 Sampling runs on the Godot main-thread frame callback, never on the IPC worker, and the first sample lands on the callback after the request is dequeued. For `N > 1` the target offsets are `round(i * duration_ms / (N - 1))` and each is collected on the first callback at or after it, so a slow frame that crosses several offsets records the same reading for each rather than stretching the window.
 
 Metrics are returned in a fixed order regardless of request order: `TIME_FPS`; `TIME_PROCESS`, `TIME_PHYSICS_PROCESS`; `PHYSICS_2D_ACTIVE_OBJECTS`, `PHYSICS_2D_COLLISION_PAIRS`, `PHYSICS_3D_ACTIVE_OBJECTS`, `PHYSICS_3D_COLLISION_PAIRS`; `RENDER_TOTAL_OBJECTS_IN_FRAME`, `RENDER_TOTAL_PRIMITIVES_IN_FRAME`, `RENDER_TOTAL_DRAW_CALLS_IN_FRAME`. Each metric is `{name, unit, available, availability_basis, valid_samples, invalid_samples, min, max, mean, last}`. `available` is true because the pinned `Performance.get_monitor` bind exists; it is never inferred from a value, and zero is a valid sample. A non-finite reading counts as invalid; with no valid sample the four statistics are explicit `null`. The response also carries `duration_ms`, `actual_elapsed_ms`, `samples_requested`, `samples_collected`, `execution_mode: "live"`, and `session_kind`.
 
-Errors: `400` for a malformed request, `423` while another collection is active on the session, `501` if the bind is missing, `504` if the session shuts down mid-window (`outcome` says whether any sample was taken). The result is capped at 256 KiB. This is a read; `dry_run` and `confirmation_token` are rejected.
+**Verdict.** Beside the samples, `verdict` says what bounds the frame: `cpu`, `gpu`, `physics`, `contested` (the CPU's work and the GPU within a quarter of each other), `none` (the frame keeps to its budget) or `unknown`. It carries a `confidence` (`high`, `medium` or `low`), the `frames` it judged, `frame_budget_ms` and its `budget_basis` (`vsync`, `max_fps`, `display_refresh`, or `assumed_60_fps` for a game with no screen and no frame cap), `median_ms` for each part of the frame, `physics_ticks_per_frame`, `gpu_measured`, and `next`, the thing to look at.
+
+The monitors cannot say this on their own. `TIME_PROCESS` covers the draw call, which is where the main thread waits for vsync and for a busy GPU: an idle game with vsync reads 18.5 ms of process time for 0.02 ms of work, measured on 4.5.1, 4.6.2 and 4.7.2. It is also the largest value of the last second, not a per-frame time. So each frame is split by when its parts began, which the addon's `didi_frame_timer.gd` records on `SceneTree.physics_frame`, `SceneTree.process_frame` and `RenderingServer.frame_pre_draw`:
+
+- `physics`: every tick's `_physics_process` and physics step.
+- `process`: `_process`, timers, and the wait for the renderer to sync.
+- `draw`: the draw call's wall time, which is rendering on the CPU plus any wait for the GPU or for vsync.
+- `outside`: before the frame's first part, such as input, a frame delay and the first tick's physics sync.
+- `render_cpu` and `gpu`: the root viewport's measured render times. Measurement is switched on for the read and off after, unless the game already had it on.
+
+The CPU's work is physics, process and render CPU; the rest of the draw is waiting. A frame within a tenth of its budget is `none`. Otherwise the larger of the CPU's work and the GPU time is the bound when it leads the other by a quarter, and the CPU side is `physics` when physics takes at least as long as the rest of it. Medians decide, so one hitch does not decide a window, and fewer than three whole frames decide nothing. A GPU or contested verdict needs a GPU time that was measured. A headless game draws nothing and reports vsync on with no screen, so its verdict is `cpu`, `physics`, `none` or `unknown`, at most `medium`, and its budget is `assumed_60_fps`. A slow frame that neither side accounts for is `unknown`, and `next` says where its time went. A game with a separate render thread, which Godot calls experimental and the editor never runs, waits for that thread before the frame's first part instead of inside the draw, so `outside` counts as waiting there, the verdict carries `render_thread: "separate"`, and its confidence stops at `medium`.
+
+**Self-check.** `self_check: true` stalls every process step, once the samples are taken, by twice the largest of the budget, the frame time and the GPU time (20 to 250 ms). It times the stalled frames for six stalls' worth (0.5 to 2.5 s) and answers `self_check: {stall_ms, bound, process_ms, frames, passed, note?}`, which passes when that verdict is `cpu` with at least nine tenths of the stall in its process time. `verdict` stays the one from before the stall. It proves on the machine and engine in front of you that the verdict sees a known cost where it was put. A project whose copy of the addon has no `didi_frame_timer.gd` still gets its samples, with an `unknown` verdict that says why; a self-check there is refused.
+
+Errors: `400` for a malformed request, `423` while another collection is active on the session, `501` if the bind is missing or, for a self-check, with `data.code: "frame_timer_unavailable"` when the frame timer is, `504` if the session shuts down mid-window (`outcome` says whether any sample was taken). The result is capped at 256 KiB. This is a read; `dry_run` and `confirmation_token` are rejected.
 
 ### `runtime_inject_input` — Live (game only)
 

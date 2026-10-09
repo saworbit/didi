@@ -446,9 +446,10 @@ the native test boundary, so it is worked on differently from the rest.
   `docs/QUICKSTART.md` and `docs/INTEGRATION_GUIDE.md`. A new `.gd` ships with
   the `.uid` sidecar an engine mints for it; `tools/vibe/addon_script_engines.py`
   prints that uid and checks the script loads on every engine. A script the
-  extension itself loads, as `didi_await.gd` and `didi_import_watch.gd` are, is
-  also copied into the harness fixture by `tests/run_godot_integration.ps1`,
-  because the fixture's addon is not the repository's.
+  extension itself loads, as `didi_await.gd`, `didi_import_watch.gd` and
+  `didi_frame_timer.gd` are, is also copied into the harness fixture by
+  `tests/run_godot_integration.ps1`, because the fixture's addon is not the
+  repository's.
 - **The console must not become an MCP client.** It reads the session
   descriptors Didi publishes and reports them. It calls no tool, speaks no part
   of the IPC protocol, and never reads the token out of a descriptor; a test

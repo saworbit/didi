@@ -6,6 +6,7 @@
 #include "didi/gdextension/runtime_log.hpp"
 #include "didi/runtime/session_kind_policy.hpp"
 #include "didi/runtime/profiler_collector.hpp"
+#include "didi/runtime/performance_verdict.hpp"
 #include "didi/runtime/invariant_watch.hpp"
 #include "didi/runtime/scene_exploration.hpp"
 #include <queue>
@@ -311,6 +312,10 @@ private:
                                    const std::shared_ptr<CommandControl>& control);
     void processMainScreenCaptureFrame();
     void processProfilerFrame();
+    // Times the frame that just ended for a profiler read's verdict. Called
+    // first in every frame callback, before any command runs in it, so Didi's
+    // own work is not counted in the frame it ended.
+    void processFrameTimerFrame();
     void processInvariantWatchFrame();
     void processSceneExplorationFrame();
     // Releases whatever the exploration is holding. Called when the run ends
@@ -444,7 +449,23 @@ private:
         bool awaiting_next_callback{true};
         std::shared_ptr<std::promise<json>> response_promise;
         std::shared_ptr<CommandControl> control;
+        // The frames the read covers, for its verdict. timing is false when
+        // the frame timer could not start, and timing_unavailable says why.
+        bool timing{false};
+        std::string timing_unavailable;
+        runtime::FrameBudget budget;
+        runtime::FrameTimingLog frames;
+        int64_t previous_end_usec{-1};
+        // The self-check runs after the samples. Their answer and verdict wait
+        // here while the stalled frames are timed.
+        std::optional<json> samples;
+        json baseline;
+        double stall_ms{0.0};
+        std::chrono::steady_clock::time_point self_check_started;
     };
+    // Stops the frame timer and answers the read, with its verdict and, when
+    // asked for, its self-check.
+    void finishProfilerRead(PendingProfilerRead completed, json failure);
 
     struct PendingInvariantWatch {
         runtime::InvariantWatch watch;

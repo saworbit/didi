@@ -50,7 +50,7 @@ fails when a phase's status differs between the roadmap and the phase design.
 | [Q13](#q13-project-defined-tools) | Project-defined tools | 12 | Q7, Q8 | not yet | PLANNED |
 | [Q14](#q14-a-skill-pack-measured) | A skill pack, measured | 12 | Q12 | not yet | PLANNED |
 | [Q15](#q15-change-journal-with-undo) | Change journal with undo | 13 | Q2 | #1149 | IN PROGRESS |
-| [Q16](#q16-performance-verdicts) | Performance verdicts | 14 | Q9 | not yet | PLANNED |
+| [Q16](#q16-performance-verdicts) | Performance verdicts | 14 | Q9 | #1228 | IN PROGRESS |
 <!-- build-queue:end -->
 
 The first six items make the surface honest and cheap before it grows. Items 7

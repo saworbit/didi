@@ -57,6 +57,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Added
 
+- `2026-10-09` `runtime_read_profiler` says whether the frame is bound on the CPU, the GPU or physics, and `self_check` proves it sees a known stall. [#1228](https://github.com/saworbit/didi/issues/1228)
 - `2026-10-09` `runtime_inject_input` takes a `window_focus` event, which runs a game's own focus-loss handlers and says it was synthetic. [#1197](https://github.com/saworbit/didi/issues/1197)
 - `2026-10-09` `scene_set_property` and `scene_instantiate_node` write `Dictionary` properties, typed ones included, and an int key reads back as its digits. [#1195](https://github.com/saworbit/didi/issues/1195)
 - `2026-10-09` `ui_list_controls` in a game reports `screen_rect`, the window pixels a click is aimed in, which a stretched project scales. [#1189](https://github.com/saworbit/didi/issues/1189)
