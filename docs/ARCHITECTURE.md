@@ -265,8 +265,10 @@ record of what they ran against.
   at the project's physics tick rate, through `runtime_launch`'s own process
   start, and finds the session that game publishes. It opens a route to that
   session alone (`openSessionRoute`), so the caller's selected session never
-  moves, pauses the game, and drives it with bridge methods a game already
-  admits: `runtime.step`, `runtime.injectInput`, `runtime.evalGdscript`,
+  moves. The game starts paused: the runner passes `-- --didi-start-paused`,
+  and the game's bridge pauses the tree from the GDExtension main-loop startup
+  callback, before the first physics frame. The runner drives it with bridge
+  methods a game already admits: `runtime.step`, `runtime.injectInput`, `runtime.evalGdscript`,
   `runtime.getOutput`, `vision.captureViewport`, `runtime.stop`. The run loop
   in `src/runtime/scenario_runner.cpp` is pure and talks to the game through
   `IScenarioDriver`; `src/tools/scenario_tools.cpp` is the driver over the
