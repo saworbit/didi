@@ -4,6 +4,7 @@
 #include "didi/gdextension/godot_bridge.hpp"
 #include "didi/gdextension/gdextension_api.hpp"
 #include "didi/gdextension/runtime_bridge.hpp"
+#include "didi/gdextension/protocol_servers.hpp"
 #include "didi/gdextension/expression_sandbox.hpp"
 #include "didi/common/logger.hpp"
 #include "didi/common/secure_random.hpp"
@@ -2072,6 +2073,9 @@ void EditorHook::scheduleRuntimeStep(
         if (m_pendingRuntimeStep.has_value() && m_pendingRuntimeStep->control == control) {
             m_pendingRuntimeStep->released_input_events =
                 resumed.value("released_input_events", int64_t{0});
+            if (resumed.contains("physics_frames") && resumed["physics_frames"].is_number_integer()) {
+                m_pendingRuntimeStep->resumed_physics_frames = resumed["physics_frames"].get<int64_t>();
+            }
         }
     }
     DIDI_LOG_INFO("EDITOR_HOOK", "Scheduled runtime frame step for ", frames, " frame(s)");
@@ -2108,11 +2112,21 @@ void EditorHook::processRuntimeStepFrame() {
     }
 
     completed->control->markCompleted();
-    fulfillCommand(completed->response_promise, completed->control,
-                   {{"status", "success"}, {"frames", completed->requested_frames},
+    json stepped = {{"status", "success"}, {"frames", completed->requested_frames},
                     {"paused", true}, {"released_input_events", completed->released_input_events},
                     {"execution_mode", "live"},
-                    {"is_live_engine", true}, {"session_kind", sessionKindName(m_sessionKind)}});
+                    {"is_live_engine", true}, {"session_kind", sessionKindName(m_sessionKind)}};
+    // A frame is one physics tick only at a fixed rate; otherwise a frame runs
+    // as many ticks as its wall-clock time covers. The answer says which, and
+    // how many ticks these frames ran (#1209).
+    const auto fixed_rate = fixedFpsArgument(processArguments());
+    stepped["fixed_fps"] = fixed_rate.has_value() ? json(*fixed_rate) : json(nullptr);
+    if (completed->resumed_physics_frames.has_value() && paused.contains("physics_frames") &&
+        paused["physics_frames"].is_number_integer()) {
+        stepped["physics_ticks"] =
+            paused["physics_frames"].get<int64_t>() - *completed->resumed_physics_frames;
+    }
+    fulfillCommand(completed->response_promise, completed->control, std::move(stepped));
 }
 
 void EditorHook::cancelPendingCommands(const std::string& reason) {

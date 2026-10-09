@@ -12,6 +12,7 @@
 #include "didi/common/project_path.hpp"
 #include "didi/common/sha256.hpp"
 #include "didi/common/version.hpp"
+#include "didi/gdextension/protocol_servers.hpp"
 #include "didi/mcp/jobs.hpp"
 #include "didi/mcp/mcp_protocol.hpp"
 #include "didi/offline/project_settings_file.hpp"
@@ -39,19 +40,6 @@ int64_t wallClockMs() {
         .count();
 }
 
-// One stepped frame is one physics tick when the game runs at the project's
-// tick rate. Without a fixed rate a frame runs as many ticks as its wall-clock
-// time covers: 5 to 6 for a 100 ms frame on 4.5.1, 4.6.2 and 4.7.2, measured.
-int fixedFramesPerSecond(const fs::path& root) {
-    auto setting = offline::readProjectSetting(root, "physics/common/physics_ticks_per_second");
-    if (setting.isErr() || !setting.value().existed) return 60;
-    try {
-        const int ticks = std::stoi(setting.value().literal);
-        return ticks >= 1 && ticks <= 1000 ? ticks : 60;
-    } catch (const std::exception&) {
-        return 60;
-    }
-}
 
 class LiveScenarioDriver : public runtime::IScenarioDriver {
 public:
@@ -73,10 +61,12 @@ public:
         const int64_t launched_at_ms = wallClockMs();
         // A fixed rate also unthrottles the game: Godot ignores --max-fps
         // beside --fixed-fps (120 frames in 1 ms on 4.7.2 with both), so a
-        // headless game runs as fast as it can until the pause lands. That
-        // was 1 to 2947 frames before the first step here, which is why a
-        // scenario syncs with wait_until rather than a guessed wait.
-        const std::vector<std::string> extra = {"--fixed-fps", std::to_string(m_fixedFps)};
+        // headless game ran as fast as it could until the pause landed, 1 to
+        // 2947 frames before the first step. The marker after `--` asks the
+        // game's bridge to pause the tree before its first physics frame
+        // instead, so frame 1 is the first frame this run steps (#1208).
+        const std::vector<std::string> extra = {"--fixed-fps", std::to_string(m_fixedFps), "--",
+                                                godot::kStartPausedArgument};
         auto started = offline::TestRunner::runSession(m_spec.scene_path, m_spec.timeout_seconds,
                                                        m_spec.headless, false, extra, true);
         if (started.launch_failed || started.pid == 0) {
@@ -137,6 +127,14 @@ public:
                      {"server_build_id", kBuildId},
                      {"fixed_fps", m_fixedFps},
                      {"headless", m_spec.headless}};
+        // Measured, not assumed: a bridge that paused at startup says how many
+        // physics frames ran first, and one that could not reports the count
+        // at the pause this run sent (#1208).
+        const bool started_paused = paused.value().value("started_paused", false);
+        game["started_paused"] = started_paused;
+        game["frames_before_pause"] = started_paused
+                                          ? paused.value().value("frames_before_pause", json(nullptr))
+                                          : paused.value().value("physics_frames", json(nullptr));
         if (published.value("build_id", std::string()) != kBuildId) {
             game["bridge_build_matches"] = false;
         }
@@ -388,7 +386,12 @@ CallToolResult handleRuntimeRunScenario(const json& args, std::shared_ptr<ipc::I
     fs::remove_all(runtime::scenarioRecordDirectory(root) / spec.value().name, error);
 
     const auto sessions = std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(ipc);
-    LiveScenarioDriver driver(spec.value(), sessions, ipc, root, fixedFramesPerSecond(root));
+    // One stepped frame is one physics tick when the game runs at the
+    // project's tick rate. Without a fixed rate a frame runs as many ticks as
+    // its wall-clock time covers: 5 to 6 for a 100 ms frame on 4.5.1, 4.6.2
+    // and 4.7.2, measured.
+    LiveScenarioDriver driver(spec.value(), sessions, ipc, root,
+                              offline::projectPhysicsTicksPerSecond(root));
     const auto outcome = runtime::runScenario(spec.value(), driver);
 
     json report = outcome.report;

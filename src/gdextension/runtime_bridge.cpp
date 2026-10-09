@@ -2,12 +2,14 @@
 #include "didi/gdextension/editor_hook.hpp"
 #include "didi/gdextension/godot_bridge.hpp"
 #include "didi/gdextension/gdextension_api.hpp"
+#include "didi/gdextension/protocol_servers.hpp"
 #include "didi/common/logger.hpp"
 
 #include <array>
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -362,6 +364,25 @@ Result<bool> sceneTreePaused(GDExtensionObjectPtr tree) {
     return paused.value() != 0;
 }
 
+// Every physics tick the engine ran, paused or not: a paused tree still
+// counts them (measured on 4.5.1, 4.6.2 and 4.7.2). Read on both sides of a
+// step, the difference is how many ticks its frames ran, which a frame alone
+// does not say outside a fixed rate (#1209).
+Result<int64_t> enginePhysicsFrames() {
+    auto& api = GodotApi::instance();
+    NativeName engine_name("Engine");
+    if (!engine_name.valid() || !api.global_get_singleton) {
+        return Error::internal("Godot Engine singleton API is unavailable");
+    }
+    auto engine = api.global_get_singleton(engine_name.ptr());
+    if (!engine) return Error::notConnected("Godot Engine singleton is unavailable");
+    return callIntResult(engine, "Engine", "get_physics_frames", 3905245786LL);
+}
+
+// The engine's physics frame count when the game was paused at startup for a
+// scenario run, until the first resume (#1208).
+std::optional<int64_t> g_startedPausedAtPhysicsFrame;
+
 Result<void> setSceneTreePaused(GDExtensionObjectPtr tree, bool paused) {
     GDExtensionBool requested = paused ? 1 : 0;
     const void* args[] = {&requested};
@@ -452,6 +473,26 @@ Result<void> setLiveSceneTreePaused(bool paused) {
     return setSceneTreePaused(tree.value(), paused);
 }
 
+void pauseGameAtStartupIfRequested() {
+    if (!startPausedRequested(processArguments())) return;
+    auto tree = activeSceneTree();
+    if (tree.isErr()) {
+        DIDI_LOG_WARN("RUNTIME_BRIDGE", "The game asked to start paused and has no SceneTree yet: ",
+                      tree.error().message);
+        return;
+    }
+    auto paused = setSceneTreePaused(tree.value(), true);
+    if (paused.isErr()) {
+        DIDI_LOG_WARN("RUNTIME_BRIDGE", "The game asked to start paused and could not be: ",
+                      paused.error().message);
+        return;
+    }
+    auto frames = enginePhysicsFrames();
+    g_startedPausedAtPhysicsFrame = frames.isOk() ? frames.value() : 0;
+    DIDI_LOG_INFO("RUNTIME_BRIDGE", "Game started paused after ", *g_startedPausedAtPhysicsFrame,
+                  " physics frame(s)");
+}
+
 json executeRuntimeBridge(const std::string& method, const json& params,
                           const std::string& session_kind) {
     if (!params.is_object()) return errorJson(400, "Runtime params must be an object");
@@ -519,6 +560,15 @@ json executeRuntimeBridge(const std::string& method, const json& params,
         }
         DIDI_LOG_INFO("RUNTIME_BRIDGE", requested ? "Game paused" : "Game resumed");
         json response = liveResult({{"status", "success"}, {"paused", observed.value()}}, session_kind);
+        if (auto frames = enginePhysicsFrames(); frames.isOk()) {
+            response["physics_frames"] = frames.value();
+        }
+        if (!requested) {
+            g_startedPausedAtPhysicsFrame.reset();
+        } else if (g_startedPausedAtPhysicsFrame.has_value()) {
+            response["started_paused"] = true;
+            response["frames_before_pause"] = *g_startedPausedAtPhysicsFrame;
+        }
         if (!requested) {
             // Input injected during the pause is handed over now, so it lands
             // in the first frame that processes (#594). The step resumes

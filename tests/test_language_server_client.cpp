@@ -339,6 +339,30 @@ void test_port_overrides_are_read_as_godot_reads_them() {
     ASSERT_FALSE(protocolPortOverrides({}).language_server.has_value());
 }
 
+// A game's frame is one physics tick only at a fixed rate, and nothing the
+// engine exposes says whether --fixed-fps was given, so runtime_step reads it
+// off the game's own command line the way the ports are read (#1209). The
+// marker that starts a scenario's game paused rides after `--`, where the
+// engine leaves the game's own arguments (#1208).
+void test_fixed_rate_and_start_marker_are_read_from_arguments() {
+    using didi::godot::fixedFpsArgument;
+    using didi::godot::startPausedRequested;
+    ASSERT_EQ(fixedFpsArgument({"--headless", "res://main.tscn", "--fixed-fps", "60"}).value_or(-1), 60);
+    ASSERT_EQ(fixedFpsArgument({"--fixed-fps", "30", "--fixed-fps", " 120 "}).value_or(-1), 120);
+    ASSERT_FALSE(fixedFpsArgument({"--fixed-fps", "0"}).has_value());
+    ASSERT_FALSE(fixedFpsArgument({"--fixed-fps", "-1"}).has_value());
+    ASSERT_FALSE(fixedFpsArgument({"--fixed-fps"}).has_value());
+    ASSERT_FALSE(fixedFpsArgument({"--fixed-fps=60"}).has_value());
+    ASSERT_FALSE(fixedFpsArgument({"--", "--fixed-fps", "60"}).has_value());
+    ASSERT_FALSE(fixedFpsArgument({}).has_value());
+
+    ASSERT_TRUE(startPausedRequested({"res://main.tscn", "--fixed-fps", "60", "--", "--didi-start-paused"}));
+    ASSERT_TRUE(startPausedRequested({"++", "--didi-start-paused"}));
+    ASSERT_FALSE(startPausedRequested({"--didi-start-paused"}));
+    ASSERT_FALSE(startPausedRequested({"--", "--didi-start-paused=1"}));
+    ASSERT_FALSE(startPausedRequested({}));
+}
+
 void test_a_check_is_answered_and_its_connection_kept() {
     didi::runtime::closeLanguageServerConnection();
     FakeServer server(godotLike(json::array({lspDiagnostic(3, 7, 1, "Identifier \"NotAThing\" not declared."),
@@ -494,6 +518,8 @@ void test_a_restarted_server_is_reconnected_to() {
 
 struct RegisterLanguageServerTests {
     RegisterLanguageServerTests() {
+        registerTest("ProtocolServers.FixedRateAndStartMarkerFromArguments",
+                     test_fixed_rate_and_start_marker_are_read_from_arguments);
         registerTest("LanguageServer.FramesSplitAndJoinedArriveWhole",
                      test_frames_split_and_joined_arrive_whole);
         registerTest("LanguageServer.MalformedStreamFailsAndStaysFailed",

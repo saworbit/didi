@@ -57,6 +57,9 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Added
 
+- `2026-10-09` `ui_list_controls` in a game reports `screen_rect`, the window pixels a click is aimed in, which a stretched project scales. [#1189](https://github.com/saworbit/didi/issues/1189)
+- `2026-10-09` `runtime_inject_input` takes `paused_delivery: "now"`, which operates a pause menu that processes while paused without stepping the game. [#1191](https://github.com/saworbit/didi/issues/1191)
+- `2026-10-09` `runtime_launch` takes `fixed_fps`, and `runtime_step` answers `fixed_fps` and the `physics_ticks` its frames ran. [#1209](https://github.com/saworbit/didi/issues/1209)
 - `2026-10-09` `project_run_tests` runs the project's GUT or GdUnit4 tests headless and judges the JUnit report, so a run that tested nothing cannot pass. [#1206](https://github.com/saworbit/didi/issues/1206) · [PR #1212](https://github.com/saworbit/didi/pull/1212)
 - `2026-10-08` `runtime_run_scenario` proves a behaviour in one call: it drives its own game frame by frame, checks it, stops it, and records the files a pass was true for. [#1206](https://github.com/saworbit/didi/issues/1206) · [PR #1210](https://github.com/saworbit/didi/pull/1210)
 - `2026-10-04` Transforms, rectangles, packed arrays and typed arrays can be read and written as JSON, so none of them is patched into scene text. [#1133](https://github.com/saworbit/didi/issues/1133) · [PR #1182](https://github.com/saworbit/didi/pull/1182)
@@ -113,6 +116,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Fixed
 
+- `2026-10-09` A scenario's game starts paused before its first physics frame, and `game.frames_before_pause` says how many ran. [#1208](https://github.com/saworbit/didi/issues/1208)
 - `2026-10-09` Six `scene_call_method` refusals carry codes of their own, and a codeless `fail(4xx)` in the bridge fails the refusal scan. [#1196](https://github.com/saworbit/didi/issues/1196)
 - `2026-10-09` `script_attach_to_node` on a node that holds a script answers `script_already_attached`, naming that script and `script_detach_from_node`. [#1193](https://github.com/saworbit/didi/issues/1193)
 - `2026-10-09` `script_check_syntax` accepts inline suites such as `if ready: start()`, and a lexical error beside a clean engine verdict is a warning, not an error. [#1188](https://github.com/saworbit/didi/issues/1188)

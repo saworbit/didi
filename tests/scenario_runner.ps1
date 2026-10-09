@@ -75,7 +75,14 @@ function Invoke-ScenarioRunnerBlock {
         (Tool-Request 8006 "runtime_run_scenario" @{ name = "one_press"; scene_path = $scene; steps = (Get-ScenarioRunnerSteps $false) }),
         (Tool-Request 8007 "runtime_run_scenario" @{ name = "smoke"; scene_path = $scene; steps = @(@{ kind = "wait"; frames = 30 }, @{ kind = "press"; action = "ui_accept" }) }),
         (Tool-Request 8008 "runtime_run_scenario" @{ name = "headless_capture"; scene_path = $scene; steps = @(@{ kind = "capture" }, @{ kind = "assert"; expression = 'node.get("position").y'; context_node = "/root/DoubleJump/Player"; maximum = 0 }) }),
-        (Tool-Request 8009 "runtime_list_sessions" @{ project_path = $FixtureRoot })
+        (Tool-Request 8009 "runtime_list_sessions" @{ project_path = $FixtureRoot }),
+        # The game starts paused, so nothing has run before the first step and
+        # a wait of N frames is N physics frames from the scene's own start
+        # (#1208).
+        (Tool-Request 8014 "runtime_run_scenario" @{ name = "frame_counter"; scene_path = "res://scenario_runner/frame_counter.tscn"; steps = @(
+            @{ kind = "assert"; label = "no physics frame yet"; expression = 'node.get("position").x'; context_node = "/root/FrameCounter"; minimum = 0; maximum = 0 },
+            @{ kind = "wait"; frames = 30 },
+            @{ kind = "assert"; label = "exactly thirty"; expression = 'node.get("position").x'; context_node = "/root/FrameCounter"; minimum = 30; maximum = 30 }) })
     )
     $byId = Get-ScenarioRunnerAnswers (Invoke-Didi -Requests $requests -Arguments @("--project", $FixtureRoot))
     Assert-True ($LASTEXITCODE -eq 0) "Didi scenario process exited with $LASTEXITCODE."
@@ -117,6 +124,10 @@ function Invoke-ScenarioRunnerBlock {
     $captureText = $byId[8008].result.content[0].text
     $capture = $captureText | ConvertFrom-Json
     Assert-True ($byId[8008].result.isError -and $capture.error.data.field -eq "headless" -and $capture.error.data.retry_with.headless -eq $false) "A capture in a headless game was not refused with the argument that fixes it: $captureText"
+    $counterText = $byId[8014].result.content[0].text
+    $counter = $counterText | ConvertFrom-Json
+    Assert-True (-not $byId[8014].result.isError -and $counter.verdict -eq "pass") "A scenario's game ran physics frames before its first step, or a wait of 30 frames was not 30: $counterText"
+    Assert-True ($counter.game.started_paused -eq $true -and $counter.game.frames_before_pause -eq 0) "The scenario's game did not report starting paused before any physics frame: $($counter.game | ConvertTo-Json -Compress)"
     $final = Get-ScenarioRunnerSessionIds $byId[8009]
     Assert-True (($before -join ",") -eq ($final -join ",")) "A scenario left a session behind: $($final -join ', ')"
 

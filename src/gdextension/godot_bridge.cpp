@@ -7325,7 +7325,12 @@ json injectInput(const json& params, const std::string& session_kind) {
     }
     auto paused = liveSceneTreeIsPaused();
     if (paused.isErr()) return errorJson(paused.error().code, paused.error().message);
-    if (paused.value()) {
+    // A pause menu runs with PROCESS_MODE_ALWAYS, and a paused tree still
+    // hands input to nodes that process while paused, the way it hands them a
+    // person's click. Asked for, the batch goes to Input now: the menu sees
+    // it, a paused node does not, and no frame is stepped (#1191).
+    const bool deliver_while_paused = paused.value() && runtime::deliversWhilePaused(params);
+    if (paused.value() && !deliver_while_paused) {
         const size_t count = events.size();
         if (g_queuedInjectedInput.size() + count > kMaxQueuedInjectedEvents) {
             return bridgeError(409, "input_queue_full",
@@ -7368,8 +7373,14 @@ json injectInput(const json& params, const std::string& session_kind) {
     json answer = {{"dispatched_event_count", dispatched}, {"queued_event_count", 0},
                    {"event_types", std::move(event_types)},
                    {"outcome", "completed"}, {"rollback", "not_available"},
-                   {"paused", false}, {"delivery", "immediate"},
+                   {"paused", paused.value()},
+                   {"delivery", deliver_while_paused ? "while_paused" : "immediate"},
                    {"session_kind", session_kind}};
+    if (deliver_while_paused) {
+        answer["message"] = "The game stays paused. Nodes that process while paused, such as a "
+                            "PROCESS_MODE_ALWAYS pause menu, received these events; paused nodes "
+                            "did not, and no frame was stepped.";
+    }
     // parse_input_event only buffers an event. Input's state, and every
     // node's _input, see it when the engine next flushes, which it does at
     // least once a frame: asked of 4.5.1, 4.6.2 and 4.7.2 from a headless
@@ -9015,6 +9026,54 @@ Result<GDExtensionObjectPtr> resolveAnimationPlayer(const std::string& path, con
 // Editor or game. The rectangle is Control.get_global_rect, which is the
 // viewport-space rectangle ui_hit_test already reports for a hit, so the two
 // tools agree about where a Control is.
+// The rectangle a Control covers in its window, in the pixels an injected
+// mouse event carries. get_global_rect is in the viewport's own coordinates,
+// which a stretched project scales on the way to the window: drawn at
+// 1600x900 into a 1280x720 window, a button's centre sits at 0.8 of where
+// get_global_rect puts it, and a click aimed at the listed centre missed
+// (#1189). Viewport.get_screen_transform is that mapping, measured identical
+// on 4.5.1, 4.6.2 and 4.7.2. A rotated or skewed transform gives the
+// rectangle that bounds the four corners.
+Result<json> screenRectOf(GDExtensionObjectPtr control, const json& global_rect) {
+    auto viewport_value = callObject(control, "Node", "get_viewport", 3596683776LL);
+    if (viewport_value.isErr()) return viewport_value.error();
+    auto viewport = objectFromVariant(viewport_value.value());
+    if (viewport.isErr()) return viewport.error();
+    if (!viewport.value()) return Error::internal("The Control is not inside a viewport");
+    auto transform_value =
+        callObject(viewport.value(), "Viewport", "get_screen_transform", 3814499831LL);
+    if (transform_value.isErr()) return transform_value.error();
+    auto transform = variantToJson(transform_value.value());
+    if (transform.isErr()) return transform.error();
+    try {
+        const auto& t = transform.value();
+        const double xx = t.at("x").at("x").get<double>(), xy = t.at("x").at("y").get<double>();
+        const double yx = t.at("y").at("x").get<double>(), yy = t.at("y").at("y").get<double>();
+        const double ox = t.at("origin").at("x").get<double>();
+        const double oy = t.at("origin").at("y").get<double>();
+        const double px = global_rect.at("position").at("x").get<double>();
+        const double py = global_rect.at("position").at("y").get<double>();
+        const double sx = global_rect.at("size").at("x").get<double>();
+        const double sy = global_rect.at("size").at("y").get<double>();
+        double min_x = 0, min_y = 0, max_x = 0, max_y = 0;
+        bool first = true;
+        for (const auto& [cx, cy] : {std::pair<double, double>{px, py}, {px + sx, py},
+                                     {px, py + sy}, {px + sx, py + sy}}) {
+            const double wx = xx * cx + yx * cy + ox;
+            const double wy = xy * cx + yy * cy + oy;
+            min_x = first ? wx : std::min(min_x, wx);
+            min_y = first ? wy : std::min(min_y, wy);
+            max_x = first ? wx : std::max(max_x, wx);
+            max_y = first ? wy : std::max(max_y, wy);
+            first = false;
+        }
+        return json{{"position", {{"x", min_x}, {"y", min_y}}},
+                    {"size", {{"x", max_x - min_x}, {"y", max_y - min_y}}}};
+    } catch (const json::exception& error) {
+        return Error::internal(std::string("The screen transform could not be read: ") + error.what());
+    }
+}
+
 json uiListControls(const json& params, const std::string& session_kind) {
     if (!hasOnlyKeys(params, {"root_path", "max_results", "visible_only", "include_text",
                               "class_filter"})) {
@@ -9182,6 +9241,12 @@ json uiListControls(const json& params, const std::string& session_kind) {
                                       {"depth", depth},
                                       {"mouse_filter", filter_name},
                                       {"mouse_filter_value", mouse_filter.value()}};
+                        // In a game, where runtime_inject_input can click it.
+                        if (!editor) {
+                            auto screen_rect = screenRectOf(node, rect_json.value());
+                            if (screen_rect.isErr()) return screen_rect.error();
+                            entry["screen_rect"] = std::move(screen_rect.value());
+                        }
 
                         // Text lives on a different class for every widget that
                         // has it, so it is read as a property rather than through

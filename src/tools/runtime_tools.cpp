@@ -9,14 +9,17 @@
 #include "didi/common/logger.hpp"
 #include "didi/common/version.hpp"
 #include "didi/gdextension/expression_sandbox.hpp"
+#include "didi/offline/project_settings_file.hpp"
 #include "didi/offline/test_runner.hpp"
 #include "didi/runtime/session_client.hpp"
 
 // Both are used directly by the detached-launch wait below. MSVC hands them
 // over through another header and libc++ does not, so a clean Windows build
 // says nothing about this: the macOS clang job is where it shows up.
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
+#include <optional>
 #include <thread>
 
 namespace didi {
@@ -458,6 +461,24 @@ CallToolResult handleExecuteTestSession(const json& args, std::shared_ptr<ipc::I
     if (args.contains("detach") && !args["detach"].is_boolean()) {
         return CallToolResult::errorJson(400, "detach must be a boolean");
     }
+    // A stepped frame is one physics tick only at a fixed rate. Without one a
+    // frame runs as many ticks as its wall-clock time covers (#1209).
+    std::optional<int> fixed_fps;
+    if (args.contains("fixed_fps")) {
+        const auto& requested = args["fixed_fps"];
+        if (requested.is_boolean()) {
+            if (requested.get<bool>()) {
+                std::error_code cwd_error;
+                fixed_fps = offline::projectPhysicsTicksPerSecond(std::filesystem::current_path(cwd_error));
+            }
+        } else if (integerInRange(requested, 1, 1000)) {
+            fixed_fps = requested.get<int>();
+        } else {
+            return CallToolResult::errorJson(
+                400, "fixed_fps must be true, false, or a rate from 1 to 1000",
+                {{"code", "invalid_arguments"}, {"field", "fixed_fps"}, {"retryable", false}});
+        }
+    }
     std::string scene_path = args.value("scene_path", "");
     int timeout_sec = args.value("timeout_seconds", 10);
     bool headless = args.value("headless", true);
@@ -471,6 +492,15 @@ CallToolResult handleExecuteTestSession(const json& args, std::shared_ptr<ipc::I
                 extra_args.push_back(a.get<std::string>());
             }
         }
+    }
+    if (fixed_fps.has_value()) {
+        if (std::find(extra_args.begin(), extra_args.end(), "--fixed-fps") != extra_args.end()) {
+            return CallToolResult::errorJson(
+                400, "fixed_fps and a --fixed-fps in extra_args both set the rate. Give it once.",
+                {{"code", "invalid_arguments"}, {"field", "extra_args"}, {"retryable", false}});
+        }
+        extra_args.push_back("--fixed-fps");
+        extra_args.push_back(std::to_string(*fixed_fps));
     }
 
     // Taken before the spawn, so a session published by the game we are about
@@ -513,6 +543,7 @@ CallToolResult handleExecuteTestSession(const json& args, std::shared_ptr<ipc::I
             std::move(data));
     }
     json result = session_res.toJson();
+    result["fixed_fps"] = fixed_fps.has_value() ? json(*fixed_fps) : json(nullptr);
 
     // A detached game is only useful once it has published a session, because
     // that is what every runtime tool routes through. Returning the moment the

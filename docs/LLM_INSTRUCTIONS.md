@@ -157,6 +157,10 @@ where it is. Editor or game.
 - `global_rect` is the same rectangle `ui_hit_test` reports, so the two compose:
   list the control, take the centre of its rectangle, and hit-test that point to
   confirm it is really on top before acting on it.
+- In a game each entry also carries `screen_rect`, the rectangle in the window
+  pixels `runtime_inject_input` takes. Click the centre of `screen_rect`, not of
+  `global_rect`: a project that stretches its viewport to the window scales one
+  into the other, and a click at the viewport centre misses (#1189).
 - It reports the resolved rectangle, not the anchors, offsets or theme overrides
   behind it, and it injects no input. Use `runtime_inject_input` in a game to
   actually press something.
@@ -238,7 +242,7 @@ Ordinary Didi starts detached and exposes 122 canonical tools plus 10 legacy reg
 
 Poll `runtime_read_logs` from cursor `0`, then pass its `next_cursor` on every later call. A true `dropped_before_cursor` means retained history was lost. Filtering still advances the cursor. The Didi ring contains structured Didi events only. For engine output -- `print()` from a running game, `push_warning`, `push_error`, and GDScript parse and runtime errors -- poll `runtime_read_output`, which is a separate stream with the same cursor contract and carries the originating file and line on errors. Use `runtime_launch` for bounded child stdout/stderr.
 
-Only game sessions accept pause/step/stop. Pause and verify before stepping; `frames` is 1–60, only one step may be pending, and success means the game re-paused after exact callbacks. A successful stop is a quit request, not proof of process exit.
+Only game sessions accept pause/step/stop. Pause and verify before stepping; `frames` is 1–60, only one step may be pending, and success means the game re-paused after exact callbacks. A frame is one physics tick only at a fixed rate: launch with `runtime_launch` `fixed_fps: true` when it must be, and read `fixed_fps` and `physics_ticks` in the step's answer. Input sent to a paused game waits for the next stepped frame; to operate a pause menu that processes while paused, send it with `paused_delivery: "now"`. A successful stop is a quit request, not proof of process exit.
 
 Treat `eval_gdscript` as a small read-only expression language. Prefer literals, arithmetic/boolean comparisons, direct scalar `node.get('<native-property>')`, `node.get_child_count()`, `node.get_path()`, `node.get_class()`, string/class/group/method/meta predicates, bounded literal-container queries, and numeric constructors/functions. Do not generate traversal, property/index syntax, chained calls, metadata values, callbacks, reflection, mutation, statements, `str(object)`, file/process/network APIs, or unsafe singletons. Source is 1–2048 UTF-8 bytes; context remains in the active subtree; timeout is 1–5000 ms and cooperative, not preemptive; result depth is 16 and the full response is 256 KiB.
 
@@ -266,7 +270,7 @@ Reach for the stand-in before you reach for a file edit. Each is a different thi
 
 | Blocked name | Use instead | What it is not |
 | :--- | :--- | :--- |
-| `physics_simulate_step` | `runtime_set_paused` `{paused: true}`, then `runtime_step` `{frames: N}`, then read back with `runtime_get_tree`, `eval_gdscript` or `viewport_capture_frame`. The step verifies the pause, advances exactly `N` process callbacks, and re-pauses before answering. | Not an exact count of physics ticks, and not a caller-supplied delta. The ticks inside those frames are the engine's, at the engine's delta. Do not report a delta-dependent result as if the delta were yours. |
+| `physics_simulate_step` | `runtime_set_paused` `{paused: true}`, then `runtime_step` `{frames: N}`, then read back with `runtime_get_tree`, `eval_gdscript` or `viewport_capture_frame`. The step verifies the pause, advances exactly `N` process callbacks, and re-pauses before answering. | An exact count of physics ticks only for a game launched with `fixed_fps`; `physics_ticks` in the answer says how many ran. Never a caller-supplied delta. The ticks inside those frames are the engine's, at the engine's delta. Do not report a delta-dependent result as if the delta were yours. |
 | `nav_bake_mesh` | Bake the `NavigationRegion2D`/`NavigationRegion3D` in the editor or from the project's own GDScript, commit it with the scene, then `nav_query_path`. | Not a bake Didi performed or can verify. `nav_query_path` reports the map that exists; an empty map answers `reachable: false` rather than baking one. |
 | `runtime_get_call_stack` | `runtime_read_output` for the `error_type` plus the `file`, `function` and `line` a script fault was raised in; `runtime_watch_invariants` to pause the game on the frame a condition turns, then read the live state. | Not a stack. One frame, only where the engine reported an error. |
 

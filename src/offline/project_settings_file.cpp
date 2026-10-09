@@ -12,6 +12,8 @@
 #include <map>
 #include <optional>
 #include <sstream>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace didi::offline {
@@ -175,6 +177,17 @@ Result<std::vector<ProjectAutoload>> readProjectAutoloads(
     autoloads.reserve(found.size());
     for (auto& [name, autoload] : found) autoloads.push_back(std::move(autoload));
     return autoloads;
+}
+
+int projectPhysicsTicksPerSecond(const std::filesystem::path& project_root) {
+    auto setting = readProjectSetting(project_root, "physics/common/physics_ticks_per_second");
+    if (setting.isErr() || !setting.value().existed) return 60;
+    try {
+        const int ticks = std::stoi(setting.value().literal);
+        return ticks >= 1 && ticks <= 1000 ? ticks : 60;
+    } catch (const std::exception&) {
+        return 60;
+    }
 }
 
 Result<ProjectSettingRead> readProjectSetting(const std::filesystem::path& project_root,

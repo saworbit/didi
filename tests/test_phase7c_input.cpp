@@ -131,6 +131,25 @@ void test_mouse_events_carry_a_position() {
     }
 }
 
+// A pause menu runs with PROCESS_MODE_ALWAYS and has to be operable while the
+// game stays paused. paused_delivery: "now" hands a batch to Input at once,
+// where nodes that process while paused receive it and paused ones do not;
+// "hold", the default, keeps the #594 behaviour (#1191).
+void test_paused_delivery_is_hold_or_now() {
+    const auto events = json::array({{{"type", "action"}, {"action_name", "ui_accept"}, {"pressed", true}}});
+    for (const char* value : {"hold", "now"}) {
+        ASSERT_TRUE(parseInputInjectionRequest({{"events", events}, {"paused_delivery", value}}).isOk());
+    }
+    ASSERT_TRUE(!didi::runtime::deliversWhilePaused({{"events", events}}));
+    ASSERT_TRUE(!didi::runtime::deliversWhilePaused({{"events", events}, {"paused_delivery", "hold"}}));
+    ASSERT_TRUE(didi::runtime::deliversWhilePaused({{"events", events}, {"paused_delivery", "now"}}));
+    for (const json& bad : {json("later"), json(true), json(1)}) {
+        auto parsed = parseInputInjectionRequest({{"events", events}, {"paused_delivery", bad}});
+        ASSERT_TRUE(parsed.isErr());
+        ASSERT_TRUE(parsed.error().message.find("paused_delivery") != std::string::npos);
+    }
+}
+
 void test_rejects_malformed_batches() {
     const json bad[] = {
         json::object(),
@@ -217,6 +236,8 @@ struct RegisterPhase7cInput {
         registerTest("phase7c_input.parses_every_kind", test_parses_every_event_kind_with_defaults);
         registerTest("phase7c_input.mouse_events_carry_a_position", test_mouse_events_carry_a_position);
         registerTest("phase7c_input.rejects_malformed", test_rejects_malformed_batches);
+        registerTest("phase7c_input.paused_delivery_is_hold_or_now",
+                     test_paused_delivery_is_hold_or_now);
         registerTest("phase7c_input.count_and_byte_caps", test_enforces_count_and_byte_caps);
         registerTest("phase7c_input.hook_rejects_editor", test_hook_rejects_editor_sessions_before_the_bridge);
     }

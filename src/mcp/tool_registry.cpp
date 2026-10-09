@@ -4935,15 +4935,15 @@ void ToolRegistry::registerAllDefaultTools() {
                 {"headless", {{"type", "boolean"}, {"default", true}}},
                 {"break_on_error", {{"type", "boolean"}, {"default", true}, {"description", "Classify captured ERROR lines as failure after process exit; does not terminate the child early"}}},
                 {"extra_args", {{"type", "array"}, {"items", {{"type", "string"}}}}},
+                {"fixed_fps", {{"type", json::array({"boolean", "integer"})},
+                               {"description",
+                                "true for the project's tick rate, or 1 to 1000, so each stepped "
+                                "frame is one physics tick. Unpaused, it runs as fast as it can."}}},
                 {"detach", {{"type", "boolean"}, {"default", false},
                             {"description",
-                             "Start the game and leave it running instead of watching it to "
-                             "completion. The call returns once the game has published a session, "
-                             "which is what runtime_attach_session and the rest of the runtime "
-                             "tools route through. Nothing is "
-                             "captured: read a running game with runtime_read_output and end it "
-                             "with runtime_stop. Without this the call blocks, terminates the game "
-                             "at the timeout, and reports what it saw."}}}
+                             "Leave the game running and return once it has published a session. "
+                             "Nothing is captured: read it with runtime_read_output and end it with "
+                             "runtime_stop."}}}
             }}
         };
         t.description = "Starts a separate Godot process. Blocking by default: captures stdout/stderr, classifies errors after exit, and enforces a 1-120 second timeout. With detach: true it leaves the game running and answers with the session to drive it through.";
@@ -4963,10 +4963,9 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "runtime_inject_input";
-        t.description = "Dispatches action, key, mouse button, mouse motion and joypad events into the "
-                        "running game. A mouse event carries the viewport position it lands at. A batch "
-                        "injected while the game is paused is held and released into the first frame "
-                        "that processes, by runtime_step or runtime_set_paused.";
+        t.description = "Dispatches input events into the running game. A mouse event's position is in "
+                        "window pixels, as ui_list_controls' screen_rect is. While the game is paused a "
+                        "batch is held for the first frame that processes, unless paused_delivery is now.";
         t.inputSchema = {
             {"type", "object"},
             {"properties", {
@@ -5527,13 +5526,11 @@ void ToolRegistry::registerAllDefaultTools() {
         ToolDefinition t;
         t.name = "ui_list_controls";
         t.description =
-            "Lists live Control nodes under a root with the viewport-space rectangle each one "
-            "occupies, its class, visibility, mouse filter, and its text where it has any. In a "
-            "localised game text is the key the scene holds; displayed_text, present when it "
-            "differs, is the translation the player reads. Editor "
-            "or game, read-only, and no input is injected. This is how a caller finds a control "
-            "to act on; ui_hit_test answers the opposite question, which is what sits under a "
-            "point it already has.";
+            "Lists live Control nodes under a root with each one's viewport-space rectangle, "
+            "class, visibility, mouse filter and text. In a game, screen_rect is that rectangle in "
+            "the window pixels runtime_inject_input takes. In a localised game text is the key; "
+            "displayed_text, when it differs, is what the player reads. Read-only. ui_hit_test "
+            "answers the opposite question: what sits under a point.";
         t.inputSchema = {{"type", "object"}, {"properties", {
             {"root_path", {{"type", "string"}, {"maxLength", 1024},
                            {"description", "Where to start. Defaults to the edited scene root in an editor and /root in a game."}}},
