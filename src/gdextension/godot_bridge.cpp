@@ -766,6 +766,9 @@ bool propertyTypeAcceptsJson(const json& value, GDExtensionVariantType type) {
             // What its elements may be depends on the array the property holds
             // now, typed or not, so they are checked when the value is built.
             return value.is_array();
+        case GDEXTENSION_VARIANT_TYPE_DICTIONARY:
+            // The same for a dictionary's keys and values (#1195).
+            return value.is_object();
         default:
             break;
     }
@@ -1330,6 +1333,113 @@ Result<VariantValue> makeArrayForProperty(const std::string& property_name, cons
                             {&items.value(), &builtin.value(), &class_name.value(), &script.value()});
 }
 
+// A Dictionary property's new value (#1195). A typed one, Dictionary[String,
+// int], keeps what it holds when handed an untyped dictionary, with no error,
+// as a typed Array does (measured on 4.5.1, 4.6.2 and 4.7.2). So the new one is
+// made with the key and value types of the one the property holds, each value
+// built as its type. JSON keys are strings: they stay a String, become a
+// StringName for a StringName key, and a whole number for an int key. An
+// untyped dictionary takes scalar values, for the reason an untyped Array does.
+Result<VariantValue> makeDictionaryForProperty(const std::string& property_name, const json& value,
+                                               VariantValue& current) {
+    if (GodotApi::instance().variant_get_type(current.ptr()) != GDEXTENSION_VARIANT_TYPE_DICTIONARY) {
+        return Error::invalidArgument("Property \"" + property_name +
+                                      "\" holds no Dictionary to take key and value types from.");
+    }
+    const auto typed = [&](const char* method) -> Result<GDExtensionVariantType> {
+        auto builtin = callVariant(current, method);
+        if (builtin.isErr()) return builtin.error();
+        auto number = scalarFromVariant<int64_t>(builtin.value(), GDEXTENSION_VARIANT_TYPE_INT);
+        if (number.isErr()) return number.error();
+        return static_cast<GDExtensionVariantType>(number.value());
+    };
+    auto key_type = typed("get_typed_key_builtin");
+    if (key_type.isErr()) return key_type.error();
+    auto value_type = typed("get_typed_value_builtin");
+    if (value_type.isErr()) return value_type.error();
+    const auto key = key_type.value();
+    const auto element = value_type.value();
+    if (key != GDEXTENSION_VARIANT_TYPE_NIL && key != GDEXTENSION_VARIANT_TYPE_STRING &&
+        key != GDEXTENSION_VARIANT_TYPE_STRING_NAME && key != GDEXTENSION_VARIANT_TYPE_INT) {
+        return Error::invalidArgument(
+            "Property \"" + property_name + "\" is a Dictionary keyed by " +
+            godotVariantTypeName(static_cast<int>(key)) +
+            ", and a JSON key is a string, which spells a String, StringName or int key only.");
+    }
+    std::string class_text;
+    if (element == GDEXTENSION_VARIANT_TYPE_OBJECT) {
+        auto class_name = callVariant(current, "get_typed_value_class_name");
+        if (class_name.isErr()) return class_name.error();
+        auto text = stringFromVariant(class_name.value(), GDEXTENSION_VARIANT_TYPE_STRING_NAME);
+        if (text.isErr()) return text.error();
+        class_text = text.value();
+    }
+    auto entries = makeJsonVariant(json::object());
+    if (entries.isErr()) return entries.error();
+    for (auto it = value.begin(); it != value.end(); ++it) {
+        const auto& key_text = it.key();
+        const auto& item = it.value();
+        const auto name = property_name + "[\"" + key_text + "\"]";
+        auto built_key = [&]() -> Result<VariantValue> {
+            if (key == GDEXTENSION_VARIANT_TYPE_INT) {
+                const auto number = dictionaryIntKey(key_text);
+                if (!number) {
+                    return Error::invalidArgument(
+                        "Property \"" + property_name + "\" is a Dictionary keyed by int, and the key \"" +
+                        key_text + "\" is not a whole number. Send each key as the number in a string, "
+                        "such as \"3\" or \"-1\".");
+                }
+                return makeScalar(GDEXTENSION_VARIANT_TYPE_INT, *number);
+            }
+            if (key == GDEXTENSION_VARIANT_TYPE_STRING_NAME) {
+                return makeJsonVariantForProperty(json(key_text), GDEXTENSION_VARIANT_TYPE_STRING_NAME);
+            }
+            return makeJsonVariant(json(key_text));
+        }();
+        if (built_key.isErr()) return built_key.error();
+        auto built = [&]() -> Result<VariantValue> {
+            if (element == GDEXTENSION_VARIANT_TYPE_NIL) {
+                if (!item.is_null() && !item.is_boolean() && !item.is_number() && !item.is_string()) {
+                    return Error::invalidArgument(
+                        "Property \"" + property_name + "\" is an untyped Dictionary, so it has no value "
+                        "type to turn the JSON " + jsonValueTypeName(item) + " at key \"" + key_text +
+                        "\" into, and Godot would keep it as a Dictionary or an Array rather than the "
+                        "vector or colour it may stand for. Send numbers, strings, booleans or null, or "
+                        "declare the property as a typed dictionary such as Dictionary[String, Vector2].");
+                }
+                return makeJsonVariant(item);
+            }
+            if (element == GDEXTENSION_VARIANT_TYPE_OBJECT) {
+                if (!propertyTypeAcceptsJson(item, element)) {
+                    return Error::invalidArgument(describePropertyTypeMismatch(name, item, element));
+                }
+                return makeResourceForProperty(name, item, class_text);
+            }
+            auto fits = validateJsonForPropertyType(name, item, element);
+            if (fits.isErr()) return fits.error();
+            return makeJsonVariantForProperty(item, element);
+        }();
+        if (built.isErr()) return built.error();
+        auto stored = callVariant(entries.value(), "set", {&built_key.value(), &built.value()});
+        if (stored.isErr()) return stored.error();
+    }
+    if (key == GDEXTENSION_VARIANT_TYPE_NIL && element == GDEXTENSION_VARIANT_TYPE_NIL) {
+        return std::move(entries.value());
+    }
+    auto key_builtin = callVariant(current, "get_typed_key_builtin");
+    auto key_class = callVariant(current, "get_typed_key_class_name");
+    auto key_script = callVariant(current, "get_typed_key_script");
+    auto value_builtin = callVariant(current, "get_typed_value_builtin");
+    auto value_class = callVariant(current, "get_typed_value_class_name");
+    auto value_script = callVariant(current, "get_typed_value_script");
+    for (const auto* part : {&key_builtin, &key_class, &key_script, &value_builtin, &value_class, &value_script}) {
+        if (part->isErr()) return part->error();
+    }
+    return constructBuiltin(GDEXTENSION_VARIANT_TYPE_DICTIONARY,
+                            {&entries.value(), &key_builtin.value(), &key_class.value(), &key_script.value(),
+                             &value_builtin.value(), &value_class.value(), &value_script.value()});
+}
+
 Result<json> variantToJson(VariantValue& value, int depth = 0, bool lenient = false) {
     if (depth > 16) return Error::invalidArgument("Godot Variant is nested more than 16 levels deep");
     auto& api = GodotApi::instance();
@@ -1386,11 +1496,24 @@ Result<json> variantToJson(VariantValue& value, int depth = 0, bool lenient = fa
                 auto key = callVariant(keys.value(), "get", {&index.value()});
                 if (key.isErr()) return key.error();
                 auto key_type = GodotApi::instance().variant_get_type(key.value().ptr());
-                if (key_type != GDEXTENSION_VARIANT_TYPE_STRING && key_type != GDEXTENSION_VARIANT_TYPE_STRING_NAME) {
-                    return Error::invalidArgument("Godot Dictionary contains a non-string key");
+                // An int key reads as the decimal string a write takes it as,
+                // so an int-keyed dictionary round-trips (#1195).
+                Result<std::string> key_text = std::string();
+                if (key_type == GDEXTENSION_VARIANT_TYPE_INT) {
+                    auto number = scalarFromVariant<int64_t>(key.value(), GDEXTENSION_VARIANT_TYPE_INT);
+                    if (number.isErr()) return number.error();
+                    key_text = std::to_string(number.value());
+                } else if (key_type == GDEXTENSION_VARIANT_TYPE_STRING ||
+                           key_type == GDEXTENSION_VARIANT_TYPE_STRING_NAME) {
+                    key_text = stringFromVariant(key.value(), key_type);
+                } else {
+                    return Error::invalidArgument("Godot Dictionary contains a key that is not a string or an int");
                 }
-                auto key_text = stringFromVariant(key.value(), key_type);
                 if (key_text.isErr()) return key_text.error();
+                if (output.contains(key_text.value())) {
+                    return Error::invalidArgument("Godot Dictionary holds the key \"" + key_text.value() +
+                                                  "\" as both a string and an int, which JSON cannot tell apart");
+                }
                 auto item = callVariant(value, "get", {&key.value()});
                 if (item.isErr()) return item.error();
                 auto converted = variantToJson(item.value(), depth + 1, lenient);
@@ -4497,6 +4620,8 @@ Result<PreparedWrite> prepareWrite(GDExtensionObjectPtr root, const std::string&
         ? makeResourceForProperty(write.property, value, write.resolved.descriptor.class_name)
         : property_type == GDEXTENSION_VARIANT_TYPE_ARRAY
         ? makeArrayForProperty(write.property, value, old_value.value())
+        : property_type == GDEXTENSION_VARIANT_TYPE_DICTIONARY
+        ? makeDictionaryForProperty(write.property, value, old_value.value())
         : makeJsonVariantForProperty(value, property_type);
     if (new_value.isErr()) return new_value.error();
     write.requested = value;
@@ -16112,6 +16237,8 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 ? makeResourceForProperty(it.key(), it.value(), declared_class)
                 : property_type == GDEXTENSION_VARIANT_TYPE_ARRAY
                 ? makeArrayForProperty(it.key(), it.value(), current_value.value())
+                : property_type == GDEXTENSION_VARIANT_TYPE_DICTIONARY
+                ? makeDictionaryForProperty(it.key(), it.value(), current_value.value())
                 : makeJsonVariantForProperty(it.value(), property_type);
             if (property_value.isErr()) {
                 GodotApi::instance().object_destroy(node);
@@ -17382,6 +17509,28 @@ const std::map<std::string, std::string>& bridgeErrorSentenceTable() {
     return bridgeErrorSentences();
 }
 
+std::optional<int64_t> dictionaryIntKey(std::string_view text) {
+    const bool negative = !text.empty() && text.front() == '-';
+    const auto digits = negative ? text.substr(1) : text;
+    if (digits.empty() || digits.size() > 19) return std::nullopt;
+    if (digits.size() > 1 && digits.front() == '0') return std::nullopt;
+    if (negative && digits == "0") return std::nullopt;
+    uint64_t magnitude = 0;
+    for (const char c : digits) {
+        if (c < '0' || c > '9') return std::nullopt;
+        const auto digit = static_cast<uint64_t>(c - '0');
+        if (magnitude > (UINT64_MAX - digit) / 10) return std::nullopt;
+        magnitude = magnitude * 10 + digit;
+    }
+    const auto limit = static_cast<uint64_t>(INT64_MAX) + (negative ? 1u : 0u);
+    if (magnitude > limit) return std::nullopt;
+    if (negative) {
+        return magnitude == static_cast<uint64_t>(INT64_MAX) + 1u ? INT64_MIN
+                                                                 : -static_cast<int64_t>(magnitude);
+    }
+    return static_cast<int64_t>(magnitude);
+}
+
 PropertyTypeMatch matchJsonToPropertyType(const json& value, int godot_type) {
     // Delegates the accept/reject decision to propertyTypeAcceptsJson rather
     // than repeating it. Two copies of this rule already disagreed once: the
@@ -17405,6 +17554,7 @@ PropertyTypeMatch matchJsonToPropertyType(const json& value, int godot_type) {
         case GDEXTENSION_VARIANT_TYPE_COLOR:
         case GDEXTENSION_VARIANT_TYPE_OBJECT:
         case GDEXTENSION_VARIANT_TYPE_ARRAY:
+        case GDEXTENSION_VARIANT_TYPE_DICTIONARY:
             break;
         default:
             if (compoundMembers(static_cast<GDExtensionVariantType>(godot_type)) == nullptr &&

@@ -3193,7 +3193,7 @@ void ToolRegistry::registerAllDefaultTools() {
                                 {"examples", json::array({json::object({{"position", json{{"x", 480}, {"y", 270}}},
                                                                         {"visible", true},
                                                                         {"text", "Score"}})})},
-                                {"description", "Initial property values, keyed by property name. Each value takes the JSON type matching the property on the new node: number for float (1.0, not \"1.0\"), integer for int, boolean for bool, string for String/StringName/NodePath, null for nil, {x,y} or {x,y,z} for Vector2/Vector2i/Vector3/Vector3i, {r,g,b} with optional a or a \"#rrggbb\" string for Color, and a res:// path for a Resource slot. Arrays are rejected."}}}
+                                {"description", "Initial property values, keyed by property name. Each value takes the JSON type matching the property on the new node: number for float (1.0, not \"1.0\"), integer for int, boolean for bool, string for String/StringName/NodePath, null for nil, {x,y} or {x,y,z} for Vector2/Vector2i/Vector3/Vector3i, {r,g,b} with optional a or a \"#rrggbb\" string for Color, a res:// path for a Resource slot, and an array or object for an Array or Dictionary."}}}
             }}
         };
         t.handler = [this](const json& args) { return handleSceneInstantiateNode(args, m_ipcClient); };
@@ -3515,7 +3515,7 @@ void ToolRegistry::registerAllDefaultTools() {
                                                      json{{"x", 480}, {"y", 270}},
                                                      json{{"r", 1}, {"g", 0.5}, {"b", 0}},
                                                      "res://tiles/arena_tileset.tres"})},
-                           {"description", "New property value, as the JSON type matching the Godot property: number for float (1.0, not \"1.0\"), integer for int, boolean for bool, string for String/StringName/NodePath, null for nil, {x,y} or {x,y,z} for vectors (whole numbers for the integer ones), {r,g,b} with optional a or \"#rrggbb\" for Color, Godot's own members for the rest (Rect2 {position,size}, Transform3D {basis,origin}), an array for an Array or packed array, and a res:// path for a Resource slot (null clears it). A member the type does not have is refused."}}},
+                           {"description", "New property value, as the JSON type matching the Godot property: number for float (1.0, not \"1.0\"), integer for int, boolean for bool, string for String/StringName/NodePath, null for nil, {x,y} or {x,y,z} for vectors (whole numbers for the integer ones), {r,g,b} with optional a or \"#rrggbb\" for Color, Godot's own members for the rest (Rect2 {position,size}, Transform3D {basis,origin}), an array for an Array or packed array, an object for a Dictionary, and a res:// path for a Resource slot (null clears it). A member the type does not have is refused."}}},
                 {"writes", {{"type", "array"}, {"minItems", 1}, {"maxItems", 64},
                             {"items", {{"type", "object"},
                                        {"properties", {{"target_node", {{"type", "string"}}},

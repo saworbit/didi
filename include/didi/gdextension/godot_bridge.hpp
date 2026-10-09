@@ -8,6 +8,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace didi {
@@ -540,6 +541,12 @@ enum class PropertyTypeMatch {
 };
 
 PropertyTypeMatch matchJsonToPropertyType(const json& value, int godot_type);
+
+// The whole number a JSON object key spells, for a Dictionary whose keys are
+// int (#1195). JSON keys are strings, so an int key arrives as "3". Only the
+// spelling that reads back the same is accepted: no sign but a leading minus,
+// no leading zero, no spaces, and nothing outside int64.
+std::optional<int64_t> dictionaryIntKey(std::string_view text);
 
 // The name Godot gives a variant type. A caller reading a rejection has no way
 // to turn a bare enum number back into a type, so nothing user-facing prints
