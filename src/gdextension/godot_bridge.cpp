@@ -7124,6 +7124,8 @@ Result<VariantValue> buildInjectedEvent(const runtime::InjectedInputEvent& spec)
         case Kind::mouse_motion: class_name = "InputEventMouseMotion"; break;
         case Kind::joypad_button: class_name = "InputEventJoypadButton"; break;
         case Kind::joypad_motion: class_name = "InputEventJoypadMotion"; break;
+        case Kind::window_focus:
+            return Error::internal("A window_focus event is told to the window, not built as an InputEvent");
     }
     NativeName native_class(class_name);
     if (!native_class.valid()) return Error::internal("Failed to construct input event class name");
@@ -7226,6 +7228,8 @@ Result<VariantValue> buildInjectedEvent(const runtime::InjectedInputEvent& spec)
             if (check(step = set_int("InputEvent", "set_device", 1286410249LL, spec.device))) return fail(step.error());
             break;
         }
+        case Kind::window_focus:
+            break;
     }
     auto wrapped = makeObject(object);
     if (wrapped.isErr()) return fail(wrapped.error());
@@ -7388,16 +7392,95 @@ Result<json> injectedInputState(const std::vector<runtime::InjectedInputEvent>& 
                 break;
             }
             case Kind::mouse_motion:
+            case Kind::window_focus:
                 break;
         }
     }
     return state;
 }
 
+// What a real change of window focus tells a game, told to it (#1197): the
+// window's NOTIFICATION_WM_WINDOW_FOCUS_OUT, its focus_exited signal, and the
+// main loop's NOTIFICATION_APPLICATION_FOCUS_OUT, which the SceneTree passes to
+// every node; the IN ones for a gain. Measured on 4.5.1, 4.6.2 and 4.7.2, paused
+// or not, each reached a game's own handler in that order. The operating
+// system's focus does not move, so the answer says the change was synthetic and
+// what Window.has_focus() still answers.
+json injectWindowFocus(const std::vector<runtime::InjectedInputEvent>& events,
+                       const std::string& session_kind) {
+    auto tree = liveSceneTree();
+    if (tree.isErr()) return errorJson(tree.error().code, tree.error().message);
+    auto root = liveSceneTreeRoot(tree.value());
+    if (root.isErr()) return errorJson(root.error().code, root.error().message);
+    json changes = json::array();
+    json event_types = json::array();
+    size_t dispatched = 0;
+    for (const auto& event : events) {
+        const bool in = event.focused;
+        auto window_what = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(in ? 1004 : 1005));
+        auto loop_what = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(in ? 2016 : 2017));
+        auto reversed = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(0));
+        auto signal = makeStringName(in ? "focus_entered" : "focus_exited");
+        if (window_what.isErr() || loop_what.isErr() || reversed.isErr() || signal.isErr()) {
+            return errorJson(500, "Failed to build the focus notification");
+        }
+        Result<VariantValue> step = callObject(root.value(), "Node", "propagate_notification",
+                                               1286410249LL, {&window_what.value()});
+        if (step.isOk()) {
+            step = callObject(root.value(), "Object", "emit_signal", 4047867050LL, {&signal.value()});
+        }
+        if (step.isOk()) {
+            step = callObject(tree.value(), "Object", "notification", 4023243586LL,
+                              {&loop_what.value(), &reversed.value()});
+        }
+        if (step.isErr()) {
+            return errorJson(dispatched == 0 ? 500 : 504, step.error().message,
+                             {{"outcome", dispatched == 0 ? "not_started" : "unknown_outcome"},
+                              {"dispatched_event_count", dispatched}, {"retryable", false}});
+        }
+        ++dispatched;
+        event_types.push_back("window_focus");
+        changes.push_back({{"focused", in},
+                           {"delivered", json::array({in ? "NOTIFICATION_WM_WINDOW_FOCUS_IN"
+                                                         : "NOTIFICATION_WM_WINDOW_FOCUS_OUT",
+                                                      in ? "focus_entered" : "focus_exited",
+                                                      in ? "NOTIFICATION_APPLICATION_FOCUS_IN"
+                                                         : "NOTIFICATION_APPLICATION_FOCUS_OUT"})}});
+    }
+    auto has_focus = callObject(root.value(), "Window", "has_focus", 36873697LL);
+    json os_focused = nullptr;
+    if (has_focus.isOk()) {
+        auto flag = scalarFromVariant<GDExtensionBool>(has_focus.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+        if (flag.isOk()) os_focused = flag.value() != 0;
+    }
+    auto paused = liveSceneTreeIsPaused();
+    json answer = {{"dispatched_event_count", dispatched}, {"queued_event_count", 0},
+                   {"event_types", std::move(event_types)},
+                   {"outcome", "completed"}, {"rollback", "not_available"},
+                   {"paused", paused.isOk() ? json(paused.value()) : json(false)},
+                   {"delivery", "synthetic_focus"},
+                   // No control of Input's was touched, so it holds nothing to report.
+                   {"input_state", json::array()},
+                   {"window_focus", {{"synthetic", true}, {"changes", std::move(changes)},
+                                     {"os_window_focused", os_focused}}},
+                   {"limitation",
+                    "Synthetic: the game's window and main loop were told its focus changed, which "
+                    "runs the game's own handlers. The operating system's focus did not change, so "
+                    "Window.has_focus() answers as before, held keys were not released, and mouse "
+                    "capture is as it was."},
+                   {"session_kind", session_kind}};
+    return liveResult(answer);
+}
+
 json injectInput(const json& params, const std::string& session_kind) {
     if (session_kind != "game") return bridgeError(409, "session_kind_rejected");
     auto parsed = runtime::parseInputInjectionRequest(params);
     if (parsed.isErr()) return errorJson(parsed.error().code, parsed.error().message);
+    // The parser keeps a focus change in a batch of its own.
+    if (!parsed.value().empty() &&
+        parsed.value().front().kind == runtime::InjectedInputEvent::Kind::window_focus) {
+        return injectWindowFocus(parsed.value(), session_kind);
+    }
     auto input = singleton("Input");
     if (input.isErr()) return errorJson(501, "Input singleton is unavailable: " + input.error().message);
     auto bind = requireMethodBind("Input", "parse_input_event", kInputParseInputEventHash);

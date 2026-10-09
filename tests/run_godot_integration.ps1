@@ -797,6 +797,19 @@ try {
         (Tool-Request 2482 "eval_gdscript" @{ expression = "node.get('position')"; context_node = "/root/RuntimeRoot/Spatial/AnimTarget/MouseButtonProbe" }),
         (Tool-Request 2483 "eval_gdscript" @{ expression = "node.get('position')"; context_node = "/root/RuntimeRoot/Spatial/AnimTarget/MouseMotionProbe" }),
         (Tool-Request 2484 "eval_gdscript" @{ expression = "node.get('position')"; context_node = "/root/RuntimeRoot/Spatial/AnimTarget/MouseMotionDelta" }),
+        # A game that pauses when its window loses focus can only be tested by
+        # losing focus. window_focus tells the window and the main loop what a
+        # real change tells them, says it was synthetic, and goes in a batch of
+        # its own (#1197).
+        (Tool-Request 2564 "eval_gdscript" @{ expression = "node.get('position')"; context_node = "/root/RuntimeRoot/Spatial/AnimTarget/FocusProbe" }),
+        (Tool-Request 2565 "eval_gdscript" @{ expression = "node.get('scale')"; context_node = "/root/RuntimeRoot/Spatial/AnimTarget/FocusProbe" }),
+        (Tool-Request 2566 "runtime_inject_input" @{ events = @(@{ type = "window_focus"; focused = $false }) }),
+        (Tool-Request 2567 "eval_gdscript" @{ expression = "node.get('position')"; context_node = "/root/RuntimeRoot/Spatial/AnimTarget/FocusProbe" }),
+        (Tool-Request 2568 "eval_gdscript" @{ expression = "node.get('skew')"; context_node = "/root/RuntimeRoot/Spatial/AnimTarget/FocusProbe" }),
+        (Tool-Request 2569 "runtime_inject_input" @{ events = @(@{ type = "window_focus"; focused = $true }) }),
+        (Tool-Request 2570 "eval_gdscript" @{ expression = "node.get('scale')"; context_node = "/root/RuntimeRoot/Spatial/AnimTarget/FocusProbe" }),
+        (Tool-Request 2571 "eval_gdscript" @{ expression = "node.get('rotation')"; context_node = "/root/RuntimeRoot/Spatial/AnimTarget/FocusProbe" }),
+        (Tool-Request 2572 "runtime_inject_input" @{ events = @(@{ type = "window_focus"; focused = $false }, @{ type = "action"; action_name = "ui_accept"; pressed = $true }) }),
         # ui_hit_test in a game session. Its root_path description promised a
         # game default while the policy refused the session kind, so the half
         # of the read that says what sits under a point was missing exactly
@@ -1517,6 +1530,16 @@ try {
     $motionAt = (Tool-Payload $runtimeById[2483]).value
     $motionBy = (Tool-Payload $runtimeById[2484]).value
     Assert-True ($motionAt.x -eq 40 -and $motionAt.y -eq 30 -and $motionBy.x -eq 5 -and $motionBy.y -eq 5) "Injected mouse motion lost its position or its relative movement: at $($motionAt | ConvertTo-Json -Compress) by $($motionBy | ConvertTo-Json -Compress)"
+    $focusLost = Tool-Payload $runtimeById[2566]
+    Assert-True ($focusLost.outcome -eq "completed" -and $focusLost.delivery -eq "synthetic_focus" -and $focusLost.window_focus.synthetic -eq $true -and $focusLost.window_focus.changes[0].focused -eq $false -and $focusLost.limitation -match "operating system") "A window_focus loss was not reported as synthetic: $($focusLost | ConvertTo-Json -Compress -Depth 6)"
+    $outBefore = (Tool-Payload $runtimeById[2564]).value
+    $outAfter = (Tool-Payload $runtimeById[2567]).value
+    Assert-True (($outAfter.x - $outBefore.x) -eq 1 -and ($outAfter.y - $outBefore.y) -eq 1 -and (Tool-Payload $runtimeById[2568]).value -eq 1) "A window_focus loss did not reach the game's focus_exited, NOTIFICATION_APPLICATION_FOCUS_OUT and NOTIFICATION_WM_WINDOW_FOCUS_OUT once each: $($outBefore | ConvertTo-Json -Compress) to $($outAfter | ConvertTo-Json -Compress), skew $((Tool-Payload $runtimeById[2568]).value)"
+    $inBefore = (Tool-Payload $runtimeById[2565]).value
+    $inAfter = (Tool-Payload $runtimeById[2570]).value
+    Assert-True ((Tool-Payload $runtimeById[2569]).window_focus.changes[0].focused -eq $true -and ($inAfter.x - $inBefore.x) -eq 1 -and ($inAfter.y - $inBefore.y) -eq 1 -and (Tool-Payload $runtimeById[2571]).value -eq 1) "A window_focus gain did not reach the game's focus_entered and focus-in notifications once each: $($inBefore | ConvertTo-Json -Compress) to $($inAfter | ConvertTo-Json -Compress)"
+    $focusMixed = $runtimeById[2572]
+    Assert-True ($focusMixed.result.isError -and $focusMixed.result.content[0].text -match "batch of their own") "A batch mixing window_focus with input was not refused: $($focusMixed.result.content[0].text)"
 
     $cappedTree = Tool-Payload $runtimeById[367]
     $cappedTreeBytes = [Text.Encoding]::UTF8.GetByteCount([string]$runtimeById[367].result.content[0].text)

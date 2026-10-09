@@ -14,7 +14,7 @@ namespace runtime {
 // defaults applied, so the engine side only constructs objects and never
 // interprets JSON.
 struct InjectedInputEvent {
-    enum class Kind { action, key, mouse_button, mouse_motion, joypad_button, joypad_motion };
+    enum class Kind { action, key, mouse_button, mouse_motion, joypad_button, joypad_motion, window_focus };
 
     Kind kind{Kind::action};
     bool pressed{false};
@@ -60,6 +60,9 @@ struct InjectedInputEvent {
     // joypad_motion
     int64_t axis{0};
     double axis_value{0.0};
+
+    // window_focus: whether the game's window gains or loses focus (#1197).
+    bool focused{false};
 
     const char* kindName() const;
 };

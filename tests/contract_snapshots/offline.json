@@ -5214,6 +5214,22 @@
                       "device"
                     ],
                     "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "focused": {
+                        "type": "boolean"
+                      },
+                      "type": {
+                        "const": "window_focus"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "focused"
+                    ],
+                    "type": "object"
                   }
                 ]
               },
@@ -8504,6 +8520,22 @@
                       "axis",
                       "axis_value",
                       "device"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "focused": {
+                        "type": "boolean"
+                      },
+                      "type": {
+                        "const": "window_focus"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "focused"
                     ],
                     "type": "object"
                   }

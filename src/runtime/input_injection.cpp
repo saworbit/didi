@@ -207,6 +207,12 @@ Result<InjectedInputEvent> parseEvent(const json& event) {
         DIDI_TRY(parsed.axis, integerField(event, "axis", 0, 5, true, 0));
         DIDI_TRY(parsed.axis_value, numberField(event, "axis_value", -1.0, 1.0, true, 0.0));
         DIDI_TRY(parsed.device, integerField(event, "device", 0, 31, true, 0));
+    } else if (type == "window_focus") {
+        parsed.kind = Kind::window_focus;
+        if (!onlyKeys(event, {"type", "focused"})) {
+            return Error::invalidArgument("window_focus event contains an unknown property");
+        }
+        DIDI_TRY(parsed.focused, boolField(event, "focused", true, false));
     } else {
         return Error::invalidArgument("Unsupported input event type: " + type);
     }
@@ -225,6 +231,7 @@ const char* InjectedInputEvent::kindName() const {
         case Kind::mouse_motion: return "mouse_motion";
         case Kind::joypad_button: return "joypad_button";
         case Kind::joypad_motion: return "joypad_motion";
+        case Kind::window_focus: return "window_focus";
     }
     return "action";
 }
@@ -256,10 +263,21 @@ Result<std::vector<InjectedInputEvent>> parseInputInjectionRequest(const json& p
     }
     std::vector<InjectedInputEvent> parsed;
     parsed.reserve(events.size());
+    size_t focus_events = 0;
     for (const auto& event : events) {
         auto result = parseEvent(event);
         if (result.isErr()) return result.error();
+        if (result.value().kind == InjectedInputEvent::Kind::window_focus) ++focus_events;
         parsed.push_back(std::move(result.value()));
+    }
+    // A focus change is told to the window and the main loop, not handed to
+    // Input, so it neither waits for a frame nor queues behind a pause. In one
+    // batch with input the order the caller meant could not be kept (#1197).
+    if (focus_events != 0 && focus_events != parsed.size()) {
+        return Error::invalidArgument(
+            "window_focus events go in a batch of their own: they are told to the game's window "
+            "and main loop at once, while input events go through Input. Send the focus change, "
+            "then the input, as two calls.");
     }
     return parsed;
 }
