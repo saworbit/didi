@@ -76,6 +76,7 @@ function Assert-RefusalsNameTheirFix([string]$ManifestJson) {
     $expectedFixes = @(
         @{ Tool = "scene_call_method"; Status = 403; Match = "leading underscore"; Field = "field"; Value = "method_name" },
         @{ Tool = "scene_call_method"; Status = 404; Match = "is not a method this node's script declares"; Field = "field"; Value = "method_name" },
+        @{ Tool = "script_attach_to_node"; Status = 409; Match = "already has a script"; Field = "next_call"; Value = "script_detach_from_node" },
         @{ Tool = "project_verify_changes"; Status = 404; Match = "run_scene names"; Field = "field"; Value = "run_scene" },
         @{ Tool = "scene_set_property"; Status = 404; Match = "no resource could be loaded from"; Field = "next_call"; Value = "project_list_resources" },
         @{ Tool = "scene_instantiate_node"; Status = 404; Match = "Property not found on new"; Field = "field"; Value = "properties" },

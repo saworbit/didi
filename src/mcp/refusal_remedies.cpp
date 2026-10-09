@@ -441,7 +441,6 @@ const std::map<std::string, Rule>& rules() {
                 return nextCall("runtime_list_sessions", json::object(),
                                 "This tool runs in the editor; attach an editor session.");
             }
-            if (r.tool == "scene_call_method") return field("arguments");
             if (r.tool == "project_add_export_preset") {
                 return nextCall("project_list_export_presets", json::object(),
                                 "export_presets.cfg has a gap or an orphan section to fix by hand.");
@@ -486,6 +485,18 @@ const std::map<std::string, Rule>& rules() {
         {"script_not_tool", [](const Refusal&) {
             return noRemedy("Add @tool to the script for it to act in the editor, or run the project and "
                             "call it in the game.");
+        }},
+        // scene_call_method's own refusals, each named by its site rather than
+        // told apart here by message text (#1196).
+        {"method_private", [](const Refusal&) { return field("method_name"); }},
+        {"method_not_declared", [](const Refusal&) { return field("method_name"); }},
+        {"argument_count_mismatch", [](const Refusal&) { return field("arguments"); }},
+        {"argument_type_mismatch", [](const Refusal&) { return field("arguments"); }},
+        {"arguments_too_large", [](const Refusal&) { return field("arguments"); }},
+        {"await_limit_reached", [](const Refusal&) { return retryAfter(1000); }},
+        {"script_already_attached", [](const Refusal&) {
+            return nextCall("script_detach_from_node", json::object(),
+                            "The node already holds a script; detach it, then attach this one.");
         }},
         {"unparseable_import_metadata", [](const Refusal&) {
             return noRemedy("The .import file does not parse at the line named; fix it by hand, "
@@ -582,8 +593,6 @@ const std::map<std::string, Rule>& rules() {
         }},
         {"forbidden", [](const Refusal& r) {
             if (r.tool == "eval_gdscript") return field("expression");
-            // A method the call refuses by its name, not a file (#1184).
-            if (r.tool == "scene_call_method") return field("method_name");
             if (isOneOf(r.tool, {"script_get_symbols", "script_check_syntax"})) return retryAfter(1000);
             return noRemedy("The file cannot be read by this process; its permissions need fixing.");
         }},

@@ -167,6 +167,28 @@ class BridgeIdentifiersReachCallersThroughBridgeError(unittest.TestCase):
                           "fall back to printing it in brackets.")
 
 
+class BridgeHelperRefusalsNameThemselves(unittest.TestCase):
+    def test_no_fail_helper_call_above_400_goes_without_a_code(self) -> None:
+        # scene_call_method built six refusals through a local
+        # fail(code, message), which has nowhere to put data.code. The floor
+        # named each by its status, and the remedy table had to tell them
+        # apart by message text, which is how the 403 told a caller to fix
+        # file permissions (#1184, #1196). The errorJson rule above never saw
+        # them, so a refusal built that way fails here instead.
+        source = BRIDGE.read_text(encoding="utf-8")
+        offenders = []
+        for match in re.finditer(r"\bfail\(\s*(\d{3})\s*,", source):
+            status = int(match.group(1))
+            if 400 < status < 500:
+                line = source.count("\n", 0, match.start()) + 1
+                offenders.append(f"{BRIDGE.name}:{line} ({status})")
+        self.assertEqual(
+            offenders, [],
+            "fail(status, message) carries no data.code, so the floor names "
+            "the refusal by its status alone. Use errorJson with a code:\n  "
+            + "\n  ".join(offenders))
+
+
 class HookRefusalsNameThemselves(unittest.TestCase):
     def test_every_refusal_above_400_carries_a_code(self) -> None:
         lines = HOOK.read_text(encoding="utf-8").splitlines()

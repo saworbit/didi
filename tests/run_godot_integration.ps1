@@ -2914,6 +2914,9 @@ try {
         (Tool-Request 2402 "scene_open" @{ scene_path = "res://main.tscn" }),
         (Tool-Request 2403 "scene_instantiate_node" @{ node_type = "Node"; parent_path = "/root/SmokeRoot"; name = "CallProbe" }),
         (Tool-Request 2404 "script_attach_to_node" @{ target_node = "/root/SmokeRoot/CallProbe"; script_path = "res://call_probe.gd" }),
+        # A second script on a node that holds one is refused before anything
+        # changes, naming the script it holds and the call that frees it (#1193).
+        (Tool-Request 2428 "script_attach_to_node" @{ target_node = "/root/SmokeRoot/CallProbe"; script_path = "res://plain_probe.gd" }),
         # A plain method, and the value it returned.
         (Tool-Request 2405 "scene_call_method" @{ target_node = "/root/SmokeRoot/CallProbe"; method_name = "add_numbers"; arguments = @(2, 3) }),
         (Tool-Request 2406 "scene_call_method" @{ target_node = "/root/SmokeRoot/CallProbe"; method_name = "describe"; arguments = @() }),
@@ -3022,10 +3025,10 @@ try {
     Assert-True ((Tool-Payload $callById[2408]).value -eq 1) "The coroutine was reported as finished without its side effect having happened."
 
     foreach ($refusal in @(
-        @{ Id = 2409; What = "a leading-underscore method"; Match = "underscore" },
-        @{ Id = 2410; What = "an engine method"; Match = "script declares" },
-        @{ Id = 2411; What = "the wrong argument count"; Match = "argument" },
-        @{ Id = 2412; What = "an argument of the wrong type"; Match = "parameter type" },
+        @{ Id = 2409; What = "a leading-underscore method"; Match = "underscore"; Code = "method_private" },
+        @{ Id = 2410; What = "an engine method"; Match = "script declares"; Code = "method_not_declared" },
+        @{ Id = 2411; What = "the wrong argument count"; Match = "argument"; Code = "argument_count_mismatch" },
+        @{ Id = 2412; What = "an argument of the wrong type"; Match = "parameter type"; Code = "argument_type_mismatch" },
         @{ Id = 2415; What = "a script that is not a @tool script"; Match = "@tool"; Code = "script_not_tool" },
         @{ Id = 2416; What = "a node with no script"; Match = "no script"; Code = "node_has_no_script" })) {
         Assert-True $callById[$refusal.Id].result.isError "scene_call_method accepted $($refusal.What)."
@@ -3038,6 +3041,10 @@ try {
             Assert-True ($refusalData.code -eq $refusal.Code -and $refusalText -notmatch "export_presets") "The refusal of $($refusal.What) did not carry its own code and fix: $refusalText"
         }
     }
+
+    $attachAgain = ($callById[2428].result.content | Where-Object { $_.type -eq "text" } | Select-Object -First 1).text
+    $attachAgainData = ($attachAgain | ConvertFrom-Json).error.data
+    Assert-True ($callById[2428].result.isError -and $attachAgainData.code -eq "script_already_attached" -and $attachAgainData.script_path -eq "res://call_probe.gd" -and $attachAgainData.next_call.tool -eq "script_detach_from_node") "A second script on a node that holds one did not name the script it holds and the call that frees it: $attachAgain"
 
     # The editor's InputMap after an input action was written, and after it was
     # removed: the 3D viewport's own actions are still there, and the project's

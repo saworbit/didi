@@ -2992,6 +2992,8 @@ std::optional<json> refuseInstanceCycle(GDExtensionObjectPtr root, const std::st
                        detail);
 }
 
+std::string resourcePathOf(GDExtensionObjectPtr resource);
+
 struct AttachableScript {
     VariantValue script;
     GDExtensionObjectPtr object{nullptr};
@@ -3010,7 +3012,14 @@ Result<AttachableScript> loadAttachableScript(GDExtensionObjectPtr node,
         auto existing = objectFromVariant(old_script.value());
         if (existing.isErr()) return existing.error();
         if (existing.value()) {
-            return Error(409, "Target node already has a script; detach it before attaching another");
+            const auto held = resourcePathOf(existing.value());
+            json data = {{"code", "script_already_attached"}, {"retryable", false}};
+            if (!held.empty()) data["script_path"] = held;
+            return Error(409,
+                         "Target node already has a script" +
+                             (held.empty() ? std::string() : " (" + held + ")") +
+                             "; detach it with script_detach_from_node before attaching another",
+                         std::move(data));
         }
     }
     if (!resourceFileExists(script_path)) {
@@ -6413,11 +6422,12 @@ json GodotBridge::callScriptMethod(const json& params,
     // state in a way no caller intends, so the prefix is refused whatever the
     // script declares.
     if (method_name.front() == '_') {
-        return fail(403,
-                    "Refusing to call \"" + method_name +
-                        "\". A leading underscore is Godot's mark for an engine callback or a "
-                        "script's private helper, and calling one by hand corrupts node state. "
-                        "Expose the behaviour under a name without the underscore.");
+        return errorJson(403,
+                         "Refusing to call \"" + method_name +
+                             "\". A leading underscore is Godot's mark for an engine callback or a "
+                             "script's private helper, and calling one by hand corrupts node state. "
+                             "Expose the behaviour under a name without the underscore.",
+                         json{{"code", "method_private"}, {"field", "method_name"}});
     }
     const auto arguments = params.value("arguments", json::array());
     if (!arguments.is_array() || arguments.size() > 8) {
@@ -6451,7 +6461,10 @@ json GodotBridge::callScriptMethod(const json& params,
         }
     }
     try {
-        if (arguments.dump().size() > 8u * 1024u) return fail(413, "arguments exceed 8 KiB");
+        if (arguments.dump().size() > 8u * 1024u) {
+            return errorJson(413, "arguments exceed 8 KiB",
+                             json{{"code", "arguments_too_large"}, {"field", "arguments"}});
+        }
     } catch (const json::exception&) {
         return fail(400, "arguments are not valid JSON text");
     }
@@ -6523,22 +6536,29 @@ json GodotBridge::callScriptMethod(const json& params,
         if (name == method_name) chosen = rendered.value();
     }
     if (!chosen.has_value()) {
-        return fail(404,
-                    "\"" + method_name + "\" is not a method this node's script declares. "
-                    "scene_call_method calls project methods only. Declared: " +
-                    declared.dump() +
-                    (typedToolForEngineMethod(method_name).empty()
-                         ? std::string()
-                         : ". For the engine's " + method_name + ", use " +
-                               typedToolForEngineMethod(method_name) + "."));
+        return errorJson(404,
+                         "\"" + method_name + "\" is not a method this node's script declares. "
+                         "scene_call_method calls project methods only. Declared: " +
+                             declared.dump() +
+                             (typedToolForEngineMethod(method_name).empty()
+                                  ? std::string()
+                                  : ". For the engine's " + method_name + ", use " +
+                                        typedToolForEngineMethod(method_name) + "."),
+                         json{{"code", "method_not_declared"},
+                              {"field", "method_name"},
+                              {"declared", declared}});
     }
 
     const auto declared_arguments = chosen->value("args", json::array());
     if (!declared_arguments.is_array()) return fail(500, "Godot returned an unreadable method list");
     if (declared_arguments.size() != arguments.size()) {
-        return fail(409, "\"" + method_name + "\" takes " +
-                             std::to_string(declared_arguments.size()) + " argument(s) and " +
-                             std::to_string(arguments.size()) + " were given");
+        return errorJson(409, "\"" + method_name + "\" takes " +
+                                  std::to_string(declared_arguments.size()) + " argument(s) and " +
+                                  std::to_string(arguments.size()) + " were given",
+                         json{{"code", "argument_count_mismatch"},
+                              {"field", "arguments"},
+                              {"expected", declared_arguments.size()},
+                              {"given", arguments.size()}});
     }
     // Each argument has to fit the parameter Godot declared, checked before
     // anything runs. A mismatch inside the engine is a crash or a silent
@@ -6573,8 +6593,12 @@ json GodotBridge::callScriptMethod(const json& params,
                 break;
         }
         if (!compatible) {
-            return fail(409, "argument " + std::to_string(index + 1) + " of \"" + method_name +
-                                 "\" does not fit the parameter type the script declares");
+            return errorJson(409, "argument " + std::to_string(index + 1) + " of \"" +
+                                      method_name +
+                                      "\" does not fit the parameter type the script declares",
+                             json{{"code", "argument_type_mismatch"},
+                                  {"field", "arguments"},
+                                  {"argument_index", index}});
         }
     }
 
@@ -6679,7 +6703,9 @@ json GodotBridge::callScriptMethod(const json& params,
                 {
                     std::lock_guard<std::mutex> lock(g_script_call_mutex);
                     if (g_script_calls.size() >= kMaxPendingScriptCalls) {
-                        return fail(429, "Too many coroutine calls are already being awaited");
+                        return errorJson(429, "Too many coroutine calls are already being awaited",
+                                         json{{"code", "await_limit_reached"},
+                                              {"retryable", true}});
                     }
                     await_id = g_next_script_call_id++;
                     ScriptCallWait entry;
