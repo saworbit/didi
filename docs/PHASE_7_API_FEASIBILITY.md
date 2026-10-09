@@ -236,6 +236,37 @@ Godot reported a Windows root-certificate-store warning in the sandbox. It did n
 
 No C or C++ compilation was needed for Task 1: ClassDB identifiers came from the two generated extension API files and semantics were exercised by the two real engines. Therefore VsDevCmd/Ninja was not invoked; it remains mandatory if a later, separately authorized feasibility probe requires compilation.
 
+### Q16 frame-timing probe
+
+Build Queue item Q16 extends `runtime_read_profiler` with a verdict on what bounds the frame. The binds it adds were probed the same way before the contract was written, on 2026-10-09, with each binary's `--dump-extension-api` and a `--script` SceneTree probe that loads a fixture scene. Every bind carries the same hash on 4.5.1, 4.6.2 and 4.7.2:
+
+| Bind | Hash |
+| --- | --- |
+| `RenderingServer.viewport_set_measure_render_time` | `1265174801` |
+| `RenderingServer.viewport_get_measured_render_time_cpu` and `_gpu` | `866169185` |
+| `RenderingServer.get_frame_setup_time_cpu` | `1740695150` |
+| `Viewport.get_viewport_rid` | `2944877500` |
+| `DisplayServer.window_can_draw` | `1051549951` |
+| `DisplayServer.window_get_vsync_mode` | `578873795` |
+| `DisplayServer.screen_get_refresh_rate` | `909105437` |
+| `Engine.get_max_fps`, `Time.get_ticks_usec` | `3905245786` |
+| `RenderingServer.is_on_render_thread` | `2240911060` |
+
+`SceneTree.physics_frame`, `SceneTree.process_frame`, `RenderingServer.frame_pre_draw` and `frame_post_draw` exist on all three. Observed, windowed Forward+ at 60 Hz, medians per frame in milliseconds:
+
+| Fixture | Frame | Physics | Process | Draw | GPU | `TIME_PROCESS` |
+| --- | --- | --- | --- | --- | --- | --- |
+| idle | 16.7 | 0.05 | 0.01 | 16.5 | 0.01 | 18.5 |
+| 25 ms `_process` | 25.5 | 0.04 | 25.0 | 0.3 | 0.01 | 26.0 |
+| heavy fragment shader | 24.0 | 0.02 | 0.01 | 23.9 | 22.9 | n/a |
+| 2,500 rigid bodies (4.7.2) | 156.8 | 153.1 over 8 ticks | 0.05 | 0.9 | 0.01 | 1.3 |
+
+- The draw call's wall time holds the wait for vsync and for the GPU's fence, and `TIME_PROCESS` includes it, so the monitor reads an idle game as busy. The extension's frame callback runs after the draw and before the next frame's delay, which is where the frame's end is taken.
+- D3D12 and the Compatibility renderer on OpenGL measure the same shader at 23.0 and 23.5 ms of GPU time on 4.7.2, so the GPU time is not a Vulkan feature.
+- A headless game never draws: `window_can_draw` is false, no `frame_pre_draw` fires, every render time reads exactly 0, `window_get_vsync_mode` still reads 1 and `screen_get_refresh_rate` reads -1. Its frames are paced to 6.9 ms by the low-processor sleep.
+- `RenderingServer.is_on_render_thread`, asked from the main thread, answers false only with `--render-thread separate`, on all three lines. Nothing else says which mode a game runs in: the flag never reaches `OS.get_cmdline_args`, and when it is given `rendering/driver/threads/thread_model` is never defined, so `get_setting` answers its default. With a separate render thread (4.7.2), the main thread waits for it before the frame's first part, not inside the draw: the shader fixture's 87.6 ms frames spent 87.5 ms there and 0.06 ms in the draw.
+- A root viewport that was never measured reads exactly 0 from both getters. Switching measurement off keeps the last times it took, unchanged, so a nonzero reading says measurement was on at some point, not that it is on now.
+
 ## Red-team review
 
 - Rejected combined-shell false positive: the first 4.5.1 post-dump crash was hidden by the later command's `0`; per-engine reruns and exits replaced it.
@@ -246,6 +277,7 @@ No C or C++ compilation was needed for Task 1: ClassDB identifiers came from the
 - Rejected debugger lookalikes: `ScriptLanguageExtension._debug_get_*` describes callbacks an extension language must implement for its own stack. It does not retrieve the paused GDScript target stack from the editor process.
 - Rejected navigation partial success: a detached copied source and guarded callback do not prove parser isolation, total pre-parse caps, bounded completion, source/target generation revalidation, or safe disposal for every late callback. The row remains BLOCKED.
 - Rejected profiler nonzero inference: seven of ten real samples were zero and were retained as valid finite values.
+- Rejected a monitor-only performance verdict (Q16): `TIME_PROCESS` reads an idle, vsync-paced game at 18.5 ms because the draw's wait is inside it, and it is the largest value of the last second rather than a frame's. The verdict splits frames by signal timestamps and takes rendering from the viewport's measured times instead.
 
 ## Gate consequence
 

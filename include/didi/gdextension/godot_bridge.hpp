@@ -3,6 +3,7 @@
 #include "didi/common/json.hpp"
 #include "didi/common/types.hpp"
 #include "didi/gdextension/undo_ledger.hpp"
+#include "didi/runtime/performance_verdict.hpp"
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -506,6 +507,28 @@ public:
     // the availability check the contract names: the pinned bind exists.
     Result<void> preflightPerformanceMonitors();
     Result<std::vector<double>> samplePerformanceMonitors(const std::vector<int64_t>& monitors);
+
+    // The frame timer behind runtime.readProfiler's verdict. The addon's
+    // didi_frame_timer.gd marks where each frame's parts begin, and the root
+    // viewport measures its render times while a read runs. Main thread only,
+    // one read at a time.
+    struct FrameTimerReading {
+        runtime::FrameMarks marks;
+        // Time.get_ticks_usec, the clock the marks are on.
+        int64_t now_usec{-1};
+        double render_cpu_ms{0.0};
+        double gpu_ms{0.0};
+    };
+    // Starts the timer and returns what the frame budget is made of. Fails
+    // with 501 when this project's copy of the addon has no frame timer.
+    Result<runtime::FrameBudgetInputs> startFrameTimer();
+    Result<FrameTimerReading> readFrameTimer();
+    // Microseconds the timer stays busy at the start of every process step.
+    Result<void> setFrameTimerStall(int64_t stall_usec);
+    // Disconnects the timer and leaves render-time measurement as it found it.
+    // Safe to call when no timer runs. engine_exiting is for the shutdown
+    // paths, which run after the scene tree has freed the root viewport.
+    void stopFrameTimer(bool engine_exiting = false);
 
 private:
     GodotBridge() = default;

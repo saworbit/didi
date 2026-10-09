@@ -46,6 +46,8 @@ void test_rejects_bad_requests() {
         {{"categories", {"frame", "process", "physics", "render", "frame"}}},
         {{"categories", "frame"}},
         {{"unknown", true}},
+        {{"self_check", "true"}},
+        {{"self_check", 1}},
         // Duration zero is one sample on the next callback, nothing else.
         {{"duration_ms", 0}, {"sample_count", 2}},
     };
@@ -56,6 +58,12 @@ void test_rejects_bad_requests() {
     }
     ASSERT_TRUE(parseProfilerRequest(json::array()).isErr());
     ASSERT_TRUE(parseProfilerRequest({{"duration_ms", 0}, {"sample_count", 1}}).isOk());
+}
+
+void test_self_check_is_an_opt_in_boolean() {
+    ASSERT_TRUE(!parseProfilerRequest(json::object()).value().self_check);
+    ASSERT_TRUE(parseProfilerRequest({{"self_check", true}}).value().self_check);
+    ASSERT_TRUE(!parseProfilerRequest({{"self_check", false}}).value().self_check);
 }
 
 void test_output_order_ignores_request_order() {
@@ -236,6 +244,7 @@ struct RegisterPhase7cProfiler {
     RegisterPhase7cProfiler() {
         registerTest("phase7c_profiler.defaults", test_defaults);
         registerTest("phase7c_profiler.rejects_bad_requests", test_rejects_bad_requests);
+        registerTest("phase7c_profiler.self_check_opt_in", test_self_check_is_an_opt_in_boolean);
         registerTest("phase7c_profiler.output_order_ignores_request_order",
                      test_output_order_ignores_request_order);
         registerTest("phase7c_profiler.fixed_metric_table", test_fixed_metric_table);

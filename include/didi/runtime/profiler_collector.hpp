@@ -41,6 +41,9 @@ struct ProfilerRequest {
     // Indices into kProfilerMetrics, ascending, so output order never depends
     // on the order categories were requested in.
     std::vector<size_t> metric_indices;
+    // After the samples, stall the game by a known amount and report whether
+    // the verdict saw it.
+    bool self_check{false};
 };
 
 // Validates a runtime.readProfiler request against the approved contract.

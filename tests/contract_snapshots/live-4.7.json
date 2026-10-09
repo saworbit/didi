@@ -2417,7 +2417,7 @@
             "A node path built dynamically or stored in a variable cannot be followed; node-path results cover only static serialized paths and direct code literals."
           ],
           "resolved_kind": "file",
-          "scanned_files": 18,
+          "scanned_files": 19,
           "target": "res://content/player.gd",
           "target_exists": true,
           "truncated": false
@@ -2465,8 +2465,8 @@
           },
           "scan_source": "project_files",
           "scanned_import_metadata": 3,
-          "scanned_resources": 43,
-          "scanned_text_files": 19,
+          "scanned_resources": 45,
+          "scanned_text_files": 20,
           "skipped_text_files": 0,
           "truncated": false
         }

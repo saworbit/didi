@@ -237,6 +237,7 @@ void EditorHook::setSessionKind(const std::string& session_kind) {
 }
 
 void EditorHook::processQueue() {
+    processFrameTimerFrame();
     // EditorFileSystem.reimport_files and RenderingServer.force_draw both
     // re-enter the main-loop callback synchronously. A nested pump must observe
     // progress and nothing else: dequeuing there would run unrelated scene and
@@ -562,24 +563,48 @@ void EditorHook::scheduleProfilerRead(
                                               {"retryable", false}}}}}});
         return;
     }
-    int sample_count = 0;
-    int duration_ms = 0;
+    const auto refuse_active = [&] {
+        control->markCompleted();
+        fulfillCommand(promise, control,
+                       {{"error", {{"code", 423},
+                                    {"message", "A profiler collection is already active"},
+                                    {"data", {{"code", "profiler_read_active"},
+                                              {"retryable", true}}}}}});
+    };
+    {
+        std::lock_guard<std::mutex> lock(m_profilerMutex);
+        if (m_pendingProfilerRead.has_value()) return refuse_active();
+    }
+    // The frame timer is the verdict's evidence. Without it the samples still
+    // come back, with a verdict that says why it has none; a self-check has
+    // nothing to check, so it is refused.
+    auto timer = GodotBridge::instance().startFrameTimer();
+    if (timer.isErr() && request.value().self_check) {
+        control->markCompleted();
+        fulfillCommand(promise, control,
+                       {{"error", {{"code", 501},
+                                    {"message", timer.error().message},
+                                    {"data", {{"code", "frame_timer_unavailable"},
+                                              {"retryable", false}}}}}});
+        return;
+    }
+    const int sample_count = request.value().sample_count;
+    const int duration_ms = request.value().duration_ms;
+    PendingProfilerRead pending{runtime::ProfilerCollector(std::move(request.value())),
+                                std::chrono::steady_clock::now(), true, promise, control};
+    pending.timing = timer.isOk();
+    if (timer.isOk()) {
+        pending.budget = runtime::frameBudget(timer.value());
+    } else {
+        pending.timing_unavailable = timer.error().message;
+    }
     {
         std::lock_guard<std::mutex> lock(m_profilerMutex);
         if (m_pendingProfilerRead.has_value()) {
-            control->markCompleted();
-            fulfillCommand(promise, control,
-                           {{"error", {{"code", 423},
-                                        {"message", "A profiler collection is already active"},
-                                        {"data", {{"code", "profiler_read_active"},
-                                                  {"retryable", true}}}}}});
-            return;
+            if (pending.timing) GodotBridge::instance().stopFrameTimer();
+            return refuse_active();
         }
-        sample_count = request.value().sample_count;
-        duration_ms = request.value().duration_ms;
-        m_pendingProfilerRead = PendingProfilerRead{
-            runtime::ProfilerCollector(std::move(request.value())),
-            std::chrono::steady_clock::now(), true, promise, control};
+        m_pendingProfilerRead = std::move(pending);
     }
     DIDI_LOG_INFO("EDITOR_HOOK", "Scheduled profiler collection of ", sample_count,
                   " sample(s) over ", duration_ms, " ms");
@@ -593,6 +618,7 @@ void EditorHook::processProfilerFrame() {
     std::vector<int64_t> monitors;
     std::shared_ptr<CommandControl> sampling_for;
     int64_t elapsed = 0;
+    std::optional<PendingProfilerRead> completed;
     {
         std::lock_guard<std::mutex> lock(m_profilerMutex);
         if (!m_pendingProfilerRead.has_value()) return;
@@ -604,18 +630,35 @@ void EditorHook::processProfilerFrame() {
             pending.started_at = std::chrono::steady_clock::now();
             return;
         }
-        elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                      std::chrono::steady_clock::now() - pending.started_at)
-                      .count();
-        if (!pending.collector.due(elapsed)) return;
-        monitors = pending.collector.monitors();
-        sampling_for = pending.control;
+        if (pending.samples.has_value()) {
+            // The self-check: the samples are taken and the stalled frames are
+            // being timed. A slow game gets longer to show three of them.
+            const auto stalled_for = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                         std::chrono::steady_clock::now() - pending.self_check_started)
+                                         .count();
+            const int64_t window = runtime::selfCheckWindowMs(pending.stall_ms);
+            const bool enough = pending.frames.frames().size() >= 3;
+            if (stalled_for < window || (!enough && stalled_for < window + 2500)) return;
+            completed = std::move(m_pendingProfilerRead);
+            m_pendingProfilerRead.reset();
+        } else {
+            elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                          std::chrono::steady_clock::now() - pending.started_at)
+                          .count();
+            if (!pending.collector.due(elapsed)) return;
+            monitors = pending.collector.monitors();
+            sampling_for = pending.control;
+        }
+    }
+    if (completed.has_value()) {
+        finishProfilerRead(std::move(*completed), json());
+        return;
     }
 
     auto reading = GodotBridge::instance().samplePerformanceMonitors(monitors);
 
-    std::optional<PendingProfilerRead> completed;
     json failure;
+    double stall_ms = 0.0;
     {
         std::lock_guard<std::mutex> lock(m_profilerMutex);
         // Shutdown may have taken the read while the engine was being asked.
@@ -634,20 +677,90 @@ void EditorHook::processProfilerFrame() {
         } else if (!pending.collector.observe(elapsed, reading.value())) {
             return;
         }
-        completed = std::move(m_pendingProfilerRead);
-        m_pendingProfilerRead.reset();
+        if (failure.is_null() && pending.collector.request().self_check && pending.timing) {
+            // The samples are done. Judge them, then stall every process step
+            // from the next frame on and time those frames afresh.
+            pending.samples = pending.collector.response();
+            pending.baseline = runtime::judgePerformance(pending.frames, pending.budget);
+            pending.stall_ms = runtime::selfCheckStallMs(pending.baseline);
+            pending.frames = runtime::FrameTimingLog();
+            pending.self_check_started = std::chrono::steady_clock::now();
+            stall_ms = pending.stall_ms;
+        } else {
+            completed = std::move(m_pendingProfilerRead);
+            m_pendingProfilerRead.reset();
+        }
     }
-
-    completed->control->markCompleted();
-    if (!failure.is_null()) {
-        fulfillCommand(completed->response_promise, completed->control, std::move(failure));
+    if (completed.has_value()) {
+        finishProfilerRead(std::move(*completed), std::move(failure));
         return;
     }
-    auto response = completed->collector.response();
+    auto stalled = GodotBridge::instance().setFrameTimerStall(std::llround(stall_ms * 1000.0));
+    if (stalled.isErr()) {
+        {
+            std::lock_guard<std::mutex> lock(m_profilerMutex);
+            if (!m_pendingProfilerRead.has_value() ||
+                m_pendingProfilerRead->control != sampling_for) {
+                return;
+            }
+            completed = std::move(m_pendingProfilerRead);
+            m_pendingProfilerRead.reset();
+        }
+        // Nothing was stalled, so the frames timed from here prove nothing.
+        completed->frames = runtime::FrameTimingLog();
+        finishProfilerRead(std::move(*completed), json());
+    }
+}
+
+void EditorHook::processFrameTimerFrame() {
+    {
+        std::lock_guard<std::mutex> lock(m_profilerMutex);
+        if (!m_pendingProfilerRead.has_value() || !m_pendingProfilerRead->timing) return;
+    }
+    // Outside the lock, the same discipline as the sampling below.
+    auto reading = GodotBridge::instance().readFrameTimer();
+    std::lock_guard<std::mutex> lock(m_profilerMutex);
+    if (!m_pendingProfilerRead.has_value() || !m_pendingProfilerRead->timing) return;
+    auto& pending = *m_pendingProfilerRead;
+    if (reading.isErr()) {
+        pending.frames.skip();
+        return;
+    }
+    const auto& read = reading.value();
+    if (pending.previous_end_usec >= 0) {
+        auto frame = runtime::frameTimingFromMarks(read.marks, pending.previous_end_usec, read.now_usec,
+                                                   read.render_cpu_ms, read.gpu_ms);
+        if (frame.has_value()) {
+            pending.frames.add(*frame);
+        } else {
+            pending.frames.skip();
+        }
+    }
+    pending.previous_end_usec = read.now_usec;
+}
+
+void EditorHook::finishProfilerRead(PendingProfilerRead completed, json failure) {
+    if (completed.timing) GodotBridge::instance().stopFrameTimer();
+    completed.control->markCompleted();
+    if (!failure.is_null()) {
+        fulfillCommand(completed.response_promise, completed.control, std::move(failure));
+        return;
+    }
+    auto response = completed.samples.has_value() ? std::move(*completed.samples)
+                                                  : completed.collector.response();
+    if (completed.samples.has_value()) {
+        response["verdict"] = std::move(completed.baseline);
+        response["self_check"] = runtime::judgeSelfCheck(
+            completed.stall_ms, runtime::judgePerformance(completed.frames, completed.budget));
+    } else if (completed.timing) {
+        response["verdict"] = runtime::judgePerformance(completed.frames, completed.budget);
+    } else {
+        response["verdict"] = runtime::unavailableVerdict(completed.timing_unavailable);
+    }
     response["execution_mode"] = "live";
     response["is_live_engine"] = true;
     response["session_kind"] = sessionKindName(m_sessionKind);
-    fulfillCommand(completed->response_promise, completed->control, std::move(response));
+    fulfillCommand(completed.response_promise, completed.control, std::move(response));
 }
 
 void EditorHook::scheduleInvariantWatch(
@@ -2241,7 +2354,12 @@ void EditorHook::cancelPendingCommands(const std::string& reason) {
         }
     }
     // Taking the pending read out under the lock is what stops a late frame
-    // callback from publishing a partial window after shutdown began.
+    // callback from publishing a partial window after shutdown began. Every
+    // caller of this runs on the main thread as the engine exits, so the timer
+    // goes here, without touching a viewport the engine may have freed.
+    if (active_profiler.has_value() && active_profiler->timing) {
+        GodotBridge::instance().stopFrameTimer(true);
+    }
     if (active_profiler.has_value() && active_profiler->control &&
         active_profiler->control->tryCancelRunning()) {
         fulfillCommand(active_profiler->response_promise, active_profiler->control,

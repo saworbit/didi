@@ -173,6 +173,7 @@ set(CORE_SOURCES
     src/runtime/managed_recovery.cpp
     src/runtime/session_lock.cpp
     src/runtime/profiler_collector.cpp
+    src/runtime/performance_verdict.cpp
     src/runtime/invariant_watch.cpp
     src/runtime/scene_exploration.cpp
     src/runtime/scenario_runner.cpp
@@ -324,6 +325,7 @@ set(DIDI_ADDON_MANIFEST_FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi_client_config.gd"
     "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi_console.gd"
     "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi_diagnostics.gd"
+    "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi_frame_timer.gd"
     "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi_import_watch.gd"
     "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi_log.gd"
     "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi_session.gd"
@@ -342,6 +344,7 @@ set(DIDI_ADDON_MANIFEST_FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi_client_config.gd.uid"
     "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi_console.gd.uid"
     "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi_diagnostics.gd.uid"
+    "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi_frame_timer.gd.uid"
     "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi_import_watch.gd.uid"
     "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi_log.gd.uid"
     "${CMAKE_CURRENT_SOURCE_DIR}/addons/didi/didi_plugin.gd.uid"
@@ -469,6 +472,7 @@ set(TEST_SOURCES
     tests/test_phase7c_input.cpp
     tests/test_phase7c_diagnostics.cpp
     tests/test_phase7c_profiler.cpp
+    tests/test_performance_verdict.cpp
     tests/test_phase7b_spatial.cpp
     tests/test_phase7b_anim.cpp
     tests/test_anim_add_library.cpp

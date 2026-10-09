@@ -33,7 +33,8 @@ Result<ProfilerRequest> parseProfilerRequest(const json& params) {
     }
     for (const auto& [key, value] : params.items()) {
         (void)value;
-        if (key != "duration_ms" && key != "sample_count" && key != "categories") {
+        if (key != "duration_ms" && key != "sample_count" && key != "categories" &&
+            key != "self_check") {
             return Error::invalidArgument("Unknown profiler parameter: " + key);
         }
     }
@@ -50,6 +51,12 @@ Result<ProfilerRequest> parseProfilerRequest(const json& params) {
             return Error::invalidArgument("sample_count must be an integer from 1 to 120");
         }
         request.sample_count = params["sample_count"].get<int>();
+    }
+    if (params.contains("self_check")) {
+        if (!params["self_check"].is_boolean()) {
+            return Error::invalidArgument("self_check must be a boolean");
+        }
+        request.self_check = params["self_check"].get<bool>();
     }
     if (request.duration_ms == 0 && request.sample_count != 1) {
         return Error::invalidArgument("duration_ms 0 requires sample_count 1");

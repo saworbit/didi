@@ -5003,7 +5003,7 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "runtime_read_profiler";
-        t.description = "Pulls frame times, draw calls, draw passes, and physics tick metrics.";
+        t.description = "Samples Performance monitors and judges whether CPU, GPU or physics bounds the frame.";
         t.inputSchema = {{"type", "object"}};
         t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
             return handleRuntimeReadProfiler(binding, args, m_ipcClient);
