@@ -150,6 +150,35 @@ void test_paused_delivery_is_hold_or_now() {
     }
 }
 
+// A game that pauses when its window loses focus can only be tested by
+// losing focus, and no event Input takes is that. window_focus tells the
+// game's window and main loop what a real focus change tells them, in a batch
+// of its own because it is not an InputEvent (#1197).
+void test_window_focus_is_its_own_batch() {
+    auto parsed = parseInputInjectionRequest(
+        {{"events", json::array({{{"type", "window_focus"}, {"focused", false}},
+                                 {{"type", "window_focus"}, {"focused", true}}})}});
+    ASSERT_TRUE(parsed.isOk());
+    ASSERT_EQ(parsed.value().size(), size_t{2});
+    ASSERT_TRUE(parsed.value()[0].kind == InjectedInputEvent::Kind::window_focus);
+    ASSERT_TRUE(!parsed.value()[0].focused);
+    ASSERT_TRUE(parsed.value()[1].focused);
+    ASSERT_EQ(std::string(parsed.value()[0].kindName()), std::string("window_focus"));
+
+    const json bad[] = {
+        batch({{{"type", "window_focus"}}}),
+        batch({{{"type", "window_focus"}, {"focused", "no"}}}),
+        batch({{{"type", "window_focus"}, {"focused", false}, {"pressed", true}}}),
+    };
+    for (const auto& request : bad) ASSERT_TRUE(parseInputInjectionRequest(request).isErr());
+
+    auto mixed = parseInputInjectionRequest(
+        {{"events", json::array({{{"type", "window_focus"}, {"focused", false}},
+                                 {{"type", "action"}, {"action_name", "ui_accept"}, {"pressed", true}}})}});
+    ASSERT_TRUE(mixed.isErr());
+    ASSERT_TRUE(mixed.error().message.find("window_focus") != std::string::npos);
+}
+
 void test_rejects_malformed_batches() {
     const json bad[] = {
         json::object(),
@@ -236,6 +265,8 @@ struct RegisterPhase7cInput {
         registerTest("phase7c_input.parses_every_kind", test_parses_every_event_kind_with_defaults);
         registerTest("phase7c_input.mouse_events_carry_a_position", test_mouse_events_carry_a_position);
         registerTest("phase7c_input.rejects_malformed", test_rejects_malformed_batches);
+        registerTest("phase7c_input.window_focus_is_its_own_batch",
+                     test_window_focus_is_its_own_batch);
         registerTest("phase7c_input.paused_delivery_is_hold_or_now",
                      test_paused_delivery_is_hold_or_now);
         registerTest("phase7c_input.count_and_byte_caps", test_enforces_count_and_byte_caps);
