@@ -96,6 +96,11 @@ reappeared as a new high-severity alert. Neither commit changed what reaches
 arriving on the wire can reach that slot -- so both were dismissed again for
 the reason above. Re-read the taint path before re-dismissing rather than
 matching on the rule name. The point of a re-raise is that the code moved.
+They came back the same way on 2026-10-04: building a child's arguments before
+the fork, and reporting a Godot that cannot run at once, moved both calls
+again. Re-read on 2026-10-09, the executable still resolves as above, and the
+only variable a child's environment gains is the helper marker, so both were
+dismissed again (#1201).
 
 Nothing read the tab back, so those two and five untriaged Scorecard findings
 sat open until someone happened to look (#807). `tools/check_code_scanning.py`
