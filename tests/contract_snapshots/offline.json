@@ -8822,7 +8822,7 @@
           "openWorldHint": false,
           "readOnlyHint": true
         },
-        "description": "Pulls frame times, draw calls, draw passes, and physics tick metrics.",
+        "description": "Samples Performance monitors and judges whether CPU, GPU or physics bounds the frame.",
         "inputSchema": {
           "$id": "https://didi.local/schemas/phase7/generated/runtime_read_profiler.request.schema.json",
           "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -8835,7 +8835,7 @@
                 "physics",
                 "render"
               ],
-              "description": "Which Performance monitors to sample. Defaults to a general set.",
+              "description": "Which Performance monitors to sample.",
               "items": {
                 "enum": [
                   "frame",
@@ -8851,17 +8851,22 @@
             },
             "duration_ms": {
               "default": 1000,
-              "description": "How long to collect samples for.",
+              "description": "How long to sample for.",
               "maximum": 5000,
               "minimum": 0,
               "type": "integer"
             },
             "sample_count": {
               "default": 30,
-              "description": "How many samples to take across that duration.",
+              "description": "How many samples to take over that time.",
               "maximum": 120,
               "minimum": 1,
               "type": "integer"
+            },
+            "self_check": {
+              "default": false,
+              "description": "Then stall the game to test the verdict.",
+              "type": "boolean"
             }
           },
           "type": "object"
