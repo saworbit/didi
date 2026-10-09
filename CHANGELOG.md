@@ -103,6 +103,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Changed
 
+- `2026-10-09` The sanitizer job has 45 minutes, the build matrix's limit, because a cold build after a header change took its whole 30. [#1224](https://github.com/saworbit/didi/issues/1224)
 - `2026-10-05` A release's notes are its changelog section, line for line, instead of GitHub's list of pull request titles. [PR #1199](https://github.com/saworbit/didi/pull/1199)
 - `2026-10-05` The tool reference says when `resource_create` and `project_apply_changes` answer `editor_index_pending`, as it already did for `script_create`. [#1177](https://github.com/saworbit/didi/issues/1177) · [PR #1192](https://github.com/saworbit/didi/pull/1192)
 - `2026-10-05` The live harness compares `project_rename_references`' `updated_files` with the scene file it rewrote, so ten mutating tools are left unchecked, not eleven. [#1020](https://github.com/saworbit/didi/issues/1020) · [PR #1187](https://github.com/saworbit/didi/pull/1187)
