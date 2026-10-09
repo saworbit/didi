@@ -17737,14 +17737,19 @@ Result<void> GodotBridge::setFrameTimerStall(int64_t stall_usec) {
     return Result<void>();
 }
 
-void GodotBridge::stopFrameTimer() {
+void GodotBridge::stopFrameTimer(bool engine_exiting) {
     // Freeing the RefCounted would disconnect its signals on its own; unwatch
     // also clears a stall, so nothing holds a frame up after the read.
     if (g_frame_timer.has_value()) {
-        (void)callFrameTimer("unwatch");
+        if (!engine_exiting) (void)callFrameTimer("unwatch");
         g_frame_timer.reset();
     }
-    if (g_render_timing_ours && g_frame_timer_viewport.has_value()) {
+    // The main loop's shutdown callback runs after the scene tree has freed
+    // the root viewport, so switching measurement off there named a viewport
+    // that was gone: "Parameter "viewport" is null" from a game stopped while a
+    // read was starting (CI's 4.6.2 runner, then about one stop in ten here).
+    // The flag goes with the viewport.
+    if (!engine_exiting && g_render_timing_ours && g_frame_timer_viewport.has_value()) {
         auto server = singleton("RenderingServer");
         if (server.isOk() && setRenderTiming(server.value(), *g_frame_timer_viewport, false).isOk()) {
             g_render_timing_stale_from_didi = true;

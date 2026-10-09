@@ -2355,9 +2355,10 @@ void EditorHook::cancelPendingCommands(const std::string& reason) {
     }
     // Taking the pending read out under the lock is what stops a late frame
     // callback from publishing a partial window after shutdown began. Every
-    // caller of this runs on the main thread, so the timer can go here.
+    // caller of this runs on the main thread as the engine exits, so the timer
+    // goes here, without touching a viewport the engine may have freed.
     if (active_profiler.has_value() && active_profiler->timing) {
-        GodotBridge::instance().stopFrameTimer();
+        GodotBridge::instance().stopFrameTimer(true);
     }
     if (active_profiler.has_value() && active_profiler->control &&
         active_profiler->control->tryCancelRunning()) {

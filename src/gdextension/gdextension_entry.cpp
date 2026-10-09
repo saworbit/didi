@@ -158,7 +158,7 @@ static void deinitialize_didi_module(void *userdata, GDExtensionInitializationLe
         removeEngineOutputLogger();
         EditorHook::instance().cancelPendingCommands("Godot editor extension is shutting down");
         GodotBridge::instance().releaseImportWatch();
-        GodotBridge::instance().stopFrameTimer();
+        GodotBridge::instance().stopFrameTimer(true);
         if (GDExtensionIpc::instance().isRunning()) {
             GDExtensionIpc::instance().stop();
         }

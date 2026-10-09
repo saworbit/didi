@@ -526,8 +526,9 @@ public:
     // Microseconds the timer stays busy at the start of every process step.
     Result<void> setFrameTimerStall(int64_t stall_usec);
     // Disconnects the timer and leaves render-time measurement as it found it.
-    // Safe to call when no timer runs.
-    void stopFrameTimer();
+    // Safe to call when no timer runs. engine_exiting is for the shutdown
+    // paths, which run after the scene tree has freed the root viewport.
+    void stopFrameTimer(bool engine_exiting = false);
 
 private:
     GodotBridge() = default;
