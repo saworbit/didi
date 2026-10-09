@@ -286,6 +286,36 @@ record of what they ran against.
   `godot://project/scenarios` hashes them again on every read, so staleness is
   never stored, only computed.
 
+## 6d. Performance verdicts
+
+`runtime_read_profiler` says what bounds a running game's frame: the CPU, the
+GPU or physics (Q16, P7). The `Performance` monitors cannot: `TIME_PROCESS`
+covers the draw call, where the main thread waits for vsync and for the GPU, so
+the read times the frame's parts itself while it samples.
+
+- **Marks**: `addons/didi/didi_frame_timer.gd` records when each frame's
+  physics ticks, process step and draw begin, on `SceneTree.physics_frame`,
+  `SceneTree.process_frame` and `RenderingServer.frame_pre_draw`. It is a
+  `RefCounted` the bridge makes for the read and drops after it, because the
+  extension cannot receive a signal. `EditorHook::processFrameTimerFrame`
+  reads the marks first in every frame callback, before any command runs, so
+  Didi's own work falls outside the frame it ended. Godot calls that callback
+  after the draw and before the frame's delay.
+- **Render times**: the bridge switches on measurement for the root viewport
+  for the read and switches it off after, unless the game measured already.
+  Switching off keeps the last times, so the bridge remembers when the stale
+  times are its own. The shutdown paths never touch the viewport: Godot runs
+  the extension's main-loop shutdown after the scene tree has freed it.
+- **Judgement**: `src/runtime/performance_verdict.cpp` is pure. It turns marks
+  into frame parts, takes the budget from vsync, `Engine.max_fps` or the
+  display's refresh rate, and judges medians. The CPU's work is physics,
+  process and render CPU; the rest of the draw is waiting. A separate render
+  thread (`RenderingServer.is_on_render_thread` false on the main thread) is
+  waited for before the frame's first part, so that time counts as waiting.
+- **Self-check**: with `self_check`, the read sets the timer's `stall_usec`
+  once its samples are taken, so every process step after that is busy for a
+  known time, and judges those frames again.
+
 ---
 
 ## 7. Phase 3 session router and runtime bridge
