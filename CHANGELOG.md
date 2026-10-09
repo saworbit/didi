@@ -113,6 +113,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Fixed
 
+- `2026-10-09` `script_check_syntax` accepts inline suites such as `if ready: start()`, and a lexical error beside a clean engine verdict is a warning, not an error. [#1188](https://github.com/saworbit/didi/issues/1188)
 - `2026-10-09` SECURITY.md records the re-read behind the second re-raise of the two process alerts. [#1201](https://github.com/saworbit/didi/issues/1201)
 - `2026-10-09` The Quickstart, admin and integration guides say `didi setup` and `didi doctor` are not in the 2.0.1 archive, and how to set up with it. [#1190](https://github.com/saworbit/didi/issues/1190)
 - `2026-10-09` The tool manifest publishes the `openWorldHint` and job tools, and the docs validator fails a list of either that misses one. [#1215](https://github.com/saworbit/didi/issues/1215)

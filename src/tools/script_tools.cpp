@@ -203,6 +203,7 @@ ScriptEngineCheck checkScriptFile(const std::string& res_path,
                 }
                 check.diagnostics.insert(check.diagnostics.end(), answered.diagnostics.begin(),
                                          answered.diagnostics.end());
+                offline::GDScriptDiagnostics::deferLexicalErrorsToCleanEngine(check.diagnostics);
                 check.language_server = true;
                 check.truncated = answered.truncated;
                 check.engine.version = editor->engine_version;
@@ -338,6 +339,7 @@ CallToolResult handleScriptCheckSyntax(const json& args, std::shared_ptr<ipc::II
         // The language server's verdict on the text, after the lexical rules'.
         if (!source_text.empty() && checked.language_server) {
             diags.insert(diags.end(), checked.diagnostics.begin(), checked.diagnostics.end());
+            offline::GDScriptDiagnostics::deferLexicalErrorsToCleanEngine(diags);
         }
         diagnostics_count = diags.size();
         for (const auto& d : diags) {

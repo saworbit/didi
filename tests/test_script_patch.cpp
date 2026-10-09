@@ -115,6 +115,73 @@ static void test_gdscript_onready_annotation_is_not_deprecated() {
     ASSERT_TRUE(deprecated == 2);
 }
 
+// A header's colon ends the header, not the line. `if true: print("valid")`
+// is a whole if statement, and Godot compiles it with exit code 0; the rule
+// read every inline suite as a header with its colon missing (#1188).
+static int missingColonsIn(const std::string& source) {
+    int count = 0;
+    for (const auto& diagnostic : didi::offline::GDScriptDiagnostics::analyze("", source)) {
+        if (diagnostic.rule == "missing_colon") ++count;
+    }
+    return count;
+}
+
+static void test_gdscript_colon_rule_accepts_inline_suites() {
+    ASSERT_EQ(missingColonsIn("extends Node\n"
+                              "func example() -> void:\n"
+                              "    if true: print(\"valid\")\n"
+                              "    for i in 2: print(i)\n"), 0);
+    ASSERT_EQ(missingColonsIn("func f(x: int) -> int: return x\n"
+                              "func g() -> void:\n"
+                              "    if x > 0: pass\n"
+                              "    elif x < 0: pass\n"
+                              "    else: pass\n"
+                              "    while x < 3: x += 1\n"
+                              "    if s == \"a:b\": print(\"a:b\") # c: d\n"
+                              "    if s == \"#\": pass\n"
+                              "    if d == {\"k\": 1}: pass\n"), 0);
+
+    // Still flagged: no colon outside brackets and strings ends the header.
+    ASSERT_EQ(missingColonsIn("if d == {\"k\": 1}\n"), 1);
+    ASSERT_EQ(missingColonsIn("func f(x: int) -> int\n"), 1);
+    ASSERT_EQ(missingColonsIn("if s == \"a:b\"\n"), 1);
+    ASSERT_EQ(missingColonsIn("for i in 2 # no: colon\n"), 1);
+    ASSERT_EQ(missingColonsIn("if items[0]\n"), 1);
+}
+
+// When the engine compiled the file with no error, a lexical rule that says
+// otherwise is the rule being wrong, and has_errors has to follow the engine.
+// The finding stays, as a warning that says why (#1188).
+static void test_gdscript_lexical_errors_defer_to_a_clean_engine() {
+    using didi::offline::GDScriptDiagnostics;
+    using didi::offline::ScriptDiagnostic;
+    const auto make = [](const char* severity, const char* rule) {
+        ScriptDiagnostic diagnostic;
+        diagnostic.severity = severity;
+        diagnostic.rule = rule;
+        diagnostic.message = "m";
+        return diagnostic;
+    };
+
+    std::vector<ScriptDiagnostic> clean = {make("error", "missing_colon"),
+                                           make("warning", "godot_compiler")};
+    GDScriptDiagnostics::deferLexicalErrorsToCleanEngine(clean);
+    ASSERT_EQ(clean[0].severity, std::string("warning"));
+    ASSERT_TRUE(!clean[0].note.empty());
+    ASSERT_EQ(clean[1].severity, std::string("warning"));
+
+    std::vector<ScriptDiagnostic> failed = {make("error", "missing_colon"),
+                                            make("error", "godot_compiler")};
+    GDScriptDiagnostics::deferLexicalErrorsToCleanEngine(failed);
+    ASSERT_EQ(failed[0].severity, std::string("error"));
+    ASSERT_TRUE(failed[0].note.empty());
+
+    std::vector<ScriptDiagnostic> language_server = {make("error", "unbalanced_parentheses"),
+                                                     make("error", "godot_language_server")};
+    GDScriptDiagnostics::deferLexicalErrorsToCleanEngine(language_server);
+    ASSERT_EQ(language_server[0].severity, std::string("error"));
+}
+
 static void test_gdscript_colon_rule_requires_else_as_a_complete_token() {
     const auto diagnostics = didi::offline::GDScriptDiagnostics::analyze(
         "", "elsewhere = 1\nelse_func()\nelse\nelse\t# comment\n");
@@ -908,6 +975,10 @@ struct RegisterScriptPatchTests {
         registerTest("GDScript.OnreadyAnnotationIsNotDeprecated",
                      test_gdscript_onready_annotation_is_not_deprecated);
         registerTest("GDScript.ElseTokenColonRule", test_gdscript_colon_rule_requires_else_as_a_complete_token);
+        registerTest("GDScript.ColonRuleAcceptsInlineSuites",
+                     test_gdscript_colon_rule_accepts_inline_suites);
+        registerTest("GDScript.LexicalErrorsDeferToCleanEngine",
+                     test_gdscript_lexical_errors_defer_to_a_clean_engine);
         registerTest("GDScript.StringAwareBalance", test_gdscript_diagnostics_ignore_brackets_in_strings_and_comments);
         registerTest("GDScript.EscapedTripleDelimiter", test_gdscript_diagnostics_ignore_escaped_triple_delimiters);
         registerTest("GDScript.Godot45CompilerOutput", test_godot_45_multiline_compiler_output_is_preserved);

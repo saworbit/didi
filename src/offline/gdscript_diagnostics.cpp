@@ -40,6 +40,25 @@ std::string resolveGodotExecutable();
 
 namespace {
 
+// Whether a block header's colon is on this line: a ':' outside every bracket
+// the line opens. Strings and comments are already blanked out of `code`. The
+// colon ends the header, not the line, because `if ready: start()` is a whole
+// if statement (#1188).
+bool hasHeaderColon(std::string_view code) {
+    int depth = 0;
+    for (const char c : code) {
+        if (c == '(' || c == '[' || c == '{') ++depth;
+        else if (c == ')' || c == ']' || c == '}') --depth;
+        else if (c == ':' && depth == 0) return true;
+    }
+    return false;
+}
+
+// The diagnostics the engine raised, as against Didi's own lexical rules.
+bool isEngineDiagnostic(const ScriptDiagnostic& diagnostic) {
+    return diagnostic.rule == "godot_compiler" || diagnostic.rule == "godot_language_server";
+}
+
 std::string codeOutsideGdscriptLiterals(std::string_view line,
                                         std::string& multiline_delimiter) {
     std::string code;
@@ -218,7 +237,7 @@ std::vector<ScriptDiagnostic> GDScriptDiagnostics::analyze(const std::string& fi
                 // and an open brace means a dictionary or match pattern is still
                 // being written, so the colon has not been reached yet.
                 const bool continued = !code_part.empty() && code_part.back() == '\\';
-                if (!code_part.empty() && code_part.back() != ':' && !continued &&
+                if (!code_part.empty() && !hasHeaderColon(code_part) && !continued &&
                     open_paren == 0 && open_bracket == 0 && open_brace == 0) {
                     ScriptDiagnostic d;
                     d.line = line_num;
@@ -265,8 +284,11 @@ std::vector<ScriptDiagnostic> GDScriptDiagnostics::analyze(const std::string& fi
 
     // Also run godot compiler check if file exists on disk and no source_text override
     if (source_text.empty() && !file_path.empty()) {
-        auto godot_diags = runGodotCompilerCheck(file_path, engine);
+        EngineCheck local_engine;
+        EngineCheck* checked = engine ? engine : &local_engine;
+        auto godot_diags = runGodotCompilerCheck(file_path, checked);
         diagnostics.insert(diagnostics.end(), godot_diags.begin(), godot_diags.end());
+        if (checked->ran && checked->exit_code == 0) deferLexicalErrorsToCleanEngine(diagnostics);
     }
 
     return diagnostics;
@@ -474,6 +496,22 @@ void GDScriptDiagnostics::demoteAutoloadDiagnostics(
             diagnostic.severity = "warning";
             diagnostic.note = "The only compile errors named autoloads this check cannot see, so "
                               "the failure it reports is not one the engine has.";
+        }
+    }
+}
+
+void GDScriptDiagnostics::deferLexicalErrorsToCleanEngine(
+    std::vector<ScriptDiagnostic>& diags) {
+    for (const auto& diagnostic : diags) {
+        if (diagnostic.severity == "error" && isEngineDiagnostic(diagnostic)) return;
+    }
+    for (auto& diagnostic : diags) {
+        if (diagnostic.severity != "error" || isEngineDiagnostic(diagnostic)) continue;
+        diagnostic.severity = "warning";
+        if (diagnostic.note.empty()) {
+            diagnostic.note = "Godot compiled this file without an error, so this is Didi's own "
+                              "lexical rule disagreeing with the engine. The engine is right. Do "
+                              "not rewrite the script for this.";
         }
     }
 }

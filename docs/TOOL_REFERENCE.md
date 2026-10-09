@@ -569,6 +569,8 @@ Didi therefore reads the `[autoload]` section of `project.godot` and demotes tho
 
 The demotion needs a `project.godot` Godot can load. A manifest that is `ERR_PARSE_ERROR` registers nothing -- measured on 4.5.1 and 4.7.2 with the entry above the broken value and below it, the project does not open either way and the singleton never enters the tree -- so an `Identifier not found` naming a key in that file is a real error and stays one. It carries a `note` naming the setting and the line in `project.godot` instead, because the script is fine and the cause is one file away.
 
+Didi's own lexical rules run beside either engine. When the engine answers with no error, which for the headless check also means exit code 0, an error one of those rules raised is the rule disagreeing with the compiler, so it becomes a warning with a `note` saying so and `has_errors` follows the engine (#1188). The colon rule reads a header's colon wherever it ends the header, so an inline suite such as `if ready: start()` is not a missing colon.
+
 `script_create` and `script_patch_method` surface the same check and get the same treatment.
 
 ### `script_reflect_class` — Offline
