@@ -2242,6 +2242,40 @@ static CallToolResult managedRecoveryDisabled(const ResolvedToolBinding& binding
          {"retryable", false}});
 }
 
+CallToolResult withRecoveryNote(CallToolResult result, const runtime::RecoveryNote& note) {
+    json payload = result.structuredContent.value_or(json::object());
+    if (!payload.is_object())
+        payload = {{"result", payload}};
+    if (payload.empty()) {
+        for (const auto& item : result.content)
+            if (item.type == "text") {
+                try {
+                    payload = json::parse(item.text);
+                } catch (...) {
+                    payload = {{"message", item.text}};
+                }
+                break;
+            }
+    }
+    if (!payload.is_object())
+        payload = {{"result", payload}};
+    if (note.error.is_object()) {
+        result.isError = true;
+        if (!payload.contains("error")) payload["error"] = note.error;
+    }
+    payload["recovery"] = note.receipt;
+    result.structuredContent = payload;
+    bool replaced = false;
+    for (auto& item : result.content)
+        if (item.type == "text" && !replaced) {
+            item.text = payload.dump();
+            replaced = true;
+        }
+    if (!replaced)
+        result.content.push_back(ContentItem::makeText(payload.dump()));
+    return result;
+}
+
 // The first string in a live call's arguments that holds a NUL, by where it
 // sits. The bridge hands every string to Godot as a C string, so the text after
 // a NUL was dropped and the tool reported the shortened value as the one it set
@@ -2478,12 +2512,12 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
     if (recovery_tool && !m_recovery) return managedRecoveryDisabled(binding);
     if (m_recovery) {
         if (name == "runtime_attach_session" || name == "runtime_detach_session")
-            return m_recovery->annotate(CallToolResult::errorJson(
+            return withRecoveryNote(CallToolResult::errorJson(
                 409,
                 "Managed mode owns its editor route; use a separate ordinary Didi session to "
                 "attach elsewhere.",
                 {{"no_remedy", "This server owns its editor; another Didi server without "
-                               "--managed-editor can attach elsewhere."}}));
+                               "--managed-editor can attach elsewhere."}}), m_recovery->note());
     }
     const bool supports_live =
         std::find(tool->capability.modes.begin(), tool->capability.modes.end(), "live") !=
@@ -2914,11 +2948,11 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
         const auto prior_session = m_runtimeSessionClient->activeSession();
         const auto ready = m_recovery->ensureEditor();
         if (ready.isErr() && (MutationSafety::isMutation(binding) || supports_live || m_recovery->status().value("state", "") == "restore_failed"))
-            return m_recovery->annotate(CallToolResult::fromError(ready.error()));
+            return withRecoveryNote(CallToolResult::fromError(ready.error()), m_recovery->note());
         const auto current_session = m_runtimeSessionClient->activeSession();
         if (ready.isOk() && MutationSafety::isMutation(binding) &&
             (!prior_session || !current_session || prior_session->session_id != current_session->session_id))
-            return m_recovery->annotate(CallToolResult::errorJson(
+            return withRecoveryNote(CallToolResult::errorJson(
                 409,
                 "Editor recovered. This mutation was not started. Inspect the scene and submit "
                 "a fresh request; any confirmation must be renewed.",
@@ -2926,13 +2960,13 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
                  {"next_call", {{"tool", "scene_get_hierarchy"},
                                 {"arguments", {{"summary", true}}},
                                 {"reason", "The editor restarted; read the scene before "
-                                           "sending the mutation again."}}}}));
+                                           "sending the mutation again."}}}}), m_recovery->note());
         if (ready.isOk() && supports_live) lease = runtime::acquireRuntimeRouteLease(m_sourceIpcClient);
     }
     const bool protected_mutation = m_recovery && !recovery_tool && MutationSafety::isMutation(binding);
     if (protected_mutation) {
         auto prepared = m_recovery->beforeMutation(std::string(binding.canonical_name), authorized_arguments);
-        if (prepared.isErr()) return m_recovery->annotate(CallToolResult::fromError(prepared.error()));
+        if (prepared.isErr()) return withRecoveryNote(CallToolResult::fromError(prepared.error()), m_recovery->note());
     }
     int dispatched_requests = 0;
     auto finish = [&](CallToolResult result) {
@@ -2947,7 +2981,9 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
                 } catch (const json::exception&) {}
             }
         }
-        return m_recovery->afterMutation(std::string(binding.canonical_name), authorized_arguments, std::move(result), not_started);
+        const auto note = m_recovery->afterMutation(std::string(binding.canonical_name), authorized_arguments,
+                                                    result.isError, not_started);
+        return withRecoveryNote(std::move(result), note);
     };
     try {
         const auto dispatcher = std::dynamic_pointer_cast<LeaseDispatchClient>(m_ipcClient);
@@ -2980,11 +3016,11 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
                         *error, lease.has_value() ? lease->descriptor
                                                   : std::optional<runtime::SessionDescriptor>{});
                     if (protected_mutation) return finish(std::move(failure));
-                    return m_recovery ? m_recovery->annotate(std::move(failure)) : std::move(failure);
+                    return m_recovery ? withRecoveryNote(std::move(failure), m_recovery->note()) : std::move(failure);
                 }
             }
             if (protected_mutation) return finish(std::move(result));
-            return m_recovery ? m_recovery->annotate(std::move(result)) : std::move(result);
+            return m_recovery ? withRecoveryNote(std::move(result), m_recovery->note()) : std::move(result);
         }
 
         const bool live = supports_live && lease.has_value();
@@ -3233,13 +3269,13 @@ void ToolRegistry::registerAllDefaultTools() {
             if (operation == "runtime_recovery_status") return CallToolResult::successJson(m_recovery->status());
             if (operation == "runtime_recover_editor") {
                 auto recovered = m_recovery->ensureEditor();
-                if (recovered.isErr()) return m_recovery->annotate(CallToolResult::fromError(recovered.error()));
+                if (recovered.isErr()) return withRecoveryNote(CallToolResult::fromError(recovered.error()), m_recovery->note());
                 return CallToolResult::successJson(m_recovery->status());
             }
             Result<json> response = operation == "runtime_checkpoint"
                 ? m_recovery->checkpoint(args.value("accept_current_files", false))
                 : m_recovery->restore(args.value("checkpoint_id", ""));
-            if (response.isErr()) return m_recovery->annotate(CallToolResult::fromError(response.error()));
+            if (response.isErr()) return withRecoveryNote(CallToolResult::fromError(response.error()), m_recovery->note());
             return CallToolResult::successJson(response.value());
         };
         registerTool(std::move(t));

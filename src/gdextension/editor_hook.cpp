@@ -4,7 +4,7 @@
 #include "didi/gdextension/godot_bridge.hpp"
 #include "didi/gdextension/gdextension_api.hpp"
 #include "didi/gdextension/runtime_bridge.hpp"
-#include "didi/gdextension/protocol_servers.hpp"
+#include "didi/runtime/godot_arguments.hpp"
 #include "didi/gdextension/expression_sandbox.hpp"
 #include "didi/common/logger.hpp"
 #include "didi/common/secure_random.hpp"
@@ -2232,7 +2232,7 @@ void EditorHook::processRuntimeStepFrame() {
     // A frame is one physics tick only at a fixed rate; otherwise a frame runs
     // as many ticks as its wall-clock time covers. The answer says which, and
     // how many ticks these frames ran (#1209).
-    const auto fixed_rate = fixedFpsArgument(processArguments());
+    const auto fixed_rate = runtime::fixedFpsArgument(runtime::processArguments());
     stepped["fixed_fps"] = fixed_rate.has_value() ? json(*fixed_rate) : json(nullptr);
     if (completed->resumed_physics_frames.has_value() && paused.contains("physics_frames") &&
         paused["physics_frames"].is_number_integer()) {

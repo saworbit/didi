@@ -1,4 +1,4 @@
-#include "didi/gdextension/protocol_servers.hpp"
+#include "didi/runtime/godot_arguments.hpp"
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -13,7 +13,7 @@
 #include <cctype>
 #include <cstdint>
 
-namespace didi::godot {
+namespace didi::runtime {
 namespace {
 
 #if defined(_WIN32)
@@ -125,4 +125,4 @@ bool startPausedRequested(const std::vector<std::string>& arguments) {
     return false;
 }
 
-} // namespace didi::godot
+} // namespace didi::runtime

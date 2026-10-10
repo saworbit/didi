@@ -8,7 +8,7 @@
 #include "didi/common/scene_node_path.hpp"
 #include "didi/common/logger.hpp"
 #include "didi/common/version.hpp"
-#include "didi/gdextension/expression_sandbox.hpp"
+#include "didi/runtime/expression_policy.hpp"
 #include "didi/offline/project_settings_file.hpp"
 #include "didi/offline/test_runner.hpp"
 #include "didi/runtime/session_client.hpp"
@@ -367,7 +367,7 @@ CallToolResult handleEvalGdscript(const json& args, std::shared_ptr<ipc::IIpcCli
         return liveValidationError(
             "Invalid expression request: expression is required and must be a string", ipc);
     }
-    const auto policy = godot::ExpressionPolicy::validate(args["expression"].get<std::string>());
+    const auto policy = runtime::ExpressionPolicy::validate(args["expression"].get<std::string>());
     if (policy.isErr()) {
         return liveValidationError("Invalid expression request: " + policy.error().message, ipc);
     }

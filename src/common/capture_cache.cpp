@@ -1,9 +1,9 @@
-#include "didi/gdextension/viewport_renderer.hpp"
+#include "didi/common/capture_cache.hpp"
 
 #include <algorithm>
 #include <utility>
 
-namespace didi::godot {
+namespace didi::image {
 namespace {
 
 bool validCaptureId(const std::string& value) {
@@ -16,20 +16,20 @@ bool validCaptureId(const std::string& value) {
 } // namespace
 
 Result<void> CaptureCache::store(const std::string& capture_id,
-                                 const image::RgbaImage& pixels) {
-    return storeFrame(capture_id, image::RgbaImage(pixels));
+                                 const RgbaImage& pixels) {
+    return storeFrame(capture_id, RgbaImage(pixels));
 }
 
-Result<void> CaptureCache::store(const std::string& capture_id, image::RgbaImage&& pixels) {
+Result<void> CaptureCache::store(const std::string& capture_id, RgbaImage&& pixels) {
     return storeFrame(capture_id, std::move(pixels));
 }
 
 Result<void> CaptureCache::storeFrame(const std::string& capture_id,
-                                      image::RgbaImage&& pixels) {
+                                      RgbaImage&& pixels) {
     if (!validCaptureId(capture_id)) {
         return Error::invalidArgument("capture_id must contain exactly 32 lowercase hexadecimal characters");
     }
-    const auto expected = image::checkedRgbaSize(pixels.width, pixels.height);
+    const auto expected = checkedRgbaSize(pixels.width, pixels.height);
     if (expected.isErr()) return expected.error();
     if (pixels.rgba.size() != expected.value()) {
         return Error::invalidArgument("Capture RGBA storage does not match its dimensions");
@@ -54,7 +54,7 @@ Result<void> CaptureCache::storeFrame(const std::string& capture_id,
     return Result<void>::ok();
 }
 
-const image::RgbaImage* CaptureCache::find(const std::string& capture_id) {
+const RgbaImage* CaptureCache::find(const std::string& capture_id) {
     if (!validCaptureId(capture_id)) return nullptr;
     const auto found = m_entries.find(capture_id);
     if (found == m_entries.end()) return nullptr;
@@ -66,4 +66,4 @@ bool CaptureCache::contains(const std::string& capture_id) const {
     return validCaptureId(capture_id) && m_entries.count(capture_id) != 0;
 }
 
-} // namespace didi::godot
+} // namespace didi::image

@@ -2,7 +2,7 @@
 #include "didi/gdextension/editor_hook.hpp"
 #include "didi/gdextension/godot_bridge.hpp"
 #include "didi/gdextension/gdextension_api.hpp"
-#include "didi/gdextension/protocol_servers.hpp"
+#include "didi/runtime/godot_arguments.hpp"
 #include "didi/common/logger.hpp"
 #include "didi/common/scene_node_path.hpp"
 
@@ -462,7 +462,7 @@ Result<void> setLiveSceneTreePaused(bool paused) {
 }
 
 void pauseGameAtStartupIfRequested() {
-    if (!startPausedRequested(processArguments())) return;
+    if (!runtime::startPausedRequested(runtime::processArguments())) return;
     auto tree = activeSceneTree();
     if (tree.isErr()) {
         DIDI_LOG_WARN("RUNTIME_BRIDGE", "The game asked to start paused and has no SceneTree yet: ",

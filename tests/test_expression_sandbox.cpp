@@ -1,4 +1,4 @@
-#include "didi/gdextension/expression_sandbox.hpp"
+#include "didi/runtime/expression_policy.hpp"
 
 #include <functional>
 #include <stdexcept>
@@ -17,7 +17,7 @@ void test_expression_policy_accepts_only_the_documented_read_only_vocabulary() {
         "node.get('process_priority')", "node.get_child_count()", "[1, 2, 3].size()",
         "'OS.execute is text'", "clamp(7, 0, 5)"
     }) {
-        ASSERT_TRUE(didi::godot::ExpressionPolicy::validate(source).isOk());
+        ASSERT_TRUE(didi::runtime::ExpressionPolicy::validate(source).isOk());
     }
 
     // Break caught: filesystem, process, mutation, dispatch, assignment, or reflection reaches Expression.parse.
@@ -36,7 +36,7 @@ void test_expression_policy_accepts_only_the_documented_read_only_vocabulary() {
         "[node].find(node)", "tree.min(1)", "node.get_child_count().min(1)",
         "min(node, 1)", "Vector2(node.get_child_count(), 1)"
     }) {
-        ASSERT_TRUE(didi::godot::ExpressionPolicy::validate(source).isErr());
+        ASSERT_TRUE(didi::runtime::ExpressionPolicy::validate(source).isErr());
     }
 }
 
@@ -47,7 +47,7 @@ void test_expression_policy_accepts_only_the_documented_read_only_vocabulary() {
 // fact about the sandbox, and buries the name that is actually bound (#488).
 void test_a_refused_read_names_the_read_that_works() {
     const auto refusal = [](const char* source) {
-        const auto result = didi::godot::ExpressionPolicy::validate(source);
+        const auto result = didi::runtime::ExpressionPolicy::validate(source);
         ASSERT_TRUE(result.isErr());
         return result.error().message;
     };
@@ -67,7 +67,7 @@ void test_a_refused_read_names_the_read_that_works() {
     }
 
     // The read the messages point at is the one that works.
-    ASSERT_TRUE(didi::godot::ExpressionPolicy::validate("node.get('position')").isOk());
+    ASSERT_TRUE(didi::runtime::ExpressionPolicy::validate("node.get('position')").isOk());
 }
 
 // A probe has to be able to read a number off a property.
@@ -84,7 +84,7 @@ void test_expression_policy_allows_a_component_of_a_property_read() {
         "node.get('modulate').a", "node.get('position').x > 100",
         "node.get('position').x + node.get('position').y"
     }) {
-        ASSERT_TRUE(didi::godot::ExpressionPolicy::validate(source).isOk());
+        ASSERT_TRUE(didi::runtime::ExpressionPolicy::validate(source).isOk());
     }
 
     // Still forbidden. The exemption is a component of a prebound read and
@@ -96,7 +96,7 @@ void test_expression_policy_allows_a_component_of_a_property_read() {
         "node.get('position').x.y", "node.get_node('..').get('position').x",
         "tree.get('root').x"
     }) {
-        ASSERT_TRUE(didi::godot::ExpressionPolicy::validate(source).isErr());
+        ASSERT_TRUE(didi::runtime::ExpressionPolicy::validate(source).isErr());
     }
 }
 
@@ -107,7 +107,7 @@ void test_expression_policy_treats_quoted_identifiers_as_data_and_tracks_escapes
         R"('queue_free \' OS.execute is still inert')",
         R"gd({"danger": "node.call(\"free\")"})gd"
     }) {
-        ASSERT_TRUE(didi::godot::ExpressionPolicy::validate(source).isOk());
+        ASSERT_TRUE(didi::runtime::ExpressionPolicy::validate(source).isOk());
     }
 
     for (const auto& source : {
@@ -116,7 +116,7 @@ void test_expression_policy_treats_quoted_identifiers_as_data_and_tracks_escapes
         R"('unterminated)",
         R"('bad\q')"
     }) {
-        ASSERT_TRUE(didi::godot::ExpressionPolicy::validate(source).isErr());
+        ASSERT_TRUE(didi::runtime::ExpressionPolicy::validate(source).isErr());
     }
 }
 
@@ -127,11 +127,11 @@ void test_expression_policy_rejects_malformed_or_oversized_source_and_obfuscatio
     const std::string maximum_source = "'" + std::string(2046, 'a') + "'";
     const std::string oversized_source = "'" + std::string(2047, 'a') + "'";
 
-    ASSERT_TRUE(didi::godot::ExpressionPolicy::validate("").isErr());
-    ASSERT_TRUE(didi::godot::ExpressionPolicy::validate(invalid_utf8).isErr());
-    ASSERT_TRUE(didi::godot::ExpressionPolicy::validate(embedded_nul).isErr());
-    ASSERT_TRUE(didi::godot::ExpressionPolicy::validate(maximum_source).isOk());
-    ASSERT_TRUE(didi::godot::ExpressionPolicy::validate(oversized_source).isErr());
+    ASSERT_TRUE(didi::runtime::ExpressionPolicy::validate("").isErr());
+    ASSERT_TRUE(didi::runtime::ExpressionPolicy::validate(invalid_utf8).isErr());
+    ASSERT_TRUE(didi::runtime::ExpressionPolicy::validate(embedded_nul).isErr());
+    ASSERT_TRUE(didi::runtime::ExpressionPolicy::validate(maximum_source).isOk());
+    ASSERT_TRUE(didi::runtime::ExpressionPolicy::validate(oversized_source).isErr());
 
     for (const auto& source : {
         "O\\u0053.execute('cmd', [])", "O/**/S.execute('cmd', [])",
@@ -141,7 +141,7 @@ void test_expression_policy_rejects_malformed_or_oversized_source_and_obfuscatio
         "node.get_child_count(); node.queue_free()", "node.get_child_count() # hidden",
         "node.get_child_count()\nnode.queue_free()"
     }) {
-        ASSERT_TRUE(didi::godot::ExpressionPolicy::validate(source).isErr());
+        ASSERT_TRUE(didi::runtime::ExpressionPolicy::validate(source).isErr());
     }
 }
 
@@ -156,7 +156,7 @@ void test_expression_policy_accepts_read_only_containers_math_and_unicode_string
         "node.has_meta('key')", "[1, 2, 3].find(2) == 1", "[1, 2, 3].size()",
         "{'a': 1}.has('a')", "'abc'.size()", "'x'.repeat(3)"
     }) {
-        ASSERT_TRUE(didi::godot::ExpressionPolicy::validate(source).isOk());
+        ASSERT_TRUE(didi::runtime::ExpressionPolicy::validate(source).isOk());
     }
 }
 
@@ -176,7 +176,7 @@ void test_expression_policy_allows_math_on_source_local_vectors_and_colors() {
         "Vector2(1, 0).angle_to(Vector2(0, 1))",
         "Vector2(3, 4).length() > 4", "Vector2(10, 20).x + Vector2(1, 2).y"
     }) {
-        ASSERT_TRUE(didi::godot::ExpressionPolicy::validate(source).isOk());
+        ASSERT_TRUE(didi::runtime::ExpressionPolicy::validate(source).isOk());
     }
 
     // Break caught: the relaxation leaks into real object property reads, into
@@ -190,7 +190,7 @@ void test_expression_policy_allows_math_on_source_local_vectors_and_colors() {
         "Vector2(1, 2).length(3)", "Vector2(1, 2).dot()",
         "'abc'.x", "[1, 2].x", "{'a': 1}.x"
     }) {
-        ASSERT_TRUE(didi::godot::ExpressionPolicy::validate(source).isErr());
+        ASSERT_TRUE(didi::runtime::ExpressionPolicy::validate(source).isErr());
     }
 }
 

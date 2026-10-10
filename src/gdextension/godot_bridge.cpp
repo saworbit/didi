@@ -3,7 +3,7 @@
 #include "didi/gdextension/editor_hook.hpp"
 #include "didi/gdextension/expression_sandbox.hpp"
 #include "didi/gdextension/property_paths.hpp"
-#include "didi/gdextension/protocol_servers.hpp"
+#include "didi/runtime/godot_arguments.hpp"
 #include "didi/gdextension/runtime_bridge.hpp"
 #include "didi/gdextension/undo_ledger.hpp"
 #include "didi/gdextension/godot_object.hpp"
@@ -11454,7 +11454,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
             if (port.isErr()) return std::nullopt;
             return port.value();
         };
-        const auto overrides = godot::protocolPortOverrides(godot::processArguments());
+        const auto overrides = runtime::protocolPortOverrides(runtime::processArguments());
         const auto describe = [&](const std::string& port_setting, const std::optional<int>& override,
                                   const std::string& host) -> json {
             const auto configured = setting_port(port_setting);

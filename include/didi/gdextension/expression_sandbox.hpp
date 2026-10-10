@@ -3,16 +3,12 @@
 #include "didi/common/types.hpp"
 
 #include <string>
-#include <string_view>
 
 namespace didi {
 namespace godot {
 
-class ExpressionPolicy {
-public:
-    static Result<void> validate(std::string_view source);
-};
-
+// Runs an expression the policy in didi/runtime/expression_policy.hpp accepts,
+// through Godot's Expression class, in the editor or a game.
 json executeExpression(const json& params, const std::string& session_kind);
 
 } // namespace godot

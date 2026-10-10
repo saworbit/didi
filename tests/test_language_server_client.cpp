@@ -19,7 +19,7 @@
 #include <unistd.h>
 #endif
 
-#include "didi/gdextension/protocol_servers.hpp"
+#include "didi/runtime/godot_arguments.hpp"
 #include "didi/runtime/language_server_client.hpp"
 
 #include <atomic>
@@ -324,7 +324,7 @@ void test_only_loopback_hosts_are_connected_to() {
 }
 
 void test_port_overrides_are_read_as_godot_reads_them() {
-    using didi::godot::protocolPortOverrides;
+    using didi::runtime::protocolPortOverrides;
     const auto both = protocolPortOverrides({"--editor", "--path", "x", "--lsp-port", "6010", "--dap-port", " 6012 "});
     ASSERT_EQ(both.language_server.value_or(-1), 6010);
     ASSERT_EQ(both.debug_adapter.value_or(-1), 6012);
@@ -345,8 +345,8 @@ void test_port_overrides_are_read_as_godot_reads_them() {
 // marker that starts a scenario's game paused rides after `--`, where the
 // engine leaves the game's own arguments (#1208).
 void test_fixed_rate_and_start_marker_are_read_from_arguments() {
-    using didi::godot::fixedFpsArgument;
-    using didi::godot::startPausedRequested;
+    using didi::runtime::fixedFpsArgument;
+    using didi::runtime::startPausedRequested;
     ASSERT_EQ(fixedFpsArgument({"--headless", "res://main.tscn", "--fixed-fps", "60"}).value_or(-1), 60);
     ASSERT_EQ(fixedFpsArgument({"--fixed-fps", "30", "--fixed-fps", " 120 "}).value_or(-1), 120);
     ASSERT_FALSE(fixedFpsArgument({"--fixed-fps", "0"}).has_value());

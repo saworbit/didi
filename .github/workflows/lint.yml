@@ -41,6 +41,7 @@ jobs:
           python -m unittest tests.test_code_scanning_watch -v
           python -m unittest tests.test_check_release_archive -v
           python -m unittest tests.test_refusal_codes -v
+          python -m unittest tests.test_include_layers -v
           python tools/validate_documentation.py
 
   # A workflow file is executable code with write access to this repository.

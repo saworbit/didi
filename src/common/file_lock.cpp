@@ -1,4 +1,4 @@
-#include "didi/runtime/session_lock.hpp"
+#include "didi/common/file_lock.hpp"
 
 #include <functional>
 #include <limits>
@@ -16,9 +16,9 @@
 #include <unistd.h>
 #endif
 
-namespace didi::runtime {
+namespace didi::files {
 
-Result<std::shared_ptr<RuntimeSessionLock>> RuntimeSessionLock::acquire(
+Result<std::shared_ptr<FileLock>> FileLock::acquire(
     const std::filesystem::path& path, const json& owner) {
     if (!owner.is_object()) return Error::invalidArgument("Session lock owner must be an object");
     const auto contents = owner.dump();
@@ -52,8 +52,8 @@ Result<std::shared_ptr<RuntimeSessionLock>> RuntimeSessionLock::acquire(
         CloseHandle(handle);
         return Error::internal("Unable to publish runtime session lock ownership");
     }
-    return std::shared_ptr<RuntimeSessionLock>(
-        new RuntimeSessionLock(path, reinterpret_cast<intptr_t>(handle)));
+    return std::shared_ptr<FileLock>(
+        new FileLock(path, reinterpret_cast<intptr_t>(handle)));
 #else
     const int fd = open(path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW,
                         S_IRUSR | S_IWUSR);
@@ -89,7 +89,7 @@ Result<std::shared_ptr<RuntimeSessionLock>> RuntimeSessionLock::acquire(
         close(fd);
         return Error::internal("Unable to sync runtime session lock ownership");
     }
-    return std::shared_ptr<RuntimeSessionLock>(new RuntimeSessionLock(path, fd));
+    return std::shared_ptr<FileLock>(new FileLock(path, fd));
 #endif
 }
 
@@ -107,7 +107,7 @@ int retryDelayMs() {
 
 } // namespace
 
-Result<std::shared_ptr<RuntimeSessionLock>> RuntimeSessionLock::acquireWithin(
+Result<std::shared_ptr<FileLock>> FileLock::acquireWithin(
     const std::filesystem::path& path, const json& owner, std::chrono::milliseconds wait) {
     const auto deadline = std::chrono::steady_clock::now() + wait;
     for (;;) {
@@ -119,7 +119,7 @@ Result<std::shared_ptr<RuntimeSessionLock>> RuntimeSessionLock::acquireWithin(
 
 // The two platforms allow opposite orders, and each order is the safe one
 // where it is available.
-void RuntimeSessionLock::releaseAndRemove() {
+void FileLock::releaseAndRemove() {
     if (m_nativeHandle == -1) return;
 #if defined(_WIN32)
     // The handle above is opened without FILE_SHARE_DELETE, so the file cannot
@@ -149,7 +149,7 @@ void RuntimeSessionLock::releaseAndRemove() {
 #endif
 }
 
-RuntimeSessionLock::~RuntimeSessionLock() {
+FileLock::~FileLock() {
     if (m_nativeHandle == -1) return;
 #if defined(_WIN32)
     auto handle = reinterpret_cast<HANDLE>(m_nativeHandle);
@@ -164,4 +164,4 @@ RuntimeSessionLock::~RuntimeSessionLock() {
     m_nativeHandle = -1;
 }
 
-} // namespace didi::runtime
+} // namespace didi::files

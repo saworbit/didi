@@ -1,7 +1,7 @@
 #pragma once
 
 #include "didi/common/types.hpp"
-#include "didi/runtime/session_lock.hpp"
+#include "didi/common/file_lock.hpp"
 
 #include <filesystem>
 #include <memory>
@@ -24,7 +24,7 @@ namespace didi::offline {
 // A holder that does not let go within the wait is refused with 409 and
 // retryable: true, because the other cycle is a few milliseconds of work and
 // calling again is the whole remedy.
-Result<std::shared_ptr<runtime::RuntimeSessionLock>> lockProjectFile(
+Result<std::shared_ptr<files::FileLock>> lockProjectFile(
     const std::filesystem::path& project_root, const std::string& file_name);
 
 } // namespace didi::offline
