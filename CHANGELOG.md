@@ -120,6 +120,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Fixed
 
+- `2026-10-10` Two `project_run_tests` runs of one name at once each read their own report, in a directory of the run's own. [#1242](https://github.com/saworbit/didi/issues/1242)
 - `2026-10-10` A scenario's `timeout_seconds` and job cancel stop a `wait_until` or `wait` already running, and the run answers `error`, not `pass`. [#1241](https://github.com/saworbit/didi/issues/1241) · [PR #1244](https://github.com/saworbit/didi/pull/1244)
 - `2026-10-09` A scenario's game starts paused before its first physics frame, and `game.frames_before_pause` says how many ran. [#1208](https://github.com/saworbit/didi/issues/1208)
 - `2026-10-09` Six `scene_call_method` refusals carry codes of their own, and a codeless `fail(4xx)` in the bridge fails the refusal scan. [#1196](https://github.com/saworbit/didi/issues/1196)

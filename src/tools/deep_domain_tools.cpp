@@ -748,31 +748,37 @@ CallToolResult handleProjectRunTests(const json& args, std::shared_ptr<ipc::IIpc
     if (test_paths.isErr()) return CallToolResult::fromError(test_paths.error());
     const bool gut = framework.value().framework == offline::TestFramework::gut;
 
-    // Emptied first, so a report an earlier run left is never read as this
-    // run's. The name is a plain file name, so this stays inside .didi.
+    // A directory of this run's own, so a report another run of the name is
+    // writing, in this server or another, is never read or cleared as this
+    // run's (#1242). The name is a plain file name, so this stays inside .didi.
     const auto& name = request.value().name;
-    const auto report_dir = root.value() / ".didi" / "tests" / name;
-    std::error_code error;
-    fs::remove_all(report_dir, error);
-    fs::create_directories(report_dir, error);
-    if (error) {
-        return CallToolResult::errorJson(500, "The report directory .didi/tests/" + name +
-                                                  " cannot be created: " + error.message());
-    }
-    const std::string report_res = "res://.didi/tests/" + name + (gut ? "/results.xml" : "");
-
-    const auto ran_against =
-        runtime::collectProofFiles(root.value(), testScriptSeeds(root.value(), test_paths.value()));
     const auto started_at_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                                    std::chrono::system_clock::now().time_since_epoch())
                                    .count();
+    auto run_id = offline::newTestRunId(started_at_ms);
+    if (run_id.isErr()) return CallToolResult::fromError(run_id.error(), "The test run could not be named: ");
+    const auto report_dir = offline::testRunDirectory(root.value(), name, run_id.value());
+    std::error_code error;
+    fs::create_directories(report_dir, error);
+    if (error) {
+        return CallToolResult::errorJson(500, "The report directory .didi/tests/" + name + "/" +
+                                                  run_id.value() + " cannot be created: " + error.message());
+    }
+    const std::string report_res =
+        "res://.didi/tests/" + name + "/" + run_id.value() + (gut ? "/results.xml" : "");
+
+    const auto ran_against =
+        runtime::collectProofFiles(root.value(), testScriptSeeds(root.value(), test_paths.value()));
     auto godot_arguments =
         offline::isolatedGodotArguments({"--path", paths::projectPathToUtf8(root.value())});
     for (auto& argument : offline::testCommandArguments(framework.value(), test_paths.value(), report_res)) {
         godot_arguments.push_back(std::move(argument));
     }
     auto run = runGodot(root.value(), godot_arguments, request.value().timeout_seconds);
-    if (run.isErr()) return CallToolResult::fromError(run.error(), "Failed to run the tests: ");
+    if (run.isErr()) {
+        fs::remove_all(report_dir, error);
+        return CallToolResult::fromError(run.error(), "Failed to run the tests: ");
+    }
 
     offline::TestRunFacts facts;
     facts.framework = framework.value();
@@ -782,20 +788,7 @@ CallToolResult handleProjectRunTests(const json& args, std::shared_ptr<ipc::IIpc
     facts.cancelled = run.value().cancelled;
     facts.output = run.value().output;
     facts.output_truncated = run.value().output_truncated;
-    // GUT writes the file it was given; GdUnit4 writes report_<n>/results.xml
-    // under the directory it was given.
-    std::optional<fs::path> report_file;
-    if (gut) {
-        if (fs::is_regular_file(report_dir / "results.xml", error)) report_file = report_dir / "results.xml";
-    } else {
-        for (fs::recursive_directory_iterator it(report_dir, error), end; !error && it != end;
-             it.increment(error)) {
-            if (it->path().filename() == "results.xml") {
-                report_file = it->path();
-                break;
-            }
-        }
-    }
+    const auto report_file = offline::findTestReport(report_dir, framework.value().framework);
     if (report_file) {
         std::ifstream in(*report_file, std::ios::binary);
         facts.report_xml = std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
@@ -839,6 +832,12 @@ CallToolResult handleProjectRunTests(const json& args, std::shared_ptr<ipc::IIpc
         report["record_error"] = "The record could not be written, so godot://project/scenarios will not "
                                  "list this run: " + written.error().message;
     }
+    // After the record, so the report the last record names is kept. A
+    // directory that cannot be removed now is left for the next run.
+    offline::pruneTestRuns(report_dir.parent_path(), run_id.value(),
+                           std::chrono::duration_cast<std::chrono::milliseconds>(
+                               std::chrono::system_clock::now().time_since_epoch())
+                               .count());
     if (verdict.verdict == "pass") return CallToolResult::successJson(report);
     report["error"] = testRunError(verdict, request.value().timeout_seconds);
     auto result = CallToolResult::successJson(report);

@@ -1934,7 +1934,7 @@ Runs the project's own GUT or GdUnit4 tests in a headless Godot and returns a re
 - `timeout_seconds` (`integer`, 5 to 900, default 120).
 - `request_id`: runs it as a job.
 
-GUT is given `-gexit`, `-gdir` and `-ginclude_subdirs` for directories, `-gtest` for files, and `-gjunit_xml_file`; GdUnit4 is given `--ignoreHeadlessMode`, one `-a` per path, and `-rd` with `-rc 1`. The report goes under `.didi/tests/<name>/`, emptied before each run so an older report is never read as this one.
+GUT is given `-gexit`, `-gdir` and `-ginclude_subdirs` for directories, `-gtest` for files, and `-gjunit_xml_file`; GdUnit4 is given `--ignoreHeadlessMode`, one `-a` per path, and `-rd` with `-rc 1`. The report goes under `.didi/tests/<name>/<run>/`, a directory of the run's own, so two runs of one name at once never read or clear each other's report. A later run of the name removes a run's directory once it is older than the longest timeout and five minutes more.
 
 **The verdict is the report's, not the exit code's.** Measured on 4.7.2, GUT exits `0` when it found no tests, and exits `0` without writing any report when the project was never imported; GdUnit4 exits `0` when it found no tests. So `verdict` is:
 
