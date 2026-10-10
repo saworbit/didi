@@ -108,7 +108,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Changed
 
-- `2026-10-11` Includes between source folders go one way, and a test fails any include that goes the other way. [#1257](https://github.com/saworbit/didi/issues/1257)
+- `2026-10-11` Includes between source folders go one way, and a test fails any include that goes the other way. [#1257](https://github.com/saworbit/didi/issues/1257) · [PR #1273](https://github.com/saworbit/didi/pull/1273)
 - `2026-10-11` The architecture guide lists never calling into a freed object as a bridge guarantee, and the developer guide says how a bridge error keeps its data. [#1266](https://github.com/saworbit/didi/issues/1266) · [PR #1272](https://github.com/saworbit/didi/pull/1272)
 - `2026-10-10` The live harness fails, naming the node, when a fixture scene holds a freed object after a scene change. [#1268](https://github.com/saworbit/didi/issues/1268) · [PR #1270](https://github.com/saworbit/didi/pull/1270)
 - `2026-10-10` A bridge refusal rebuilt from a helper's error keeps its `data`, and the refusal scan fails a rebuild that drops it. [#1267](https://github.com/saworbit/didi/issues/1267) · [PR #1270](https://github.com/saworbit/didi/pull/1270)
