@@ -963,8 +963,19 @@ Result<T> scalarFromVariant(VariantValue& value, GDExtensionVariantType type) {
     return result;
 }
 
+// Godot hands an extension the pointer a Variant holds without asking whether
+// the object still exists (Variant::operator Object *, read at 4.5.1-stable),
+// so a value read from project state can name a freed node: an enemy's target
+// after the target was freed. Calling into one crashes once its memory is
+// reused, and reads garbage until then (#1266). A Variant's truth asks ObjectDB,
+// so a freed object comes back as null here and nothing calls into it.
 Result<GDExtensionObjectPtr> objectFromVariant(VariantValue& value) {
-    return scalarFromVariant<GDExtensionObjectPtr>(value, GDEXTENSION_VARIANT_TYPE_OBJECT);
+    auto object = scalarFromVariant<GDExtensionObjectPtr>(value, GDEXTENSION_VARIANT_TYPE_OBJECT);
+    if (object.isErr() || !object.value()) return object;
+    const auto& api = GodotApi::instance();
+    if (!api.variant_booleanize) return Error::internal("Godot's Variant truth test is unavailable");
+    if (!api.variant_booleanize(value.ptr())) return GDExtensionObjectPtr{nullptr};
+    return object;
 }
 
 Result<std::string> nativeStringToUtf8(

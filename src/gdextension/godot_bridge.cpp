@@ -1242,8 +1242,30 @@ Result<T> scalarFromVariant(VariantValue& value, GDExtensionVariantType type) {
     return result;
 }
 
+// Godot hands an extension the pointer a Variant holds without asking whether
+// the object still exists (Variant::operator Object *, read at 4.5.1-stable),
+// so a value read from project state can name a freed node: an enemy's target
+// after the target was freed. Calling into one crashes once its memory is
+// reused, and reads garbage until then (#1266). A Variant's truth asks ObjectDB,
+// so a freed object comes back as null here and nothing calls into it.
 Result<GDExtensionObjectPtr> objectFromVariant(VariantValue& value) {
-    return scalarFromVariant<GDExtensionObjectPtr>(value, GDEXTENSION_VARIANT_TYPE_OBJECT);
+    auto object = scalarFromVariant<GDExtensionObjectPtr>(value, GDEXTENSION_VARIANT_TYPE_OBJECT);
+    if (object.isErr() || !object.value()) return object;
+    const auto& api = GodotApi::instance();
+    if (!api.variant_booleanize) return Error::internal("Godot's Variant truth test is unavailable");
+    if (!api.variant_booleanize(value.ptr())) return GDExtensionObjectPtr{nullptr};
+    return object;
+}
+
+// Whether a value holds an object that has been freed, which objectFromVariant
+// answers as null. Reading the pointer only copies it out of the Variant.
+bool holdsFreedObject(VariantValue& value) {
+    const auto& api = GodotApi::instance();
+    if (api.variant_get_type(value.ptr()) != GDEXTENSION_VARIANT_TYPE_OBJECT || !api.variant_booleanize) {
+        return false;
+    }
+    auto object = scalarFromVariant<GDExtensionObjectPtr>(value, GDEXTENSION_VARIANT_TYPE_OBJECT);
+    return object.isOk() && object.value() && !api.variant_booleanize(value.ptr());
 }
 
 Result<std::string> nativeStringToUtf8(const void* native_string) {
@@ -4567,6 +4589,10 @@ Result<json> describeProperty(const ResolvedProperty& resolved, const std::strin
         if (object.isOk() && object.value()) {
             const auto held_class = nodeClassName(object.value());
             if (!held_class.empty()) entry["holds"] = held_class;
+        } else if (holdsFreedObject(value)) {
+            // Godot prints this value as <Freed Object>. It reads null, and
+            // says why, so a caller can tell it from a slot nobody filled.
+            entry["freed"] = true;
         }
     }
     if (resolved.home.home != ResourceHome::EditedScene) entry["resource_file"] = resolved.home.file;

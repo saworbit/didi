@@ -125,6 +125,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Fixed
 
+- `2026-10-10` A property holding a freed node reads as `null` with `freed: true`, and nothing calls into the freed object. [#1266](https://github.com/saworbit/didi/issues/1266)
 - `2026-10-10` The developer guide and build queue name the new test-run, profiler and text-copy pieces, and the rule a harness fixture's `@tool` script keeps. [#1227](https://github.com/saworbit/didi/issues/1227) · [PR #1265](https://github.com/saworbit/didi/pull/1265)
 - `2026-10-10` The harness fixture's editor probe no longer leaves a freed node in its metadata, which crashed the 4.5.1 editor on a tab switch. [#1227](https://github.com/saworbit/didi/issues/1227) · [PR #1264](https://github.com/saworbit/didi/pull/1264)
 - `2026-10-10` `scene_call_method` takes a call that leaves out parameters with defaults, and runs it with them. [#1251](https://github.com/saworbit/didi/issues/1251) · [PR #1263](https://github.com/saworbit/didi/pull/1263)
