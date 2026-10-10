@@ -481,7 +481,9 @@ int runSetupCommand(const std::vector<std::string>& arguments) {
     }
 
     if (agent_guide) {
-        for (const auto& file : agentGuideFiles(root, clients)) {
+        const bool claude_code = std::find(clients.begin(), clients.end(), Client::ClaudeCode) != clients.end();
+        const auto claude_above = claude_code ? claudeFileAbove(root) : std::nullopt;
+        for (const auto& file : agentGuideFiles(root, clients, claude_above)) {
             const auto relative = utf8(std::filesystem::relative(file, root));
             auto written = writeAgentGuide(file);
             if (written.isErr()) {
@@ -494,6 +496,9 @@ int runSetupCommand(const std::vector<std::string>& arguments) {
                                               : (written.value() == FileAction::Created ? "created " : "wrote the didi block into ") +
                                                     relative);
             step.data["file"] = utf8(file);
+            if (claude_above && file == root / "CLAUDE.md" && written.value() == FileAction::Created) {
+                step.detail += ", because Claude Code does not read AGENTS.md below " + utf8(*claude_above);
+            }
         }
     }
 

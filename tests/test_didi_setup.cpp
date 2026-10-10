@@ -4,9 +4,11 @@
 #include "didi/setup/client_config.hpp"
 
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -47,6 +49,32 @@ public:
 
 private:
     std::filesystem::path m_root;
+};
+
+class ScopedEnvironmentVariable {
+public:
+    explicit ScopedEnvironmentVariable(std::string name) : m_name(std::move(name)) {
+        if (const char* value = std::getenv(m_name.c_str())) m_original = value;
+    }
+    ~ScopedEnvironmentVariable() {
+#if defined(_WIN32)
+        _putenv_s(m_name.c_str(), m_original ? m_original->c_str() : "");
+#else
+        if (m_original) setenv(m_name.c_str(), m_original->c_str(), 1);
+        else unsetenv(m_name.c_str());
+#endif
+    }
+    void set(const std::string& value) const {
+#if defined(_WIN32)
+        _putenv_s(m_name.c_str(), value.c_str());
+#else
+        setenv(m_name.c_str(), value.c_str(), 1);
+#endif
+    }
+
+private:
+    std::string m_name;
+    std::optional<std::string> m_original;
 };
 
 void parses_and_orders_build_ids() {
@@ -194,7 +222,7 @@ void puts_the_guide_where_each_client_reads_it() {
     Scratch scratch("targets");
     const auto names = [&scratch](const std::vector<Client>& clients) {
         std::string joined;
-        for (const auto& file : agentGuideFiles(scratch.root(), clients)) {
+        for (const auto& file : agentGuideFiles(scratch.root(), clients, std::nullopt)) {
             joined += std::filesystem::relative(file, scratch.root()).generic_string() + ";";
         }
         return joined;
@@ -206,6 +234,48 @@ void puts_the_guide_where_each_client_reads_it() {
     ASSERT_EQ(names({Client::ClaudeCode, Client::Codex}), std::string(".claude/CLAUDE.md;AGENTS.md;"));
     scratch.write("CLAUDE.md", "# ours\n");
     ASSERT_EQ(names({Client::ClaudeCode}), std::string("CLAUDE.md;"));
+}
+
+// A CLAUDE.md in a directory above the project stops Claude Code reading the
+// project's AGENTS.md as surely as one inside it, so a guide written there was
+// never read (#1144). The user's own ~/.claude/CLAUDE.md does not count.
+void puts_the_guide_where_claude_code_reads_it_below_a_claude_md() {
+    Scratch scratch("above");
+    const auto project = scratch.root() / "up" / "project";
+    std::filesystem::create_directories(project);
+    const auto names = [&project](const std::vector<Client>& clients,
+                                  const std::optional<std::filesystem::path>& above) {
+        std::string joined;
+        for (const auto& file : agentGuideFiles(project, clients, above)) {
+            joined += std::filesystem::relative(file, project).generic_string() + ";";
+        }
+        return joined;
+    };
+    const auto above = scratch.root() / "up" / "CLAUDE.local.md";
+    ASSERT_EQ(names({Client::ClaudeCode}, above), std::string("CLAUDE.md;"));
+    ASSERT_EQ(names({Client::ClaudeCode, Client::Codex}, above), std::string("CLAUDE.md;AGENTS.md;"));
+    ASSERT_EQ(names({Client::Cursor}, above), std::string("AGENTS.md;"));
+    ASSERT_EQ(names({Client::ClaudeCode}, std::nullopt), std::string("AGENTS.md;"));
+
+    // The nearest one is found, whichever of the three names it has.
+    scratch.write("CLAUDE.md", "# further up\n");
+    scratch.write("up/CLAUDE.local.md", "# nearer\n");
+    const auto nearest = claudeFileAbove(project);
+    ASSERT_TRUE(nearest.has_value() && std::filesystem::equivalent(*nearest, above));
+
+    // Above a project in the user's home, their own .claude/CLAUDE.md is passed
+    // over and the search goes on up.
+    const auto home = scratch.root() / "home";
+    std::filesystem::create_directories(home / "project");
+    scratch.write("home/.claude/CLAUDE.md", "# the user's own\n");
+#if defined(_WIN32)
+    ScopedEnvironmentVariable variable("USERPROFILE");
+#else
+    ScopedEnvironmentVariable variable("HOME");
+#endif
+    variable.set(home.string());
+    const auto past_home = claudeFileAbove(home / "project");
+    ASSERT_TRUE(past_home.has_value() && std::filesystem::equivalent(*past_home, scratch.root() / "CLAUDE.md"));
 }
 
 void refuses_a_codex_config_that_declares_didi_elsewhere() {
@@ -293,6 +363,7 @@ struct Registrar {
         registerTest("didi_setup.enable_plugin", enables_the_plugin_and_refuses_a_list_it_cannot_extend);
         registerTest("didi_setup.agent_guide_block", replaces_only_the_agent_guide_block);
         registerTest("didi_setup.agent_guide_files", puts_the_guide_where_each_client_reads_it);
+        registerTest("didi_setup.agent_guide_below_a_claude_md", puts_the_guide_where_claude_code_reads_it_below_a_claude_md);
         registerTest("didi_setup.codex_foreign_declaration", refuses_a_codex_config_that_declares_didi_elsewhere);
         registerTest("didi_setup.codex_keeps_a_persons_tables", keeps_the_tables_a_person_adds_under_codex_didi);
         registerTest("didi_setup.json_merge", merges_json_configs_without_reformatting_them);

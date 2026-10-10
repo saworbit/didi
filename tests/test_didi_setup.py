@@ -270,6 +270,18 @@ class SetupOffline(SetupFixture):
         self.setup_json("--client", "claude-code", "--client", "cursor")
         self.assertTrue((self.project / "AGENTS.md").exists())
 
+    def test_a_claude_md_above_the_project_sends_the_guide_to_one_here(self):
+        # Claude Code skips AGENTS.md below any CLAUDE.md, and the one above is
+        # not the project's to write (#1144).
+        (self.root / "CLAUDE.md").write_text("# Above\n", encoding="utf-8", newline="\n")
+        report = self.setup_json("--client", "claude-code")
+        steps = [step for step in report["steps"] if step["step"] == "agent-guide"]
+        self.assertEqual([Path(step["file"]).name for step in steps], ["CLAUDE.md"])
+        self.assertIn("does not read AGENTS.md below", steps[0]["detail"])
+        self.assertIn("<!-- BEGIN didi -->", (self.project / "CLAUDE.md").read_text(encoding="utf-8"))
+        self.assertFalse((self.project / "AGENTS.md").exists())
+        self.assertEqual((self.root / "CLAUDE.md").read_text(encoding="utf-8"), "# Above\n")
+
     def test_a_file_it_cannot_reproduce_is_refused_and_left_alone(self):
         (self.project / ".vscode").mkdir()
         original = '{\n  // mine\n  "servers": {}\n}\n'
