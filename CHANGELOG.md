@@ -123,6 +123,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Fixed
 
+- `2026-10-10` The harness fixture's editor probe no longer leaves a freed node in its metadata, which crashed the 4.5.1 editor on a tab switch. [#1227](https://github.com/saworbit/didi/issues/1227)
 - `2026-10-10` `scene_call_method` takes a call that leaves out parameters with defaults, and runs it with them. [#1251](https://github.com/saworbit/didi/issues/1251) · [PR #1263](https://github.com/saworbit/didi/pull/1263)
 - `2026-10-10` `editor_reload_project` without `request_id` drops the server's cached resource index, as the job and offline paths do. [#1250](https://github.com/saworbit/didi/issues/1250) · [PR #1263](https://github.com/saworbit/didi/pull/1263)
 - `2026-10-10` An untyped Dictionary's `int` keys stay `int` when a read is written back, so `table[1]` still finds its value. [#1249](https://github.com/saworbit/didi/issues/1249) · [PR #1263](https://github.com/saworbit/didi/pull/1263)
