@@ -14,6 +14,8 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <utility>
+#include <vector>
 
 void registerTest(const std::string& name, std::function<void()> fn);
 
@@ -214,6 +216,41 @@ TEST(Phase6, ExplicitProjectRootRefusesBytesThatAreNotUtf8) {
 #else
     ASSERT_TRUE(resolved.error().message.find("accessible directory") != std::string::npos);
 #endif
+}
+
+// The MCP preflight and the game bridge both ask this one rule, so a root_path
+// is refused the same way, with the same words, wherever it is refused (#1254).
+TEST(Phase6, RuntimeRootPathRuleIsOneRule) {
+    using didi::paths::runtimePathProblem;
+    for (const std::string accepted : {"/root", "/root/Main", "/root/Main/Player", "/root/a..b"}) {
+        ASSERT_FALSE(runtimePathProblem(accepted).has_value());
+    }
+    const std::string bytes = "root_path must be a non-empty UTF-8 path of at most 1024 bytes";
+    const std::string beneath = "root_path must be a canonical absolute path beneath /root";
+    const std::string canonical = "root_path must be a canonical absolute NodePath";
+    const std::string segments = "root_path may not contain empty, '.', '..', or unique-name alias segments";
+    const std::vector<std::pair<std::string, std::string>> refused = {
+        {"", bytes},
+        {"/root/" + std::string(didi::paths::kMaxRuntimePathBytes, 'a'), bytes},
+        {std::string("/root/a\0b", 9), bytes},
+        {"Main", beneath},
+        {"/rootless", beneath},
+        {"/root/", canonical},
+        {"/root//Main", canonical},
+        {"/root/Main\\Child", canonical},
+        {"/root/Main:position", canonical},
+        {"/root/.", segments},
+        {"/root/..", segments},
+        {"/root/Main/../Other", segments},
+        {"/root/%Unique", segments},
+    };
+    for (const auto& [path, message] : refused) {
+        const auto problem = runtimePathProblem(path);
+        ASSERT_TRUE(problem.has_value());
+        ASSERT_EQ(*problem, message);
+    }
+    ASSERT_FALSE(runtimePathProblem("/root/" + std::string(didi::paths::kMaxRuntimePathBytes - 6, 'a'))
+                     .has_value());
 }
 
 TEST(Phase6, ProjectEndpointKeysAreStableAndIsolated) {

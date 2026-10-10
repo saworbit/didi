@@ -44,6 +44,14 @@ json errorJson(int code, const std::string& message, const char* data_code) {
                        {"data", {{"code", data_code}}}}}};
 }
 
+// A Result's error as an answer, its data kept. Rebuilding one from its code
+// and message drops the data, and with it the code that names the refusal's
+// fix (#1267).
+json errorJson(const Error& error) {
+    if (error.data.is_null()) return errorJson(error.code, error.message);
+    return {{"error", {{"code", error.code}, {"message", error.message}, {"data", error.data}}}};
+}
+
 bool isContinuation(unsigned char value) {
     return (value & 0xC0u) == 0x80u;
 }
@@ -955,8 +963,19 @@ Result<T> scalarFromVariant(VariantValue& value, GDExtensionVariantType type) {
     return result;
 }
 
+// Godot hands an extension the pointer a Variant holds without asking whether
+// the object still exists (Variant::operator Object *, read at 4.5.1-stable),
+// so a value read from project state can name a freed node: an enemy's target
+// after the target was freed. Calling into one crashes once its memory is
+// reused, and reads garbage until then (#1266). A Variant's truth asks ObjectDB,
+// so a freed object comes back as null here and nothing calls into it.
 Result<GDExtensionObjectPtr> objectFromVariant(VariantValue& value) {
-    return scalarFromVariant<GDExtensionObjectPtr>(value, GDEXTENSION_VARIANT_TYPE_OBJECT);
+    auto object = scalarFromVariant<GDExtensionObjectPtr>(value, GDEXTENSION_VARIANT_TYPE_OBJECT);
+    if (object.isErr() || !object.value()) return object;
+    const auto& api = GodotApi::instance();
+    if (!api.variant_booleanize) return Error::internal("Godot's Variant truth test is unavailable");
+    if (!api.variant_booleanize(value.ptr())) return GDExtensionObjectPtr{nullptr};
+    return object;
 }
 
 Result<std::string> nativeStringToUtf8(
@@ -1674,17 +1693,15 @@ json executeExpression(const json& params, const std::string& session_kind) {
                                               "unsafe_expression");
     if (params.contains("context_node")) {
         auto valid_path = validateContextPath(params["context_node"].get<std::string>());
-        if (valid_path.isErr()) return errorJson(valid_path.error().code, valid_path.error().message);
+        if (valid_path.isErr()) return errorJson(valid_path.error());
     }
     auto within_timeout = requireWithinTimeout(started, timeout_ms);
-    if (within_timeout.isErr()) return errorJson(within_timeout.error().code,
-                                                  within_timeout.error().message);
+    if (within_timeout.isErr()) return errorJson(within_timeout.error());
 
     auto context = resolveContext(params, session_kind);
-    if (context.isErr()) return errorJson(context.error().code, context.error().message);
+    if (context.isErr()) return errorJson(context.error());
     within_timeout = requireWithinTimeout(started, timeout_ms);
-    if (within_timeout.isErr()) return errorJson(within_timeout.error().code,
-                                                  within_timeout.error().message);
+    if (within_timeout.isErr()) return errorJson(within_timeout.error());
 
     std::string executable_source;
     std::vector<std::string> prebound_names;
@@ -1692,10 +1709,9 @@ json executeExpression(const json& params, const std::string& session_kind) {
     auto prepared = prepareNativePropertyReads(source, context.value().node,
                                                executable_source, prebound_names,
                                                prebound_values);
-    if (prepared.isErr()) return errorJson(prepared.error().code, prepared.error().message);
+    if (prepared.isErr()) return errorJson(prepared.error());
     within_timeout = requireWithinTimeout(started, timeout_ms);
-    if (within_timeout.isErr()) return errorJson(within_timeout.error().code,
-                                                  within_timeout.error().message);
+    if (within_timeout.isErr()) return errorJson(within_timeout.error());
 
     NativeName expression_class("Expression");
     if (!expression_class.valid() || !GodotApi::instance().classdb_construct_object) {
@@ -1714,28 +1730,26 @@ json executeExpression(const json& params, const std::string& session_kind) {
 
     auto source_value = makeString(executable_source);
     auto input_names = makeContainer(GDEXTENSION_VARIANT_TYPE_PACKED_STRING_ARRAY);
-    if (source_value.isErr()) return errorJson(source_value.error().code, source_value.error().message);
-    if (input_names.isErr()) return errorJson(input_names.error().code, input_names.error().message);
+    if (source_value.isErr()) return errorJson(source_value.error());
+    if (input_names.isErr()) return errorJson(input_names.error());
     for (const auto* name : {"node", "tree"}) {
         auto name_value = makeString(name);
-        if (name_value.isErr()) return errorJson(name_value.error().code, name_value.error().message);
+        if (name_value.isErr()) return errorJson(name_value.error());
         auto appended = callVariant(input_names.value(), "append", {&name_value.value()});
-        if (appended.isErr()) return errorJson(appended.error().code, appended.error().message);
+        if (appended.isErr()) return errorJson(appended.error());
     }
     for (const auto& name : prebound_names) {
         auto name_value = makeString(name);
-        if (name_value.isErr()) return errorJson(name_value.error().code,
-                                                 name_value.error().message);
+        if (name_value.isErr()) return errorJson(name_value.error());
         auto appended = callVariant(input_names.value(), "append", {&name_value.value()});
-        if (appended.isErr()) return errorJson(appended.error().code,
-                                               appended.error().message);
+        if (appended.isErr()) return errorJson(appended.error());
     }
 
     auto parsed = callObject(expression.get(), "Expression", "parse", 3069722906LL,
                              {&source_value.value(), &input_names.value()});
-    if (parsed.isErr()) return errorJson(parsed.error().code, parsed.error().message);
+    if (parsed.isErr()) return errorJson(parsed.error());
     auto parse_code = scalarFromVariant<int64_t>(parsed.value(), GDEXTENSION_VARIANT_TYPE_INT);
-    if (parse_code.isErr()) return errorJson(parse_code.error().code, parse_code.error().message);
+    if (parse_code.isErr()) return errorJson(parse_code.error());
     if (parse_code.value() != 0) {
         auto detail = expressionErrorText(expression.get());
         return errorJson(422, detail.isOk() && !detail.value().empty()
@@ -1744,39 +1758,36 @@ json executeExpression(const json& params, const std::string& session_kind) {
                          "expression_parse_failed");
     }
     within_timeout = requireWithinTimeout(started, timeout_ms);
-    if (within_timeout.isErr()) return errorJson(within_timeout.error().code,
-                                                  within_timeout.error().message);
+    if (within_timeout.isErr()) return errorJson(within_timeout.error());
 
     auto inputs = makeContainer(GDEXTENSION_VARIANT_TYPE_ARRAY);
     auto node_value = makeObject(context.value().node);
     auto tree_value = makeObject(context.value().tree);
-    if (inputs.isErr()) return errorJson(inputs.error().code, inputs.error().message);
-    if (node_value.isErr()) return errorJson(node_value.error().code, node_value.error().message);
-    if (tree_value.isErr()) return errorJson(tree_value.error().code, tree_value.error().message);
+    if (inputs.isErr()) return errorJson(inputs.error());
+    if (node_value.isErr()) return errorJson(node_value.error());
+    if (tree_value.isErr()) return errorJson(tree_value.error());
     for (auto* input : {&node_value.value(), &tree_value.value()}) {
         auto appended = callVariant(inputs.value(), "append", {input});
-        if (appended.isErr()) return errorJson(appended.error().code, appended.error().message);
+        if (appended.isErr()) return errorJson(appended.error());
     }
     for (auto& input : prebound_values) {
         auto appended = callVariant(inputs.value(), "append", {&input});
-        if (appended.isErr()) return errorJson(appended.error().code,
-                                               appended.error().message);
+        if (appended.isErr()) return errorJson(appended.error());
     }
     VariantValue base_instance;
     auto show_error = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(0));
     auto const_calls_only = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(1));
-    if (show_error.isErr()) return errorJson(show_error.error().code, show_error.error().message);
-    if (const_calls_only.isErr()) return errorJson(const_calls_only.error().code,
-                                                   const_calls_only.error().message);
+    if (show_error.isErr()) return errorJson(show_error.error());
+    if (const_calls_only.isErr()) return errorJson(const_calls_only.error());
 
     auto result = callObject(expression.get(), "Expression", "execute", 3712471238LL,
                              {&inputs.value(), &base_instance, &show_error.value(),
                               &const_calls_only.value()});
-    if (result.isErr()) return errorJson(result.error().code, result.error().message);
+    if (result.isErr()) return errorJson(result.error());
     auto failed_value = callObject(expression.get(), "Expression", "has_execute_failed", 36873697LL);
-    if (failed_value.isErr()) return errorJson(failed_value.error().code, failed_value.error().message);
+    if (failed_value.isErr()) return errorJson(failed_value.error());
     auto failed = scalarFromVariant<GDExtensionBool>(failed_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
-    if (failed.isErr()) return errorJson(failed.error().code, failed.error().message);
+    if (failed.isErr()) return errorJson(failed.error());
     if (failed.value() != 0) {
         auto detail = expressionErrorText(expression.get());
         return errorJson(422, detail.isOk() && !detail.value().empty()
@@ -1785,16 +1796,14 @@ json executeExpression(const json& params, const std::string& session_kind) {
                          "expression_execution_failed");
     }
     within_timeout = requireWithinTimeout(started, timeout_ms);
-    if (within_timeout.isErr()) return errorJson(within_timeout.error().code,
-                                                  within_timeout.error().message);
+    if (within_timeout.isErr()) return errorJson(within_timeout.error());
 
     ConversionBudget budget;
     auto converted = convertVariant(result.value(), budget, context.value(),
                                     started, timeout_ms);
-    if (converted.isErr()) return errorJson(converted.error().code, converted.error().message);
+    if (converted.isErr()) return errorJson(converted.error());
     within_timeout = requireWithinTimeout(started, timeout_ms);
-    if (within_timeout.isErr()) return errorJson(within_timeout.error().code,
-                                                  within_timeout.error().message);
+    if (within_timeout.isErr()) return errorJson(within_timeout.error());
     json response = {
         {"context_node", context.value().canonical_path},
         {"value", std::move(converted.value().value)},
@@ -1812,8 +1821,7 @@ json executeExpression(const json& params, const std::string& session_kind) {
                          "response_too_large");
     }
     within_timeout = requireWithinTimeout(started, timeout_ms);
-    if (within_timeout.isErr()) return errorJson(within_timeout.error().code,
-                                                  within_timeout.error().message);
+    if (within_timeout.isErr()) return errorJson(within_timeout.error());
     response["elapsed_ms"] = elapsedMilliseconds(started);
     return response;
 }

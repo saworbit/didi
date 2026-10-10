@@ -39,6 +39,37 @@ inline std::optional<Error> refuseParentRelativeNodePath(const std::string& path
     return std::nullopt;
 }
 
+constexpr size_t kMaxRuntimePathBytes = 1024;
+
+// Why a runtime root_path is not a canonical NodePath beneath /root, or nothing
+// when it is one. The MCP preflight and the game bridge both ask this, so a
+// path is refused the same way wherever it is refused (#1254).
+inline std::optional<std::string> runtimePathProblem(const std::string& path) {
+    if (path.empty() || path.size() > kMaxRuntimePathBytes || path.find('\0') != std::string::npos) {
+        return "root_path must be a non-empty UTF-8 path of at most 1024 bytes";
+    }
+    if (path != "/root" && path.rfind("/root/", 0) != 0) {
+        return "root_path must be a canonical absolute path beneath /root";
+    }
+    if (path.back() == '/' || path.find("//") != std::string::npos ||
+        path.find('\\') != std::string::npos || path.find(':') != std::string::npos) {
+        return "root_path must be a canonical absolute NodePath";
+    }
+    size_t start = 1;
+    while (start <= path.size()) {
+        const auto end = path.find('/', start);
+        const auto segment = path.substr(start, end == std::string::npos
+                                                   ? std::string::npos
+                                                   : end - start);
+        if (segment.empty() || segment == "." || segment == ".." || segment.front() == '%') {
+            return "root_path may not contain empty, '.', '..', or unique-name alias segments";
+        }
+        if (end == std::string::npos) break;
+        start = end + 1;
+    }
+    return std::nullopt;
+}
+
 // Why a context_node is not a path the read-only expression sandbox resolves,
 // or nothing when it is one. The bridge refuses the same paths; checking here
 // lets a caller hear it before anything runs, which for runtime_run_scenario is

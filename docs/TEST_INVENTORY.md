@@ -10,14 +10,14 @@ Every number here is derived from the suites themselves rather than written down
 
 | Measure | Count |
 | --- | ---: |
-| Automated tests | **1721** |
-| Live-harness assertions | 1614 |
+| Automated tests | **1723** |
+| Live-harness assertions | 1615 |
 
 The badge in the [README](../README.md) shows the automated test total. Harness assertions are counted separately because they are assertions inside one live scenario, not independently runnable cases; adding them together would flatter the number.
 
 ## Native C++ suite (`didi_tests`)
 
-**1135 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
+**1136 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
 
 | Suite | Tests |
 | --- | ---: |
@@ -53,7 +53,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `ManagedProcess` | 6 |
 | `McpServer` | 42 |
 | `Phase5` | 31 |
-| `Phase6` | 25 |
+| `Phase6` | 26 |
 | `Phase7Contract` | 9 |
 | `Phase7Diagnostics` | 1 |
 | `Phase7Navigation` | 1 |
@@ -113,7 +113,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 
 ## Python contract suites (`tests/test_*.py`)
 
-**586 tests.** Derived from `test_*` methods on every `unittest.TestCase` subclass, read with `ast`.
+**587 tests.** Derived from `test_*` methods on every `unittest.TestCase` subclass, read with `ast`.
 
 | File | Tests |
 | --- | ---: |
@@ -145,7 +145,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `test_phase7_plan_ownership.py` | 10 |
 | `test_phase7_schema_contract.py` | 6 |
 | `test_phase7_signal_admission.py` | 3 |
-| `test_refusal_codes.py` | 12 |
+| `test_refusal_codes.py` | 13 |
 | `test_refusal_remedies.py` | 5 |
 | `test_stdio_process.py` | 2 |
 | `test_test_inventory.py` | 27 |
@@ -156,7 +156,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 
 ## Live Godot harness (`tests/*.ps1`)
 
-**1614 assertions.** Derived from `Assert-True` call sites. The harness is one long live scenario rather than a set of named cases, so this counts assertions and says so.
+**1615 assertions.** Derived from `Assert-True` call sites. The harness is one long live scenario rather than a set of named cases, so this counts assertions and says so.
 
 | File | Assertions |
 | --- | ---: |
@@ -172,7 +172,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `scenario_runner.ps1` | 29 |
 | `scene_tab_reload.ps1` | 26 |
 | `test_runner.ps1` | 15 |
-| `typed_object_layer.ps1` | 41 |
+| `typed_object_layer.ps1` | 42 |
 | `ui_screen_space.ps1` | 9 |
 
 ## What is not counted here

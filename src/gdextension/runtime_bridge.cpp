@@ -4,6 +4,7 @@
 #include "didi/gdextension/gdextension_api.hpp"
 #include "didi/gdextension/protocol_servers.hpp"
 #include "didi/common/logger.hpp"
+#include "didi/common/scene_node_path.hpp"
 
 #include <array>
 #include <algorithm>
@@ -19,7 +20,6 @@ namespace {
 
 constexpr size_t kOpaqueBytes = 64;
 constexpr size_t kMaxRuntimeNodes = 10000;
-constexpr size_t kMaxRuntimePathBytes = 1024;
 constexpr size_t kMaxRuntimeTreeNameBytes = 1024;
 constexpr size_t kMaxRuntimeTreeTypeBytes = 256;
 constexpr size_t kMaxRuntimeTreeNodePathBytes = 4096;
@@ -41,6 +41,14 @@ json errorJson(int code, const std::string& message) {
 json errorJson(int code, const std::string& message, const char* data_code) {
     return {{"error", {{"code", code}, {"message", message},
                        {"data", {{"code", data_code}}}}}};
+}
+
+// A Result's error as an answer, its data kept. Rebuilding one from its code
+// and message drops the data, and with it the code that names the refusal's
+// fix (#1267).
+json errorJson(const Error& error) {
+    if (error.data.is_null()) return errorJson(error.code, error.message);
+    return {{"error", {{"code", error.code}, {"message", error.message}, {"data", error.data}}}};
 }
 
 json liveResult(json result, const std::string& session_kind) {
@@ -224,27 +232,7 @@ Result<GDExtensionObjectPtr> sceneTreeRoot(GDExtensionObjectPtr tree) {
 }
 
 Result<void> validateRuntimePath(const std::string& path) {
-    if (path.empty() || path.size() > kMaxRuntimePathBytes || path.find('\0') != std::string::npos) {
-        return Error::invalidArgument("root_path must be a non-empty UTF-8 path of at most 1024 bytes");
-    }
-    if (path != "/root" && path.rfind("/root/", 0) != 0) {
-        return Error::invalidArgument("root_path must be a canonical absolute path beneath /root");
-    }
-    if (path.back() == '/' || path.find("//") != std::string::npos ||
-        path.find('\\') != std::string::npos || path.find(':') != std::string::npos) {
-        return Error::invalidArgument("root_path must be a canonical absolute NodePath");
-    }
-    size_t start = 1;
-    while (start <= path.size()) {
-        const auto end = path.find('/', start);
-        const auto segment = path.substr(start, end == std::string::npos ? std::string::npos : end - start);
-        if (segment.empty() || segment == "." || segment == ".." || segment.front() == '%') {
-            return Error::invalidArgument(
-                "root_path may not contain empty, '.', '..', or unique-name alias segments");
-        }
-        if (end == std::string::npos) break;
-        start = end + 1;
-    }
+    if (auto problem = paths::runtimePathProblem(path)) return Error::invalidArgument(*problem);
     return Result<void>::ok();
 }
 
@@ -506,7 +494,7 @@ json executeRuntimeBridge(const std::string& method, const json& params,
     }
 
     auto tree = activeSceneTree();
-    if (tree.isErr()) return errorJson(tree.error().code, tree.error().message);
+    if (tree.isErr()) return errorJson(tree.error());
 
     if (method == "runtime.getTree") {
         if (params.contains("root_path") && !params["root_path"].is_string()) {
@@ -517,21 +505,21 @@ json executeRuntimeBridge(const std::string& method, const json& params,
         }
         const auto root_path = params.value("root_path", std::string("/root"));
         auto valid_path = validateRuntimePath(root_path);
-        if (valid_path.isErr()) return errorJson(valid_path.error().code, valid_path.error().message);
+        if (valid_path.isErr()) return errorJson(valid_path.error());
         const int max_depth = params.value("max_depth", 4);
         auto root = sceneTreeRoot(tree.value());
-        if (root.isErr()) return errorJson(root.error().code, root.error().message);
+        if (root.isErr()) return errorJson(root.error());
         auto target = resolveRuntimeNode(root.value(), root_path);
-        if (target.isErr()) return errorJson(target.error().code, target.error().message);
+        if (target.isErr()) return errorJson(target.error());
         TraversalState state;
         auto serialized = serializeRuntimeNode(target.value(), 0, max_depth, false, state);
-        if (serialized.isErr()) return errorJson(serialized.error().code, serialized.error().message);
+        if (serialized.isErr()) return errorJson(serialized.error());
         if (serialized.value().is_null()) {
             return errorJson(507, "Runtime tree root exceeds the serialized response budget",
                                  "response_too_large");
         }
         auto paused = sceneTreePaused(tree.value());
-        if (paused.isErr()) return errorJson(paused.error().code, paused.error().message);
+        if (paused.isErr()) return errorJson(paused.error());
         auto response = liveResult({{"root_path", root_path}, {"scene_tree", serialized.value()},
                                     {"paused", paused.value()}, {"node_count", state.node_count},
                                     {"max_nodes", kMaxRuntimeNodes}, {"max_depth", max_depth},
@@ -551,9 +539,9 @@ json executeRuntimeBridge(const std::string& method, const json& params,
         }
         const bool requested = params["paused"].get<bool>();
         auto changed = setSceneTreePaused(tree.value(), requested);
-        if (changed.isErr()) return errorJson(changed.error().code, changed.error().message);
+        if (changed.isErr()) return errorJson(changed.error());
         auto observed = sceneTreePaused(tree.value());
-        if (observed.isErr()) return errorJson(observed.error().code, observed.error().message);
+        if (observed.isErr()) return errorJson(observed.error());
         if (observed.value() != requested) {
             return errorJson(500, "Godot SceneTree pause state did not match the requested value",
                                  "pause_state_mismatch");

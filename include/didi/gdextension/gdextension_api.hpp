@@ -89,6 +89,7 @@ public:
             variant_get_ptr_destructor = (GDExtensionInterfaceVariantGetPtrDestructor)p_get_proc_address("variant_get_ptr_destructor");
             variant_get_ptr_getter = (GDExtensionInterfaceVariantGetPtrGetter)p_get_proc_address("variant_get_ptr_getter");
             variant_get_type = (GDExtensionInterfaceVariantGetType)p_get_proc_address("variant_get_type");
+            variant_booleanize = (GDExtensionInterfaceVariantBooleanize)p_get_proc_address("variant_booleanize");
             packed_byte_array_operator_index_const = (GDExtensionInterfacePackedByteArrayOperatorIndexConst)p_get_proc_address("packed_byte_array_operator_index_const");
             register_main_loop_callbacks = (GDExtensionInterfaceRegisterMainLoopCallbacks)p_get_proc_address("register_main_loop_callbacks");
         }
@@ -163,6 +164,7 @@ public:
     GDExtensionInterfaceVariantGetPtrDestructor variant_get_ptr_destructor{nullptr};
     GDExtensionInterfaceVariantGetPtrGetter variant_get_ptr_getter{nullptr};
     GDExtensionInterfaceVariantGetType variant_get_type{nullptr};
+    GDExtensionInterfaceVariantBooleanize variant_booleanize{nullptr};
     GDExtensionInterfacePackedByteArrayOperatorIndexConst packed_byte_array_operator_index_const{nullptr};
     GDExtensionInterfaceRegisterMainLoopCallbacks register_main_loop_callbacks{nullptr};
     GDExtensionInterfaceGetGodotVersion2 get_godot_version2{nullptr};

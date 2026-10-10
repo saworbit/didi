@@ -1,8 +1,9 @@
-[gd_scene load_steps=7 format=3]
+[gd_scene load_steps=8 format=3]
 
 [ext_resource type="StyleBox" path="res://typed_shared_box.tres" id="1_shared"]
 [ext_resource type="PackedScene" path="res://typed_child.tscn" id="2_child"]
 [ext_resource type="Shader" path="res://probe_uniforms.gdshader" id="3_shader"]
+[ext_resource type="Script" path="res://typed_holder.gd" id="4_holder"]
 
 [sub_resource type="StyleBoxFlat" id="embedded_box"]
 bg_color = Color(1, 0, 0, 1)
@@ -27,3 +28,6 @@ material_override = SubResource("tinted_material")
 [node name="Mover" type="Node2D" parent="."]
 
 [node name="Child" parent="." instance=ExtResource("2_child")]
+
+[node name="Holder" type="Node" parent="."]
+script = ExtResource("4_holder")

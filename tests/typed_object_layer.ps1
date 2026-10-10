@@ -17,8 +17,9 @@
 #   applies nothing.
 #
 # run_godot_integration.ps1 dot-sources this file and calls the block once the
-# editor session is attached. typed_object_layer.tscn, typed_shared_box.tres and
-# typed_child.tscn are its fixture, and nothing else opens them.
+# editor session is attached. typed_object_layer.tscn, typed_holder.gd,
+# typed_shared_box.tres and typed_child.tscn are its fixture, and nothing else
+# opens them.
 
 function Invoke-TypedObjectLayerBlock {
     param(
@@ -110,15 +111,29 @@ function Invoke-TypedObjectLayerBlock {
         (Tool-Request 7151 "script_attach_to_node" @{ target_node = "$root/Guarded"; script_path = "res://typed_guarded.gd" }),
         (Tool-Request 7152 "scene_set_property" @{ target_node = "$root/Guarded"; property_name = "guarded"; value = "res://typed_shared_box.tres" }),
         (Tool-Request 7153 "scene_set_property" @{ target_node = "$root/Guarded"; property_name = "guarded:bg_color"; value = "#ff00ff"; make_unique = $true }),
-        (Tool-Request 7154 "scene_get_property" @{ reads = @(@{ target_node = "$root/Guarded"; property_name = "guarded:bg_color" }, @{ target_node = "$root/Shared"; property_name = $box }) }),
-        # Saved by the request before, so nothing is discarded; before 4.7 the
-        # engine cannot report that, and a close without the flag is refused.
+        (Tool-Request 7154 "scene_get_property" @{ reads = @(@{ target_node = "$root/Guarded"; property_name = "guarded:bg_color" }, @{ target_node = "$root/Shared"; property_name = $box }) })
+    )
+    $rawTyped = Invoke-Didi -Requests $typedRequests -Arguments @("--project", $FixtureRoot)
+    # A property that holds a node which has since been freed (#1266), on the
+    # scene the batch above leaves open. scene_call_method is confirmation
+    # gated, so this is its own --yolo batch. The node is settled at once,
+    # before the close: nothing else may read it while it dangles.
+    $freedRequests = @(
+        (@{ jsonrpc = "2.0"; id = 7160; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
+        (Tool-Request 7161 "runtime_attach_session" @{ session_id = $EditorSession.session_id }),
+        (Tool-Request 7155 "scene_call_method" @{ target_node = "$root/Holder"; method_name = "dangle" }),
+        (Tool-Request 7156 "scene_get_property" @{ target_node = "$root/Holder"; property_name = "target" }),
+        (Tool-Request 7157 "scene_call_method" @{ target_node = "$root/Holder"; method_name = "settle" }),
+        # Saved by 7120, and changed since; a close without the flag is
+        # refused before 4.7, which cannot report what would be lost.
         (Tool-Request 7121 "scene_close" @{ discard_unsaved = $true }),
         (Tool-Request 7122 "scene_open" @{ scene_path = "res://main.tscn" })
     )
-    $rawTyped = Invoke-Didi -Requests $typedRequests -Arguments @("--project", $FixtureRoot)
+    $rawFreed = Invoke-Didi -Requests $freedRequests -Arguments @("--project", $FixtureRoot, "--yolo")
     $typedById = @{}
     foreach ($response in @($rawTyped | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.PSObject.Properties.Name -contains "id" })) { $typedById[[int]$response.id] = $response }
+    $freedById = @{}
+    foreach ($response in @($rawFreed | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.PSObject.Properties.Name -contains "id" })) { $freedById[[int]$response.id] = $response }
     $text = { param($id) [string]$typedById[$id].result.content[0].text }
     $refusal = { param($id) (& $text $id) | ConvertFrom-Json }
     $near = { param($a, $b) [Math]::Abs([double]$a - [double]$b) -lt 0.002 }
@@ -243,6 +258,11 @@ function Invoke-TypedObjectLayerBlock {
     # 7111 made the shared StyleBox green; the refused write asked for magenta.
     Assert-True ((& $near $kept[0].value.r 0) -and (& $near $kept[0].value.b 0) -and (& $near $kept[1].value.r 0) -and (& $near $kept[1].value.b 0)) "A make_unique write whose setter refused the copy changed the StyleBox the node shares: $(& $text 7154)"
 
-    foreach ($id in 7121, 7122) { [void](Tool-Payload $typedById[$id]) }
+    # Godot hands an extension a freed object's pointer as it stands, so the
+    # read has to ask whether it is alive before calling into it (#1266).
+    [void](Tool-Payload $freedById[7155])
+    $freed = Tool-Payload $freedById[7156]
+    Assert-True ($null -eq $freed.value -and $freed.freed -eq $true -and $freed.PSObject.Properties.Name -notcontains "holds") "A property holding a freed node was not read as freed: $([string]$freedById[7156].result.content[0].text)"
+    foreach ($id in 7157, 7121, 7122) { [void](Tool-Payload $freedById[$id]) }
     Write-Output "Typed object layer: a batch over three nodes undid and redid as one step, and the save kept what the answers said."
 }
