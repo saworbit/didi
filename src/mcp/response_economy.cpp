@@ -35,6 +35,16 @@ const char* sessionDescriptorModeName(SessionDescriptorMode mode) {
     return mode == SessionDescriptorMode::Once ? "once" : "every";
 }
 
+std::optional<TextCopyMode> parseTextCopyMode(const std::string& value) {
+    if (value == "always") return TextCopyMode::Always;
+    if (value == "once") return TextCopyMode::Once;
+    return std::nullopt;
+}
+
+const char* textCopyModeName(TextCopyMode mode) {
+    return mode == TextCopyMode::Once ? "once" : "always";
+}
+
 json responseEconomyDeclaration() {
     return {{kResponseEconomyExtension,
              {{"omit", json::array({kOmitTextCopy, kOmitSessionDescriptor})}}}};

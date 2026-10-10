@@ -437,17 +437,24 @@ a client that dropped one gets it back. A failed call (`isError: true`) is
 never reshaped: its text and its session provenance are what a caller most
 needs whole.
 
-A client that declares nothing gets the bytes it got before the extension
-existed. The live harness runs the seven-call authoring arc #776 measured both
-ways on every engine line, and fails when the declared arc is not under half the
-undeclared one's bytes.
+A client that declares nothing, on a server started with neither switch below,
+gets the bytes it got before the extension existed. The live harness runs the
+seven-call authoring arc #776 measured both ways on every engine line, and fails
+when the declared arc is not under half the undeclared one's bytes.
 
 A host that cannot declare an extension can still have the descriptor half.
 `--session-descriptor once` applies `sessionDescriptor` to every request on the
 process, declared or not, with the same holder rules; `every`, the default,
-sends the whole descriptor on every live answer. It never leaves out the text
-copy, which only a client can decline. The mode is fixed at startup, and
-`initialize` and `server/discover` report it as `_meta.didi.sessionDescriptor`.
+sends the whole descriptor on every live answer. The mode is fixed at startup,
+and `initialize` and `server/discover` report it as
+`_meta.didi.sessionDescriptor`.
+
+`--text-copy once` applies `textCopy` the same way, to every request on the
+process. It is not the default and not safe for every host: only the client
+knows which half of a result it reads, and a host that reads only `content`
+gets nothing from an answer whose copy was left out. `always`, the default,
+keeps the copy unless a client declines it. Failures keep their text either
+way. The mode is fixed at startup and reported as `_meta.didi.textCopy`.
 
 ### Bounded reads and fields
 

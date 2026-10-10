@@ -600,6 +600,52 @@ json callOffline(didi::mcp::McpServer& server, const std::string& tool, const js
 
 }  // namespace
 
+static void test_only_always_and_once_are_text_copy_modes() {
+    using didi::mcp::TextCopyMode;
+    ASSERT_TRUE(didi::mcp::parseTextCopyMode("always") == TextCopyMode::Always);
+    ASSERT_TRUE(didi::mcp::parseTextCopyMode("once") == TextCopyMode::Once);
+    for (const auto* refused : {"", "Once", "ALWAYS", "never", "every", "once "}) {
+        ASSERT_FALSE(didi::mcp::parseTextCopyMode(refused).has_value());
+    }
+    for (const auto mode : {TextCopyMode::Always, TextCopyMode::Once}) {
+        ASSERT_TRUE(didi::mcp::parseTextCopyMode(didi::mcp::textCopyModeName(mode)) == mode);
+    }
+}
+
+// The operator's other switch (#1238), for a host that reads structuredContent
+// and cannot declare didi/responseEconomy. The answer keeps every fact in
+// structuredContent and drops only the text that repeats it.
+static void test_text_copy_once_leaves_out_the_copy_for_a_client_that_declared_nothing() {
+    LiveServer live;
+    live.server.setTextCopyMode(didi::mcp::TextCopyMode::Once);
+    const auto initialized = initialize(live.server);
+    ASSERT_EQ(initialized["_meta"]["didi"]["textCopy"], "once");
+    ASSERT_EQ(send(live.server, "server/discover", json::object())["_meta"]["didi"]["textCopy"], "once");
+    for (int i = 0; i < 2; ++i) {
+        const auto live_answer = liveCall(live.server);
+        ASSERT_TRUE(live_answer["content"].empty());
+        ASSERT_EQ(live_answer["structuredContent"]["execution_mode"], "live");
+        // The descriptor half is its own switch, still at every.
+        ASSERT_TRUE(live_answer["structuredContent"]["session"].contains("endpoint"));
+    }
+    const auto offline = callOffline(live.server, "script_reflect_class", {{"class_name", "Node"}});
+    ASSERT_FALSE(offline.value("isError", false));
+    ASSERT_TRUE(offline["content"].empty());
+    ASSERT_TRUE(offline["structuredContent"].contains("methods"));
+    // A failure is the answer a caller most needs whole, so it keeps its text.
+    const auto refused = callOffline(live.server, "script_reflect_class", json::object());
+    ASSERT_TRUE(refused.value("isError", false));
+    ASSERT_FALSE(refused["content"].empty());
+}
+
+// always is the default, and an undeclared client's answers are what they were.
+static void test_always_is_the_default_text_copy() {
+    LiveServer live;
+    ASSERT_TRUE(live.server.textCopyMode() == didi::mcp::TextCopyMode::Always);
+    ASSERT_EQ(initialize(live.server)["_meta"]["didi"]["textCopy"], "always");
+    ASSERT_TRUE(carriesTextCopy(liveCall(live.server)));
+}
+
 // A large read made of sections takes `fields` (Q5). The schema publishes the
 // sections, the answer keeps the selected ones and every key that is not a
 // section, and names what it left out.
@@ -706,6 +752,11 @@ struct RegisterResponseEconomyTests {
                      test_once_references_the_descriptor_for_a_client_that_declared_nothing);
         registerTest("ResponseEconomy.EveryIsTheDefault",
                      test_every_is_the_default_and_changes_nothing);
+        registerTest("ResponseEconomy.OnlyAlwaysAndOnceAreTextCopyModes",
+                     test_only_always_and_once_are_text_copy_modes);
+        registerTest("ResponseEconomy.TextCopyOnceForAnUndeclaredClient",
+                     test_text_copy_once_leaves_out_the_copy_for_a_client_that_declared_nothing);
+        registerTest("ResponseEconomy.AlwaysIsTheDefaultTextCopy", test_always_is_the_default_text_copy);
         registerTest("ResponseEconomy.LiveResourceReadReferencesAHeldDescriptor",
                      test_a_live_resource_read_references_a_held_descriptor);
         registerTest("ResponseEconomy.FieldsSelectSections",

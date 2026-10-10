@@ -2003,6 +2003,7 @@
       "didi": {
         "confirmationsSkipped": false,
         "sessionDescriptor": "every",
+        "textCopy": "always",
         "toolProfile": "full"
       }
     },
@@ -2241,6 +2242,7 @@
       "didi": {
         "confirmationsSkipped": false,
         "sessionDescriptor": "every",
+        "textCopy": "always",
         "toolProfile": "full"
       },
       "io.modelcontextprotocol/serverInfo": {

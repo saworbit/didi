@@ -5190,14 +5190,13 @@ try {
     # the same arc from a client that declared nothing, on a server started
     # with --session-descriptor once. The attach answer carries the descriptor
     # whole, every live answer after it a reference, and the text copy stays,
-    # because only a client can say it does not read it.
+    # because that is the other switch. The economy scene stays open for the
+    # arc after this one, which puts main.tscn back.
     $onceRequests = @(
         (@{ jsonrpc = "2.0"; id = 5740; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
         (Tool-Request 5741 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
         (Tool-Request 5742 "scene_open" @{ scene_path = "res://economy_arc.tscn" })
-    ) + (Economy-Arc 5750 "Once" $null) + @(
-        (Tool-Request 5760 "scene_open" @{ scene_path = "res://main.tscn" })
-    )
+    ) + (Economy-Arc 5750 "Once" $null)
     $rawOnceResponses = Invoke-Didi -Requests $onceRequests -Arguments @("--project", $fixtureRoot, "--session-descriptor", "once")
     Assert-True ($LASTEXITCODE -eq 0) "Session-descriptor-once MCP process exited with $LASTEXITCODE."
     $onceById = @{}
@@ -5221,6 +5220,41 @@ try {
     }
     Write-Host "Session descriptor once: #776 arc $onceBytes bytes, against $undeclaredBytes with every."
     Assert-True (4 * $onceBytes -lt 3 * $undeclaredBytes) "--session-descriptor once cost $onceBytes bytes against $undeclaredBytes, which is not under three quarters (#1031)."
+
+    # Both switches (#1238), for a host that reads structuredContent and
+    # cannot declare anything: the same arc, undeclared, on a server started
+    # with --session-descriptor once and --text-copy once. It has to cost what
+    # the declared arc does, under half. It runs in the scene the arc above
+    # left open and puts main.tscn back, so the block switches tabs no more
+    # often than before.
+    $textOnceRequests = @(
+        (@{ jsonrpc = "2.0"; id = 5770; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
+        (Tool-Request 5771 "runtime_attach_session" @{ session_id = $editorSession.session_id })
+    ) + (Economy-Arc 5780 "TextOnce" $null) + @(
+        (Tool-Request 5790 "scene_open" @{ scene_path = "res://main.tscn" })
+    )
+    $rawTextOnceResponses = Invoke-Didi -Requests $textOnceRequests -Arguments @("--project", $fixtureRoot, "--session-descriptor", "once", "--text-copy", "once")
+    Assert-True ($LASTEXITCODE -eq 0) "Text-copy-once MCP process exited with $LASTEXITCODE."
+    $textOnceById = @{}
+    $textOnceBytes = 0
+    foreach ($line in $rawTextOnceResponses) {
+        $match = [regex]::Match([string]$line, '^\{"id":(\d+),')
+        if (-not $match.Success) { continue }
+        $id = [int]$match.Groups[1].Value
+        $textOnceById[$id] = [string]$line | ConvertFrom-Json
+        if ($id -ge 5780 -and $id -le 5786) { $textOnceBytes += [Text.Encoding]::UTF8.GetByteCount([string]$line) }
+    }
+    Assert-True ($textOnceById[5770].result._meta.didi.textCopy -eq "once") "initialize did not report --text-copy once."
+    foreach ($step in 0..6) {
+        $textOnce = $textOnceById[5780 + $step]
+        Assert-True ($null -ne $textOnce -and -not $textOnce.result.isError) "Text-copy-once arc step $step failed: $($textOnce | ConvertTo-Json -Compress -Depth 20)"
+        Assert-True (@($textOnce.result.content).Count -eq 0) "Text-copy-once arc step $step still carried the text copy: $($textOnce.result.content | ConvertTo-Json -Compress -Depth 5)"
+        Assert-True ($textOnce.result.structuredContent.execution_mode -eq "live" -and $textOnce.result.structuredContent.session.session_id -eq $editorSession.session_id) "Text-copy-once arc step $step lost execution_mode or which session answered."
+    }
+    Assert-True ($textOnceById[5783].result.structuredContent.value -eq "a") "The text-copy-once arc's read did not see the value it wrote."
+    Assert-True (-not $textOnceById[5790].result.isError) "main.tscn did not reopen after the economy arcs: $($textOnceById[5790].result.content[0].text)"
+    Write-Host "Text copy once: #776 arc $textOnceBytes bytes undeclared, against $undeclaredBytes with neither switch."
+    Assert-True (2 * $textOnceBytes -lt $undeclaredBytes) "--text-copy once with --session-descriptor once cost $textOnceBytes bytes against $undeclaredBytes, which is not under half (#1238)."
     # An asset the editor has never seen. Adding art is step one of building a
     # game and there was no way to do it through the surface: update_file
     # announces a file, it does not import one, so no .import was written and

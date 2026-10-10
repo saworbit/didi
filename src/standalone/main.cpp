@@ -63,6 +63,8 @@ static const char* kToolsHelpLine =
     "  --tools <profile>     Tools to list: full (default) or core, the tools agents reach";
 static const char* kSessionDescriptorHelpLine =
     "  --session-descriptor <mode>  Live answers carry the session: every (default) or once";
+static const char* kTextCopyHelpLine =
+    "  --text-copy <mode>    Tool answers repeat structuredContent as text: always (default) or once";
 static const char* kHelpHint = "Run didi --help for the supported options.";
 
 #if defined(_WIN32)
@@ -173,6 +175,7 @@ static int runDidi(const std::vector<std::string>& arguments) {
     auto ui_app_mode = didi::mcp::McpServer::UiAppMode::Auto;
     auto tool_profile = didi::mcp::ToolProfile::Full;
     auto session_descriptor = didi::mcp::SessionDescriptorMode::Every;
+    auto text_copy = didi::mcp::TextCopyMode::Always;
     std::string managed_editor, recovery_workspace;
     if (const auto env_yolo = environmentValue("DIDI_YOLO")) {
         const std::string& value = *env_yolo;
@@ -224,6 +227,7 @@ static int runDidi(const std::vector<std::string>& arguments) {
                       << kUiAppHelpLine << "\n"
                       << kToolsHelpLine << "\n"
                       << kSessionDescriptorHelpLine << "\n"
+                      << kTextCopyHelpLine << "\n"
                       << "  --dump-tool-manifest  Print the registered tool surface as JSON and exit\n"
                       << "  --managed-editor <exe>  Own a headless Godot editor with saved-file recovery\n"
                       << "  --recovery-workspace <new-dir>  Copy the project here; required with --managed-editor\n"
@@ -281,6 +285,17 @@ static int runDidi(const std::vector<std::string>& arguments) {
                 return 2;
             }
             session_descriptor = *parsed;
+        } else if (arg == "--text-copy") {
+            // For a host that reads structuredContent and cannot declare
+            // didi/responseEconomy: leave out the text that repeats it (#1238).
+            std::string mode;
+            if (!takeValue(arguments, i, arg, kTextCopyHelpLine, mode)) return 2;
+            const auto parsed = didi::mcp::parseTextCopyMode(mode);
+            if (!parsed.has_value()) {
+                refuse("--text-copy expects always or once, not " + mode, kTextCopyHelpLine);
+                return 2;
+            }
+            text_copy = *parsed;
         } else if (arg == "--yolo") {
             skip_confirmations = true;
         } else if (arg == "--log-level") {
@@ -378,6 +393,7 @@ static int runDidi(const std::vector<std::string>& arguments) {
     server.setUiAppMode(ui_app_mode);
     server.setToolProfile(tool_profile);
     server.setSessionDescriptorMode(session_descriptor);
+    server.setTextCopyMode(text_copy);
     // The dashboard's log page is the only place this process's own
     // diagnostics are readable: they otherwise go to standard error, which a
     // client that launched this server over stdio usually discards.

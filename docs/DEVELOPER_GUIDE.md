@@ -236,8 +236,9 @@ of it is `economizeToolResult` in `src/mcp/response_economy.cpp`, applied in
 one place: every `tools/call` answer in `McpServer::handleRequest` is encoded
 through its `encode` lambda, so a new return path there must use it too.
 Handlers never see the declaration and never need to. `--session-descriptor
-once` is the operator's way to the descriptor half for a client that declared
-nothing; it enters in `McpServer::responseEconomyFor`, beside the declarations.
+once` and `--text-copy once` are the operator's way to each half for a client
+that declared nothing; they enter in `McpServer::responseEconomyFor`, beside
+the declarations.
 
 ### Jobs
 

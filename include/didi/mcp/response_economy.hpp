@@ -59,14 +59,23 @@ ResponseEconomy declaredResponseEconomy(const json& capabilities);
 // No host Didi documents can declare an extension, so the declaration above
 // reaches only a client written for it. The descriptor half is safe to apply
 // for every client, because the reference is valid in both halves of a result
-// and runtime_get_session returns the rest. The text copy is not: only the
-// client knows which half it reads, so no switch turns that one on. `every` is
-// the default because API_SPECIFICATION.md promises the endpoint on every
-// successful result; `once` is the operator deciding their host does not need
-// it.
+// and runtime_get_session returns the rest. `every` is the default because
+// API_SPECIFICATION.md promises the endpoint on every successful result;
+// `once` is the operator deciding their host does not need it.
 enum class SessionDescriptorMode { Every, Once };
 std::optional<SessionDescriptorMode> parseSessionDescriptorMode(const std::string& value);
 const char* sessionDescriptorModeName(SessionDescriptorMode mode);
+
+// Whether a tool answer carries the text copy of its structuredContent, chosen
+// by the operator at startup with --text-copy (#1238). The text half is not
+// safe for every client the way the descriptor is: a host that reads only
+// `content` would get nothing. So `always` is the default, and `once` is the
+// operator deciding their host reads structuredContent. It leaves out exactly
+// what the declaration's textCopy leaves out, a text item that is byte for
+// byte the structuredContent, and a client that declares more still gets it.
+enum class TextCopyMode { Always, Once };
+std::optional<TextCopyMode> parseTextCopyMode(const std::string& value);
+const char* textCopyModeName(TextCopyMode mode);
 
 // This server's half of the negotiation, for initialize and server/discover.
 json responseEconomyDeclaration();
