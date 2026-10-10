@@ -13,6 +13,9 @@
 # - A second read of each game still measures the GPU. Switching render-time
 #   measurement off keeps the last times it took, and a second read that took
 #   those for the game's own would leave measurement on and its times frozen.
+# - perf_hitch.tscn stalls one process step a second. The verdict, judged on
+#   medians, keeps to its budget, and slow_frames names the stall as a cpu
+#   frame of about 400 ms (#1230).
 #
 # The fixtures grow their load until a frame takes three 60 Hz frames, so they
 # are bound on a machine with a GPU and on a software-rendered runner alike.
@@ -81,6 +84,27 @@ function Invoke-PerformanceVerdictsBlock {
                 [void](Send-DidiSession $session (Tool-Request $id "runtime_stop" @{ exit_code = 0 }) 30)
             }
         }
+
+        # One slow frame a second among quick ones. Headless, so the quick
+        # frames are far inside the budget on any machine.
+        $id++
+        $launch = Tool-Payload (Send-DidiSession $session (Tool-Request $id "runtime_launch" @{ scene_path = "res://perf_hitch.tscn"; timeout_seconds = 60; headless = $true; detach = $true }) 90)
+        Assert-True ($launch.session_published -eq $true) "The hitching fixture did not start: $($launch | ConvertTo-Json -Compress -Depth 6)"
+        try {
+            $id++
+            [void](Tool-Payload (Send-DidiSession $session (Tool-Request $id "runtime_attach_session" @{ session_id = [string]$launch.game_session.session_id })))
+            $id++
+            $verdict = (Tool-Payload (Send-DidiSession $session (Tool-Request $id "runtime_read_profiler" @{ duration_ms = 2500; sample_count = 5 }) 60)).verdict
+            $verdictText = $verdict | ConvertTo-Json -Compress -Depth 6
+            Assert-True ($verdict.bound -eq "none") "One 400 ms stall a second decided the hitching fixture's verdict: $verdictText"
+            $worst = @($verdict.slow_frames.worst)
+            Assert-True ($verdict.slow_frames.count -ge 1 -and $worst.Count -ge 1 -and $worst[0].bound -eq "cpu" -and $worst[0].process_ms -ge 300) "slow_frames did not name the 400 ms process stall as a cpu frame: $verdictText"
+            $seen += "a 400 ms stall named as a $($worst[0].frame_ms) ms cpu frame beside $($verdict.bound)"
+        } finally {
+            $id++
+            [void](Send-DidiSession $session (Tool-Request $id "runtime_stop" @{ exit_code = 0 }) 30)
+        }
+
     } finally {
         Stop-DidiSession $session
     }

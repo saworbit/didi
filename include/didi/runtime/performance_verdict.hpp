@@ -98,6 +98,8 @@ FrameBudget frameBudget(const FrameBudgetInputs& inputs);
 class FrameTimingLog {
 public:
     static constexpr size_t kDefaultCapacity = 2048;
+    // How many of the slowest frames are kept aside from the stride.
+    static constexpr size_t kSlowestKept = 16;
 
     FrameTimingLog() : FrameTimingLog(kDefaultCapacity) {}
     explicit FrameTimingLog(size_t capacity);
@@ -107,6 +109,9 @@ public:
     void skip() { ++m_skipped; }
 
     const std::vector<FrameTiming>& frames() const { return m_frames; }
+    // The slowest frames seen, slowest first, whichever the stride kept. A
+    // hitch is one frame, and halving the log would drop it half the time.
+    std::vector<FrameTiming> slowest() const;
     int64_t seen() const { return m_seen; }
     int64_t skipped() const { return m_skipped; }
 
@@ -116,12 +121,16 @@ private:
     int64_t m_seen{0};
     int64_t m_skipped{0};
     std::vector<FrameTiming> m_frames;
+    // A heap with the fastest of the slowest on top.
+    std::vector<FrameTiming> m_slowest;
 };
 
 // The verdict object runtime_read_profiler returns beside its samples:
 // bound (cpu, gpu, physics, contested, none or unknown), confidence, frames,
 // the budget and its basis, median_ms per part, physics_ticks_per_frame,
-// gpu_measured, and next, the thing to look at.
+// gpu_measured, slow_frames, and next, the thing to look at. The bound is
+// judged on medians, so one hitch does not decide it; slow_frames counts the
+// frames over twice the budget and judges the worst three on their own parts.
 json judgePerformance(const FrameTimingLog& log, const FrameBudget& budget);
 
 // The verdict when no frame could be timed at all.

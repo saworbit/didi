@@ -57,6 +57,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Added
 
+- `2026-10-10` `runtime_read_profiler`'s verdict carries `slow_frames`: frames over twice the budget, the worst three each judged on its own parts. [#1230](https://github.com/saworbit/didi/issues/1230)
 - `2026-10-09` `runtime_read_profiler` says whether the frame is bound on the CPU, the GPU or physics, and `self_check` proves it sees a known stall. [#1228](https://github.com/saworbit/didi/issues/1228) · [PR #1229](https://github.com/saworbit/didi/pull/1229)
 - `2026-10-09` `runtime_inject_input` takes a `window_focus` event, which runs a game's own focus-loss handlers and says it was synthetic. [#1197](https://github.com/saworbit/didi/issues/1197)
 - `2026-10-09` `scene_set_property` and `scene_instantiate_node` write `Dictionary` properties, typed ones included, and an int key reads back as its digits. [#1195](https://github.com/saworbit/didi/issues/1195)
@@ -120,6 +121,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Fixed
 
+- `2026-10-10` TOOL_REFERENCE gives the answer a profiler read gets when its game exits mid-window: `502` `live_session_ended`, not `504`. [#1230](https://github.com/saworbit/didi/issues/1230)
 - `2026-10-10` 26 bridge refusals that reached clients as a bare `conflict` carry a `data.code` and its fix, and a codeless `Error(4xx)` fails the refusal scan. [#1222](https://github.com/saworbit/didi/issues/1222) · [PR #1253](https://github.com/saworbit/didi/pull/1253)
 - `2026-10-10` A `project_run_tests` run whose output passed its 1 MiB cap answers `error` `output_truncated`, not `pass`: a load error could be in what was dropped. [#1243](https://github.com/saworbit/didi/issues/1243) · [PR #1248](https://github.com/saworbit/didi/pull/1248)
 - `2026-10-10` Two `project_run_tests` runs of one name at once each read their own report, in a directory of the run's own. [#1242](https://github.com/saworbit/didi/issues/1242) · [PR #1248](https://github.com/saworbit/didi/pull/1248)
