@@ -215,7 +215,8 @@ bounded read `truncated`, after an audit of all 54 reads' answers, which is
 what 11 of the 18 tools taking a bound needed, since they published no
 `outputSchema`. Between them, `--session-descriptor once` (#1034) and live
 resource reads (#1033) carry the descriptor half to hosts that cannot declare
-anything.
+anything, and `--text-copy once` (#1238) the text half, for a host the operator
+has seen read `structuredContent`.
 
 ### Q6. Next step in every answer
 

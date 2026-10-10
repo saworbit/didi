@@ -129,6 +129,15 @@ with `-t tests`. For simple test-owned stdio children, use
 finite timeout. Managed editor fixtures keep their process-tree ownership
 cleanup. Avoid shared project/session state in new real-wire fixtures.
 
+An `@tool` script in `tests/godot_smoke` runs inside the harness editor, so it
+must never leave a freed object reachable from its metadata or an exported
+property. The editor takes a scene out of the tree whenever its tab is left,
+and walks every node's property list when the tab comes back, to save its
+folding. `malicious_probe.gd` freed a node in `_exit_tree` and kept it in
+metadata, and on 4.5.1 that walk crashed the editor whenever the memory had
+been reused (#1227). Make such objects in `_enter_tree` and drop every reference
+to them before freeing them in `_exit_tree`.
+
 See the [2026-09-25 exploratory report](EXPLORATORY_MCP_INSTRUCTIONS.md) for
 measured latency, cross-version live coverage, harness fixes and outstanding
 issues. Its local results do not substitute for cross-platform CI.
@@ -345,6 +354,11 @@ harness-tested.
   fake game (`FakeGame`) frame by frame, so a step's frame accounting can be
   checked exactly. A step must not be able to reach a pass on its own:
   `ScenarioStep::provesSomething` decides what counts as an assertion.
+- What a test run records, and where its report goes, are
+  `offline::testRunSeeds` (GUT's `.gutconfig.json` and the tests it lists
+  included, #1246), `offline::testRunDirectory` (one directory per run, #1242)
+  and `offline::readTestReport` (read no further than the limit, #1247), all
+  tested without an engine.
 - The verdict for a test run is `offline::judgeTestRun`. Its fixtures in
   `tests/test_test_reports.cpp` are reports the real GUT 9.7.1 and GdUnit4
   6.2.2 wrote; keep new ones real rather than written by hand.
@@ -372,8 +386,14 @@ native-tested; the timing, harness-tested.
   the numbers in it are measurements, so take new ones from a probe rather than
   inventing them. A change to a threshold must keep the idle vsync game at
   `none` and the shader game at `gpu`.
+- Slow frames are judged beside the medians, never in place of them:
+  `FrameTimingLog` keeps its 16 slowest frames aside from the stride, so one
+  hitch is never dropped, and `slow_frames` judges the worst three on their own
+  parts by the same rule (#1230).
 - The live half is `tests/performance_verdicts.ps1` with
-  `tests/godot_smoke/perf_cpu.tscn`, `perf_gpu.tscn` and `perf_physics.tscn`.
+  `tests/godot_smoke/perf_cpu.tscn`, `perf_gpu.tscn`, `perf_physics.tscn`, and
+  `perf_hitch.tscn`, which stalls one process step a second and is read
+  headless.
   The fixtures grow their load until a frame takes three 60 Hz frames, because
   a load that binds a GPU machine leaves CI's software renderer idle, or the
   reverse. A fixture also has to hold its load once it says ready: a pile of
