@@ -5,9 +5,11 @@
 #include "didi/common/project_path.hpp"
 
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <regex>
 #include <sstream>
+#include <utility>
 
 namespace didi::setup {
 namespace {
@@ -482,8 +484,55 @@ std::string agentGuideBlock() {
            kGuideEnd + "\n";
 }
 
+namespace {
+
+// Where Claude Code keeps the user's own instructions. It reads them in every
+// project, and they do not count against AGENTS.md.
+std::optional<std::filesystem::path> userClaudeFile() {
+#if defined(_WIN32)
+    const wchar_t* home = _wgetenv(L"USERPROFILE");
+#else
+    const char* home = std::getenv("HOME");
+#endif
+    if (!home || !*home) return std::nullopt;
+    return std::filesystem::path(home) / ".claude" / "CLAUDE.md";
+}
+
+// The first of the files that stop Claude Code reading AGENTS.md, in one
+// directory.
+std::optional<std::filesystem::path> claudeFileIn(const std::filesystem::path& directory,
+                                                  const std::optional<std::filesystem::path>& user) {
+    for (const char* name : {"CLAUDE.md", ".claude/CLAUDE.md", "CLAUDE.local.md"}) {
+        std::error_code error;
+        const auto candidate = directory / paths::projectPathFromUtf8(name);
+        if (!std::filesystem::is_regular_file(candidate, error) || error) continue;
+        if (user && std::filesystem::equivalent(candidate, *user, error) && !error) continue;
+        return candidate;
+    }
+    return std::nullopt;
+}
+
+}  // namespace
+
+std::optional<std::filesystem::path> claudeFileAbove(const std::filesystem::path& project_root) {
+    std::error_code error;
+    auto directory = std::filesystem::absolute(project_root, error).lexically_normal();
+    if (error) return std::nullopt;
+    if (!directory.has_filename()) directory = directory.parent_path();
+    const auto user = userClaudeFile();
+    // A root is its own parent, which is where the walk stops.
+    for (auto parent = directory.parent_path(); !parent.empty();) {
+        if (auto found = claudeFileIn(parent, user)) return found;
+        auto next = parent.parent_path();
+        if (next == parent) break;
+        parent = std::move(next);
+    }
+    return std::nullopt;
+}
+
 std::vector<std::filesystem::path> agentGuideFiles(const std::filesystem::path& project_root,
-                                                   const std::vector<Client>& clients) {
+                                                   const std::vector<Client>& clients,
+                                                   const std::optional<std::filesystem::path>& claude_above) {
     std::vector<std::filesystem::path> files;
     const auto add = [&files](const std::filesystem::path& file) {
         for (const auto& existing : files) {
@@ -497,18 +546,12 @@ std::vector<std::filesystem::path> agentGuideFiles(const std::filesystem::path& 
             any_other = true;
             continue;
         }
-        // Each of these stops Claude Code reading AGENTS.md. A CLAUDE.md in a
-        // directory above the project does too; that one is not the project's
-        // to write.
-        std::optional<std::filesystem::path> claude;
-        for (const char* name : {"CLAUDE.md", ".claude/CLAUDE.md", "CLAUDE.local.md"}) {
-            std::error_code error;
-            const auto candidate = project_root / paths::projectPathFromUtf8(name);
-            if (std::filesystem::is_regular_file(candidate, error) && !error) {
-                claude = candidate;
-                break;
-            }
-        }
+        // Each of these stops Claude Code reading AGENTS.md, and so does one in
+        // any directory above the project. That one is not the project's to
+        // write, so the guide goes into a CLAUDE.md here, which Claude Code reads
+        // beside it (#1144).
+        auto claude = claudeFileIn(project_root, userClaudeFile());
+        if (!claude && claude_above) claude = project_root / "CLAUDE.md";
         add(claude.value_or(project_root / "AGENTS.md"));
     }
     if (any_other) add(project_root / "AGENTS.md");

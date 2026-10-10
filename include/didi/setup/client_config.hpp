@@ -68,11 +68,19 @@ inline constexpr const char* kGuideBegin = "<!-- BEGIN didi -->";
 inline constexpr const char* kGuideEnd = "<!-- END didi -->";
 std::string agentGuideBlock();
 
+// The nearest CLAUDE.md, .claude/CLAUDE.md or CLAUDE.local.md in a directory
+// above the project. Claude Code reads AGENTS.md only when there is none in
+// the project or above it. The user's own ~/.claude/CLAUDE.md does not count.
+std::optional<std::filesystem::path> claudeFileAbove(const std::filesystem::path& project_root);
+
 // The instructions file each named client reads. AGENTS.md for every one of
-// them, except that Claude Code reads AGENTS.md only when the project has no
-// CLAUDE.md of its own, so beside one the guide goes there instead.
+// them, except Claude Code: beside the project's own CLAUDE.md the guide goes
+// there, and with one only above the project it goes into a new CLAUDE.md
+// here, since Claude Code then skips AGENTS.md and the one above is not the
+// project's to write.
 std::vector<std::filesystem::path> agentGuideFiles(const std::filesystem::path& project_root,
-                                                   const std::vector<Client>& clients);
+                                                   const std::vector<Client>& clients,
+                                                   const std::optional<std::filesystem::path>& claude_above);
 
 Result<FileAction> writeAgentGuide(const std::filesystem::path& file);
 bool hasAgentGuide(const std::filesystem::path& file);

@@ -132,7 +132,10 @@ What `setup` does, in order, and what stops it:
 6. Writes the agent guide between `<!-- BEGIN didi -->` and `<!-- END didi -->`
    into `AGENTS.md`, or into the project's `CLAUDE.md`, `.claude/CLAUDE.md` or
    `CLAUDE.local.md` when Claude Code is named and one exists, since Claude Code
-   then reads that file and not `AGENTS.md`. A rerun replaces only the block.
+   then reads that file and not `AGENTS.md`. One in a directory above the
+   project stops it reading `AGENTS.md` too, so then the guide goes into a new
+   `CLAUDE.md` in the project. Your own `~/.claude/CLAUDE.md` does not count.
+   A rerun replaces only the block.
    New files are UTF-8 with no byte-order mark; an existing file keeps its own
    mark and line endings.
 7. With `--godot`, starts the editor and waits for it to publish a session,
