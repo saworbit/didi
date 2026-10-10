@@ -30,6 +30,9 @@ func _ready() -> void:
 		$RuntimeChild/Nested.add_child(child)
 
 func _exit_tree() -> void:
+	# The metadata goes before the node it names, so nothing reads a freed node
+	# from it (#1227).
+	remove_meta("detached_node")
 	if is_instance_valid(detached_probe):
 		detached_probe.free()
 
