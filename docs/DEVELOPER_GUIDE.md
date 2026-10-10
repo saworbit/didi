@@ -308,7 +308,10 @@ was there (#1184), and fails when the run stops meeting one of them. Answer a
 failure with `CallToolResult::errorJson`, `fromError` or `notConnected`, never
 plain text, which has no `error.data` to carry a remedy. The constructor that
 makes plain text is private, so a new one does not compile, and the harness
-fails a plain-text failure it sees. `RepeatedFailures`, in
+fails a plain-text failure it sees. In the extension, answer a helper's error
+with `errorJson(e)`, never `errorJson(e.code, e.message)`, which drops
+`e.data` and the `data.code` in it; `tests/test_refusal_codes.py` fails the
+two-argument form in all three bridge files (#1267). `RepeatedFailures`, in
 `src/mcp/repeated_failures.cpp`, marks the second identical failure of a call on
 its way out of `McpServer::handleRequest`; it keys on the arguments as sent, so
 nothing a handler does changes what counts as the same call.

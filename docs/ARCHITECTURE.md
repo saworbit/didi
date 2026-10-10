@@ -140,6 +140,7 @@ Godot's `SceneTree`, `EditorInterface`, and `RenderingServer` are **not thread-s
    - Windows Named Pipes use SDDL grants for the owning SID (`OW`) and local Administrators (`BA`); this is access-controlled but not strictly owner-only.
    - Descriptor conversion is fail-closed: the server reports failed startup before creating a pipe if the SDDL cannot be applied.
    - Phase 6 adds a stable project key to each process-unique, token-authenticated endpoint and holds an OS-backed lock for the selected MCP client. POSIX defaults are owner-only; Windows grants the owning SID and local administrators. This is a local attachment boundary, not remote authentication.
+5. **No Call Into a Freed Object**: Godot hands an extension the pointer a Variant holds without asking whether the object still exists, so a value read from project state can name a freed node, such as an enemy's target after the target was freed. `objectFromVariant`, in the editor bridge and in the expression sandbox, asks the engine first (`variant_booleanize`, which goes through ObjectDB) and answers a freed object as null, and every bridge path that turns a value into an object goes through it. Nothing calls into freed memory, which crashed the editor once the memory was reused and read garbage until then. `scene_get_property` says `freed: true` beside the null (#1266).
 
 ---
 

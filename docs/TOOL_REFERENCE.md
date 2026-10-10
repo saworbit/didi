@@ -325,7 +325,7 @@ Each answer also says what the class declares about the property:
 - `type`: the declared Godot type, which is what a write is checked against. A property that declares none says what it holds, or `Variant` when it holds nothing.
 - `engine_constraint`, when the engine declares one about the values the property takes: `{kind, hint_string}`, the shape `not_applied` uses, with `kind` one of `range`, `enum`, `enum_suggestion` and `resource_type`. A Node2D's `position` carries its `range`, and a theme override slot its `resource_type`, such as `StyleBox`.
 - `holds`: the class of the resource a slot holds, so a slot holding an embedded StyleBoxFlat says so.
-- `freed: true`, when the property holds an object that has been freed, such as a target node freed after it was set. Godot prints that value as `<Freed Object>`; it reads `null`, and nothing calls into it.
+- `freed: true`, when the property holds an object that has been freed, such as a target node freed after it was set. Godot prints that value as `<Freed Object>`; it reads `null`, and nothing calls into it. One inside an array or a dictionary reads `null` too, with no marker.
 - `resource_file`: when the property is inside a resource kept in another file, that file.
 
 A shader parameter the material does not override reads `null` by path on every supported line; `shader_list_uniforms` reads the shader's declared default for it.
