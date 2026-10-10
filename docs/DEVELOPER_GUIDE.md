@@ -83,6 +83,15 @@ didi/
 └── demo/                 # Reference Godot 4 test project
 ```
 
+Includes between those folders go one way. `common` is the bottom; `offline`
+may include `common`; `runtime` may include both; `mcp` and `tools` include each
+other and everything below them; `gdextension` includes `common`, `offline` and
+`runtime`, never the server; `setup` and `standalone` sit on top.
+`tests/test_include_layers.py` holds the table and fails on an include that goes
+the other way. A file under `src/gdextension/` may still be built into
+`didi_core` so the native suite can test it, as long as nothing below the
+extension includes it.
+
 ---
 
 ## 🧪 Automated Test Suite
@@ -629,7 +638,8 @@ A tool that reads or writes a property of a node, or of a resource the node hold
 - `src/gdextension/session_host.cpp`: bind-before-publish editor/game endpoint lifecycle, private descriptor generation, authentication stripping, and safe no-replace descriptor retirement.
 - `src/gdextension/runtime_log.cpp`: bounded 2,000-record ring, UTF-8-safe 16 KiB messages, 64 KiB details, cursor gaps, filtering, and logger sink mirroring.
 - `src/gdextension/runtime_bridge.cpp`: SceneTree resolution, UTF-8 field limits, 10,000-node/256 KiB tree budgets, explicit truncation, pause verification, exact one-active-step state machine, shutdown cancellation, and stop requests.
-- `src/gdextension/expression_sandbox.cpp`: tokenizer/policy, receiver-aware call validation, ClassDB-prebound native scalar property reads, context confinement, cooperative deadlines, and bounded Variant-to-JSON conversion.
+- `src/runtime/expression_policy.cpp`: tokenizer/policy and receiver-aware call validation, which the server and the bridge both apply, with no Godot calls.
+- `src/gdextension/expression_sandbox.cpp`: ClassDB-prebound native scalar property reads, context confinement, cooperative deadlines, and bounded Variant-to-JSON conversion.
 
 The standalone router starts detached, then may auto-attach on first availability only to an unambiguous live canonical-project match: the sole session, or a unique editor among games. Preserve the tests that keep same-kind ambiguity detached, roll back failed handshakes, disable auto-selection after explicit attach/detach or quarantine, and make `runtime_get_session` revalidate the complete token-free identity. Keep local session management distinct from live engine calls. Never log or return descriptor tokens or full submitted expression source.
 
@@ -759,7 +769,7 @@ its contract in the same pull request.
 
 - `src/tools/deep_domain_tools.cpp` and `src/offline/deep_domain_support.cpp`: bounded C#/shader diagnostics, public export-preset parsing, guarded export, deterministic MeshLibrary generation, and live UI hit-test registration/dispatch.
 - `include/didi/common/project_path.hpp`: explicit project-root validation, canonical containment, and stable 16-hex project endpoint keys.
-- `src/runtime/session_lock.cpp`: owner-only cross-platform OS locks and `423` exclusion for a second MCP owner.
+- `src/common/file_lock.cpp`: owner-only cross-platform OS locks and `423` exclusion for a second MCP owner.
 - `src/mcp/mutation_safety.cpp`: mutation classification, schema decoration, handler-free previews, exact context binding, 120-second expiry, and single-use confirmation storage.
 - `tests/test_phase5.cpp`, `tests/test_phase6.cpp`, the `tests/test_phase7*.cpp` suites, and `tests/run_godot_integration.ps1`: deep-domain contracts, project/lock/preview red-team cases, Phase 7 transport and validation contracts, and disposable Phases 1–7 Godot workflows.
 
