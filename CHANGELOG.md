@@ -123,6 +123,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Fixed
 
+- `2026-10-10` A `make_unique` write whose setter refuses the copy no longer changes the resource it shares, and the answer says the node kept its own. [#1245](https://github.com/saworbit/didi/issues/1245)
 - `2026-10-10` TOOL_REFERENCE gives the answer a profiler read gets when its game exits mid-window: `502` `live_session_ended`, not `504`. [#1230](https://github.com/saworbit/didi/issues/1230) · [PR #1258](https://github.com/saworbit/didi/pull/1258)
 - `2026-10-10` 26 bridge refusals that reached clients as a bare `conflict` carry a `data.code` and its fix, and a codeless `Error(4xx)` fails the refusal scan. [#1222](https://github.com/saworbit/didi/issues/1222) · [PR #1253](https://github.com/saworbit/didi/pull/1253)
 - `2026-10-10` A `project_run_tests` run whose output passed its 1 MiB cap answers `error` `output_truncated`, not `pass`: a load error could be in what was dropped. [#1243](https://github.com/saworbit/didi/issues/1243) · [PR #1248](https://github.com/saworbit/didi/pull/1248)

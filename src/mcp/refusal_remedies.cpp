@@ -444,6 +444,10 @@ const std::map<std::string, Rule>& rules() {
         {"camera_frustum_undefined", [](const Refusal&) { return field("camera"); }},
         {"camera_projection_unsupported", [](const Refusal&) { return field("camera"); }},
         {"no_aspect_ratio", [](const Refusal&) { return field("camera"); }},
+        {"make_unique_refused", [](const Refusal&) {
+            return noRemedy("The node's own setter decides what it holds; change the resource where "
+                            "the setter takes it from.");
+        }},
         {"no_viewport_size", [](const Refusal&) {
             return noRemedy("The game window shows its viewport at no size, as while it is minimized; "
                             "restore it, then call again.");
