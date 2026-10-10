@@ -499,6 +499,56 @@ Result<std::vector<std::string>> resolveTestPaths(const TestRunRequest& request,
                   "paths");
 }
 
+std::vector<std::string> testRunSeeds(const fs::path& project_root, const std::vector<std::string>& test_paths,
+                                      TestFramework framework) {
+    std::vector<std::string> seeds;
+    std::vector<std::string> roots = test_paths;
+    if (framework == TestFramework::gut) {
+        std::ifstream in(project_root / ".gutconfig.json", std::ios::binary);
+        const auto config = in ? json::parse(in, nullptr, false) : json();
+        if (config.is_object()) {
+            seeds.push_back("res://.gutconfig.json");
+            const auto listed = [&](const char* key) {
+                const auto found = config.find(key);
+                if (found == config.end() || !found->is_array()) return;
+                for (const auto& entry : *found) {
+                    if (entry.is_string()) roots.push_back(entry.get<std::string>());
+                }
+            };
+            // GUT's command line names directories in place of the file's.
+            if (test_paths.empty()) listed("dirs");
+            listed("tests");
+        }
+    }
+    for (const auto& path : roots) {
+        if (path.rfind("res://", 0) != 0) continue;
+        const auto target = project_root / paths::projectPathFromUtf8(path.substr(6));
+        std::error_code error;
+        if (fs::is_regular_file(target, error)) {
+            seeds.push_back(path);
+            continue;
+        }
+        for (fs::recursive_directory_iterator it(target, fs::directory_options::skip_permission_denied, error), end;
+             !error && it != end && seeds.size() < 512; it.increment(error)) {
+            if (it->path().extension() != ".gd") continue;
+            const auto relative = it->path().lexically_relative(project_root);
+            seeds.push_back("res://" + paths::projectPathToUtf8(relative.generic_string()));
+        }
+    }
+    std::sort(seeds.begin(), seeds.end());
+    seeds.erase(std::unique(seeds.begin(), seeds.end()), seeds.end());
+    return seeds;
+}
+
+std::optional<std::string> readTestReport(const fs::path& file, size_t limit) {
+    std::ifstream in(file, std::ios::binary);
+    if (!in) return std::nullopt;
+    std::string text(limit + 1, '\0');
+    in.read(text.data(), static_cast<std::streamsize>(text.size()));
+    text.resize(static_cast<size_t>(in.gcount()));
+    return text;
+}
+
 Result<std::string> newTestRunId(int64_t started_at_ms) {
     auto suffix = security::secureRandomHex(6);
     if (suffix.isErr()) return suffix.error();

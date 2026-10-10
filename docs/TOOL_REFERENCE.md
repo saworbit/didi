@@ -1948,7 +1948,7 @@ GUT is given `-gexit`, `-gdir` and `-ginclude_subdirs` for directories, `-gtest`
 
 A run that did not pass answers `isError: true` with the report and an `error` beside it: `422 tests_failed`, `422 no_tests` with `field: "paths"`, `422 scripts_did_not_load`, `422 output_truncated` with `field: "paths"`, `409 project_not_imported`, `504 timeout` with `retry_with` a longer `timeout_seconds`.
 
-Like `runtime_run_scenario`, the answer records the SHA-256 of `project.godot`, the autoloads, the test scripts and every script they reach, through `res://` literals and the `class_name` identifiers they use; nothing under `addons/` is followed. [`godot://project/scenarios`](RESOURCES_AND_PROMPTS.md#godotprojectscenarios) lists the run with `kind: "tests"` and marks it `stale` when one of those files changes.
+Like `runtime_run_scenario`, the answer records the SHA-256 of `project.godot`, the autoloads, the test scripts and every script they reach, through `res://` literals and the `class_name` identifiers they use; nothing under `addons/` is followed. For GUT it also records `.gutconfig.json` and the `tests` it lists, because GUT runs those whatever paths were given (#1246). [`godot://project/scenarios`](RESOURCES_AND_PROMPTS.md#godotprojectscenarios) lists the run with `kind: "tests"` and marks it `stale` when one of those files changes.
 
 It runs the project's own test code, which can do anything project code can, so it carries `openWorldHint: true`, as `csharp_check_build` does.
 

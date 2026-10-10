@@ -123,6 +123,8 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Fixed
 
+- `2026-10-10` A test report over 16 MiB is refused after reading 16 MiB of it, not after reading all of it. [#1247](https://github.com/saworbit/didi/issues/1247)
+- `2026-10-10` A GUT run records `.gutconfig.json` and the tests it lists, so its pass goes stale when one of them changes. [#1246](https://github.com/saworbit/didi/issues/1246)
 - `2026-10-10` A `make_unique` write whose setter refuses the copy no longer changes the resource it shares, and the answer says the node kept its own. [#1245](https://github.com/saworbit/didi/issues/1245) · [PR #1261](https://github.com/saworbit/didi/pull/1261)
 - `2026-10-10` TOOL_REFERENCE gives the answer a profiler read gets when its game exits mid-window: `502` `live_session_ended`, not `504`. [#1230](https://github.com/saworbit/didi/issues/1230) · [PR #1258](https://github.com/saworbit/didi/pull/1258)
 - `2026-10-10` 26 bridge refusals that reached clients as a bare `conflict` carry a `data.code` and its fix, and a codeless `Error(4xx)` fails the refusal scan. [#1222](https://github.com/saworbit/didi/issues/1222) · [PR #1253](https://github.com/saworbit/didi/pull/1253)

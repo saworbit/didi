@@ -949,7 +949,9 @@ ScenarioFiles collectProofFiles(const fs::path& project_root, const std::vector<
         const auto path = pending.front();
         pending.pop_front();
         if (!seen.insert(path).second) continue;
-        if (path != "project.godot" && !followed(path)) continue;
+        // A file the run names is recorded whatever it is, a .gutconfig.json
+        // included; what it reaches is followed only into code and scenes.
+        if (path != "project.godot" && !seeded.count(path) && !followed(path)) continue;
         // What a run names is recorded wherever it is; what those files reach
         // under addons/ is the framework's or a plugin's, not the project's.
         if (!seeded.count(path) && path.rfind("res://addons/", 0) == 0) continue;
