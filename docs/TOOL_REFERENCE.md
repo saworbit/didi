@@ -1454,6 +1454,8 @@ Each invariant takes a `kind`:
 
 `outcome` is `violated`, `held`, or `inconclusive`. The third is not a failure mode of the tool: an invariant that never produced a reading, because its context node was missing or its expression failed, is reported with zero readings and makes the run inconclusive. A condition nobody could measure is not a condition that stayed true.
 
+`paused` is whether the game's tree is paused when the watch ends, read from the tree: `true` after a pause on a violation, and `true` for a game that was paused before the watch began (#1020).
+
 An invariant with no bound at all is refused rather than accepted, because it could never be violated and would report as held on nothing.
 
 Evaluating expressions costs engine time inside the window being measured. A frame-rate invariant watched alongside several expression invariants is measuring a game that is also being watched.
@@ -1475,6 +1477,8 @@ This is the pairing `runtime_inject_input` and `runtime_watch_invariants` cannot
 - `seed` (`integer`, default `1`).
 
 `stopped_reason` is `duration_elapsed`, `stuck`, or `engine_error`. Each stuck interval carries `started_ms`, `ended_ms`, `duration_ms` and the `action_held` that was down for it, because an interval that does not say what was being pressed does not say what provoked it.
+
+`paused` is whether the game's tree is paused when the run ends, read from the tree rather than taken from the run's own pause call (#1020).
 
 **Input actions, not movement.** Nothing outside a project's own controller knows how that project moves its player. Setting a position directly would move the sprite without running any of that, which proves nothing about whether the game can be played. Pressing the project's own actions runs the project's own code. `nav_query_path` and the `spatial_query_*` family are how an agent decides where to go; this is how it gets there.
 

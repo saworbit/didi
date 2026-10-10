@@ -179,8 +179,10 @@
       "issue": 1020
     },
     "runtime_explore_scene": {
-      "exempt": "A timed exploration of a running game, and no case compares its answer with an independent read.",
-      "issue": 1020
+      "observed": [
+        "paused"
+      ],
+      "witness": "runtime_get_tree's paused"
     },
     "runtime_inject_input": {
       "observed": [
@@ -217,12 +219,14 @@
       "witness": "runtime_get_tree's paused"
     },
     "runtime_stop": {
-      "exempt": "Ends the game the rest of the harness uses. The stop block checks the exit, not the answer's fields.",
-      "issue": 1020
+      "exempt": "The game answers before it exits, because quitting first can end the process before the answer is written, so the answer holds no state after the stop. shutdown_requested and exit_code describe the request. The stop block checks the exit itself. Decided in #1020.",
+      "permanent": true
     },
     "runtime_watch_invariants": {
-      "exempt": "A timed watch of a running game, and no case compares its answer with an independent read.",
-      "issue": 1020
+      "observed": [
+        "paused"
+      ],
+      "witness": "runtime_get_tree's paused"
     },
     "scene_add_to_group": {
       "observed": [
