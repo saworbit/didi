@@ -412,12 +412,16 @@ native-tested; the timing, harness-tested.
   `tests/godot_smoke/perf_cpu.tscn`, `perf_gpu.tscn`, `perf_physics.tscn`, and
   `perf_hitch.tscn`, which stalls one process step a second and is read
   headless.
-  The fixtures grow their load until a frame takes three 60 Hz frames, because
-  a load that binds a GPU machine leaves CI's software renderer idle, or the
-  reverse. A fixture also has to hold its load once it says ready: a pile of
-  bodies allowed to sleep fell from 170 ms frames to 21 ms within fifteen
-  seconds, and CI read it as keeping to its budget, so `perf_physics.tscn`'s
-  bodies never sleep. Assert verdicts there, never timings.
+  The fixtures grow their load until the median frame takes three 60 Hz
+  frames, because a load that binds a GPU machine leaves CI's software
+  renderer idle, or the reverse. The median, because the verdict judges it: a
+  physics load that could still catch up passed on its mean frame while CI
+  read its median as within budget, so `perf_physics.tscn` also adds a
+  quarter more bodies once the median holds (#1276). A fixture also has to
+  hold its load once it says ready: a pile of bodies allowed to sleep fell
+  from 170 ms frames to 21 ms within fifteen seconds, and CI read it as
+  keeping to its budget, so `perf_physics.tscn`'s bodies never sleep. Assert
+  verdicts there, never timings.
 - The verdict is in `$defs.performance_verdict` of
   `schemas/phase7/runtime_read_profiler.schema.json`, and
   `tools/phase7_success.py` holds every live answer to it.
@@ -633,7 +637,7 @@ A tool that reads or writes a property of a node, or of a resource the node hold
 
 - `src/runtime/checkpoint_store.cpp`: bounded saved-file inventory, manifest/hash validation, checkpoint publication, retention, and restore staging.
 - `src/runtime/managed_process.cpp`: owned-child launch, process identity, exit observation, logs, and termination.
-- `src/runtime/managed_recovery.cpp`: copied-project lifecycle, readiness, pre/post checkpoints, reconciliation latch, one automatic restart, and preserved-project restore.
+- `src/runtime/managed_recovery.cpp`: copied-project lifecycle, readiness, pre/post checkpoints, reconciliation latch, one automatic restart, and preserved-project restore. It hands back a `RecoveryNote` of plain JSON, and `withRecoveryNote` in `src/mcp/tool_registry.cpp` puts it on the answer.
 - `src/runtime/session_client.cpp`: descriptor discovery, opened-handle validation, cross-platform PID/process-start identity, transactional handshake on a finite deadline, token insertion, and local route state.
 - `src/gdextension/session_host.cpp`: bind-before-publish editor/game endpoint lifecycle, private descriptor generation, authentication stripping, and safe no-replace descriptor retirement.
 - `src/gdextension/runtime_log.cpp`: bounded 2,000-record ring, UTF-8-safe 16 KiB messages, 64 KiB details, cursor gaps, filtering, and logger sink mirroring.

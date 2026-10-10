@@ -46,7 +46,8 @@ The `README.md` inside the archive has the notes for that platform. On macOS, cl
 >
 > It copies the addon that matches this `didi` into the project, enables it, writes the client's
 > configuration (`--client` takes `claude-code`, `cursor`, `vscode`, `codex` or `all`) and an
-> agent guide in `AGENTS.md`, then starts the editor and waits until it answers. Run it again
+> agent guide in `AGENTS.md`, or in a `CLAUDE.md` where Claude Code would skip `AGENTS.md`, then
+> starts the editor and waits until it answers. Run it again
 > after an upgrade: it replaces an older addon, and refuses to replace a newer one without
 > `--replace-addon`. `didi doctor --project D:/my_game` checks all of it from outside the
 > editor. The rest of this step is the same thing by hand.
