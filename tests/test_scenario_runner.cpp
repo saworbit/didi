@@ -2,11 +2,13 @@
 #include "didi/common/sha256.hpp"
 #include "didi/mcp/tool_registry.hpp"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -461,6 +463,57 @@ void test_wait_until_waits_for_its_condition_and_fails_when_it_never_holds() {
     ASSERT_EQ(failed.report["steps"][1]["outcome"], "not_run");
 }
 
+// Driver calls before the wait_until polls: eval, press, step 1, release.
+// Its first poll is eval (call 5) and then step 1 (call 6), and the player is
+// in the air for about twenty frames after that.
+json jumpThenWaitForTheFloor() {
+    json spec = scenario(json::array({{{"kind", "assert"}, {"expression", kOnFloor}},
+                                      {{"kind", "press"}, {"action", "jump"}, {"frames", 1}},
+                                      {{"kind", "wait_until"}, {"expression", kOnFloor}, {"frames", 60}}}));
+    spec["timeout_seconds"] = 5;
+    return spec;
+}
+
+size_t framesStepped(const FakeGame& game) {
+    return static_cast<size_t>(std::count(game.log.begin(), game.log.end(), "step 1"));
+}
+
+void test_a_cancel_or_deadline_stops_a_step_that_is_already_running() {
+    {   // Cancelled during the polls: the poll that saw it is the last.
+        FakeGame game;
+        game.cancel_after_calls = 6;
+        const auto outcome = runScenario(parsed(jumpThenWaitForTheFloor()), game);
+        ASSERT_EQ(outcome.verdict, "error");
+        ASSERT_EQ(outcome.failure->stage, "cancelled");
+        ASSERT_EQ(outcome.failure->step, std::optional<size_t>(2));
+        ASSERT_EQ(outcome.report["steps"][2]["outcome"], "interrupted");
+        ASSERT_EQ(framesStepped(game), 2u);
+        ASSERT_EQ(game.teardowns, 1);
+    }
+    {   // The deadline passed during the last step.
+        FakeGame game;
+        game.ms_per_call = 1000;
+        const auto outcome = runScenario(parsed(jumpThenWaitForTheFloor()), game);
+        ASSERT_EQ(outcome.verdict, "error");
+        ASSERT_EQ(outcome.failure->stage, "timeout");
+        ASSERT_EQ(outcome.report["steps"][2]["outcome"], "interrupted");
+        ASSERT_EQ(framesStepped(game), 2u);
+        ASSERT_EQ(game.teardowns, 1);
+    }
+    {   // A wait of one chunk is checked after it too, not only between chunks.
+        FakeGame game;
+        game.ms_per_call = 3000;
+        json spec = scenario(json::array({{{"kind", "assert"}, {"expression", kOnFloor}},
+                                          {{"kind", "wait"}, {"frames", 60}}}));
+        spec["timeout_seconds"] = 5;
+        const auto outcome = runScenario(parsed(spec), game);
+        ASSERT_EQ(outcome.verdict, "error");
+        ASSERT_EQ(outcome.failure->stage, "timeout");
+        ASSERT_EQ(outcome.report["steps"][1]["outcome"], "interrupted");
+        ASSERT_EQ(game.teardowns, 1);
+    }
+}
+
 void test_output_assertions_page_and_refuse_to_prove_an_absence_over_a_gap() {
     {   // Found on a later page.
         FakeGame game;
@@ -659,6 +712,8 @@ struct RegisterScenarioRunnerTests {
         registerTest("ScenarioRunner.ValuesAreJudgedStrictly", test_values_are_judged_strictly);
         registerTest("ScenarioRunner.WaitUntil",
                      test_wait_until_waits_for_its_condition_and_fails_when_it_never_holds);
+        registerTest("ScenarioRunner.CancelOrDeadlineStopsARunningStep",
+                     test_a_cancel_or_deadline_stops_a_step_that_is_already_running);
         registerTest("ScenarioRunner.OutputAssertions",
                      test_output_assertions_page_and_refuse_to_prove_an_absence_over_a_gap);
         registerTest("ScenarioRunner.RecordNamesWhatRan",
