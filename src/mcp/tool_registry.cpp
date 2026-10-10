@@ -5549,15 +5549,16 @@ void ToolRegistry::registerAllDefaultTools() {
     {
         ToolDefinition t;
         t.name = "ui_hit_test";
-        t.description = "Hit-tests live Control nodes at a viewport-space point without injecting input. "
-                        "Editor or game: the edited scene in an editor, the running scene in a game.";
+        t.description = "Hit-tests live Control nodes at a point without injecting input, in an editor's "
+                        "edited scene or a game's running one.";
         t.inputSchema = {{"type", "object"}, {"properties", {
             {"point", {{"type", "object"}, {"properties", {
                 {"x", {{"type", "number"}}}, {"y", {{"type", "number"}}}
             }}, {"required", {"x", "y"}}}},
             {"root_path", {{"type", "string"}, {"default", "/root"}}},
             {"include_mouse_filter_ignore", {{"type", "boolean"}, {"default", false}}},
-            {"max_results", {{"type", "integer"}, {"minimum", 1}, {"maximum", 256}, {"default", 32}}}
+            {"max_results", {{"type", "integer"}, {"minimum", 1}, {"maximum", 256}, {"default", 32}}},
+            {"space", {{"type", "string"}, {"enum", {"viewport", "screen"}}, {"default", "viewport"}}}
         }}, {"required", {"point"}}};
         t.handler = [this](const json& args) { return handleUiHitTest(args, m_ipcClient); };
         registerTool(std::move(t));

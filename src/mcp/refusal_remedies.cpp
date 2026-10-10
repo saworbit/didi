@@ -444,6 +444,10 @@ const std::map<std::string, Rule>& rules() {
         {"camera_frustum_undefined", [](const Refusal&) { return field("camera"); }},
         {"camera_projection_unsupported", [](const Refusal&) { return field("camera"); }},
         {"no_aspect_ratio", [](const Refusal&) { return field("camera"); }},
+        {"no_viewport_size", [](const Refusal&) {
+            return noRemedy("The game window shows its viewport at no size, as while it is minimized; "
+                            "restore it, then call again.");
+        }},
         {"no_camera_far_plane", [](const Refusal&) { return field("depth_far"); }},
         {"preview_dimension_mismatch", [](const Refusal&) { return field("previews"); }},
         {"too_many_open_scenes", [](const Refusal&) {
