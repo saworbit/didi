@@ -375,7 +375,10 @@ native-tested; the timing, harness-tested.
   `tests/godot_smoke/perf_cpu.tscn`, `perf_gpu.tscn` and `perf_physics.tscn`.
   The fixtures grow their load until a frame takes three 60 Hz frames, because
   a load that binds a GPU machine leaves CI's software renderer idle, or the
-  reverse. Assert verdicts there, never timings.
+  reverse. A fixture also has to hold its load once it says ready: a pile of
+  bodies allowed to sleep fell from 170 ms frames to 21 ms within fifteen
+  seconds, and CI read it as keeping to its budget, so `perf_physics.tscn`'s
+  bodies never sleep. Assert verdicts there, never timings.
 - The verdict is in `$defs.performance_verdict` of
   `schemas/phase7/runtime_read_profiler.schema.json`, and
   `tools/phase7_success.py` holds every live answer to it.
