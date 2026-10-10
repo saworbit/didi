@@ -9,6 +9,7 @@
 // thread, and the server's job path against a scripted editor, an older bridge
 // and a read that goes missing.
 
+#include "didi/offline/resource_indexer.hpp"
 #include "didi/common/ipc_channel.hpp"
 #include "didi/gdextension/editor_hook.hpp"
 #include "didi/gdextension/runtime_request_router.hpp"
@@ -525,8 +526,12 @@ void test_a_reload_job_waits_for_the_scan_and_answers_its_repeat() {
     ASSERT_EQ(repeat.result["_meta"]["didi"]["job"]["job_id"], job_id);
     ASSERT_EQ(editor->count("editor.reloadProject"), 1u);
 
+    // A reload without request_id drops the server's own index too (#1250).
+    const auto indexed = didi::offline::ResourceIndexer::sharedIndex(".");
+    ASSERT_TRUE(indexed == didi::offline::ResourceIndexer::sharedIndex("."));
     const auto plain = callReload(server, 22, json::object());
     ASSERT_FALSE(plain.result.value("isError", false));
+    ASSERT_TRUE(indexed != didi::offline::ResourceIndexer::sharedIndex("."));
     ASSERT_EQ(textPayload(plain)["scan_applied"], true);
     ASSERT_EQ(editor->count("editor.reloadProject"), 2u);
     ASSERT_EQ(editor->count("editor.reloadStatus"), 4u);

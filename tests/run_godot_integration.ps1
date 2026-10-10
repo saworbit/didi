@@ -2989,6 +2989,10 @@ try {
         # A plain method, and the value it returned.
         (Tool-Request 2405 "scene_call_method" @{ target_node = "/root/SmokeRoot/CallProbe"; method_name = "add_numbers"; arguments = @(2, 3) }),
         (Tool-Request 2406 "scene_call_method" @{ target_node = "/root/SmokeRoot/CallProbe"; method_name = "describe"; arguments = @() }),
+        # Trailing parameters with defaults may be left out (#1251).
+        (Tool-Request 2429 "scene_call_method" @{ target_node = "/root/SmokeRoot/CallProbe"; method_name = "configure"; arguments = @("Main") }),
+        (Tool-Request 2434 "scene_call_method" @{ target_node = "/root/SmokeRoot/CallProbe"; method_name = "configure"; arguments = @("Main", 1024) }),
+        (Tool-Request 2435 "scene_call_method" @{ target_node = "/root/SmokeRoot/CallProbe"; method_name = "configure"; arguments = @() }),
         # A coroutine, and the value its completed signal carried.
         (Tool-Request 2407 "scene_call_method" @{ target_node = "/root/SmokeRoot/CallProbe"; method_name = "bake"; arguments = @($true, $false); timeout_seconds = 20 }),
         # The side effect, read back separately rather than trusted from the
@@ -3084,6 +3088,10 @@ try {
     Assert-True ($addResult.returned -eq 5) "scene_call_method did not return what the method returned: $($addResult | ConvertTo-Json -Depth 6 -Compress)"
     Assert-True ($addResult.awaited -eq $false) "A synchronous method reported that it was awaited."
     Assert-True ((Tool-Payload $callById[2406]).returned -eq "call probe") "A string return was not carried back."
+    Assert-True ((Tool-Payload $callById[2429]).returned -eq "Main:800x600") "A call that left out both defaulted arguments did not run with the defaults: $($callById[2429].result.content[0].text)"
+    Assert-True ((Tool-Payload $callById[2434]).returned -eq "Main:1024x600") "A call that left out one defaulted argument did not run with it: $($callById[2434].result.content[0].text)"
+    $tooFew = ($callById[2435].result.content[0].text | ConvertFrom-Json).error
+    Assert-True ($callById[2435].result.isError -and $tooFew.data.code -eq "argument_count_mismatch" -and $tooFew.data.required -eq 1 -and $tooFew.message -match "1 to 3") "A call that left out a required argument was not refused with how many it takes: $($callById[2435].result.content[0].text)"
 
     # The coroutine. Object.callv hands back a GDScriptFunctionState rather than
     # the value, so returning that object would report a bake that has not
