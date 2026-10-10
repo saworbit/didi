@@ -316,7 +316,62 @@ void test_one_hitch_does_not_decide_the_window() {
     FrameTimingLog log;
     for (int index = 0; index < 59; ++index) log.add(timing(0.05, 0.01, 16.5, 0.08, 0.03, 0.01, 1));
     log.add(timing(0.05, 400.0, 0.5, 0.08, 0.03, 0.01, 1));
-    ASSERT_EQ(bound(judgePerformance(log, kVsync60)), std::string("none"));
+    const auto verdict = judgePerformance(log, kVsync60);
+    ASSERT_EQ(bound(verdict), std::string("none"));
+    // It does not decide the bound, and it is named beside it (#1230).
+    const auto& slow = verdict["slow_frames"];
+    ASSERT_EQ(slow["count"], 1);
+    ASSERT_NEAR(slow["threshold_ms"].get<double>(), 2000.0 / 60.0, 0.01);
+    ASSERT_EQ(slow["worst"].size(), 1u);
+    ASSERT_EQ(slow["worst"][0]["bound"], "cpu");
+    ASSERT_NEAR(slow["worst"][0]["frame_ms"].get<double>(), 400.63, 0.01);
+    ASSERT_NEAR(slow["worst"][0]["process_ms"].get<double>(), 400.0, 0.01);
+    ASSERT_TRUE(!slow.contains("at_least"));
+    ASSERT_TRUE(verdict["next"].get<std::string>().find("slowest took 400.6 ms and was cpu bound") !=
+                std::string::npos);
+}
+
+// The log halves what it keeps past capacity, which drops every second frame.
+// A hitch is one frame, so it is kept aside from that.
+void test_a_hitch_the_stride_drops_is_still_named() {
+    FrameTimingLog log(8);
+    for (int index = 0; index < 100; ++index) {
+        log.add(index == 41 ? timing(0.05, 300.0, 0.5, 0.08, 0.03, 0.01, 1)
+                            : timing(0.05, 0.01, 16.5, 0.08, 0.03, 0.01, 1));
+    }
+    for (const auto& frame : log.frames()) ASSERT_TRUE(frame.process_ms < 1.0);
+    const auto slow = judgePerformance(log, kVsync60)["slow_frames"];
+    ASSERT_EQ(slow["count"], 1);
+    ASSERT_NEAR(slow["worst"][0]["process_ms"].get<double>(), 300.0, 0.01);
+}
+
+void test_each_slow_frame_is_judged_on_its_own_parts() {
+    FrameTimingLog log;
+    for (int index = 0; index < 30; ++index) log.add(timing(0.05, 2.0, 14.0, 0.1, 1.0, 3.0, 1));
+    // A shader compile: the draw waited 90 ms on the GPU.
+    log.add(timing(0.05, 2.0, 92.0, 0.1, 1.0, 90.0, 1));
+    // Physics catching up: four ticks in one frame.
+    log.add(timing(120.0, 2.0, 14.0, 0.1, 1.0, 3.0, 4));
+    // Nothing timed accounts for it.
+    log.add(timing(0.05, 2.0, 14.0, 70.0, 1.0, 3.0, 1));
+    const auto slow = judgePerformance(log, kVsync60)["slow_frames"];
+    ASSERT_EQ(slow["count"], 3);
+    ASSERT_EQ(slow["worst"][0]["bound"], "physics");
+    ASSERT_EQ(slow["worst"][0]["physics_ticks"], 4);
+    ASSERT_EQ(slow["worst"][1]["bound"], "gpu");
+    ASSERT_NEAR(slow["worst"][1]["gpu_ms"].get<double>(), 90.0, 0.01);
+    ASSERT_EQ(slow["worst"][2]["bound"], "unknown");
+}
+
+void test_slow_frames_stay_a_fixed_size() {
+    FrameTimingLog log;
+    for (int index = 0; index < 40; ++index) log.add(timing(0.05, 50.0 + index, 0.5, 0.1, 0.0, 0.0, 1, false));
+    const auto slow = judgePerformance(log, kHeadless)["slow_frames"];
+    ASSERT_EQ(slow["count"], static_cast<int>(FrameTimingLog::kSlowestKept));
+    ASSERT_EQ(slow["at_least"], true);
+    ASSERT_EQ(slow["worst"].size(), 3u);
+    ASSERT_NEAR(slow["worst"][0]["process_ms"].get<double>(), 89.0, 0.01);
+    ASSERT_TRUE(slow["worst"][0]["gpu_ms"].is_null());
 }
 
 void test_the_log_keeps_the_whole_window_past_capacity() {
@@ -404,6 +459,9 @@ struct RegisterPerformanceVerdict {
                      test_a_separate_render_thread_is_waited_for_outside_the_frame);
         registerTest("performance_verdict.too_few_frames", test_too_few_frames_decide_nothing);
         registerTest("performance_verdict.one_hitch", test_one_hitch_does_not_decide_the_window);
+        registerTest("performance_verdict.stride_keeps_the_hitch", test_a_hitch_the_stride_drops_is_still_named);
+        registerTest("performance_verdict.slow_frames_judged_alone", test_each_slow_frame_is_judged_on_its_own_parts);
+        registerTest("performance_verdict.slow_frames_fixed_size", test_slow_frames_stay_a_fixed_size);
         registerTest("performance_verdict.log_capacity", test_the_log_keeps_the_whole_window_past_capacity);
         registerTest("performance_verdict.unavailable", test_the_unavailable_verdict_names_its_reason);
         registerTest("performance_verdict.self_check_stall", test_the_self_check_stall_outweighs_the_baseline);

@@ -27,6 +27,10 @@ constexpr double kExplainsWell = 0.6;
 constexpr double kExplainsSome = 0.4;
 // A part of the budget this small leaves room to spare.
 constexpr double kComfortable = 0.75;
+// A frame over this many budgets is a slow frame, and this many of them are
+// described one by one.
+constexpr double kSlowFrameBudgets = 2.0;
+constexpr size_t kSlowFramesDescribed = 3;
 
 constexpr double kStallFloorMs = 20.0;
 constexpr double kStallCapMs = 250.0;
@@ -66,6 +70,60 @@ double numberOr(const json& object, const char* key, double fallback) {
     if (!object.is_object()) return fallback;
     const auto found = object.find(key);
     return found != object.end() && found->is_number() ? found->get<double>() : fallback;
+}
+
+// Puts the faster frame on top of a heap, so the heap holds the slowest.
+bool fasterOnTop(const FrameTiming& a, const FrameTiming& b) { return a.frame_ms > b.frame_ms; }
+
+// One slow frame, judged on its own parts by the rule the verdict applies to
+// the medians.
+json slowFrame(const FrameTiming& frame, bool gpu_measured) {
+    const double cpu = frame.physics_ms + frame.process_ms + frame.render_cpu_ms;
+    const double gpu = gpu_measured && frame.drawn ? frame.gpu_ms : 0.0;
+    const char* cpu_side = frame.physics_ms >= frame.process_ms + frame.render_cpu_ms ? "physics" : "cpu";
+    const char* bound = "unknown";
+    if (gpu > 0.0) {
+        if (std::max(cpu, gpu) >= frame.frame_ms * kExplainsSome) {
+            if (gpu >= cpu) {
+                bound = gpu / std::max(cpu, 0.001) >= kLeadRatio ? "gpu" : "contested";
+            } else {
+                bound = cpu / std::max(gpu, 0.001) >= kLeadRatio ? cpu_side : "contested";
+            }
+        }
+    } else if (cpu >= frame.frame_ms * kExplainsFrame) {
+        bound = cpu_side;
+    }
+    return {
+        {"frame_ms", rounded(frame.frame_ms)},
+        {"bound", bound},
+        {"physics_ms", rounded(frame.physics_ms)},
+        {"process_ms", rounded(frame.process_ms)},
+        {"render_cpu_ms", rounded(frame.render_cpu_ms)},
+        {"gpu_ms", gpu_measured && frame.drawn ? json(rounded(frame.gpu_ms)) : json(nullptr)},
+        {"draw_ms", rounded(frame.draw_ms)},
+        {"outside_ms", rounded(frame.outside_ms)},
+        {"physics_ticks", frame.physics_ticks},
+    };
+}
+
+// The frames over twice the budget, which the median verdict lets pass on
+// purpose: a stutter is the other half of why a game is slow (#1230).
+json slowFrames(const FrameTimingLog& log, const FrameBudget& budget, bool gpu_measured) {
+    const double threshold = kSlowFrameBudgets * budget.ms;
+    const auto slowest = log.slowest();
+    size_t over = 0;
+    json worst = json::array();
+    for (const auto& frame : slowest) {
+        if (frame.frame_ms <= threshold) break;
+        ++over;
+        if (worst.size() < kSlowFramesDescribed) worst.push_back(slowFrame(frame, gpu_measured));
+    }
+    json slow = {{"threshold_ms", rounded(threshold)}, {"count", over}, {"worst", std::move(worst)}};
+    // Every frame kept aside was over, so more may have been.
+    if (over == FrameTimingLog::kSlowestKept && log.seen() > static_cast<int64_t>(over)) {
+        slow["at_least"] = true;
+    }
+    return slow;
 }
 
 } // namespace
@@ -138,6 +196,14 @@ FrameTimingLog::FrameTimingLog(size_t capacity) : m_capacity(std::max<size_t>(ca
 }
 
 void FrameTimingLog::add(const FrameTiming& frame) {
+    if (m_slowest.size() < kSlowestKept) {
+        m_slowest.push_back(frame);
+        std::push_heap(m_slowest.begin(), m_slowest.end(), fasterOnTop);
+    } else if (frame.frame_ms > m_slowest.front().frame_ms) {
+        std::pop_heap(m_slowest.begin(), m_slowest.end(), fasterOnTop);
+        m_slowest.back() = frame;
+        std::push_heap(m_slowest.begin(), m_slowest.end(), fasterOnTop);
+    }
     const int64_t index = m_seen++;
     if (index % m_stride != 0) return;
     if (m_frames.size() >= m_capacity) {
@@ -150,6 +216,12 @@ void FrameTimingLog::add(const FrameTiming& frame) {
         if (index % m_stride != 0) return;
     }
     m_frames.push_back(frame);
+}
+
+std::vector<FrameTiming> FrameTimingLog::slowest() const {
+    auto sorted = m_slowest;
+    std::sort(sorted.begin(), sorted.end(), fasterOnTop);
+    return sorted;
 }
 
 json unavailableVerdict(const std::string& reason) {
@@ -222,6 +294,7 @@ json judgePerformance(const FrameTimingLog& log, const FrameBudget& budget) {
         {"outside", rounded(O)},
     };
     verdict["physics_ticks_per_frame"] = std::round(ticks_per_frame * 100.0) / 100.0;
+    verdict["slow_frames"] = slowFrames(log, budget, gpu_measured);
 
     const auto conclude = [&](const char* bound, const char* confidence, std::string next) {
         verdict["bound"] = bound;
@@ -237,10 +310,19 @@ json judgePerformance(const FrameTimingLog& log, const FrameBudget& budget) {
 
     if (F <= budget.ms * kOverBudget) {
         const double peak = std::max(C, G);
-        return conclude("none", peak <= budget.ms * kComfortable ? "high" : "medium",
-                        "The frame keeps to its " + ms(budget.ms) + " ms budget (" + budget.basis +
-                            ") with " + ms(std::max(0.0, budget.ms - peak)) +
-                            " ms to spare. Read again while the slow part of the game is on screen.");
+        const auto& slow = verdict["slow_frames"];
+        std::string next = "The frame keeps to its " + ms(budget.ms) + " ms budget (" + budget.basis +
+                           ") with " + ms(std::max(0.0, budget.ms - peak)) + " ms to spare.";
+        if (!slow["worst"].empty()) {
+            const auto& first = slow["worst"][0];
+            next += " " + std::to_string(slow["count"].get<size_t>()) +
+                    " frame(s) took over twice that; the slowest took " +
+                    ms(first["frame_ms"].get<double>()) + " ms and was " +
+                    first["bound"].get<std::string>() + " bound (slow_frames has its parts).";
+        } else {
+            next += " Read again while the slow part of the game is on screen.";
+        }
+        return conclude("none", peak <= budget.ms * kComfortable ? "high" : "medium", std::move(next));
     }
 
     // A separate render thread is waited for out there, so that time is not

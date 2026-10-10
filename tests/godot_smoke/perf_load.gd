@@ -11,14 +11,20 @@ extends Node2D
 # then read it as keeping to its budget.
 # editor_description reads "ready" once the load holds, because the expression
 # sandbox reads native properties only.
+#
+# hitch is idle but for one 400 ms process step a second: a slow frame among
+# quick ones, which the verdict's medians leave alone and slow_frames names
+# (#1230).
 
-@export_enum("cpu", "gpu", "physics") var load_kind := "cpu"
+@export_enum("cpu", "gpu", "physics", "hitch") var load_kind := "cpu"
 
 const TARGET_FRAME_USEC := 50000
 const RAMP_EVERY_USEC := 400000
 const CPU_STALL_USEC := 30000
 const BODIES_PER_STEP := 150
 const MAX_BODIES := 8000
+const HITCH_EVERY_USEC := 1000000
+const HITCH_USEC := 400000
 
 var _iterations := 32
 var _bodies := 0
@@ -27,10 +33,12 @@ var _circle := CircleShape2D.new()
 var _ramp_started := 0
 var _ramp_frames := 0
 var _rows := 0
+var _last_hitch := 0
 
 
 func _ready() -> void:
-	editor_description = "ready" if load_kind == "cpu" else "loading"
+	editor_description = "ready" if load_kind in ["cpu", "hitch"] else "loading"
+	_last_hitch = Time.get_ticks_usec()
 	if load_kind == "gpu":
 		_build_shader()
 	elif load_kind == "physics":
@@ -44,6 +52,13 @@ func _process(_delta: float) -> void:
 		var until := now + CPU_STALL_USEC
 		while Time.get_ticks_usec() < until:
 			pass
+		return
+	if load_kind == "hitch":
+		if now - _last_hitch >= HITCH_EVERY_USEC:
+			_last_hitch = now
+			var until := now + HITCH_USEC
+			while Time.get_ticks_usec() < until:
+				pass
 		return
 	if editor_description == "ready":
 		return
