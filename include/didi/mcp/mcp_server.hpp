@@ -87,6 +87,10 @@ public:
     // changed afterwards; see SessionDescriptorMode.
     void setSessionDescriptorMode(SessionDescriptorMode mode) { m_sessionDescriptorMode = mode; }
     SessionDescriptorMode sessionDescriptorMode() const { return m_sessionDescriptorMode; }
+    // Whether tool answers repeat structuredContent as text. Set from
+    // --text-copy at startup and never changed after (#1238).
+    void setTextCopyMode(TextCopyMode mode) { m_textCopyMode = mode; }
+    TextCopyMode textCopyMode() const { return m_textCopyMode; }
 
 private:
     std::optional<JsonRpcResponse> dispatchPayload(const json& payload);
@@ -125,6 +129,7 @@ private:
     UiAppMode m_uiAppMode{UiAppMode::Auto};
     ToolProfile m_toolProfile{ToolProfile::Full};
     SessionDescriptorMode m_sessionDescriptorMode{SessionDescriptorMode::Every};
+    TextCopyMode m_textCopyMode{TextCopyMode::Always};
     // Sticky from a 2024-11-05 handshake, and read only for legacy requests.
     // A modern request declares its own capabilities and is answered from
     // those alone, so one client's extension choice cannot reach another's

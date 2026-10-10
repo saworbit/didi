@@ -57,6 +57,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Added
 
+- `2026-10-10` `--text-copy once` leaves out the text that repeats `structuredContent`, for a host that reads it and cannot declare `didi/responseEconomy`. [#1238](https://github.com/saworbit/didi/issues/1238) · [PR #1259](https://github.com/saworbit/didi/pull/1259)
 - `2026-10-10` `runtime_read_profiler`'s verdict carries `slow_frames`: frames over twice the budget, the worst three each judged on its own parts. [#1230](https://github.com/saworbit/didi/issues/1230) · [PR #1258](https://github.com/saworbit/didi/pull/1258)
 - `2026-10-09` `runtime_read_profiler` says whether the frame is bound on the CPU, the GPU or physics, and `self_check` proves it sees a known stall. [#1228](https://github.com/saworbit/didi/issues/1228) · [PR #1229](https://github.com/saworbit/didi/pull/1229)
 - `2026-10-09` `runtime_inject_input` takes a `window_focus` event, which runs a game's own focus-loss handlers and says it was synthetic. [#1197](https://github.com/saworbit/didi/issues/1197)

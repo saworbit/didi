@@ -76,6 +76,8 @@ ACCEPTED = [
     ("log level NONE", ["--project", FIXTURE_PROJECT, "--log-level", "NONE"]),
     ("session descriptor every", ["--project", FIXTURE_PROJECT, "--session-descriptor", "every"]),
     ("session descriptor once", ["--project", FIXTURE_PROJECT, "--session-descriptor", "once"]),
+    ("text copy always", ["--project", FIXTURE_PROJECT, "--text-copy", "always"]),
+    ("text copy once", ["--project", FIXTURE_PROJECT, "--text-copy", "once"]),
     ("every option at once",
      ["--project", FIXTURE_PROJECT, "--yolo", "--log-level", "WARN",
       "--pipe-name", "didi-cli-test"]),
@@ -115,6 +117,11 @@ REFUSED = [
      "--session-descriptor expects every or once, not always"),
     ("session descriptor swallows the next flag", ["--session-descriptor", "--yolo"],
      "--session-descriptor expects a value, but the next argument is the option --yolo"),
+    ("text copy outside the enum",
+     ["--project", FIXTURE_PROJECT, "--text-copy", "every"],
+     "--text-copy expects always or once, not every"),
+    ("text copy swallows the next flag", ["--text-copy", "--yolo"],
+     "--text-copy expects a value, but the next argument is the option --yolo"),
     ("empty argument", [""], "an empty argument is neither an option nor a value"),
     ("stray argument", ["oops"], "unexpected argument oops"),
     ("stray argument after valid options", ["--project", FIXTURE_PROJECT, "oops"],
@@ -197,7 +204,7 @@ class CommandLineTests(unittest.TestCase):
         help_text = _run(["--help"]).stdout
         for option in ("--version", "--help", "--project", "--pipe-name",
                        "--log-level", "--dump-tool-manifest", "--yolo", "--ui-app",
-                       "--tools", "--session-descriptor", "--managed-editor",
+                       "--tools", "--session-descriptor", "--text-copy", "--managed-editor",
                        "--recovery-workspace"):
             self.assertIn(option, help_text)
 
