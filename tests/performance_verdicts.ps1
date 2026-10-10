@@ -17,8 +17,9 @@
 #   medians, keeps to its budget, and slow_frames names the stall as a cpu
 #   frame of about 400 ms (#1230).
 #
-# The fixtures grow their load until a frame takes three 60 Hz frames, so they
-# are bound on a machine with a GPU and on a software-rendered runner alike.
+# The fixtures grow their load until the median frame takes three 60 Hz
+# frames, so they are bound on a machine with a GPU and on a software-rendered
+# runner alike, by the measure the verdict uses (#1276).
 # The block waits for each to say it is ready and asserts the verdict, never a
 # timing. The headless game the main runtime block drives is read there, where
 # its verdict must leave the GPU unmeasured.

@@ -461,6 +461,12 @@ Result<void> setLiveSceneTreePaused(bool paused) {
     return setSceneTreePaused(tree.value(), paused);
 }
 
+Result<bool> liveSceneTreePaused() {
+    auto tree = activeSceneTree();
+    if (tree.isErr()) return tree.error();
+    return sceneTreePaused(tree.value());
+}
+
 void pauseGameAtStartupIfRequested() {
     if (!runtime::startPausedRequested(runtime::processArguments())) return;
     auto tree = activeSceneTree();

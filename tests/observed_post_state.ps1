@@ -725,12 +725,27 @@ function Get-ObservedPostStateCases {
                $state = @($s.call.input_state)[0]
                Agree "input_state.pressed" $state.pressed ($s.witness.value.x -eq 1)
                Agree "input_state.strength" $state.strength $s.witness.value.y } },
+        # The runtime root's child count does not move while nothing touches
+        # the tree, so this run finds a stuck interval and pauses there. A
+        # constant false would disagree; the pause is read back from the tree
+        # rather than taken from the pause call (#1020).
+        @{ Tool = "runtime_explore_scene"; Session = "game"; Steps = @(
+            (Step "call" "runtime_explore_scene" @{ duration_ms = 1500; stuck_ms = 300; action_hold_ms = 100; seed = 11; actions = @("ui_accept"); probes = @(@{ name = "children"; expression = "node.get_child_count()"; context_node = "/root/RuntimeRoot" }) }),
+            (Step "witness" "runtime_get_tree" @{ root_path = "/root/RuntimeRoot"; max_depth = 1 }))
+           Agree = { param($s) Agree "paused" $s.call.paused $s.witness.paused } },
         @{ Tool = "runtime_set_paused"; Session = "game"; Steps = @(
             (Step "call" "runtime_set_paused" @{ paused = $true }),
             (Step "witness" "runtime_get_tree" @{ root_path = "/root/RuntimeRoot"; max_depth = 1 }))
            Agree = { param($s) Agree "paused" $s.call.paused $s.witness.paused } },
         @{ Tool = "runtime_step"; Session = "game"; Steps = @(
             (Step "call" "runtime_step" @{ frames = 2 }),
+            (Step "witness" "runtime_get_tree" @{ root_path = "/root/RuntimeRoot"; max_depth = 1 }))
+           Agree = { param($s) Agree "paused" $s.call.paused $s.witness.paused } },
+        # On a game that is already paused, with a condition that holds, so the
+        # watch pauses nothing itself. It answered paused: false here while the
+        # tree stayed paused, because it reported its own pause call (#1020).
+        @{ Tool = "runtime_watch_invariants"; Session = "game"; Steps = @(
+            (Step "call" "runtime_watch_invariants" @{ duration_ms = 200; invariants = @(@{ name = "children_present"; kind = "expression_between"; expression = "node.get_child_count()"; context_node = "/root/RuntimeRoot"; minimum = 1 }) }),
             (Step "witness" "runtime_get_tree" @{ root_path = "/root/RuntimeRoot"; max_depth = 1 }))
            Agree = { param($s) Agree "paused" $s.call.paused $s.witness.paused } }
     )

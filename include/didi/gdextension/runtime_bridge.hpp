@@ -36,6 +36,8 @@ Result<GDExtensionObjectPtr> liveSceneTreeRoot(GDExtensionObjectPtr tree);
 // condition: a pause that arrives a round trip later is a pause on a different
 // frame, and the state it freezes is no longer the state that failed.
 Result<void> setLiveSceneTreePaused(bool paused);
+// Whether the live SceneTree is paused, read from the tree itself.
+Result<bool> liveSceneTreePaused();
 // For a game whose own arguments carry the start-paused marker, pauses the
 // tree before its first physics frame runs. Called once, when the main loop
 // starts (#1208).

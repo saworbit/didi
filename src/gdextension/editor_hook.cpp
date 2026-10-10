@@ -922,6 +922,15 @@ void EditorHook::processInvariantWatchFrame() {
                           stopped.error().message);
         }
     }
+    // The answer says what the tree holds after the run, read from the tree.
+    // Whether this run's own pause call worked is not that: a watch on a game
+    // that was already paused answered paused: false (#1020).
+    if (const auto now = liveSceneTreePaused(); now.isOk()) {
+        paused = now.value();
+    } else {
+        DIDI_LOG_WARN("EDITOR_HOOK", "Could not read the pause state after an invariant watch: ",
+                      now.error().message);
+    }
 
     completed->control->markCompleted();
     auto response = completed->watch.response(paused);
@@ -1215,6 +1224,15 @@ void EditorHook::processSceneExplorationFrame() {
             DIDI_LOG_WARN("EDITOR_HOOK", "Could not pause on a stuck interval: ",
                           stopped.error().message);
         }
+    }
+    // The answer says what the tree holds after the run, read from the tree.
+    // Whether this run's own pause call worked is not that: a game paused during
+    // an exploration answered paused: false (#1020).
+    if (const auto now = liveSceneTreePaused(); now.isOk()) {
+        paused = now.value();
+    } else {
+        DIDI_LOG_WARN("EDITOR_HOOK", "Could not read the pause state after an exploration: ",
+                      now.error().message);
     }
 
     completed->control->markCompleted();

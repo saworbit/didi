@@ -1454,6 +1454,8 @@ Each invariant takes a `kind`:
 
 `outcome` is `violated`, `held`, or `inconclusive`. The third is not a failure mode of the tool: an invariant that never produced a reading, because its context node was missing or its expression failed, is reported with zero readings and makes the run inconclusive. A condition nobody could measure is not a condition that stayed true.
 
+`paused` is whether the game's tree is paused when the watch ends, read from the tree: `true` after a pause on a violation, and `true` for a game that was paused before the watch began (#1020).
+
 An invariant with no bound at all is refused rather than accepted, because it could never be violated and would report as held on nothing.
 
 Evaluating expressions costs engine time inside the window being measured. A frame-rate invariant watched alongside several expression invariants is measuring a game that is also being watched.
@@ -1475,6 +1477,8 @@ This is the pairing `runtime_inject_input` and `runtime_watch_invariants` cannot
 - `seed` (`integer`, default `1`).
 
 `stopped_reason` is `duration_elapsed`, `stuck`, or `engine_error`. Each stuck interval carries `started_ms`, `ended_ms`, `duration_ms` and the `action_held` that was down for it, because an interval that does not say what was being pressed does not say what provoked it.
+
+`paused` is whether the game's tree is paused when the run ends, read from the tree rather than taken from the run's own pause call (#1020).
 
 **Input actions, not movement.** Nothing outside a project's own controller knows how that project moves its player. Setting a position directly would move the sprite without running any of that, which proves nothing about whether the game can be played. Pressing the project's own actions runs the project's own code. `nav_query_path` and the `spatial_query_*` family are how an agent decides where to go; this is how it gets there.
 
@@ -1854,7 +1858,7 @@ the tool listing states `editorConnected` and `sessionKind` once, in its own
 
 Tools whose result shape has been observed also publish an `outputSchema`, and CI validates each of those tools' real `structuredContent` against the schema the server published for it, so the promise cannot drift from the implementation. A schema is declared only where the shape is known: a tool that cannot be exercised, and every unimplemented name, publishes none rather than asserting a shape nobody has seen. `required` lists only fields present in every execution mode, and additional properties are permitted, so the extra members a live result carries never invalidate it.
 
-A mutation's result is meant to report the state the tool read back after its write, and [`tests/observed_post_state.json`](../tests/observed_post_state.json) records, for every mutating tool, which result fields do. The live harness compares those fields with the engine on every supported line. A field it does not list was copied from the request or read before the write, whatever its name: `old_value`, `before` and `previous` are all read before. A tool exempted there does not yet report observed state, and its entry names the issue tracking that (#1020). `scene_call_method` and `signal_emit` are exempt for good: they run project code and describe the call, not a state. Read such a tool's result back with the matching read tool before relying on it.
+A mutation's result is meant to report the state the tool read back after its write, and [`tests/observed_post_state.json`](../tests/observed_post_state.json) records, for every mutating tool, which result fields do. The live harness compares those fields with the engine on every supported line. A field it does not list was copied from the request or read before the write, whatever its name: `old_value`, `before` and `previous` are all read before. A tool exempted there does not yet report observed state, and its entry names the issue tracking that (#1020). `scene_call_method` and `signal_emit` are exempt for good: they run project code and describe the call, not a state. So is `runtime_stop`, whose game answers before it exits. Read such a tool's result back with the matching read tool before relying on it.
 
 The state a call replaced is reported the other way round, read before the write, so the change journal can say what each entry replaced (#1151). `scene_remove_node` answers `before` with the node's `path`, `parent`, `index` and `type`; `scene_reparent_node` with its old `path` and `parent`; `script_attach_to_node` and `script_detach_from_node` with the `script` it held, or null; `scene_add_to_group` and `scene_remove_from_group` with `in_group`, and a removal with whether the membership was `persistent`; `signal_connect` with `connected: false`, and `signal_disconnect` with `connected: true` and the `flags` the connection had. A live `project_set_setting` answers `previous_value`, the literal `project.godot` held before the write or null for an engine default, as its offline route does. None of these is an observed field.
 
