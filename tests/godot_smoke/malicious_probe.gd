@@ -26,6 +26,7 @@ func _exit_tree() -> void:
 	remove_meta("detached_node")
 	if is_instance_valid(detached_probe):
 		detached_probe.free()
+	detached_probe = null
 
 var dangerous_property: int:
 	get:

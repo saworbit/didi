@@ -108,6 +108,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Changed
 
+- `2026-10-10` The live harness fails, naming the node, when a fixture scene holds a freed object after a scene change. [#1268](https://github.com/saworbit/didi/issues/1268)
 - `2026-10-10` A bridge refusal rebuilt from a helper's error keeps its `data`, and the refusal scan fails a rebuild that drops it. [#1267](https://github.com/saworbit/didi/issues/1267)
 - `2026-10-10` The MCP preflight and the game bridge check a runtime `root_path` with one rule. [#1254](https://github.com/saworbit/didi/issues/1254)
 - `2026-10-09` The sanitizer job has 45 minutes, the build matrix's limit, because a cold build after a header change took its whole 30. [#1224](https://github.com/saworbit/didi/issues/1224)

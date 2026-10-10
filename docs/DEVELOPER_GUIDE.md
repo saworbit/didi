@@ -137,9 +137,12 @@ folding. `malicious_probe.gd` freed a node in `_exit_tree` and kept it in
 metadata, and on 4.5.1 that walk crashed the editor whenever the memory had
 been reused (#1227). Make such objects in `_enter_tree` and drop every reference
 to them before freeing them in `_exit_tree`.
-The one deliberate exception is `typed_holder.gd`, which holds a freed node
-for a single read and clears it before its block saves or leaves the tab, so
-the read path is proved against a freed object (#1266).
+The fixture's editor plugin checks the rule at every scene change: it walks the
+open scenes' metadata and script properties and names, as an engine error the
+harness fails on, each node that holds a freed object (#1268). The one
+deliberate exception is `typed_holder.gd`, which holds a freed node for a
+single read and clears it before its block saves or leaves the tab, so the
+read path is proved against a freed object (#1266).
 
 See the [2026-09-25 exploratory report](EXPLORATORY_MCP_INSTRUCTIONS.md) for
 measured latency, cross-version live coverage, harness fixes and outstanding
