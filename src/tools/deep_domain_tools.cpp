@@ -654,42 +654,6 @@ CallToolResult handleShaderCheckCompile(const json& args, std::shared_ptr<ipc::I
 // this starts the framework and keeps what it wrote.
 namespace {
 
-// Every .gd file the run names, for the record of what a pass was true for.
-std::vector<std::string> testScriptSeeds(const std::filesystem::path& root,
-                                         const std::vector<std::string>& test_paths) {
-    std::vector<std::string> seeds;
-    std::vector<std::string> roots = test_paths;
-    if (roots.empty()) {
-        // GUT reads its directories from .gutconfig.json.
-        std::ifstream in(root / ".gutconfig.json", std::ios::binary);
-        const auto config = json::parse(in, nullptr, false);
-        if (config.is_object() && config.contains("dirs") && config["dirs"].is_array()) {
-            for (const auto& dir : config["dirs"]) {
-                if (dir.is_string()) roots.push_back(dir.get<std::string>());
-            }
-        }
-    }
-    for (const auto& path : roots) {
-        if (path.rfind("res://", 0) != 0) continue;
-        const auto target = root / paths::projectPathFromUtf8(path.substr(6));
-        std::error_code error;
-        if (std::filesystem::is_regular_file(target, error)) {
-            seeds.push_back(path);
-            continue;
-        }
-        for (std::filesystem::recursive_directory_iterator it(
-                 target, std::filesystem::directory_options::skip_permission_denied, error), end;
-             !error && it != end && seeds.size() < 512; it.increment(error)) {
-            if (it->path().extension() != ".gd") continue;
-            const auto relative = it->path().lexically_relative(root);
-            seeds.push_back("res://" + paths::projectPathToUtf8(relative.generic_string()));
-        }
-    }
-    std::sort(seeds.begin(), seeds.end());
-    seeds.erase(std::unique(seeds.begin(), seeds.end()), seeds.end());
-    return seeds;
-}
-
 // The error a run that did not pass answers with, the report kept beside it.
 json testRunError(const offline::TestRunVerdict& verdict, int timeout_seconds) {
     const auto& reason = verdict.reason;
@@ -772,7 +736,8 @@ CallToolResult handleProjectRunTests(const json& args, std::shared_ptr<ipc::IIpc
         "res://.didi/tests/" + name + "/" + run_id.value() + (gut ? "/results.xml" : "");
 
     const auto ran_against =
-        runtime::collectProofFiles(root.value(), testScriptSeeds(root.value(), test_paths.value()));
+        runtime::collectProofFiles(root.value(), offline::testRunSeeds(root.value(), test_paths.value(),
+                                                                        framework.value().framework));
     auto godot_arguments =
         offline::isolatedGodotArguments({"--path", paths::projectPathToUtf8(root.value())});
     for (auto& argument : offline::testCommandArguments(framework.value(), test_paths.value(), report_res)) {
@@ -793,10 +758,7 @@ CallToolResult handleProjectRunTests(const json& args, std::shared_ptr<ipc::IIpc
     facts.output = run.value().output;
     facts.output_truncated = run.value().output_truncated;
     const auto report_file = offline::findTestReport(report_dir, framework.value().framework);
-    if (report_file) {
-        std::ifstream in(*report_file, std::ios::binary);
-        facts.report_xml = std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
-    }
+    if (report_file) facts.report_xml = offline::readTestReport(*report_file, offline::kMaxReportBytes);
     const auto verdict = offline::judgeTestRun(facts);
 
     json report = verdict.report;

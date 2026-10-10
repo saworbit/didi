@@ -101,6 +101,16 @@ function Invoke-TypedObjectLayerBlock {
         # A script on a node its base class is not (#1181).
         (Tool-Request 7147 "script_create" @{ script_path = "res://typed_spatial.gd"; source_text = "extends Node3D`n"; overwrite = $true }),
         (Tool-Request 7148 "script_attach_to_node" @{ target_node = "$root/Mover"; script_path = "res://typed_spatial.gd" }),
+        # make_unique on a property whose setter keeps the first StyleBox it is
+        # given and refuses the copy (#1245). Guarded shares Shared's StyleBox
+        # file, so a write that followed the node's path past the refusal
+        # would turn Shared green as well.
+        (Tool-Request 7149 "script_create" @{ script_path = "res://typed_guarded.gd"; source_text = "@tool`nextends Node`n`nvar _held: StyleBox`n@export var guarded: StyleBox:`n`tget:`n`t`treturn _held`n`tset(value):`n`t`tif _held == null:`n`t`t`t_held = value`n"; overwrite = $true }),
+        (Tool-Request 7150 "scene_instantiate_node" @{ node_type = "Node"; parent_path = $root; name = "Guarded" }),
+        (Tool-Request 7151 "script_attach_to_node" @{ target_node = "$root/Guarded"; script_path = "res://typed_guarded.gd" }),
+        (Tool-Request 7152 "scene_set_property" @{ target_node = "$root/Guarded"; property_name = "guarded"; value = "res://typed_shared_box.tres" }),
+        (Tool-Request 7153 "scene_set_property" @{ target_node = "$root/Guarded"; property_name = "guarded:bg_color"; value = "#ff00ff"; make_unique = $true }),
+        (Tool-Request 7154 "scene_get_property" @{ reads = @(@{ target_node = "$root/Guarded"; property_name = "guarded:bg_color" }, @{ target_node = "$root/Shared"; property_name = $box }) }),
         # Saved by the request before, so nothing is discarded; before 4.7 the
         # engine cannot report that, and a close without the flag is refused.
         (Tool-Request 7121 "scene_close" @{ discard_unsaved = $true }),
@@ -223,6 +233,15 @@ function Invoke-TypedObjectLayerBlock {
     [void](Tool-Payload $typedById[7147])
     $base = & $refusal 7148
     Assert-True ($typedById[7148].result.isError -and $base.error.code -eq 422 -and $base.error.data.code -eq "script_base_incompatible" -and $base.error.data.base_type -eq "Node3D" -and $base.error.data.field -eq "target_node" -and (& $text 7148) -notmatch "export_presets") "A script attached to a node its base class is not was not refused with its own code and fix: $(& $text 7148)"
+
+    # The node kept its own StyleBox, so the write went into a copy nothing
+    # holds: nothing in the scene changed, and the answer says so (#1245).
+    foreach ($id in 7149, 7150, 7151, 7152) { [void](Tool-Payload $typedById[$id]) }
+    $refused = Tool-Payload $typedById[7153]
+    Assert-True ($refused.applied -eq $false -and $refused.not_applied.reason -eq "make_unique_refused" -and @($refused.make_unique_refused) -contains "guarded" -and $refused.PSObject.Properties.Name -notcontains "made_unique") "A make_unique write whose setter refused the copy did not say the node kept its own resource: $(& $text 7153)"
+    $kept = @((Tool-Payload $typedById[7154]).reads)
+    # 7111 made the shared StyleBox green; the refused write asked for magenta.
+    Assert-True ((& $near $kept[0].value.r 0) -and (& $near $kept[0].value.b 0) -and (& $near $kept[1].value.r 0) -and (& $near $kept[1].value.b 0)) "A make_unique write whose setter refused the copy changed the StyleBox the node shares: $(& $text 7154)"
 
     foreach ($id in 7121, 7122) { [void](Tool-Payload $typedById[$id]) }
     Write-Output "Typed object layer: a batch over three nodes undid and redid as one step, and the save kept what the answers said."

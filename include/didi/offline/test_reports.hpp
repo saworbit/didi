@@ -92,6 +92,20 @@ inline constexpr int64_t kTestRunRetentionMs = (kMaxTestTimeoutSeconds + 300) * 
 // `now_ms`, which may still be going.
 void pruneTestRuns(const std::filesystem::path& name_directory, const std::string& keep, int64_t now_ms);
 
+// The files a run names, for the record of what a pass was true for: every
+// .gd file under the paths it was given, or for GUT, under the dirs its
+// .gutconfig.json names when none were. GUT merges that file with its command
+// line, so for GUT the file itself and the tests it lists are named too: a run
+// that only the configuration selected recorded project.godot alone, and its
+// pass stayed fresh after its test changed (#1246).
+std::vector<std::string> testRunSeeds(const std::filesystem::path& project_root,
+                                      const std::vector<std::string>& test_paths, TestFramework framework);
+
+// The report a framework wrote, read to at most `limit` bytes and one more, so
+// a report over the limit is refused by parseJUnitReport without the rest of it
+// ever being held (#1247). Nothing when it cannot be opened.
+std::optional<std::string> readTestReport(const std::filesystem::path& file, size_t limit);
+
 // Godot's arguments, after --headless and --path: the entry script and the
 // framework's own options, with the report written to `report` (a res:// file
 // for GUT, a res:// directory for GdUnit4).

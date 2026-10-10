@@ -2,6 +2,7 @@
 #include "didi/mcp/tool_registry.hpp"
 #include "didi/runtime/scenario_runner.hpp"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <filesystem>
@@ -377,6 +378,61 @@ void test_a_test_records_the_classes_it_uses_and_not_the_framework() {
     ASSERT_EQ(listed, expected);
 }
 
+// GUT merges .gutconfig.json with its command line, so a test the file lists
+// runs whatever paths were given. A pass it selected has to go stale when that
+// test changes (#1246).
+void test_a_gut_configured_run_records_what_the_configuration_selects() {
+    using didi::offline::testRunSeeds;
+    TempProject project;
+    project.write(".gutconfig.json",
+                  "{\"tests\":[\"res://spec/test_configured.gd\"],\"dirs\":[\"res://unit\"]}");
+    project.write("spec/test_configured.gd", "extends Node\n\nfunc test_configured():\n\tpass\n");
+    project.write("unit/test_unit.gd", "extends Node\n");
+    project.write("test/test_named.gd", "extends Node\n");
+
+    const auto configured = testRunSeeds(project.root, {}, TestFramework::gut);
+    const std::vector<std::string> everything = {"res://.gutconfig.json", "res://spec/test_configured.gd",
+                                                 "res://unit/test_unit.gd"};
+    ASSERT_EQ(configured, everything);
+    // Paths given replace the file's dirs, and its tests still run.
+    const auto named = testRunSeeds(project.root, {"res://test"}, TestFramework::gut);
+    const std::vector<std::string> named_and_listed = {"res://.gutconfig.json", "res://spec/test_configured.gd",
+                                                       "res://test/test_named.gd"};
+    ASSERT_EQ(named, named_and_listed);
+    // GdUnit4 reads no .gutconfig.json.
+    const auto gdunit_seeds = testRunSeeds(project.root, {"res://test"}, TestFramework::gdunit4);
+    ASSERT_EQ(gdunit_seeds, std::vector<std::string>{"res://test/test_named.gd"});
+
+    const auto recorded = didi::runtime::collectProofFiles(project.root, configured);
+    std::vector<std::string> listed;
+    for (const auto& file : recorded.files) listed.push_back(file.path);
+    ASSERT_TRUE(std::find(listed.begin(), listed.end(), "res://.gutconfig.json") != listed.end());
+    ASSERT_TRUE(std::find(listed.begin(), listed.end(), "res://spec/test_configured.gd") != listed.end());
+    project.write("spec/test_configured.gd", "extends Node\n\nfunc test_configured():\n\tassert(false)\n");
+    const auto changed = didi::runtime::changedScenarioFiles(project.root, recorded.files);
+    ASSERT_EQ(changed.size(), 1u);
+    ASSERT_EQ(changed[0].path, "res://spec/test_configured.gd");
+}
+
+// A report over the limit is refused, and only the limit and one byte of it is
+// ever read (#1247).
+void test_an_oversized_report_is_read_no_further_than_the_limit() {
+    using didi::offline::kMaxReportBytes;
+    using didi::offline::readTestReport;
+    TempProject project;
+    ASSERT_TRUE(!readTestReport(project.root / "missing.xml", 10).has_value());
+    project.write("small.xml", "<a/>");
+    ASSERT_EQ(*readTestReport(project.root / "small.xml", 10), "<a/>");
+    project.write("big.xml", std::string(kMaxReportBytes + 4096, ' '));
+    const auto read = readTestReport(project.root / "big.xml", kMaxReportBytes);
+    ASSERT_TRUE(read.has_value());
+    ASSERT_EQ(read->size(), kMaxReportBytes + 1);
+    auto run = facts(gut(), 1, read);
+    const auto verdict = didi::offline::judgeTestRun(run);
+    ASSERT_EQ(verdict.reason, "report_unreadable");
+    ASSERT_TRUE(verdict.summary.find("larger than") != std::string::npos);
+}
+
 void test_the_tool_runs_project_code_and_says_so() {
     auto& registry = didi::mcp::ToolRegistry::instance();
     registry.registerAllDefaultTools();
@@ -466,6 +522,10 @@ struct RegisterTestReportTests {
         registerTest("TestReports.RecordFollowsClassNames",
                      test_a_test_records_the_classes_it_uses_and_not_the_framework);
         registerTest("TestReports.ToolRunsProjectCode", test_the_tool_runs_project_code_and_says_so);
+        registerTest("TestReports.GutConfigurationIsRecorded",
+                     test_a_gut_configured_run_records_what_the_configuration_selects);
+        registerTest("TestReports.OversizedReportReadToTheLimit",
+                     test_an_oversized_report_is_read_no_further_than_the_limit);
         registerTest("TestReports.RunsOfOneNameKeepTheirOwnReports",
                      test_two_runs_of_one_name_keep_their_own_reports);
     }

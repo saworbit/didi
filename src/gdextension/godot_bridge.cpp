@@ -89,6 +89,8 @@ const std::map<std::string, std::string>& bridgeErrorSentences() {
     {"node_not_owned",
      "The edited scene does not own this node, so the file cannot hold the change and a save "
      "would report saved having written none of it."},
+    {"make_unique_refused",
+     "The node kept its own resource when it was given a copy, so the write has nowhere it can be read back from."},
     {"node_inherited",
      "This node is inherited from the base scene, and a scene file has no way to record "
      "removing, moving or duplicating an inherited node."},
@@ -4559,6 +4561,9 @@ struct PreparedWrite {
     VariantValue new_value;
     // The steps given copies of their own by make_unique, outermost first.
     json made_unique = json::array();
+    // make_unique gave this write copies, so its leaf goes into the innermost
+    // copy itself rather than through the node's path (#1245).
+    bool into_copy{false};
 };
 
 // Every check the write makes, short of making it. A dry run runs this too,
@@ -4771,8 +4776,25 @@ Result<std::vector<UniqueAssignment>> makeWritesUnique(std::vector<PreparedWrite
         resolved.resources = chain;
         resolved.holder = chain.back();
         resolved.home = ResourceHomeVerdict{};
+        write.into_copy = true;
     }
     return assignments;
+}
+
+// The object a write's leaf is on, reached from the node the way the engine
+// reaches it: one get per step. Nothing when a step holds no object.
+Result<GDExtensionObjectPtr> heldHolder(GDExtensionObjectPtr node, const std::vector<std::string>& steps) {
+    GDExtensionObjectPtr current = node;
+    for (size_t k = 0; k + 1 < steps.size(); ++k) {
+        auto name = makeStringName(steps[k]);
+        if (name.isErr()) return name.error();
+        auto value = callObject(current, "Object", "get", 2760726917LL, {&name.value()});
+        if (value.isErr()) return value.error();
+        auto object = objectFromVariant(value.value());
+        if (object.isErr() || !object.value()) return static_cast<GDExtensionObjectPtr>(nullptr);
+        current = object.value();
+    }
+    return current;
 }
 
 // The node taking its copy, or its original back. One per node and outermost
@@ -4796,6 +4818,28 @@ Result<void> recordAssignment(GDExtensionObjectPtr manager, const UniqueAssignme
 // stays in the edited scene's history whichever file the resource it reaches
 // is kept in.
 Result<void> recordWrite(GDExtensionObjectPtr manager, PreparedWrite& write) {
+    if (write.into_copy) {
+        // Into the copy, not through the node's path. A setter can refuse the
+        // copy without a word, and the path then still leads to the shared
+        // original, so the write changed every node holding it while the
+        // answer read the copy and called it unchanged (#1245). A copy has no
+        // path for the manager to place it by, so it is told to keep the
+        // action's history, the scene's, for each of these two.
+        auto holder = makeObject(write.resolved.holder);
+        auto name = makeStringName(write.resolved.leaf);
+        if (holder.isErr()) return holder.error();
+        if (name.isErr()) return name.error();
+        for (const bool undo : {false, true}) {
+            auto forced = callObject(manager, "EditorUndoRedoManager", "force_fixed_history", 3218959716LL);
+            if (forced.isErr()) return forced.error();
+            auto recorded = callObject(manager, "EditorUndoRedoManager",
+                                       undo ? "add_undo_property" : "add_do_property", 1017172818LL,
+                                       {&holder.value(), &name.value(),
+                                        undo ? &write.old_value : &write.new_value});
+            if (recorded.isErr()) return recorded.error();
+        }
+        return Result<void>::ok();
+    }
     if (write.resolved.steps.size() == 1) {
         auto object_value = makeObject(write.node);
         if (object_value.isErr()) return object_value.error();
@@ -4878,7 +4922,8 @@ json setSceneProperties(GDExtensionObjectPtr editor, GDExtensionObjectPtr root, 
     std::vector<UniqueAssignment> assignments;
     if (params.value("make_unique", false)) {
         if (requireMethodBind("Resource", "duplicate", 482882304LL).isErr() ||
-            requireMethodBind("Object", "set", 3776071444LL).isErr()) {
+            requireMethodBind("Object", "set", 3776071444LL).isErr() ||
+            requireMethodBind("EditorUndoRedoManager", "force_fixed_history", 3218959716LL).isErr()) {
             return bridgeError(501, "required_bind_unavailable");
         }
         auto made = makeWritesUnique(writes, kept_copies);
@@ -4921,8 +4966,45 @@ json setSceneProperties(GDExtensionObjectPtr editor, GDExtensionObjectPtr root, 
     json results = json::array();
     bool all_applied = true;
     for (auto& write : writes) {
+        // Whether the node took its copy is read from the node, never assumed:
+        // a setter that refused it leaves the node holding its original, and
+        // the write went into a copy nothing holds.
+        bool kept_original = false;
+        if (write.into_copy) {
+            auto held = heldHolder(write.node, write.resolved.steps);
+            if (held.isErr()) return errorJson(held.error());
+            if (held.value() != write.resolved.holder) {
+                kept_original = true;
+                write.resolved.holder = held.value();
+            }
+        }
+        if (kept_original && !write.resolved.holder) {
+            return bridgeError(409, "make_unique_refused",
+                                 {{"property_name", write.property}, {"make_unique_refused", write.made_unique}},
+                                 write.target_path + " holds nothing at " +
+                                     joinSteps(write.resolved.steps, write.resolved.steps.size() - 1) +
+                                     " after taking its copy, so the write cannot be read back.");
+        }
         auto observed = observeWrite(write);
         if (observed.isErr()) return errorJson(observed.error().code, observed.error().message);
+        if (kept_original) {
+            // Nothing the scene holds changed, which is what the answer says.
+            auto& answer = observed.value();
+            answer.erase("made_unique");
+            answer["applied"] = false;
+            answer["make_unique_refused"] = write.made_unique;
+            answer["not_applied"] = {
+                {"outcome", "unchanged"},
+                {"reason", "make_unique_refused"},
+                {"detail", write.target_path + " kept its own " + write.made_unique[0].get<std::string>() +
+                               " when it was given a copy, so the write went into a copy nothing holds. "
+                               "The resource it shares was not touched. Its setter decides what it holds; "
+                               "change the resource where the setter takes it from, or without make_unique, "
+                               "which changes every node that shares it."}};
+            all_applied = false;
+            results.push_back(std::move(answer));
+            continue;
+        }
         all_applied = all_applied && observed.value().value("applied", false);
         // Who else the write reached: every other node holding what it changed.
         auto shared = sharedWith(root, write.node, write.resolved.resources);
