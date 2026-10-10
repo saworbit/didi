@@ -15,7 +15,7 @@ constexpr auto kProjectFileLockWait = std::chrono::milliseconds(5000);
 
 } // namespace
 
-Result<std::shared_ptr<runtime::RuntimeSessionLock>> lockProjectFile(
+Result<std::shared_ptr<files::FileLock>> lockProjectFile(
     const std::filesystem::path& project_root, const std::string& file_name) {
     const auto directory = project_root / ".didi" / "locks";
     // A file below the root, such as a sidecar beside an asset in a folder,
@@ -28,7 +28,7 @@ Result<std::shared_ptr<runtime::RuntimeSessionLock>> lockProjectFile(
         return Error::internal("The lock for " + file_name + " cannot be taken, because " +
                                ".didi/locks cannot be created in the project: " + error.message());
     }
-    auto lock = runtime::RuntimeSessionLock::acquireWithin(lock_path,
+    auto lock = files::FileLock::acquireWithin(lock_path,
                                                            json::object(), kProjectFileLockWait);
     if (lock.isOk()) return lock;
     // acquire speaks of runtime sessions, which is not what this is.

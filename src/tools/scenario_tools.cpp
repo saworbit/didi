@@ -12,7 +12,7 @@
 #include "didi/common/project_path.hpp"
 #include "didi/common/sha256.hpp"
 #include "didi/common/version.hpp"
-#include "didi/gdextension/protocol_servers.hpp"
+#include "didi/runtime/godot_arguments.hpp"
 #include "didi/mcp/jobs.hpp"
 #include "didi/mcp/mcp_protocol.hpp"
 #include "didi/offline/project_settings_file.hpp"
@@ -66,7 +66,7 @@ public:
         // game's bridge to pause the tree before its first physics frame
         // instead, so frame 1 is the first frame this run steps (#1208).
         const std::vector<std::string> extra = {"--fixed-fps", std::to_string(m_fixedFps), "--",
-                                                godot::kStartPausedArgument};
+                                                runtime::kStartPausedArgument};
         auto started = offline::TestRunner::runSession(m_spec.scene_path, m_spec.timeout_seconds,
                                                        m_spec.headless, false, extra, true);
         if (started.launch_failed || started.pid == 0) {

@@ -1,10 +1,24 @@
 #pragma once
-#include "didi/mcp/mcp_protocol.hpp"
+#include "didi/common/types.hpp"
 #include "didi/runtime/checkpoint_store.hpp"
 #include "didi/runtime/managed_process.hpp"
 #include "didi/runtime/session_client.hpp"
 
+#include <cstdint>
+#include <filesystem>
+#include <memory>
+#include <string>
+
 namespace didi::runtime {
+// What recovery says beside one tool answer, as plain JSON for the mcp layer
+// to place. `receipt` is the compact persistence receipt. `error`, when it is
+// an object, is an error envelope for a change that applied and whose
+// protection then failed (#1043), and it makes the answer an error.
+struct RecoveryNote {
+    json receipt;
+    json error = nullptr;
+};
+
 // Called serially by the stdio tool dispatcher. Never owns an attached human editor.
 class ManagedRecovery {
   public:
@@ -16,16 +30,14 @@ class ManagedRecovery {
     Result<json> checkpoint(bool accept_current_files);
     Result<json> restore(const std::string& id);
     Result<void> beforeMutation(const std::string& tool, const json& args);
-    mcp::CallToolResult afterMutation(const std::string& tool, const json& args,
-                                      mcp::CallToolResult result, bool not_started = false);
-    // `error`, when given, is an error envelope put beside the tool's answer
-    // and the receipt, for a result that is an error only because of what
-    // happened after the tool succeeded.
-    mcp::CallToolResult annotate(mcp::CallToolResult result, json error = nullptr);
+    // `failed` is whether the tool's own answer was an error.
+    RecoveryNote afterMutation(const std::string& tool, const json& args, bool failed,
+                               bool not_started = false);
+    // The receipt as it stands, for an answer recovery has no more to say about.
+    RecoveryNote note() const;
 
   private:
-    mcp::CallToolResult appliedButUnprotected(mcp::CallToolResult result,
-                                              const std::string& what_failed);
+    RecoveryNote appliedButUnprotected(const std::string& what_failed) const;
     Result<void> launchAndAttach();
     Result<void> journal();
     Result<json> snapshot(const std::string& label);

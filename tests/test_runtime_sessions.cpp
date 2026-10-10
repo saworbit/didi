@@ -1,5 +1,5 @@
 #include "didi/runtime/session_client.hpp"
-#include "didi/runtime/session_lock.hpp"
+#include "didi/common/file_lock.hpp"
 #include "didi/gdextension/session_host.hpp"
 
 #include <cstdlib>
@@ -1232,7 +1232,7 @@ void test_discovery_keeps_a_lock_file_somebody_holds() {
     setSessionDirectory(directory);
     const auto session_id = std::string("99998888777766665555444433332222");
     const auto lock_path = directory / (session_id + ".lock");
-    auto held = didi::runtime::RuntimeSessionLock::acquire(lock_path, didi::json{{"held", true}});
+    auto held = didi::files::FileLock::acquire(lock_path, didi::json{{"held", true}});
     ASSERT_TRUE(held.isOk());
 
     auto client = didi::runtime::createRuntimeSessionClient(
@@ -1253,7 +1253,7 @@ void test_a_released_lock_leaves_no_file_behind() {
     // and is what left the pile.
     const auto directory = makeSessionDirectory();
     const auto lock_path = directory / std::string("cccc0000cccc0000cccc0000cccc0000.lock");
-    auto held = didi::runtime::RuntimeSessionLock::acquire(lock_path, didi::json{{"held", true}});
+    auto held = didi::files::FileLock::acquire(lock_path, didi::json{{"held", true}});
     ASSERT_TRUE(held.isOk());
     ASSERT_TRUE(std::filesystem::exists(lock_path));
     held.value()->releaseAndRemove();
@@ -1266,7 +1266,7 @@ void test_a_released_lock_leaves_no_file_behind() {
     ASSERT_TRUE(!std::filesystem::exists(lock_path));
 
     // And the path is free for the next acquirer.
-    auto again = didi::runtime::RuntimeSessionLock::acquire(lock_path, didi::json{{"held", true}});
+    auto again = didi::files::FileLock::acquire(lock_path, didi::json{{"held", true}});
     ASSERT_TRUE(again.isOk());
     again.value()->releaseAndRemove();
     std::filesystem::remove_all(directory);

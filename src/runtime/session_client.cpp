@@ -1,5 +1,5 @@
 #include "didi/runtime/session_client.hpp"
-#include "didi/runtime/session_lock.hpp"
+#include "didi/common/file_lock.hpp"
 #include "didi/runtime/undo_capture.hpp"
 #include "didi/common/ipc_channel.hpp"
 #include "didi/common/secure_random.hpp"
@@ -1256,7 +1256,7 @@ void reapOrphanedSessionLock(const std::filesystem::path& path) {
     std::error_code exists_error;
     if (std::filesystem::exists(descriptor, exists_error) || exists_error) return;
 
-    auto held = RuntimeSessionLock::acquire(path, json{{"reaping_orphaned_lock", true}});
+    auto held = files::FileLock::acquire(path, json{{"reaping_orphaned_lock", true}});
     if (held.isErr()) return;
     held.value()->releaseAndRemove();
 }
@@ -1655,7 +1655,7 @@ private:
     // the only reference to each, so removing the entry is what releases both.
     struct Route {
         std::shared_ptr<ipc::IIpcClient> client;
-        std::shared_ptr<RuntimeSessionLock> lock;
+        std::shared_ptr<files::FileLock> lock;
         SessionDescriptor descriptor;
         uint64_t generation{0};
     };
@@ -1671,7 +1671,7 @@ private:
     Result<json> attachDescriptorInner(const SessionDescriptor& descriptor, bool make_selected) {
         if (!m_factory) return Error::internal("Runtime IPC client factory is not configured");
         if (m_clientId.empty()) return Error::internal("Unable to establish MCP client identity");
-        std::shared_ptr<RuntimeSessionLock> session_lock;
+        std::shared_ptr<files::FileLock> session_lock;
         // What this attach is racing against. Connecting and handshaking happen
         // outside the mutex, so the world can move underneath: a caller can
         // disconnect everything, or detach this very session, while the
@@ -1693,7 +1693,7 @@ private:
         if (!session_lock) {
             auto session_directory = resolveSessionDescriptorDirectory();
             if (session_directory.isErr()) return session_directory.error();
-            auto acquired = RuntimeSessionLock::acquire(
+            auto acquired = files::FileLock::acquire(
                 session_directory.value() / (descriptor.session_id + ".lock"),
                 {{"client_id", m_clientId}, {"session_id", descriptor.session_id},
                  {"project_path", descriptor.project_path}});

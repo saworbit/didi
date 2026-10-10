@@ -14,7 +14,7 @@
 #include <string>
 #include <vector>
 
-namespace didi::godot {
+namespace didi::runtime {
 
 struct ProtocolPortOverrides {
     std::optional<int> language_server;
@@ -40,4 +40,4 @@ std::optional<int> fixedFpsArgument(const std::vector<std::string>& arguments);
 inline constexpr const char* kStartPausedArgument = "--didi-start-paused";
 bool startPausedRequested(const std::vector<std::string>& arguments);
 
-} // namespace didi::godot
+} // namespace didi::runtime

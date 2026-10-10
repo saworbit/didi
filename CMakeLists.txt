@@ -157,6 +157,7 @@ set(CORE_SOURCES
     src/common/png.cpp
     src/common/image_diff.cpp
     src/common/capture_cache.cpp
+    src/common/file_lock.cpp
     src/common/secure_random.cpp
     src/common/sha256.cpp
     src/common/ipc_channel_win32.cpp
@@ -171,7 +172,8 @@ set(CORE_SOURCES
     src/runtime/checkpoint_store.cpp
     src/runtime/managed_process.cpp
     src/runtime/managed_recovery.cpp
-    src/runtime/session_lock.cpp
+    src/runtime/expression_policy.cpp
+    src/runtime/godot_arguments.cpp
     src/runtime/profiler_collector.cpp
     src/runtime/performance_verdict.cpp
     src/runtime/invariant_watch.cpp
@@ -196,9 +198,7 @@ set(CORE_SOURCES
     src/gdextension/engine_output_logger.cpp
     src/gdextension/godot_object.cpp
     src/gdextension/engine_diagnostics.cpp
-    src/gdextension/protocol_servers.cpp
     src/gdextension/runtime_request_router.cpp
-    src/gdextension/expression_sandbox.cpp
     src/gdextension/property_paths.cpp
     src/gdextension/undo_ledger.cpp
     src/offline/gdscript_diagnostics.cpp
@@ -274,6 +274,7 @@ set(GDEXT_SOURCES
     src/gdextension/gdextension_entry.cpp
     src/gdextension/crash_capture.cpp
     src/gdextension/editor_hook.cpp
+    src/gdextension/expression_sandbox.cpp
     src/gdextension/godot_bridge.cpp
     src/gdextension/runtime_bridge.cpp
     src/gdextension/viewport_renderer.cpp

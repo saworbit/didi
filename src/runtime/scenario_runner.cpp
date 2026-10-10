@@ -3,7 +3,7 @@
 #include "didi/common/project_path.hpp"
 #include "didi/common/scene_node_path.hpp"
 #include "didi/common/sha256.hpp"
-#include "didi/gdextension/expression_sandbox.hpp"
+#include "didi/runtime/expression_policy.hpp"
 #include "didi/offline/project_settings_file.hpp"
 
 #include <algorithm>
@@ -113,7 +113,7 @@ Result<void> parseExpression(const json& step, size_t index, ScenarioStep& parse
     parsed.expression = step["expression"].get<std::string>();
     // The same rules eval_gdscript applies, so a refusal here is the one the
     // game would have given, without a game started to give it.
-    const auto policy = godot::ExpressionPolicy::validate(parsed.expression);
+    const auto policy = ExpressionPolicy::validate(parsed.expression);
     if (policy.isErr()) {
         return refuse(stepName(index) + ".expression is refused by the read-only sandbox: " +
                           policy.error().message,

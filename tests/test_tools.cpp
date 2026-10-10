@@ -5102,8 +5102,12 @@ static void test_an_applied_change_that_was_not_protected_says_so_as_an_error() 
     const auto container = std::filesystem::canonical(std::filesystem::temp_directory_path()) /
                            ("didi-unprotected-" +
                             std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    const auto applied = [] {
-        return didi::mcp::CallToolResult::successJson({{"status", "success"}, {"value", 3}});
+    // The registry's own path: the tool's answer, recovery's note on it, and
+    // the note put on the answer by the mcp layer.
+    const auto applied = [](didi::runtime::ManagedRecovery& recovery) {
+        auto result = didi::mcp::CallToolResult::successJson({{"status", "success"}, {"value", 3}});
+        const auto note = recovery.afterMutation("scene_set_property", didi::json::object(), result.isError);
+        return didi::mcp::withRecoveryNote(std::move(result), note);
     };
     const auto unprotected = [](const didi::mcp::CallToolResult& result, const std::string& outcome) {
         ASSERT_TRUE(result.isError);
@@ -5132,13 +5136,11 @@ static void test_an_applied_change_that_was_not_protected_says_so_as_an_error() 
 
     // The save failed.
     didi::runtime::ManagedRecovery save_failed(container / "save", "", refusing);
-    unprotected(save_failed.afterMutation("scene_set_property", didi::json::object(), applied()),
-                "applied_persistence_failed");
+    unprotected(applied(save_failed), "applied_persistence_failed");
 
     // Saved, and the checkpoint after it failed: there is no project to copy.
     didi::runtime::ManagedRecovery checkpoint_failed(container / "checkpoint", "", saving);
-    unprotected(checkpoint_failed.afterMutation("scene_set_property", didi::json::object(), applied()),
-                "applied_checkpoint_failed");
+    unprotected(applied(checkpoint_failed), "applied_checkpoint_failed");
 
     // Saved and checkpointed, and the journal could not be written, because
     // its temporary file's name is taken by a directory.
@@ -5146,13 +5148,12 @@ static void test_an_applied_change_that_was_not_protected_says_so_as_an_error() 
     std::ofstream(container / "journal" / "project" / "project.godot") << "config_version=5\n";
     std::filesystem::create_directories(container / "journal" / "recovery.json.tmp");
     didi::runtime::ManagedRecovery journal_failed(container / "journal", "", saving);
-    unprotected(journal_failed.afterMutation("scene_set_property", didi::json::object(), applied()),
-                "applied_journal_failed");
+    unprotected(applied(journal_failed), "applied_journal_failed");
 
     // A change that was protected answers as the tool did, with no error.
     std::filesystem::remove_all(container / "journal" / "recovery.json.tmp");
     didi::runtime::ManagedRecovery protected_change(container / "journal", "", saving);
-    const auto kept = protected_change.afterMutation("scene_set_property", didi::json::object(), applied());
+    const auto kept = applied(protected_change);
     ASSERT_TRUE(!kept.isError);
     ASSERT_TRUE(!didi::json::parse(kept.content[0].text).contains("error"));
 

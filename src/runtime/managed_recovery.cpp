@@ -3,6 +3,8 @@
 #include "didi/common/logger.hpp"
 #include "didi/common/project_path.hpp"
 #include "didi/common/secure_random.hpp"
+#include <algorithm>
+#include <chrono>
 #include <fstream>
 #include <set>
 #include <thread>
@@ -373,14 +375,14 @@ Result<void> ManagedRecovery::beforeMutation(const std::string& tool, const json
     m_needsReconciliation = true;
     return journal();
 }
-mcp::CallToolResult ManagedRecovery::afterMutation(const std::string& tool, const json& args,
-                                                   mcp::CallToolResult result, bool not_started) {
-    if (result.isError) {
+RecoveryNote ManagedRecovery::afterMutation(const std::string& tool, const json& args, bool failed,
+                                            bool not_started) {
+    if (failed) {
         m_operation["outcome"] = not_started ? "not_started" : "failed_or_unknown";
         m_needsReconciliation = !not_started;
         if (journal().isErr())
             m_needsReconciliation = true;
-        return annotate(std::move(result));
+        return note();
     }
     if ((tool == "scene_open" || tool == "scene_create") && args.contains("scene_path"))
         m_lastScene = args.value("scene_path", "");
@@ -396,8 +398,7 @@ mcp::CallToolResult ManagedRecovery::afterMutation(const std::string& tool, cons
             m_operation["outcome"] = "applied_persistence_failed";
             m_operation["persistence_error"] = saved.error().message;
             journal();
-            return appliedButUnprotected(std::move(result),
-                                         "saving the scene failed, so the saved files and the "
+            return appliedButUnprotected("saving the scene failed, so the saved files and the "
                                          "recovery checkpoint do not have it");
         }
     }
@@ -406,8 +407,7 @@ mcp::CallToolResult ManagedRecovery::afterMutation(const std::string& tool, cons
         m_operation["outcome"] = "applied_checkpoint_failed";
         m_operation["persistence_error"] = after.error().message;
         journal();
-        return appliedButUnprotected(std::move(result),
-                                     "it was saved, and the checkpoint after it failed, so a "
+        return appliedButUnprotected("it was saved, and the checkpoint after it failed, so a "
                                      "restore cannot return to this state");
     }
     m_operation["outcome"] = "completed_saved_files_checkpointed";
@@ -417,11 +417,10 @@ mcp::CallToolResult ManagedRecovery::afterMutation(const std::string& tool, cons
     if (receipt.isErr()) {
         m_needsReconciliation = true;
         m_operation["outcome"] = "applied_journal_failed";
-        return appliedButUnprotected(std::move(result),
-                                     "it was saved and checkpointed, and the recovery journal "
+        return appliedButUnprotected("it was saved and checkpointed, and the recovery journal "
                                      "could not be written");
     }
-    return annotate(std::move(result));
+    return note();
 }
 
 // A change the editor made whose protection then failed. It set isError on the
@@ -429,57 +428,27 @@ mcp::CallToolResult ManagedRecovery::afterMutation(const std::string& tool, cons
 // and nothing a caller could branch on said the one thing that matters: the
 // change is in, and sending it again applies it twice (#1043). The tool's
 // answer and the receipt stay as they were, with an error beside them.
-mcp::CallToolResult ManagedRecovery::appliedButUnprotected(mcp::CallToolResult result,
-                                                           const std::string& what_failed) {
-    result.isError = true;
-    return annotate(std::move(result),
-                    json{{"code", 500},
-                         {"message", "The change was applied, and " + what_failed +
-                                         ". Do not send it again."},
-                         {"data", {{"outcome", m_operation.value("outcome", std::string())},
-                                   {"retryable", false},
-                                   {"next_call",
-                                    {{"tool", "runtime_recovery_status"},
-                                     {"reason", "The change applied and must not be sent again. "
-                                                "Read the recovery state before anything else."}}}}}});
+RecoveryNote ManagedRecovery::appliedButUnprotected(const std::string& what_failed) const {
+    return {note().receipt,
+            json{{"code", 500},
+                 {"message", "The change was applied, and " + what_failed +
+                                 ". Do not send it again."},
+                 {"data", {{"outcome", m_operation.value("outcome", std::string())},
+                           {"retryable", false},
+                           {"next_call",
+                            {{"tool", "runtime_recovery_status"},
+                             {"reason", "The change applied and must not be sent again. "
+                                        "Read the recovery state before anything else."}}}}}}};
 }
-mcp::CallToolResult ManagedRecovery::annotate(mcp::CallToolResult result, json error) {
-    json payload = result.structuredContent.value_or(json::object());
-    if (!payload.is_object())
-        payload = {{"result", payload}};
-    if (payload.empty()) {
-        for (const auto& item : result.content)
-            if (item.type == "text") {
-                try {
-                    payload = json::parse(item.text);
-                } catch (...) {
-                    payload = {{"message", item.text}};
-                }
-                break;
-            }
-    }
-    if (!payload.is_object())
-        payload = {{"result", payload}};
-    if (error.is_object() && !payload.contains("error")) payload["error"] = std::move(error);
+RecoveryNote ManagedRecovery::note() const {
     // A compact persistence receipt on normal calls; full history is available
     // once through runtime_recovery_status, not repeated in every LLM response.
-    payload["recovery"] = {
-        {"state", m_state},
-        {"requires_reconciliation", m_needsReconciliation},
-        {"operation", m_operation},
-        {"checkpoint_id", m_lastCheckpoint.is_object() ? m_lastCheckpoint.value("id", "") : ""},
-        {"coverage", "saved_project_files"},
-        {"unprotected_changes", m_unprotected}};
-    result.structuredContent = payload;
-    bool replaced = false;
-    for (auto& item : result.content)
-        if (item.type == "text" && !replaced) {
-            item.text = payload.dump();
-            replaced = true;
-        }
-    if (!replaced)
-        result.content.push_back(mcp::ContentItem::makeText(payload.dump()));
-    return result;
+    return {json{{"state", m_state},
+                 {"requires_reconciliation", m_needsReconciliation},
+                 {"operation", m_operation},
+                 {"checkpoint_id", m_lastCheckpoint.is_object() ? m_lastCheckpoint.value("id", "") : ""},
+                 {"coverage", "saved_project_files"},
+                 {"unprotected_changes", m_unprotected}}};
 }
 Result<json> ManagedRecovery::restore(const std::string& id) {
     auto nonce = security::secureRandomHex(8);

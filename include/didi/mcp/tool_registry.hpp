@@ -68,6 +68,11 @@ struct ToolManifest {
 // schema, and nothing else does.
 bool toolRunsAsJob(const std::string& canonical);
 
+// Puts managed recovery's note on a tool's answer: the receipt under
+// `recovery`, and for a change that applied unprotected an error beside the
+// tool's own fields, which makes the answer an error (#1043).
+CallToolResult withRecoveryNote(CallToolResult result, const runtime::RecoveryNote& note);
+
 class ToolRegistry {
 public:
     static ToolRegistry& instance();

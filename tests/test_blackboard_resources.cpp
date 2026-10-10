@@ -1,7 +1,7 @@
 #include "didi/mcp/mcp_server.hpp"
 #include "didi/mcp/resource_registry.hpp"
 #include "didi/offline/blackboard.hpp"
-#include "didi/runtime/session_lock.hpp"
+#include "didi/common/file_lock.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -166,7 +166,7 @@ void test_exists_is_sampled_under_the_lock() {
     ProjectFixture fixture("exists-under-lock");
     const auto board_file = fixture.boardFile("raced");
     std::filesystem::create_directories(board_file.parent_path());
-    auto held = runtime::RuntimeSessionLock::acquire(board_file.parent_path() / "raced.lock",
+    auto held = files::FileLock::acquire(board_file.parent_path() / "raced.lock",
                                                      json::object());
     ASSERT_TRUE(held.isOk());
 

@@ -27,7 +27,7 @@ std::string makeCaptureId() {
     return result;
 }
 
-Result<std::string> makeUniqueCaptureId(CaptureCache& cache) {
+Result<std::string> makeUniqueCaptureId(image::CaptureCache& cache) {
     for (int attempt = 0; attempt < 32; ++attempt) {
         auto candidate = makeCaptureId();
         if (!cache.contains(candidate)) return candidate;

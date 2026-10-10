@@ -2,7 +2,7 @@
 
 #include "didi/common/atomic_write.hpp"
 #include "didi/runtime/session_client.hpp"
-#include "didi/runtime/session_lock.hpp"
+#include "didi/common/file_lock.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -356,7 +356,7 @@ Result<json> append(const std::filesystem::path& project_root, json entry,
     std::filesystem::create_directories(file.parent_path(), error);
     if (error) return Error(500, "The project's .didi directory cannot be created: " + error.message());
 
-    auto lock = runtime::RuntimeSessionLock::acquireWithin(file.parent_path() / "journal.lock",
+    auto lock = files::FileLock::acquireWithin(file.parent_path() / "journal.lock",
                                                            json::object(), kLockWait);
     if (lock.isErr()) {
         return Error(500, "The journal lock stayed held for the whole " +

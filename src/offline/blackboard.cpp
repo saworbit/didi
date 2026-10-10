@@ -3,7 +3,7 @@
 #include "didi/common/atomic_write.hpp"
 #include "didi/common/logger.hpp"
 #include "didi/common/project_path.hpp"
-#include "didi/runtime/session_lock.hpp"
+#include "didi/common/file_lock.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -379,7 +379,7 @@ Result<json> withBoardLock(const std::string& board, Operation operation) {
     const auto file = directory.value() / (board + ".json");
     const auto lock_file = directory.value() / (board + ".lock");
 
-    auto lock = runtime::RuntimeSessionLock::acquireWithin(lock_file, json::object(), kLockWait);
+    auto lock = files::FileLock::acquireWithin(lock_file, json::object(), kLockWait);
     if (lock.isErr()) {
         // Not "another process": the holder is as often another thread in this
         // one, and a message naming the wrong thing sends the next reader

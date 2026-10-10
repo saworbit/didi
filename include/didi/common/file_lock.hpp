@@ -7,21 +7,21 @@
 #include <filesystem>
 #include <memory>
 
-namespace didi::runtime {
+namespace didi::files {
 
-class RuntimeSessionLock {
+class FileLock {
 public:
-    ~RuntimeSessionLock();
-    RuntimeSessionLock(const RuntimeSessionLock&) = delete;
-    RuntimeSessionLock& operator=(const RuntimeSessionLock&) = delete;
+    ~FileLock();
+    FileLock(const FileLock&) = delete;
+    FileLock& operator=(const FileLock&) = delete;
 
-    static Result<std::shared_ptr<RuntimeSessionLock>> acquire(
+    static Result<std::shared_ptr<FileLock>> acquire(
         const std::filesystem::path& path, const json& owner);
 
     // acquire, tried again until the wait runs out. Returns the last attempt's
     // error when it does, so a holder that never let go reads as 423 and a lock
     // file that cannot be opened reads as what it is.
-    static Result<std::shared_ptr<RuntimeSessionLock>> acquireWithin(
+    static Result<std::shared_ptr<FileLock>> acquireWithin(
         const std::filesystem::path& path, const json& owner, std::chrono::milliseconds wait);
 
     const std::filesystem::path& path() const { return m_path; }
@@ -34,11 +34,11 @@ public:
     void releaseAndRemove();
 
 private:
-    RuntimeSessionLock(std::filesystem::path path, intptr_t native_handle)
+    FileLock(std::filesystem::path path, intptr_t native_handle)
         : m_path(std::move(path)), m_nativeHandle(native_handle) {}
 
     std::filesystem::path m_path;
     intptr_t m_nativeHandle{-1};
 };
 
-} // namespace didi::runtime
+} // namespace didi::files

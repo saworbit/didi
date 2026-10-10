@@ -5,7 +5,7 @@
 #include "didi/gdextension/session_host.hpp"
 #include "didi/mcp/mutation_safety.hpp"
 #include "didi/mcp/tool_registry.hpp"
-#include "didi/runtime/session_lock.hpp"
+#include "didi/common/file_lock.hpp"
 
 #include <filesystem>
 #include <algorithm>
@@ -276,14 +276,14 @@ TEST(Phase6, RuntimeSessionLockIsExclusiveAndReleasedByRaii) {
     const didi::json first_owner = {{"client_id", "first"}, {"project_path", directory.root.string()}};
     const didi::json second_owner = {{"client_id", "second"}, {"project_path", directory.root.string()}};
 
-    auto first = didi::runtime::RuntimeSessionLock::acquire(path, first_owner);
+    auto first = didi::files::FileLock::acquire(path, first_owner);
     ASSERT_TRUE(first.isOk());
-    auto rejected = didi::runtime::RuntimeSessionLock::acquire(path, second_owner);
+    auto rejected = didi::files::FileLock::acquire(path, second_owner);
     ASSERT_TRUE(rejected.isErr());
     ASSERT_EQ(rejected.error().code, 423);
 
     first.value().reset();
-    auto replacement = didi::runtime::RuntimeSessionLock::acquire(path, second_owner);
+    auto replacement = didi::files::FileLock::acquire(path, second_owner);
     ASSERT_TRUE(replacement.isOk());
 }
 

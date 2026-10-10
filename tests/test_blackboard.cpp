@@ -1,5 +1,5 @@
 #include "didi/offline/blackboard.hpp"
-#include "didi/runtime/session_lock.hpp"
+#include "didi/common/file_lock.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -719,7 +719,7 @@ void test_blackboard_waits_out_a_held_lock() {
     writeValue("architecture.inventory.slots", 12);
 
     const auto lock_file = std::filesystem::current_path() / ".didi" / "blackboard" / "default.lock";
-    auto held = didi::runtime::RuntimeSessionLock::acquire(lock_file, json::object());
+    auto held = didi::files::FileLock::acquire(lock_file, json::object());
     ASSERT_TRUE(held.isOk());
 
     std::atomic<bool> released{false};

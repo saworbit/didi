@@ -1,4 +1,5 @@
 #include "didi/common/base64.hpp"
+#include "didi/common/capture_cache.hpp"
 #include "didi/common/image_diff.hpp"
 #include "didi/gdextension/viewport_renderer.hpp"
 
@@ -75,7 +76,7 @@ void test_capture_cache_lru_and_byte_budget() {
     const std::string id2 = "00000000000000000000000000000002";
     const std::string id3 = "00000000000000000000000000000003";
     didi::image::RgbaImage pixel{1, 1, {1, 2, 3, 4}};
-    didi::godot::CaptureCache cache(2, 8);
+    didi::image::CaptureCache cache(2, 8);
     ASSERT_TRUE(cache.store(id1, pixel).isOk());
     ASSERT_TRUE(cache.store(id2, pixel).isOk());
     ASSERT_TRUE(cache.find(id1) != nullptr);
@@ -89,7 +90,7 @@ void test_capture_cache_lru_and_byte_budget() {
 
 void test_capture_cache_rejects_bad_ids_and_oversize_entries() {
     // Break caught: malformed IDs enter the cache or a single entry exceeds the memory cap.
-    didi::godot::CaptureCache cache(8, 4);
+    didi::image::CaptureCache cache(8, 4);
     didi::image::RgbaImage pixel{1, 1, {1, 2, 3, 4}};
     ASSERT_TRUE(cache.store("NOT-A-CAPTURE-ID", pixel).isErr());
     didi::image::RgbaImage two_pixels{2, 1, std::vector<uint8_t>(8, 0)};
@@ -326,7 +327,7 @@ void test_capture_cache_moves_frames_and_checks_membership_without_copying() {
     // Break caught: find() returned a full copy of a frame that can be 16 MiB,
     // and the unique-id search copied one per attempt just to test existence.
     const std::string id = "0000000000000000000000000000000a";
-    didi::godot::CaptureCache cache(4, 64);
+    didi::image::CaptureCache cache(4, 64);
     didi::image::RgbaImage frame{2, 1, {1, 2, 3, 4, 5, 6, 7, 8}};
 
     ASSERT_TRUE(cache.contains(id) == false);
