@@ -485,6 +485,8 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
          "are left out by default."},
         {"ui_hit_test.max_results",
          "How many hits to return, ordered topmost first."},
+        {"ui_hit_test.space",
+         "screen takes a game's window pixels, as runtime_inject_input does. viewport by default."},
         {"ui_list_controls.max_results",
          "How many Controls to return."},
 

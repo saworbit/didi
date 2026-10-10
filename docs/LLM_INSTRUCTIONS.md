@@ -160,7 +160,9 @@ where it is. Editor or game.
 - In a game each entry also carries `screen_rect`, the rectangle in the window
   pixels `runtime_inject_input` takes. Click the centre of `screen_rect`, not of
   `global_rect`: a project that stretches its viewport to the window scales one
-  into the other, and a click at the viewport centre misses (#1189).
+  into the other, and a click at the viewport centre misses (#1189). Hit-test
+  that same point with `space: "screen"`, so the list, the hit test and the
+  click use one space; each hit in a game carries `screen_rect` too (#1223).
 - It reports the resolved rectangle, not the anchors, offsets or theme overrides
   behind it, and it injects no input. Use `runtime_inject_input` in a game to
   actually press something.

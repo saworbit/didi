@@ -6,7 +6,7 @@
     "note": "main before Q4 (15c8458), 2026-09-28"
   },
   "budgets": {
-    "full": 210200,
+    "full": 210400,
     "core": 96900
   },
   "raises": [
@@ -49,6 +49,14 @@
         210200
       ],
       "why": "Q9 part 2 (#1206): project_run_tests, which runs the project's GUT or GdUnit4 tests and judges the JUnit report, with framework, paths, name, timeout_seconds and a request_id because it runs as a job. It is not in core, so core does not move. Measured 209,837 full with that change, against 208,435 on main: 1,402 bytes, the new entry and its separator."
+    },
+    {
+      "date": "2026-10-10",
+      "full": [
+        210200,
+        210400
+      ],
+      "why": "#1223: ui_hit_test takes space, viewport or screen, so a game's window-pixel point, the space runtime_inject_input and ui_list_controls' screen_rect use, can be hit-tested. The argument carries its own description, and the tool's description was rewritten shorter to make room. It is not in core, so core does not move. Measured 210,338 full with that change, against 210,196 on main: 142 bytes."
     }
   ]
 }

@@ -9300,6 +9300,34 @@ Result<json> screenRectOf(GDExtensionObjectPtr control, const json& global_rect)
     }
 }
 
+// The other direction: a point in window pixels, where an injected click and
+// viewport_capture_frame put it, as a point in the viewport's own coordinates,
+// which is what hit-testing compares against (#1223).
+Result<std::pair<double, double>> viewportPointOf(GDExtensionObjectPtr viewport, double x, double y) {
+    auto transform_value =
+        callObject(viewport, "Viewport", "get_screen_transform", 3814499831LL);
+    if (transform_value.isErr()) return transform_value.error();
+    auto transform = variantToJson(transform_value.value());
+    if (transform.isErr()) return transform.error();
+    try {
+        const auto& t = transform.value();
+        const double xx = t.at("x").at("x").get<double>(), xy = t.at("x").at("y").get<double>();
+        const double yx = t.at("y").at("x").get<double>(), yy = t.at("y").at("y").get<double>();
+        const double ox = t.at("origin").at("x").get<double>();
+        const double oy = t.at("origin").at("y").get<double>();
+        const double determinant = xx * yy - yx * xy;
+        if (!std::isfinite(determinant) || std::fabs(determinant) < 1e-12) {
+            return Error(409, "The window shows this viewport at no size, so no window pixel maps into it",
+                         {{"code", "no_viewport_size"}});
+        }
+        const double dx = x - ox;
+        const double dy = y - oy;
+        return std::make_pair((yy * dx - yx * dy) / determinant, (xx * dy - xy * dx) / determinant);
+    } catch (const json::exception& error) {
+        return Error::internal(std::string("The screen transform could not be read: ") + error.what());
+    }
+}
+
 json uiListControls(const json& params, const std::string& session_kind) {
     if (!hasOnlyKeys(params, {"root_path", "max_results", "visible_only", "include_text",
                               "class_filter"})) {
@@ -9614,11 +9642,22 @@ json uiHitTest(const json& params, const std::string& session_kind) {
     }
     const int max_results = params.value("max_results", 32);
     if (max_results < 1 || max_results > 256) return errorJson(400, "max_results must be from 1 to 256");
+    const std::string space = params.value("space", std::string("viewport"));
+    if (space != "viewport" && space != "screen") {
+        return errorJson(400, "space must be viewport or screen", {{"field", "space"}});
+    }
 
     // The editor answers for the scene being edited and a game for the one
     // being played, the same two roots uiListControls reads, so the tool's
     // own root_path description is true in both kinds of session (#592).
     const bool editor = session_kind == "editor";
+    // Window pixels are a running game's: an editor draws the edited scene
+    // inside its own window, where nothing is clicked by an injected event.
+    if (editor && space == "screen") {
+        return errorJson(400, "space: screen is a running game's window pixels. In an editor, give the "
+                              "point in the edited scene's viewport coordinates.",
+                         {{"field", "space"}, {"retry_with", {{"space", "viewport"}}}});
+    }
     Result<GDExtensionObjectPtr> edited_root = Error::internal("unresolved");
     if (editor) {
         auto interface_result = editorInterface();
@@ -9635,7 +9674,15 @@ json uiHitTest(const json& params, const std::string& session_kind) {
     const std::string requested_root = params.value("root_path", "/root");
     auto traversal_root = resolveNode(edited_root.value(), requested_root);
     if (traversal_root.isErr()) return errorJson(traversal_root.error().code, traversal_root.error().message);
-    auto point = makeVector2(x, y);
+    double viewport_x = x;
+    double viewport_y = y;
+    if (space == "screen") {
+        auto mapped = viewportPointOf(edited_root.value(), x, y);
+        if (mapped.isErr()) return errorJson(mapped.error());
+        viewport_x = mapped.value().first;
+        viewport_y = mapped.value().second;
+    }
+    auto point = makeVector2(viewport_x, viewport_y);
     if (point.isErr()) return errorJson(point.error().code, point.error().message);
 
     struct UiHit {
@@ -9751,14 +9798,19 @@ json uiHitTest(const json& params, const std::string& session_kind) {
                     if (rect_json.isErr()) return rect_json.error();
                     const char* filter_name = mouse_filter.value() == 0 ? "stop" :
                                               mouse_filter.value() == 1 ? "pass" : "ignore";
-                    hits.push_back({
-                        {{"node_path", path.value()}, {"class", class_name.value()},
-                         {"mouse_filter", filter_name}, {"mouse_filter_value", mouse_filter.value()},
-                         {"canvas_layer", canvas_layer}, {"effective_z_index", effective_z},
-                         {"draw_order", current_order}, {"local_point", local_json.value()},
-                         {"global_rect", rect_json.value()}},
-                        canvas_layer, effective_z, current_order
-                    });
+                    json hit = {{"node_path", path.value()}, {"class", class_name.value()},
+                                {"mouse_filter", filter_name}, {"mouse_filter_value", mouse_filter.value()},
+                                {"canvas_layer", canvas_layer}, {"effective_z_index", effective_z},
+                                {"draw_order", current_order}, {"local_point", local_json.value()},
+                                {"global_rect", rect_json.value()}};
+                    // Where a click lands, as ui_list_controls reports it, so a
+                    // hit can be clicked without converting it by hand (#1223).
+                    if (!editor) {
+                        auto screen_rect = screenRectOf(node, rect_json.value());
+                        if (screen_rect.isErr()) return screen_rect.error();
+                        hit["screen_rect"] = std::move(screen_rect.value());
+                    }
+                    hits.push_back({std::move(hit), canvas_layer, effective_z, current_order});
                 }
             }
 
@@ -9804,7 +9856,7 @@ json uiHitTest(const json& params, const std::string& session_kind) {
         return errorJson(hit_root_path.error().code, hit_root_path.error().message);
     }
     const std::string resolved_hit_root = boundUtf8(hit_root_path.value(), 1024).value;
-    return liveResult({
+    json answer = liveResult({
         // The sibling of the same defect. This echoed the literal default
         // "/root" while actually traversing from the edited scene root, so
         // the two tools reported different subtrees for the same two nodes
@@ -9817,6 +9869,13 @@ json uiHitTest(const json& params, const std::string& session_kind) {
         {"ordering", "canvas_layer_desc,effective_z_index_desc,scene_draw_order_desc"},
         {"input_injected", false}
     });
+    // A point given in window pixels says so, and says what it was compared
+    // against. A viewport point's answer is what it always was.
+    if (space == "screen") {
+        answer["space"] = "screen";
+        answer["viewport_point"] = {{"x", viewport_x}, {"y", viewport_y}};
+    }
+    return answer;
 }
 
 

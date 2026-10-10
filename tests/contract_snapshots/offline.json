@@ -12005,7 +12005,7 @@
           "openWorldHint": false,
           "readOnlyHint": true
         },
-        "description": "Hit-tests live Control nodes at a viewport-space point without injecting input. Editor or game: the edited scene in an editor, the running scene in a game.",
+        "description": "Hit-tests live Control nodes at a point without injecting input, in an editor's edited scene or a game's running one.",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {
@@ -12040,6 +12040,15 @@
             "root_path": {
               "default": "/root",
               "description": "Where to start looking. Defaults to the edited scene root in an editor and /root in a game; the answer reports the subtree it actually covered.",
+              "type": "string"
+            },
+            "space": {
+              "default": "viewport",
+              "description": "screen takes a game's window pixels, as runtime_inject_input does. viewport by default.",
+              "enum": [
+                "viewport",
+                "screen"
+              ],
               "type": "string"
             }
           },

@@ -180,6 +180,7 @@ if (-not $fixtureRoot.StartsWith($buildRoot + [IO.Path]::DirectorySeparatorChar,
 . (Join-Path $PSScriptRoot 'scenario_runner.ps1')
 . (Join-Path $PSScriptRoot 'test_runner.ps1')
 . (Join-Path $PSScriptRoot 'performance_verdicts.ps1')
+. (Join-Path $PSScriptRoot 'ui_screen_space.ps1')
 Remove-TestDirectory -Path $fixtureRoot
 # Only what the fixture tracks. The Python suites run the server against
 # tests/godot_smoke and leave runtime state in its .didi/, which a whole copy
@@ -1536,6 +1537,11 @@ try {
     $gameHit = Tool-Payload $runtimeById[2491]
     Assert-True ($null -ne $gameHit.topmost -and $gameHit.topmost.node_path -eq $gameButtonPath) "ui_hit_test in the game did not name the button under the point: $($gameHit | ConvertTo-Json -Compress -Depth 4)"
     Assert-True ($gameHit.root_path -eq "/root/RuntimeRoot/Spatial") "ui_hit_test in the game did not report the subtree it covered: $($gameHit.root_path)"
+    # A hit in a game says where a click lands, as the list does (#1223). This
+    # game is not stretched, so that is its viewport rectangle.
+    $hitRect = $gameHit.topmost.global_rect
+    $hitScreenRect = $gameHit.topmost.screen_rect
+    Assert-True ($null -ne $hitScreenRect -and [math]::Abs($hitScreenRect.position.x - $hitRect.position.x) -lt 0.01 -and [math]::Abs($hitScreenRect.position.y - $hitRect.position.y) -lt 0.01 -and [math]::Abs($hitScreenRect.size.x - $hitRect.size.x) -lt 0.01 -and [math]::Abs($hitScreenRect.size.y - $hitRect.size.y) -lt 0.01) "ui_hit_test in an unstretched game did not report a screen_rect equal to its global_rect: $($gameHit.topmost | ConvertTo-Json -Compress -Depth 4)"
     Assert-True ((Tool-Payload $runtimeById[2492]).hit_count_total -eq 0) "ui_hit_test in the game reported a hit where no Control is."
     $mouseBatch = Tool-Payload $runtimeById[2480]
     Assert-True ($mouseBatch.outcome -eq "completed" -and $mouseBatch.delivery -eq "immediate" -and $mouseBatch.paused -eq $false -and $mouseBatch.queued_event_count -eq 0) "A batch on a running game was not reported as delivered at once: $($mouseBatch | ConvertTo-Json -Compress)"
@@ -5794,6 +5800,9 @@ text = "Not a key"
     # Q16 in docs/BUILD_QUEUE.md. It starts and stops windowed games of its own
     # beside the harness's headless one.
     Invoke-PerformanceVerdictsBlock -FixtureRoot $fixtureRoot
+
+    # #1223. A windowed game of its own, stretched, then the editor's refusal.
+    Invoke-UiScreenSpaceBlock -FixtureRoot $fixtureRoot -EditorSessionId $editorSession.session_id
 
     # Last, while the editor and the game are both still attached, so no block
     # after it depends on what its cases leave behind. Q2 in docs/BUILD_QUEUE.md.
