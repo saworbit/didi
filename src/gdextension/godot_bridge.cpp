@@ -59,8 +59,9 @@ json errorJson(int code, const std::string& message, json data) {
     return {{"error", {{"code", code}, {"message", message}, {"data", std::move(data)}}}};
 }
 
-// A Result's error as an answer, its data kept. errorJson(e.code, e.message)
-// drops the data, and with it the code that names the refusal's fix (#1222).
+// A Result's error as an answer, its data kept. Rebuilding one from its code
+// and message drops the data, and with it the code that names the refusal's
+// fix (#1222).
 json errorJson(const Error& error) {
     if (error.data.is_null()) return errorJson(error.code, error.message);
     return errorJson(error.code, error.message, error.data);
@@ -2941,11 +2942,11 @@ std::optional<json> refuseUnsavableEdit(GDExtensionObjectPtr root, GDExtensionOb
     InheritedSceneState inherited;
     if (edit == SceneEdit::Structure) {
         auto loaded = inheritedSceneState(root);
-        if (loaded.isErr()) return errorJson(loaded.error().code, loaded.error().message);
+        if (loaded.isErr()) return errorJson(loaded.error());
         inherited = std::move(loaded.value());
     }
     auto ownership = classifyNodeOwnership(root, node, inherited);
-    if (ownership.isErr()) return errorJson(ownership.error().code, ownership.error().message);
+    if (ownership.isErr()) return errorJson(ownership.error());
     const auto& owned = ownership.value();
     if (owned.foreign) {
         const char* dropped = edit == SceneEdit::AddChild
@@ -3136,7 +3137,7 @@ std::optional<json> refuseInstanceCycle(GDExtensionObjectPtr root, const std::st
     // An unsaved scene is in no file's dependencies.
     if (edited.empty()) return std::nullopt;
     auto chain = instanceCycleChain(scene_path, edited);
-    if (chain.isErr()) return errorJson(chain.error().code, chain.error().message);
+    if (chain.isErr()) return errorJson(chain.error());
     if (chain.value().empty()) return std::nullopt;
     std::string detail;
     if (chain.value().size() == 1) {
@@ -3345,7 +3346,7 @@ std::optional<json> previewMutationPreconditions(GDExtensionObjectPtr root, GDEx
         }
         if (auto new_parent_path = string_argument("new_parent_path")) {
             auto new_parent = resolveNode(root, *new_parent_path);
-            if (new_parent.isErr()) return errorJson(new_parent.error().code, new_parent.error().message);
+            if (new_parent.isErr()) return errorJson(new_parent.error());
             if (auto refused = refuseUnsavableEdit(root, new_parent.value(), *new_parent_path,
                                                    SceneEdit::AddChild)) {
                 return refused;
@@ -3360,10 +3361,10 @@ std::optional<json> previewMutationPreconditions(GDExtensionObjectPtr root, GDEx
         if (auto scene_path = string_argument("scene_path")) {
             auto valid_scene = validateResPath(*scene_path, ".tscn");
             if (valid_scene.isErr()) {
-                return errorJson(valid_scene.error().code, valid_scene.error().message);
+                return errorJson(valid_scene.error());
             }
             auto present = packedSceneExists(*scene_path);
-            if (present.isErr()) return errorJson(present.error().code, present.error().message);
+            if (present.isErr()) return errorJson(present.error());
             if (!present.value()) return errorJson(404, "PackedScene not found: " + *scene_path);
             if (auto refused = refuseInstanceCycle(root, *scene_path)) return refused;
         }
@@ -3381,8 +3382,7 @@ std::optional<json> previewMutationPreconditions(GDExtensionObjectPtr root, GDEx
                 auto attachable = loadAttachableScript(node, *script_path);
                 if (attachable.isErr()) {
                     const auto& failure = attachable.error();
-                    return failure.data.is_object() ? errorJson(failure.code, failure.message, failure.data)
-                                                    : errorJson(failure.code, failure.message);
+                    return errorJson(failure);
                 }
             }
         }
@@ -4286,8 +4286,7 @@ Error errorOfResponse(const json& response) {
 }
 
 json responseOfError(const Error& error) {
-    return error.data.is_object() ? errorJson(error.code, error.message, error.data)
-                                  : errorJson(error.code, error.message);
+    return errorJson(error);
 }
 
 // The names an object shows in the inspector, which are the ones worth
@@ -4939,9 +4938,9 @@ json setSceneProperties(GDExtensionObjectPtr editor, GDExtensionObjectPtr root, 
     if (prepared.isErr()) return responseOfError(prepared.error());
     auto& writes = prepared.value();
     auto manager = undoManager(editor);
-    if (manager.isErr()) return errorJson(manager.error().code, manager.error().message);
+    if (manager.isErr()) return errorJson(manager.error());
     auto preflight = preflightUndoManagerBindings();
-    if (preflight.isErr()) return errorJson(preflight.error().code, preflight.error().message);
+    if (preflight.isErr()) return errorJson(preflight.error());
     std::vector<VariantValue> kept_copies;
     std::vector<UniqueAssignment> assignments;
     if (params.value("make_unique", false)) {
@@ -4951,7 +4950,7 @@ json setSceneProperties(GDExtensionObjectPtr editor, GDExtensionObjectPtr root, 
             return bridgeError(501, "required_bind_unavailable");
         }
         auto made = makeWritesUnique(writes, kept_copies);
-        if (made.isErr()) return errorJson(made.error().code, made.error().message);
+        if (made.isErr()) return errorJson(made.error());
         assignments = std::move(made.value());
     }
     // A batch is recorded against the scene root, which puts the action in the
@@ -4960,19 +4959,19 @@ json setSceneProperties(GDExtensionObjectPtr editor, GDExtensionObjectPtr root, 
         ? createAction(manager.value(), "Didi: set " + std::to_string(writes.size()) + " properties",
                        root)
         : createAction(manager.value(), "Didi: set " + writes.front().property, writes.front().node);
-    if (action.isErr()) return errorJson(action.error().code, action.error().message);
+    if (action.isErr()) return errorJson(action.error());
     for (const auto& assignment : assignments) {
         auto recorded = recordAssignment(manager.value(), assignment, false);
         if (recorded.isErr()) {
             abandonAction(manager.value());
-            return errorJson(recorded.error().code, recorded.error().message);
+            return errorJson(recorded.error());
         }
     }
     for (auto& write : writes) {
         auto recorded = recordWrite(manager.value(), write);
         if (recorded.isErr()) {
             abandonAction(manager.value());
-            return errorJson(recorded.error().code, recorded.error().message);
+            return errorJson(recorded.error());
         }
     }
     // Undo puts each write's old value into the copy first, then the original
@@ -4981,11 +4980,11 @@ json setSceneProperties(GDExtensionObjectPtr editor, GDExtensionObjectPtr root, 
         auto recorded = recordAssignment(manager.value(), assignment, true);
         if (recorded.isErr()) {
             abandonAction(manager.value());
-            return errorJson(recorded.error().code, recorded.error().message);
+            return errorJson(recorded.error());
         }
     }
     auto committed = commitAction(manager.value());
-    if (committed.isErr()) return errorJson(committed.error().code, committed.error().message);
+    if (committed.isErr()) return errorJson(committed.error());
 
     json results = json::array();
     bool all_applied = true;
@@ -5010,7 +5009,7 @@ json setSceneProperties(GDExtensionObjectPtr editor, GDExtensionObjectPtr root, 
                                      " after taking its copy, so the write cannot be read back.");
         }
         auto observed = observeWrite(write);
-        if (observed.isErr()) return errorJson(observed.error().code, observed.error().message);
+        if (observed.isErr()) return errorJson(observed.error());
         if (kept_original) {
             // Nothing the scene holds changed, which is what the answer says.
             auto& answer = observed.value();
@@ -5062,7 +5061,7 @@ json getSceneProperties(GDExtensionObjectPtr root, const json& params) {
             if (prepared.isErr()) return responseOfError(prepared.error());
         } else if (!batch) {
             auto node = resolveNode(root, params.value("target_node", ""));
-            if (node.isErr()) return errorJson(node.error().code, node.error().message);
+            if (node.isErr()) return errorJson(node.error());
             if (auto refused = previewMutationPreconditions(root, node.value(),
                                                             params.value("target_node", ""), mutation)) {
                 return *refused;
@@ -5718,9 +5717,9 @@ json undoStatusAnswer(const json& params) {
                          {{"code", "invalid_undo_reference"}, {"field", "refs"}});
     }
     auto editor = editorInterface();
-    if (editor.isErr()) return errorJson(editor.error().code, editor.error().message);
+    if (editor.isErr()) return errorJson(editor.error());
     auto manager = undoManager(editor.value());
-    if (manager.isErr()) return errorJson(manager.error().code, manager.error().message);
+    if (manager.isErr()) return errorJson(manager.error());
     json states = json::array();
     // Read once: every reference outside the current scene asks for it.
     const auto open_scenes = openScenePaths(editor.value());
@@ -7544,9 +7543,9 @@ Result<json> injectedInputState(const std::vector<runtime::InjectedInputEvent>& 
 json injectWindowFocus(const std::vector<runtime::InjectedInputEvent>& events,
                        const std::string& session_kind) {
     auto tree = liveSceneTree();
-    if (tree.isErr()) return errorJson(tree.error().code, tree.error().message);
+    if (tree.isErr()) return errorJson(tree.error());
     auto root = liveSceneTreeRoot(tree.value());
-    if (root.isErr()) return errorJson(root.error().code, root.error().message);
+    if (root.isErr()) return errorJson(root.error());
     json changes = json::array();
     json event_types = json::array();
     size_t dispatched = 0;
@@ -7610,7 +7609,7 @@ json injectWindowFocus(const std::vector<runtime::InjectedInputEvent>& events,
 json injectInput(const json& params, const std::string& session_kind) {
     if (session_kind != "game") return bridgeError(409, "session_kind_rejected");
     auto parsed = runtime::parseInputInjectionRequest(params);
-    if (parsed.isErr()) return errorJson(parsed.error().code, parsed.error().message);
+    if (parsed.isErr()) return errorJson(parsed.error());
     // The parser keeps a focus change in a batch of its own.
     if (!parsed.value().empty() &&
         parsed.value().front().kind == runtime::InjectedInputEvent::Kind::window_focus) {
@@ -7662,12 +7661,12 @@ json injectInput(const json& params, const std::string& session_kind) {
     json event_types = json::array();
     for (const auto& spec : parsed.value()) {
         auto built = buildInjectedEvent(spec);
-        if (built.isErr()) return errorJson(built.error().code, built.error().message);
+        if (built.isErr()) return errorJson(built.error());
         events.push_back(std::move(built.value()));
         event_types.push_back(spec.kindName());
     }
     auto paused = liveSceneTreeIsPaused();
-    if (paused.isErr()) return errorJson(paused.error().code, paused.error().message);
+    if (paused.isErr()) return errorJson(paused.error());
     // A pause menu runs with PROCESS_MODE_ALWAYS, and a paused tree still
     // hands input to nodes that process while paused, the way it hands them a
     // person's click. Asked for, the batch goes to Input now: the menu sees
@@ -8295,7 +8294,7 @@ constexpr int64_t kSetBoolHash = 2586408642LL;
 
 json physicsClearance(const json& params, const std::string& session_kind) {
     auto parsed = runtime::parseClearanceRequest(params);
-    if (parsed.isErr()) return errorJson(parsed.error().code, parsed.error().message);
+    if (parsed.isErr()) return errorJson(parsed.error());
     const auto& request = parsed.value();
     const int dimension = request.dimension();
     const char* params_class = dimension == 2 ? "PhysicsShapeQueryParameters2D"
@@ -8326,7 +8325,7 @@ json physicsClearance(const json& params, const std::string& session_kind) {
     if (state.isErr()) return errorJson(state.error());
 
     auto shape = makeClearanceShape(request);
-    if (shape.isErr()) return errorJson(shape.error().code, shape.error().message);
+    if (shape.isErr()) return errorJson(shape.error());
     auto shape_value = makeObject(shape.value());
     if (shape_value.isErr()) return errorJson(500, shape_value.error().message);
 
@@ -8337,7 +8336,7 @@ json physicsClearance(const json& params, const std::string& session_kind) {
     if (query_value.isErr()) return errorJson(500, query_value.error().message);
 
     auto transform = makeUprightTransform(request.from);
-    if (transform.isErr()) return errorJson(transform.error().code, transform.error().message);
+    if (transform.isErr()) return errorJson(transform.error());
     runtime::SpatialPoint motion_point = request.to;
     motion_point.x -= request.from.x;
     motion_point.y -= request.from.y;
@@ -8919,7 +8918,7 @@ bool frustumHitIsSelf(const std::string& node_path, const std::string& collider_
 
 json visionFrustumQuery(const json& params, const std::string& session_kind) {
     auto parsed = runtime::parseFrustumRequest(params);
-    if (parsed.isErr()) return errorJson(parsed.error().code, parsed.error().message);
+    if (parsed.isErr()) return errorJson(parsed.error());
     const auto& request = parsed.value();
 
     for (const auto& bind : {std::make_tuple("Node", "get_children", 873284517LL),
@@ -8935,20 +8934,20 @@ json visionFrustumQuery(const json& params, const std::string& session_kind) {
     const bool editor = session_kind == "editor";
     if (editor) {
         auto interface = editorInterface();
-        if (interface.isErr()) return errorJson(interface.error().code, interface.error().message);
+        if (interface.isErr()) return errorJson(interface.error());
         root = editedSceneRoot(interface.value());
     } else {
         auto tree = liveSceneTree();
-        if (tree.isErr()) return errorJson(tree.error().code, tree.error().message);
+        if (tree.isErr()) return errorJson(tree.error());
         root = liveSceneTreeRoot(tree.value());
     }
-    if (root.isErr()) return errorJson(root.error().code, root.error().message);
+    if (root.isErr()) return errorJson(root.error());
 
     FrustumBasis basis;
     json camera_json = json::object();
     if (request.source == runtime::FrustumSource::camera_node) {
         auto node = resolveNode(root.value(), request.camera_node);
-        if (node.isErr()) return errorJson(node.error().code, node.error().message);
+        if (node.isErr()) return errorJson(node.error());
         auto is_camera = objectIsClass(node.value(), "Camera3D");
         if (is_camera.isErr()) return errorJson(500, is_camera.error().message);
         if (!is_camera.value()) {
@@ -8999,7 +8998,7 @@ json visionFrustumQuery(const json& params, const std::string& session_kind) {
     scan.editor = editor;
     scan.keep = request.max_results;
     auto walked = scanFrustumNode(root.value(), scan);
-    if (walked.isErr()) return errorJson(walked.error().code, walked.error().message);
+    if (walked.isErr()) return errorJson(walked.error());
 
     std::sort_heap(scan.candidates.begin(), scan.candidates.end(), frustumFurther);
     const size_t reported = scan.candidates.size();
@@ -9050,7 +9049,7 @@ json visionFrustumQuery(const json& params, const std::string& session_kind) {
                     continue;
                 }
                 auto cast = castOneRay(space.value(), ray, session_kind);
-                if (cast.isErr()) return errorJson(cast.error().code, cast.error().message);
+                if (cast.isErr()) return errorJson(cast.error());
                 ++rays_cast;
                 const json& hit = cast.value();
                 if (!hit["hit"].get<bool>()) {
@@ -9098,7 +9097,7 @@ json visionFrustumQuery(const json& params, const std::string& session_kind) {
 
 json physicsRaycastBatch(const json& params, const std::string& session_kind) {
     auto parsed = runtime::parseRaycastBatchRequest(params);
-    if (parsed.isErr()) return errorJson(parsed.error().code, parsed.error().message);
+    if (parsed.isErr()) return errorJson(parsed.error());
     const auto& request = parsed.value();
     auto space = openRaycastSpace(request.dimension(), session_kind);
     if (space.isErr()) return errorJson(space.error());
@@ -9127,7 +9126,7 @@ json physicsRaycastBatch(const json& params, const std::string& session_kind) {
 
 json physicsRaycast(const json& params, const std::string& session_kind) {
     auto parsed = runtime::parseRaycastRequest(params);
-    if (parsed.isErr()) return errorJson(parsed.error().code, parsed.error().message);
+    if (parsed.isErr()) return errorJson(parsed.error());
     const auto& request = parsed.value();
     const int dimension = request.dimension();
     const char* params_class = dimension == 2 ? "PhysicsRayQueryParameters2D" : "PhysicsRayQueryParameters3D";
@@ -9180,7 +9179,7 @@ json physicsRaycast(const json& params, const std::string& session_kind) {
         }
         return std::move(created);
     }();
-    if (query.isErr()) return errorJson(query.error().code, query.error().message);
+    if (query.isErr()) return errorJson(query.error());
     auto query_object = objectFromVariant(query.value());
     if (query_object.isErr() || !query_object.value()) return errorJson(500, "Ray query parameters were not created");
     // Fixed flags from the contract: bodies and areas on, hit-from-inside off,
@@ -9260,7 +9259,7 @@ json physicsRaycast(const json& params, const std::string& session_kind) {
 
 json navQueryPath(const json& params, const std::string& session_kind) {
     auto parsed = runtime::parseNavPathRequest(params);
-    if (parsed.isErr()) return errorJson(parsed.error().code, parsed.error().message);
+    if (parsed.isErr()) return errorJson(parsed.error());
     const auto& request = parsed.value();
     const int dimension = request.dimension();
     const char* server_class = dimension == 2 ? "NavigationServer2D" : "NavigationServer3D";
@@ -9500,21 +9499,21 @@ json uiListControls(const json& params, const std::string& session_kind) {
     if (editor) {
         auto interface_result = editorInterface();
         if (interface_result.isErr()) {
-            return errorJson(interface_result.error().code, interface_result.error().message);
+            return errorJson(interface_result.error());
         }
         root = editedSceneRoot(interface_result.value());
     } else {
         auto tree = liveSceneTree();
-        if (tree.isErr()) return errorJson(tree.error().code, tree.error().message);
+        if (tree.isErr()) return errorJson(tree.error());
         root = liveSceneTreeRoot(tree.value());
     }
-    if (root.isErr()) return errorJson(root.error().code, root.error().message);
+    if (root.isErr()) return errorJson(root.error());
 
     GDExtensionObjectPtr traversal_root = root.value();
     const std::string requested_root = params.value("root_path", std::string());
     if (!requested_root.empty()) {
         auto resolved = resolveNode(root.value(), requested_root);
-        if (resolved.isErr()) return errorJson(resolved.error().code, resolved.error().message);
+        if (resolved.isErr()) return errorJson(resolved.error());
         if (!resolved.value()) return errorJson(404, "No node at " + requested_root);
         traversal_root = resolved.value();
     }
@@ -9700,7 +9699,7 @@ json uiListControls(const json& params, const std::string& session_kind) {
         };
 
     auto visited = visit(traversal_root, 0);
-    if (visited.isErr()) return errorJson(visited.error().code, visited.error().message);
+    if (visited.isErr()) return errorJson(visited.error());
 
     // root_path is an input to this tool, and the value echoed back could not
     // be sent to anything: not to this tool on the next call, not to
@@ -9715,7 +9714,7 @@ json uiListControls(const json& params, const std::string& session_kind) {
     if (resolved_root.empty()) {
         auto root_name = editor ? logicalPathFromEditedRoot(root.value(), traversal_root)
                                 : nodeString(traversal_root, "get_path", 4075236667LL);
-        if (root_name.isErr()) return errorJson(root_name.error().code, root_name.error().message);
+        if (root_name.isErr()) return errorJson(root_name.error());
         resolved_root = boundUtf8(root_name.value(), 1024).value;
     }
 
@@ -9780,18 +9779,18 @@ json uiHitTest(const json& params, const std::string& session_kind) {
     if (editor) {
         auto interface_result = editorInterface();
         if (interface_result.isErr()) {
-            return errorJson(interface_result.error().code, interface_result.error().message);
+            return errorJson(interface_result.error());
         }
         edited_root = editedSceneRoot(interface_result.value());
     } else {
         auto tree = liveSceneTree();
-        if (tree.isErr()) return errorJson(tree.error().code, tree.error().message);
+        if (tree.isErr()) return errorJson(tree.error());
         edited_root = liveSceneTreeRoot(tree.value());
     }
-    if (edited_root.isErr()) return errorJson(edited_root.error().code, edited_root.error().message);
+    if (edited_root.isErr()) return errorJson(edited_root.error());
     const std::string requested_root = params.value("root_path", "/root");
     auto traversal_root = resolveNode(edited_root.value(), requested_root);
-    if (traversal_root.isErr()) return errorJson(traversal_root.error().code, traversal_root.error().message);
+    if (traversal_root.isErr()) return errorJson(traversal_root.error());
     double viewport_x = x;
     double viewport_y = y;
     if (space == "screen") {
@@ -9801,7 +9800,7 @@ json uiHitTest(const json& params, const std::string& session_kind) {
         viewport_y = mapped.value().second;
     }
     auto point = makeVector2(viewport_x, viewport_y);
-    if (point.isErr()) return errorJson(point.error().code, point.error().message);
+    if (point.isErr()) return errorJson(point.error());
 
     struct UiHit {
         json value;
@@ -9956,7 +9955,7 @@ json uiHitTest(const json& params, const std::string& session_kind) {
         };
 
     auto visited = visit(traversal_root.value(), true, 0);
-    if (visited.isErr()) return errorJson(visited.error().code, visited.error().message);
+    if (visited.isErr()) return errorJson(visited.error());
     std::stable_sort(hits.begin(), hits.end(), [](const UiHit& left, const UiHit& right) {
         if (left.canvas_layer != right.canvas_layer) return left.canvas_layer > right.canvas_layer;
         if (left.effective_z != right.effective_z) return left.effective_z > right.effective_z;
@@ -9971,7 +9970,7 @@ json uiHitTest(const json& params, const std::string& session_kind) {
     auto hit_root_path = editor ? logicalPathFromEditedRoot(edited_root.value(), traversal_root.value())
                                 : nodeString(traversal_root.value(), "get_path", 4075236667LL);
     if (hit_root_path.isErr()) {
-        return errorJson(hit_root_path.error().code, hit_root_path.error().message);
+        return errorJson(hit_root_path.error());
     }
     const std::string resolved_hit_root = boundUtf8(hit_root_path.value(), 1024).value;
     json answer = liveResult({
@@ -9999,7 +9998,7 @@ json uiHitTest(const json& params, const std::string& session_kind) {
 
 json animListTracks(const json& params, const std::string& session_kind) {
     auto parsed = runtime::parseAnimListRequest(params);
-    if (parsed.isErr()) return errorJson(parsed.error().code, parsed.error().message);
+    if (parsed.isErr()) return errorJson(parsed.error());
     for (const auto& bind : {std::make_tuple("AnimationMixer", "get_animation_list", 1139954409LL),
                              std::make_tuple("AnimationMixer", "get_animation", 2933122410LL),
                              std::make_tuple("Animation", "get_length", 1740695150LL),
@@ -10013,7 +10012,7 @@ json animListTracks(const json& params, const std::string& session_kind) {
         if (required.isErr()) return errorJson(501, required.error().message);
     }
     auto player = resolveAnimationPlayer(parsed.value().animation_player_path, session_kind);
-    if (player.isErr()) return errorJson(player.error().code, player.error().message);
+    if (player.isErr()) return errorJson(player.error());
 
     auto names = callObject(player.value(), "AnimationMixer", "get_animation_list", 1139954409LL);
     if (names.isErr()) return errorJson(500, names.error().message);
@@ -10101,7 +10100,7 @@ json animListTracks(const json& params, const std::string& session_kind) {
 json animPlayTrack(const json& params, const std::string& session_kind) {
     if (session_kind != "game") return bridgeError(409, "session_kind_rejected");
     auto parsed = runtime::parseAnimPlayRequest(params);
-    if (parsed.isErr()) return errorJson(parsed.error().code, parsed.error().message);
+    if (parsed.isErr()) return errorJson(parsed.error());
     for (const auto& bind : {std::make_tuple("AnimationMixer", "has_animation", 2619796661LL),
                              std::make_tuple("AnimationPlayer", "play", 3118260607LL),
                              std::make_tuple("AnimationPlayer", "is_playing", 36873697LL),
@@ -10111,7 +10110,7 @@ json animPlayTrack(const json& params, const std::string& session_kind) {
     }
     const auto& request = parsed.value();
     auto player = resolveAnimationPlayer(request.animation_player_path, session_kind);
-    if (player.isErr()) return errorJson(player.error().code, player.error().message);
+    if (player.isErr()) return errorJson(player.error());
 
     auto name = makeStringName(request.animation_name);
     if (name.isErr()) return errorJson(500, name.error().message);
@@ -10295,7 +10294,7 @@ Result<json> libraryFingerprint(GDExtensionObjectPtr library) {
 json animAddLibrary(const json& params, const std::string& session_kind) {
     if (session_kind != "editor") return bridgeError(409, "session_kind_rejected");
     auto parsed = runtime::parseAnimAddLibraryRequest(params);
-    if (parsed.isErr()) return errorJson(parsed.error().code, parsed.error().message);
+    if (parsed.isErr()) return errorJson(parsed.error());
     const auto& request = parsed.value();
     // Hash-identical on 4.5.1, 4.6.2 and 4.7.2; see the amendment.
     for (const auto& bind : {std::make_tuple("AnimationMixer", "add_animation_library", 618909818LL),
@@ -10323,11 +10322,11 @@ json animAddLibrary(const json& params, const std::string& session_kind) {
     }
 
     auto editor = editorInterface();
-    if (editor.isErr()) return errorJson(editor.error().code, editor.error().message);
+    if (editor.isErr()) return errorJson(editor.error());
     auto root = editedSceneRoot(editor.value());
-    if (root.isErr()) return errorJson(root.error().code, root.error().message);
+    if (root.isErr()) return errorJson(root.error());
     auto player = resolveAnimationPlayer(request.animation_player_path, session_kind);
-    if (player.isErr()) return errorJson(player.error().code, player.error().message);
+    if (player.isErr()) return errorJson(player.error());
     // A library added to a player inside an instance the edited scene does not
     // own is dropped by the save, having been reported as added.
     if (auto refused = refuseUnsavableEdit(root.value(), player.value(),
@@ -10343,7 +10342,7 @@ json animAddLibrary(const json& params, const std::string& session_kind) {
         return errorJson(400, "library_path must be a normalized res:// path ending in .tres or .res");
     }
     auto loader = singleton("ResourceLoader");
-    if (loader.isErr()) return errorJson(loader.error().code, loader.error().message);
+    if (loader.isErr()) return errorJson(loader.error());
     auto path_value = makeString(request.library_path);
     auto hint = makeString("");
     auto cache_mode = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(1));
@@ -10545,7 +10544,7 @@ json animAddLibrary(const json& params, const std::string& session_kind) {
         return errorJson(500, "Failed to construct library arguments");
     }
     auto manager = undoManager(editor.value());
-    if (manager.isErr()) return errorJson(manager.error().code, manager.error().message);
+    if (manager.isErr()) return errorJson(manager.error());
     auto action = createAction(manager.value(),
                                "Didi: add animation library " + describe_name(request.library_name),
                                root.value());
@@ -10561,7 +10560,7 @@ json animAddLibrary(const json& params, const std::string& session_kind) {
         return bridgeError(500, "animation_library_undo_registration_failed");
     }
     auto committed = commitAction(manager.value());
-    if (committed.isErr()) return errorJson(committed.error().code, committed.error().message);
+    if (committed.isErr()) return errorJson(committed.error());
 
     // The engine returns an Error from add_animation_library and the undo
     // manager drops it, so the only evidence the add happened is the player
@@ -10859,7 +10858,7 @@ Result<VariantValue> editedSceneCanvas() {
 
 json ghostPreviewRender(const json& params) {
     auto parsed = runtime::parseGhostPreviewRequest(params);
-    if (parsed.isErr()) return errorJson(parsed.error().code, parsed.error().message);
+    if (parsed.isErr()) return errorJson(parsed.error());
     const auto& request = parsed.value();
 
     for (const auto& bind : {std::make_tuple("RenderingServer", "free_rid", 2722037293LL),
@@ -10889,7 +10888,7 @@ json ghostPreviewRender(const json& params) {
     }
 
     auto server = renderingServer();
-    if (server.isErr()) return errorJson(server.error().code, server.error().message);
+    if (server.isErr()) return errorJson(server.error());
 
     // The world the shapes go in, resolved before anything already on screen is
     // torn down.
@@ -11047,7 +11046,7 @@ json ghostPreviewRender(const json& params) {
 
 json ghostPreviewClear(const json& params) {
     auto parsed = runtime::parseGhostClearRequest(params);
-    if (parsed.isErr()) return errorJson(parsed.error().code, parsed.error().message);
+    if (parsed.isErr()) return errorJson(parsed.error());
     auto required = requireMethodBind("RenderingServer", "free_rid", 2722037293LL);
     if (required.isErr()) return errorJson(501, required.error().message);
 
@@ -11072,7 +11071,7 @@ json ghostPreviewClear(const json& params) {
         outcome = freeGhostRids(found->second);
         ghostBatches().erase(found);
     }
-    if (outcome.isErr()) return errorJson(outcome.error().code, outcome.error().message);
+    if (outcome.isErr()) return errorJson(outcome.error());
     // Same reason as drawing them: freeing the shapes does not by itself put a
     // frame on screen without them.
     (void)GodotBridge::instance().forceDraw();
@@ -11394,14 +11393,14 @@ json GodotBridge::execute(const std::string& method, const json& params,
             return errorJson(400, "editor.getProtocolServers takes no parameters");
         }
         auto editor = editorInterface();
-        if (editor.isErr()) return errorJson(editor.error().code, editor.error().message);
+        if (editor.isErr()) return errorJson(editor.error());
         // EditorInterface.get_editor_settings is 4086932459, and
         // EditorSettings.has_setting 3927539163 and get_setting 1868160156, on
         // 4.5.1, 4.6.2 and 4.7.2.
         auto settings_value =
             callObject(editor.value(), "EditorInterface", "get_editor_settings", 4086932459LL);
         if (settings_value.isErr()) {
-            return errorJson(settings_value.error().code, settings_value.error().message);
+            return errorJson(settings_value.error());
         }
         auto settings = objectFromVariant(settings_value.value());
         if (settings.isErr() || !settings.value()) {
@@ -11466,7 +11465,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
             return bridgeError(501, "required_bind_unavailable");
         }
         auto editor = editorInterface();
-        if (editor.isErr()) return errorJson(editor.error().code, editor.error().message);
+        if (editor.isErr()) return errorJson(editor.error());
         auto open = openScenePaths(editor.value());
         if (open.isErr()) return errorJson(open.error());
         json answer = {{"open_scenes", open.value()}};
@@ -11523,9 +11522,9 @@ json GodotBridge::execute(const std::string& method, const json& params,
             }
         }
         auto loader = singleton("ResourceLoader");
-        if (loader.isErr()) return errorJson(loader.error().code, loader.error().message);
+        if (loader.isErr()) return errorJson(loader.error());
         auto editor = editorInterface();
-        if (editor.isErr()) return errorJson(editor.error().code, editor.error().message);
+        if (editor.isErr()) return errorJson(editor.error());
         auto open = openScenePaths(editor.value());
         if (open.isErr()) return errorJson(open.error());
         const std::set<std::string> open_scenes(open.value().begin(), open.value().end());
@@ -11557,9 +11556,9 @@ json GodotBridge::execute(const std::string& method, const json& params,
         }
         const auto path = params["path"].get<std::string>();
         auto valid_path = validateResPath(path, "");
-        if (valid_path.isErr()) return errorJson(valid_path.error().code, valid_path.error().message);
+        if (valid_path.isErr()) return errorJson(valid_path.error());
         auto loader = singleton("ResourceLoader");
-        if (loader.isErr()) return errorJson(loader.error().code, loader.error().message);
+        if (loader.isErr()) return errorJson(loader.error());
         auto godot_path = makeString(path);
         auto type_hint = makeString("");
         auto ignore_cache = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(0));
@@ -11577,7 +11576,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
         }
         auto loaded = callObject(loader.value(), "ResourceLoader", "load", 3358495409LL,
                                  {&godot_path.value(), &type_hint.value(), &ignore_cache.value()});
-        if (loaded.isErr()) return errorJson(loaded.error().code, loaded.error().message);
+        if (loaded.isErr()) return errorJson(loaded.error());
         auto object = objectFromVariant(loaded.value());
         if (object.isErr() || !object.value()) {
             return errorJson(422, "Godot could not load " + path, json{{"code", "load_failed"}});
@@ -11618,29 +11617,29 @@ json GodotBridge::execute(const std::string& method, const json& params,
         // per-version branch. AudioServer is a core singleton and is present
         // whether or not an editor scene is open.
         auto server = singleton("AudioServer");
-        if (server.isErr()) return errorJson(server.error().code, server.error().message);
+        if (server.isErr()) return errorJson(server.error());
 
         auto count_value = callObject(server.value(), "AudioServer", "get_bus_count", 3905245786LL);
-        if (count_value.isErr()) return errorJson(count_value.error().code, count_value.error().message);
+        if (count_value.isErr()) return errorJson(count_value.error());
         auto count = scalarFromVariant<int64_t>(count_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
-        if (count.isErr()) return errorJson(count.error().code, count.error().message);
+        if (count.isErr()) return errorJson(count.error());
 
         json buses = json::array();
         for (int64_t index = 0; index < count.value(); ++index) {
             auto bus_index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
-            if (bus_index.isErr()) return errorJson(bus_index.error().code, bus_index.error().message);
+            if (bus_index.isErr()) return errorJson(bus_index.error());
 
             auto name_value = callObject(server.value(), "AudioServer", "get_bus_name", 844755477LL,
                                          {&bus_index.value()});
-            if (name_value.isErr()) return errorJson(name_value.error().code, name_value.error().message);
+            if (name_value.isErr()) return errorJson(name_value.error());
             auto name = stringFromVariant(name_value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
-            if (name.isErr()) return errorJson(name.error().code, name.error().message);
+            if (name.isErr()) return errorJson(name.error());
 
             auto volume_value = callObject(server.value(), "AudioServer", "get_bus_volume_db",
                                            2339986948LL, {&bus_index.value()});
-            if (volume_value.isErr()) return errorJson(volume_value.error().code, volume_value.error().message);
+            if (volume_value.isErr()) return errorJson(volume_value.error());
             auto volume = scalarFromVariant<double>(volume_value.value(), GDEXTENSION_VARIANT_TYPE_FLOAT);
-            if (volume.isErr()) return errorJson(volume.error().code, volume.error().message);
+            if (volume.isErr()) return errorJson(volume.error());
 
             const auto boolOf = [&](const char* method_name, int64_t hash) -> Result<bool> {
                 auto value = callObject(server.value(), "AudioServer", method_name, hash,
@@ -11649,40 +11648,40 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 return scalarFromVariant<bool>(value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
             };
             auto mute = boolOf("is_bus_mute", 1116898809LL);
-            if (mute.isErr()) return errorJson(mute.error().code, mute.error().message);
+            if (mute.isErr()) return errorJson(mute.error());
             auto solo = boolOf("is_bus_solo", 1116898809LL);
-            if (solo.isErr()) return errorJson(solo.error().code, solo.error().message);
+            if (solo.isErr()) return errorJson(solo.error());
             auto bypass = boolOf("is_bus_bypassing_effects", 1116898809LL);
-            if (bypass.isErr()) return errorJson(bypass.error().code, bypass.error().message);
+            if (bypass.isErr()) return errorJson(bypass.error());
 
             auto send_value = callObject(server.value(), "AudioServer", "get_bus_send", 659327637LL,
                                          {&bus_index.value()});
-            if (send_value.isErr()) return errorJson(send_value.error().code, send_value.error().message);
+            if (send_value.isErr()) return errorJson(send_value.error());
             auto send = stringFromVariant(send_value.value(), GDEXTENSION_VARIANT_TYPE_STRING_NAME);
             if (send.isErr()) {
                 send = stringFromVariant(send_value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
-                if (send.isErr()) return errorJson(send.error().code, send.error().message);
+                if (send.isErr()) return errorJson(send.error());
             }
 
             auto effect_count_value = callObject(server.value(), "AudioServer",
                                                  "get_bus_effect_count", 3744713108LL,
                                                  {&bus_index.value()});
             if (effect_count_value.isErr()) {
-                return errorJson(effect_count_value.error().code, effect_count_value.error().message);
+                return errorJson(effect_count_value.error());
             }
             auto effect_count =
                 scalarFromVariant<int64_t>(effect_count_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
-            if (effect_count.isErr()) return errorJson(effect_count.error().code, effect_count.error().message);
+            if (effect_count.isErr()) return errorJson(effect_count.error());
 
             // The effect chain is the part the offline layout file cannot
             // report, so it is the reason to attach an editor at all.
             json effects = json::array();
             for (int64_t slot = 0; slot < effect_count.value(); ++slot) {
                 auto slot_index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, slot);
-                if (slot_index.isErr()) return errorJson(slot_index.error().code, slot_index.error().message);
+                if (slot_index.isErr()) return errorJson(slot_index.error());
                 auto effect = callObject(server.value(), "AudioServer", "get_bus_effect", 726064442LL,
                                          {&bus_index.value(), &slot_index.value()});
-                if (effect.isErr()) return errorJson(effect.error().code, effect.error().message);
+                if (effect.isErr()) return errorJson(effect.error());
                 auto class_value = callVariant(effect.value(), "get_class");
                 std::string class_name = "AudioEffect";
                 if (class_value.isOk()) {
@@ -11709,12 +11708,12 @@ json GodotBridge::execute(const std::string& method, const json& params,
 
     if (method == "audio.configureBus") {
         auto server = singleton("AudioServer");
-        if (server.isErr()) return errorJson(server.error().code, server.error().message);
+        if (server.isErr()) return errorJson(server.error());
 
         auto count_value = callObject(server.value(), "AudioServer", "get_bus_count", 3905245786LL);
-        if (count_value.isErr()) return errorJson(count_value.error().code, count_value.error().message);
+        if (count_value.isErr()) return errorJson(count_value.error());
         auto count = scalarFromVariant<int64_t>(count_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
-        if (count.isErr()) return errorJson(count.error().code, count.error().message);
+        if (count.isErr()) return errorJson(count.error());
 
         // A bus can be named or numbered. Names are what a person uses and what
         // the layout file records; indices are what AudioServer takes. Resolving
@@ -11725,12 +11724,12 @@ json GodotBridge::execute(const std::string& method, const json& params,
         if (bus_field.is_string()) {
             const auto wanted = bus_field.get<std::string>();
             auto name_variant = makeString(wanted);
-            if (name_variant.isErr()) return errorJson(name_variant.error().code, name_variant.error().message);
+            if (name_variant.isErr()) return errorJson(name_variant.error());
             auto found = callObject(server.value(), "AudioServer", "get_bus_index", 2458036349LL,
                                     {&name_variant.value()});
-            if (found.isErr()) return errorJson(found.error().code, found.error().message);
+            if (found.isErr()) return errorJson(found.error());
             auto resolved = scalarFromVariant<int64_t>(found.value(), GDEXTENSION_VARIANT_TYPE_INT);
-            if (resolved.isErr()) return errorJson(resolved.error().code, resolved.error().message);
+            if (resolved.isErr()) return errorJson(resolved.error());
             index = resolved.value();
             if (index < 0) return errorJson(404, "No audio bus is named " + wanted);
         } else if (bus_field.is_number_integer()) {
@@ -11745,7 +11744,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
         }
 
         auto bus_index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
-        if (bus_index.isErr()) return errorJson(bus_index.error().code, bus_index.error().message);
+        if (bus_index.isErr()) return errorJson(bus_index.error());
 
         const auto readState = [&]() -> Result<json> {
             auto name_value = callObject(server.value(), "AudioServer", "get_bus_name", 844755477LL,
@@ -11779,7 +11778,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
         // because bus state is not part of the edited scene and the editor undo
         // stack does not carry it.
         auto before = readState();
-        if (before.isErr()) return errorJson(before.error().code, before.error().message);
+        if (before.isErr()) return errorJson(before.error());
 
         json applied = json::array();
         if (params.contains("volume_db")) {
@@ -11793,10 +11792,10 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 return errorJson(400, "volume_db must be between -80 and 24 decibels");
             }
             auto db_variant = makeScalar(GDEXTENSION_VARIANT_TYPE_FLOAT, db);
-            if (db_variant.isErr()) return errorJson(db_variant.error().code, db_variant.error().message);
+            if (db_variant.isErr()) return errorJson(db_variant.error());
             auto set = callObject(server.value(), "AudioServer", "set_bus_volume_db", 1602489585LL,
                                   {&bus_index.value(), &db_variant.value()});
-            if (set.isErr()) return errorJson(set.error().code, set.error().message);
+            if (set.isErr()) return errorJson(set.error());
             applied.push_back("volume_db");
         }
 
@@ -11815,10 +11814,10 @@ json GodotBridge::execute(const std::string& method, const json& params,
             return true;
         };
         auto muted = applyFlag("mute", "set_bus_mute", 300928843LL);
-        if (muted.isErr()) return errorJson(muted.error().code, muted.error().message);
+        if (muted.isErr()) return errorJson(muted.error());
         if (muted.value()) applied.push_back("mute");
         auto soloed = applyFlag("solo", "set_bus_solo", 300928843LL);
-        if (soloed.isErr()) return errorJson(soloed.error().code, soloed.error().message);
+        if (soloed.isErr()) return errorJson(soloed.error());
         if (soloed.value()) applied.push_back("solo");
 
         if (applied.empty()) {
@@ -11826,7 +11825,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
         }
 
         auto after = readState();
-        if (after.isErr()) return errorJson(after.error().code, after.error().message);
+        if (after.isErr()) return errorJson(after.error());
 
         // Where the change ends up, which is not where this handler leaves it.
         //
@@ -11878,12 +11877,12 @@ json GodotBridge::execute(const std::string& method, const json& params,
     }
 
     auto editor_result = editorInterface();
-    if (editor_result.isErr()) return errorJson(editor_result.error().code, editor_result.error().message);
+    if (editor_result.isErr()) return errorJson(editor_result.error());
     auto editor = editor_result.value();
 
     if (method == "editor.getRecoveryState") {
         auto scanning = isEditorFilesystemScanning();
-        if (scanning.isErr()) return errorJson(scanning.error().code, scanning.error().message);
+        if (scanning.isErr()) return errorJson(scanning.error());
         return liveResult({{"filesystem_scanning", scanning.value()}});
     }
 
@@ -11899,7 +11898,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
             return bridgeError(501, "required_bind_unavailable");
         }
         auto root = editedSceneRoot(editor);
-        if (root.isErr()) return errorJson(root.error().code, root.error().message);
+        if (root.isErr()) return errorJson(root.error());
         auto layer = resolveNode(root.value(), params["tilemap_path"].get<std::string>());
         const auto tilemap_path = params["tilemap_path"].get<std::string>();
         if (layer.isErr()) {
@@ -11973,7 +11972,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
         if (preflightUndoManagerBindings().isErr() || preflightUndoRollbackBindings().isErr())
             return bridgeError(501, "required_bind_unavailable");
         auto root = editedSceneRoot(editor);
-        if (root.isErr()) return errorJson(root.error().code, root.error().message);
+        if (root.isErr()) return errorJson(root.error());
         auto layer = resolveNode(root.value(), params["tilemap_path"].get<std::string>());
         const auto tilemap_path = params["tilemap_path"].get<std::string>();
         if (layer.isErr()) {
@@ -12108,7 +12107,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 {"unchanged_cells", cells.size()}, {"cells", std::move(observed_cells)}, {"undo_redo_registered", false}, {"outcome", "completed"}, {"rollback", "not_required"}});
         }
         auto manager = undoManager(editor);
-        if (manager.isErr()) return errorJson(manager.error().code, manager.error().message);
+        if (manager.isErr()) return errorJson(manager.error());
         auto action = createAction(manager.value(), "Didi: set TileMapLayer cells", layer.value());
         if (action.isErr()) return errorJson(500, action.error().message);
         for (auto& cell : cells) if (cell.changed) {
@@ -12172,7 +12171,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
         if (preflightUndoManagerBindings().isErr() || preflightUndoRollbackBindings().isErr())
             return bridgeError(501, "required_bind_unavailable");
         auto root = editedSceneRoot(editor);
-        if (root.isErr()) return errorJson(root.error().code, root.error().message);
+        if (root.isErr()) return errorJson(root.error());
         auto grid = resolveNode(root.value(), params["gridmap_path"].get<std::string>());
         const auto gridmap_path = params["gridmap_path"].get<std::string>();
         if (grid.isErr()) {
@@ -12248,7 +12247,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 {"unchanged_cells", cells.size()}, {"cells", std::move(observed_cells)}, {"undo_redo_registered", false}, {"outcome", "completed"}, {"rollback", "not_required"}});
         }
         auto manager = undoManager(editor);
-        if (manager.isErr()) return errorJson(manager.error().code, manager.error().message);
+        if (manager.isErr()) return errorJson(manager.error());
         auto action = createAction(manager.value(), "Didi: set GridMap cells", grid.value());
         if (action.isErr()) return errorJson(500, action.error().message);
         for (auto& cell : cells) if (cell.changed) {
@@ -12333,10 +12332,10 @@ json GodotBridge::execute(const std::string& method, const json& params,
         }
 
         auto root = editedSceneRoot(editor);
-        if (root.isErr()) return errorJson(root.error().code, root.error().message);
+        if (root.isErr()) return errorJson(root.error());
         const auto camera_path = params["camera_path"].get<std::string>();
         auto camera = resolveNode(root.value(), camera_path);
-        if (camera.isErr()) return errorJson(camera.error().code, camera.error().message);
+        if (camera.isErr()) return errorJson(camera.error());
         if (auto refused = refuseUnsavableEdit(root.value(), camera.value(), camera_path,
                                                SceneEdit::Property)) {
             return *refused;
@@ -12387,7 +12386,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
         }
 
         auto manager = undoManager(editor);
-        if (manager.isErr()) return errorJson(manager.error().code, manager.error().message);
+        if (manager.isErr()) return errorJson(manager.error());
         auto action = createAction(manager.value(), "Set Camera3D Transform", camera.value());
         if (action.isErr()) return errorJson(500, action.error().message);
         auto add_step = [&](const char* operation, const char* property_method,
@@ -12493,7 +12492,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
             }
         }
         auto tree = liveSceneTree();
-        if (tree.isErr()) return errorJson(tree.error().code, tree.error().message);
+        if (tree.isErr()) return errorJson(tree.error());
         auto read_hint = [&](const char* getter) -> Result<bool> {
             auto value = callObject(tree.value(), "SceneTree", getter, 36873697LL);
             if (value.isErr()) return value.error();
@@ -12848,9 +12847,9 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 return bridgeError(501, "required_bind_unavailable");
             }
             auto root = editedSceneRoot(editor);
-            if (root.isErr()) return errorJson(root.error().code, root.error().message);
+            if (root.isErr()) return errorJson(root.error());
             auto target = resolveNode(root.value(), params["target_node"].get<std::string>());
-            if (target.isErr()) return errorJson(target.error().code, target.error().message);
+            if (target.isErr()) return errorJson(target.error());
 #if defined(DIDI_PHASE7_SIGNAL_TEST_SEAMS)
             if (takePhase7SignalTestSeam("malformed_metadata")) {
                 return bridgeError(500, "extension_protocol_error");
@@ -13205,11 +13204,11 @@ json GodotBridge::execute(const std::string& method, const json& params,
             }
 
             auto root = editedSceneRoot(editor);
-            if (root.isErr()) return errorJson(root.error().code, root.error().message);
+            if (root.isErr()) return errorJson(root.error());
             auto emitter = resolveNode(root.value(), params["emitter_node"].get<std::string>());
             auto target = resolveNode(root.value(), params["target_node"].get<std::string>());
-            if (emitter.isErr()) return errorJson(emitter.error().code, emitter.error().message);
-            if (target.isErr()) return errorJson(target.error().code, target.error().message);
+            if (emitter.isErr()) return errorJson(emitter.error());
+            if (target.isErr()) return errorJson(target.error());
             const auto signal_name = params["signal_name"].get<std::string>();
             const auto target_method = params["target_method"].get<std::string>();
             auto signal_name_value = makeStringName(signal_name);
@@ -13286,7 +13285,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
             auto target_metadata = method_metadata(target.value(), target_method);
             if (signal.isErr()) return errorJson(signal.error());
             if (target_metadata.isErr()) {
-                return errorJson(target_metadata.error().code, target_metadata.error().message);
+                return errorJson(target_metadata.error());
             }
             const int64_t signal_arity = static_cast<int64_t>(
                 signal.value().arguments.size());
@@ -13402,7 +13401,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
             }
 
             auto manager = undoManager(editor);
-            if (manager.isErr()) return errorJson(manager.error().code, manager.error().message);
+            if (manager.isErr()) return errorJson(manager.error());
             // A connect writes what the caller asked for. A disconnect's undo
             // restores what was there, verbatim, including CONNECT_INHERITED:
             // undo that put a deferred connection back as a plain one would be
@@ -13554,9 +13553,9 @@ json GodotBridge::execute(const std::string& method, const json& params,
             return bridgeError(501, "required_bind_unavailable");
         }
         auto root = editedSceneRoot(editor);
-        if (root.isErr()) return errorJson(root.error().code, root.error().message);
+        if (root.isErr()) return errorJson(root.error());
         auto target = resolveNode(root.value(), params["target_node"].get<std::string>());
-        if (target.isErr()) return errorJson(target.error().code, target.error().message);
+        if (target.isErr()) return errorJson(target.error());
         const auto signal_name = params["signal_name"].get<std::string>();
         auto signal_name_value = makeStringName(signal_name);
         if (signal_name_value.isErr()) return errorJson(500, signal_name_value.error().message);
@@ -13764,9 +13763,9 @@ json GodotBridge::execute(const std::string& method, const json& params,
             if (required.isErr()) return errorJson(501, required.error().message);
         }
         auto uid_table = singleton("ResourceUID");
-        if (uid_table.isErr()) return errorJson(uid_table.error().code, uid_table.error().message);
+        if (uid_table.isErr()) return errorJson(uid_table.error());
         auto resource_loader = singleton("ResourceLoader");
-        if (resource_loader.isErr()) return errorJson(resource_loader.error().code, resource_loader.error().message);
+        if (resource_loader.isErr()) return errorJson(resource_loader.error());
 
         // Whether Godot can load a path, which is the question a reference asks.
         // It is not the same question as whether a file scan indexed the path:
@@ -13866,19 +13865,19 @@ json GodotBridge::execute(const std::string& method, const json& params,
         auto valid_name = method == "project.setSetting"
             ? validateGenericSettingName(setting)
             : validateSettingName(setting);
-        if (valid_name.isErr()) return errorJson(valid_name.error().code, valid_name.error().message);
+        if (valid_name.isErr()) return errorJson(valid_name.error());
 
         auto project_settings = singleton("ProjectSettings");
         if (project_settings.isErr()) {
-            return errorJson(project_settings.error().code, project_settings.error().message);
+            return errorJson(project_settings.error());
         }
         auto name = makeStringName(setting);
-        if (name.isErr()) return errorJson(name.error().code, name.error().message);
+        if (name.isErr()) return errorJson(name.error());
         auto exists_value = callObject(project_settings.value(), "ProjectSettings", "has_setting", 3927539163LL,
                                        {&name.value()});
-        if (exists_value.isErr()) return errorJson(exists_value.error().code, exists_value.error().message);
+        if (exists_value.isErr()) return errorJson(exists_value.error());
         auto exists = scalarFromVariant<GDExtensionBool>(exists_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
-        if (exists.isErr()) return errorJson(exists.error().code, exists.error().message);
+        if (exists.isErr()) return errorJson(exists.error());
 
         if (method == "project.getSetting") {
             if (!exists.value()) {
@@ -13889,9 +13888,9 @@ json GodotBridge::execute(const std::string& method, const json& params,
             VariantValue default_value;
             auto current = callObject(project_settings.value(), "ProjectSettings", "get_setting", 223050753LL,
                                       {&name.value(), &default_value});
-            if (current.isErr()) return errorJson(current.error().code, current.error().message);
+            if (current.isErr()) return errorJson(current.error());
             auto value = variantToJson(current.value());
-            if (value.isErr()) return errorJson(value.error().code, value.error().message);
+            if (value.isErr()) return errorJson(value.error());
             return liveResult({{"status", "success"}, {"setting", setting}, {"value", value.value()}});
         }
 
@@ -13934,9 +13933,9 @@ json GodotBridge::execute(const std::string& method, const json& params,
             ? callObject(project_settings.value(), "ProjectSettings", "get_setting", 223050753LL,
                          {&name.value(), &default_value})
             : Result<VariantValue>(VariantValue{});
-        if (previous.isErr()) return errorJson(previous.error().code, previous.error().message);
+        if (previous.isErr()) return errorJson(previous.error());
         auto replacement = remove ? Result<VariantValue>(VariantValue{}) : makeJsonVariant(params["value"]);
-        if (replacement.isErr()) return errorJson(replacement.error().code, replacement.error().message);
+        if (replacement.isErr()) return errorJson(replacement.error());
 
         // Having established that the engine defines this setting, the tool
         // used to write whatever it was handed. The lookup that answered
@@ -13971,7 +13970,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
             const auto text = params["value"].get<std::string>();
             if (strings::startsWith(text, "res://")) {
                 auto present = resourcePathExistsOnDisk(text);
-                if (present.isErr()) return errorJson(present.error().code, present.error().message);
+                if (present.isErr()) return errorJson(present.error());
                 if (!present.value()) {
                     return errorJson(404,
                                      "Project setting resource not found: " + text +
@@ -13990,7 +13989,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
         auto literal_before = projectFileSettingLiteral(setting);
         auto applied = callObject(project_settings.value(), "ProjectSettings", "set_setting", 402577236LL,
                                   {&name.value(), &replacement.value()});
-        if (applied.isErr()) return errorJson(applied.error().code, applied.error().message);
+        if (applied.isErr()) return errorJson(applied.error());
         const auto file_before = projectFileStamp();
         auto saved = callObject(project_settings.value(), "ProjectSettings", "save", 166280745LL);
         auto save_code = saved.isOk()
@@ -14053,39 +14052,39 @@ json GodotBridge::execute(const std::string& method, const json& params,
     if (method == "project.listAutoloads" || method == "project.setAutoload" ||
         method == "project.removeAutoload") {
         auto project_settings = singleton("ProjectSettings");
-        if (project_settings.isErr()) return errorJson(project_settings.error().code, project_settings.error().message);
+        if (project_settings.isErr()) return errorJson(project_settings.error());
 
         if (method == "project.listAutoloads") {
             auto properties = callObject(project_settings.value(), "Object", "get_property_list", 3995934104LL);
-            if (properties.isErr()) return errorJson(properties.error().code, properties.error().message);
+            if (properties.isErr()) return errorJson(properties.error());
             auto size_value = callVariant(properties.value(), "size");
-            if (size_value.isErr()) return errorJson(size_value.error().code, size_value.error().message);
+            if (size_value.isErr()) return errorJson(size_value.error());
             auto size = scalarFromVariant<int64_t>(size_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
-            if (size.isErr()) return errorJson(size.error().code, size.error().message);
+            if (size.isErr()) return errorJson(size.error());
             auto name_key = makeString("name");
-            if (name_key.isErr()) return errorJson(name_key.error().code, name_key.error().message);
+            if (name_key.isErr()) return errorJson(name_key.error());
             std::vector<json> entries;
             for (int64_t i = 0; i < size.value(); ++i) {
                 auto index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, i);
-                if (index.isErr()) return errorJson(index.error().code, index.error().message);
+                if (index.isErr()) return errorJson(index.error());
                 auto descriptor = callVariant(properties.value(), "get", {&index.value()});
-                if (descriptor.isErr()) return errorJson(descriptor.error().code, descriptor.error().message);
+                if (descriptor.isErr()) return errorJson(descriptor.error());
                 auto property_name_value = callVariant(descriptor.value(), "get", {&name_key.value()});
-                if (property_name_value.isErr()) return errorJson(property_name_value.error().code, property_name_value.error().message);
+                if (property_name_value.isErr()) return errorJson(property_name_value.error());
                 auto property_type = GodotApi::instance().variant_get_type(property_name_value.value().ptr());
                 if (property_type != GDEXTENSION_VARIANT_TYPE_STRING && property_type != GDEXTENSION_VARIANT_TYPE_STRING_NAME) continue;
                 auto property_name = stringFromVariant(property_name_value.value(), property_type);
-                if (property_name.isErr()) return errorJson(property_name.error().code, property_name.error().message);
+                if (property_name.isErr()) return errorJson(property_name.error());
                 if (!strings::startsWith(property_name.value(), "autoload/") || property_name.value().size() <= 9) continue;
                 auto setting_name = makeStringName(property_name.value());
                 VariantValue default_value;
-                if (setting_name.isErr()) return errorJson(setting_name.error().code, setting_name.error().message);
+                if (setting_name.isErr()) return errorJson(setting_name.error());
                 auto setting = callObject(project_settings.value(), "ProjectSettings", "get_setting", 223050753LL,
                                           {&setting_name.value(), &default_value});
-                if (setting.isErr()) return errorJson(setting.error().code, setting.error().message);
+                if (setting.isErr()) return errorJson(setting.error());
                 auto setting_type = GodotApi::instance().variant_get_type(setting.value().ptr());
                 auto encoded = stringFromVariant(setting.value(), setting_type);
-                if (encoded.isErr()) return errorJson(encoded.error().code, encoded.error().message);
+                if (encoded.isErr()) return errorJson(encoded.error());
                 const bool autoload_singleton = strings::startsWith(encoded.value(), "*");
                 entries.push_back({{"name", property_name.value().substr(9)},
                                    {"path", autoload_singleton ? encoded.value().substr(1) : encoded.value()},
@@ -14099,15 +14098,15 @@ json GodotBridge::execute(const std::string& method, const json& params,
 
         const std::string autoload_name = params.value("name", "");
         auto valid_name = validateIdentifier(autoload_name, "autoload name");
-        if (valid_name.isErr()) return errorJson(valid_name.error().code, valid_name.error().message);
+        if (valid_name.isErr()) return errorJson(valid_name.error());
         const std::string setting_path = "autoload/" + autoload_name;
         auto setting_name = makeStringName(setting_path);
-        if (setting_name.isErr()) return errorJson(setting_name.error().code, setting_name.error().message);
+        if (setting_name.isErr()) return errorJson(setting_name.error());
         auto exists_value = callObject(project_settings.value(), "ProjectSettings", "has_setting", 3927539163LL,
                                        {&setting_name.value()});
-        if (exists_value.isErr()) return errorJson(exists_value.error().code, exists_value.error().message);
+        if (exists_value.isErr()) return errorJson(exists_value.error());
         auto exists = scalarFromVariant<GDExtensionBool>(exists_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
-        if (exists.isErr()) return errorJson(exists.error().code, exists.error().message);
+        if (exists.isErr()) return errorJson(exists.error());
         const bool removing = method == "project.removeAutoload";
         if (removing && !exists.value()) return errorJson(404, "Autoload not found: " + autoload_name);
         if (!removing && exists.value() && !params.value("replace", false)) {
@@ -14120,7 +14119,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
             ? callObject(project_settings.value(), "ProjectSettings", "get_setting", 223050753LL,
                          {&setting_name.value(), &default_value})
             : Result<VariantValue>(VariantValue{});
-        if (previous.isErr()) return errorJson(previous.error().code, previous.error().message);
+        if (previous.isErr()) return errorJson(previous.error());
         Result<VariantValue> replacement(VariantValue{});
         std::string resource_path;
         bool autoload_singleton = true;
@@ -14129,26 +14128,26 @@ json GodotBridge::execute(const std::string& method, const json& params,
             auto valid_path = strings::endsWith(resource_path, ".gd") || strings::endsWith(resource_path, ".cs")
                 ? validateScriptPath(resource_path)
                 : validateResPath(resource_path, ".tscn");
-            if (valid_path.isErr()) return errorJson(valid_path.error().code, valid_path.error().message);
+            if (valid_path.isErr()) return errorJson(valid_path.error());
             auto loader = singleton("ResourceLoader");
-            if (loader.isErr()) return errorJson(loader.error().code, loader.error().message);
+            if (loader.isErr()) return errorJson(loader.error());
             auto path = makeString(resource_path);
             auto hint = makeString("");
             if (path.isErr() || hint.isErr()) return errorJson(500, "Failed to construct resource existence arguments");
             auto resource_exists_value = callObject(loader.value(), "ResourceLoader", "exists", 4185558881LL,
                                                     {&path.value(), &hint.value()});
-            if (resource_exists_value.isErr()) return errorJson(resource_exists_value.error().code, resource_exists_value.error().message);
+            if (resource_exists_value.isErr()) return errorJson(resource_exists_value.error());
             auto resource_exists = scalarFromVariant<GDExtensionBool>(resource_exists_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
-            if (resource_exists.isErr()) return errorJson(resource_exists.error().code, resource_exists.error().message);
+            if (resource_exists.isErr()) return errorJson(resource_exists.error());
             if (!resource_exists.value()) return errorJson(404, "Autoload resource not found: " + resource_path);
             autoload_singleton = params.value("singleton", true);
             replacement = makeString((autoload_singleton ? "*" : "") + resource_path);
-            if (replacement.isErr()) return errorJson(replacement.error().code, replacement.error().message);
+            if (replacement.isErr()) return errorJson(replacement.error());
         }
 
         auto applied = callObject(project_settings.value(), "ProjectSettings", "set_setting", 402577236LL,
                                   {&setting_name.value(), &replacement.value()});
-        if (applied.isErr()) return errorJson(applied.error().code, applied.error().message);
+        if (applied.isErr()) return errorJson(applied.error());
         const auto file_before = projectFileStamp();
         auto saved = callObject(project_settings.value(), "ProjectSettings", "save", 166280745LL);
         auto save_code = saved.isOk()
@@ -14197,7 +14196,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
     if (method == "project.listInputActions" || method == "project.setInputAction" ||
         method == "project.removeInputAction") {
         auto project_settings = singleton("ProjectSettings");
-        if (project_settings.isErr()) return errorJson(project_settings.error().code, project_settings.error().message);
+        if (project_settings.isErr()) return errorJson(project_settings.error());
 
         if (method == "project.listInputActions") {
             // Ninety actions came back on every call, eighty-five of them the
@@ -14226,11 +14225,11 @@ json GodotBridge::execute(const std::string& method, const json& params,
             size_t omitted_engine_defaults = 0;
             bool named_action_omitted = false;
             auto properties = callObject(project_settings.value(), "Object", "get_property_list", 3995934104LL);
-            if (properties.isErr()) return errorJson(properties.error().code, properties.error().message);
+            if (properties.isErr()) return errorJson(properties.error());
             auto size_value = callVariant(properties.value(), "size");
-            if (size_value.isErr()) return errorJson(size_value.error().code, size_value.error().message);
+            if (size_value.isErr()) return errorJson(size_value.error());
             auto size = scalarFromVariant<int64_t>(size_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
-            if (size.isErr()) return errorJson(size.error().code, size.error().message);
+            if (size.isErr()) return errorJson(size.error());
             auto name_key = makeString("name");
             auto deadzone_key = makeString("deadzone");
             auto events_key = makeString("events");
@@ -14238,15 +14237,15 @@ json GodotBridge::execute(const std::string& method, const json& params,
             std::vector<json> actions;
             for (int64_t i = 0; i < size.value(); ++i) {
                 auto index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, i);
-                if (index.isErr()) return errorJson(index.error().code, index.error().message);
+                if (index.isErr()) return errorJson(index.error());
                 auto descriptor = callVariant(properties.value(), "get", {&index.value()});
-                if (descriptor.isErr()) return errorJson(descriptor.error().code, descriptor.error().message);
+                if (descriptor.isErr()) return errorJson(descriptor.error());
                 auto property_name_value = callVariant(descriptor.value(), "get", {&name_key.value()});
-                if (property_name_value.isErr()) return errorJson(property_name_value.error().code, property_name_value.error().message);
+                if (property_name_value.isErr()) return errorJson(property_name_value.error());
                 auto property_type = GodotApi::instance().variant_get_type(property_name_value.value().ptr());
                 if (property_type != GDEXTENSION_VARIANT_TYPE_STRING && property_type != GDEXTENSION_VARIANT_TYPE_STRING_NAME) continue;
                 auto property_name = stringFromVariant(property_name_value.value(), property_type);
-                if (property_name.isErr()) return errorJson(property_name.error().code, property_name.error().message);
+                if (property_name.isErr()) return errorJson(property_name.error());
                 if (!strings::startsWith(property_name.value(), "input/") || property_name.value().size() <= 6) continue;
                 const std::string action_name = property_name.value().substr(6);
                 if (!only_action.empty() && action_name != only_action) continue;
@@ -14258,10 +14257,10 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 }
                 auto setting_name = makeStringName(property_name.value());
                 VariantValue default_value;
-                if (setting_name.isErr()) return errorJson(setting_name.error().code, setting_name.error().message);
+                if (setting_name.isErr()) return errorJson(setting_name.error());
                 auto setting = callObject(project_settings.value(), "ProjectSettings", "get_setting", 223050753LL,
                                           {&setting_name.value(), &default_value});
-                if (setting.isErr()) return errorJson(setting.error().code, setting.error().message);
+                if (setting.isErr()) return errorJson(setting.error());
                 if (GodotApi::instance().variant_get_type(setting.value().ptr()) != GDEXTENSION_VARIANT_TYPE_DICTIONARY) {
                     return errorJson(422, "InputMap setting is not a Dictionary: " + property_name.value(),
                                           {{"code", "malformed_input_map_entry"}});
@@ -14273,19 +14272,19 @@ json GodotBridge::execute(const std::string& method, const json& params,
                                      {{"code", "malformed_input_map_entry"}});
                 }
                 auto deadzone = scalarFromVariant<double>(deadzone_value.value(), GDEXTENSION_VARIANT_TYPE_FLOAT);
-                if (deadzone.isErr()) return errorJson(deadzone.error().code, deadzone.error().message);
+                if (deadzone.isErr()) return errorJson(deadzone.error());
                 auto event_count_value = callVariant(events_value.value(), "size");
-                if (event_count_value.isErr()) return errorJson(event_count_value.error().code, event_count_value.error().message);
+                if (event_count_value.isErr()) return errorJson(event_count_value.error());
                 auto event_count = scalarFromVariant<int64_t>(event_count_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
-                if (event_count.isErr()) return errorJson(event_count.error().code, event_count.error().message);
+                if (event_count.isErr()) return errorJson(event_count.error());
                 json events = json::array();
                 for (int64_t event_index = 0; event_index < event_count.value(); ++event_index) {
                     auto native_index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, event_index);
-                    if (native_index.isErr()) return errorJson(native_index.error().code, native_index.error().message);
+                    if (native_index.isErr()) return errorJson(native_index.error());
                     auto event = callVariant(events_value.value(), "get", {&native_index.value()});
-                    if (event.isErr()) return errorJson(event.error().code, event.error().message);
+                    if (event.isErr()) return errorJson(event.error());
                     auto normalized = inputEventToJson(event.value());
-                    if (normalized.isErr()) return errorJson(normalized.error().code, normalized.error().message);
+                    if (normalized.isErr()) return errorJson(normalized.error());
                     events.push_back(normalized.value());
                 }
                 json entry = {{"action", action_name}, {"deadzone", deadzone.value()}, {"events", events}};
@@ -14318,15 +14317,15 @@ json GodotBridge::execute(const std::string& method, const json& params,
 
         const std::string action = params.value("action", "");
         auto valid_action = validateActionName(action);
-        if (valid_action.isErr()) return errorJson(valid_action.error().code, valid_action.error().message);
+        if (valid_action.isErr()) return errorJson(valid_action.error());
         const std::string setting_path = "input/" + action;
         auto setting_name = makeStringName(setting_path);
-        if (setting_name.isErr()) return errorJson(setting_name.error().code, setting_name.error().message);
+        if (setting_name.isErr()) return errorJson(setting_name.error());
         auto exists_value = callObject(project_settings.value(), "ProjectSettings", "has_setting", 3927539163LL,
                                        {&setting_name.value()});
-        if (exists_value.isErr()) return errorJson(exists_value.error().code, exists_value.error().message);
+        if (exists_value.isErr()) return errorJson(exists_value.error());
         auto exists = scalarFromVariant<GDExtensionBool>(exists_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
-        if (exists.isErr()) return errorJson(exists.error().code, exists.error().message);
+        if (exists.isErr()) return errorJson(exists.error());
         const bool removing = method == "project.removeInputAction";
         if (removing && !exists.value()) return errorJson(404, "Input action not found: " + action);
         if (removing) {
@@ -14337,7 +14336,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
             // what persisted promises: the removal is gone on the next load
             // (#485).
             auto defined = projectFileDefinesInputAction(action);
-            if (defined.isErr()) return errorJson(defined.error().code, defined.error().message);
+            if (defined.isErr()) return errorJson(defined.error());
             if (!defined.value()) {
                 return errorJson(
                     409,
@@ -14365,7 +14364,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
             ? callObject(project_settings.value(), "ProjectSettings", "get_setting", 223050753LL,
                          {&setting_name.value(), &default_value})
             : Result<VariantValue>(VariantValue{});
-        if (previous.isErr()) return errorJson(previous.error().code, previous.error().message);
+        if (previous.isErr()) return errorJson(previous.error());
         Result<VariantValue> replacement(VariantValue{});
         double deadzone = 0.2;
         size_t event_count = 0;
@@ -14397,7 +14396,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 }
                 ++event_index;
                 auto appended = callVariant(events.value(), "append", {&event.value()});
-                if (appended.isErr()) return errorJson(appended.error().code, appended.error().message);
+                if (appended.isErr()) return errorJson(appended.error());
             }
             auto set_deadzone = callVariant(dictionary.value(), "set", {&deadzone_key.value(), &deadzone_value.value()});
             auto set_events = callVariant(dictionary.value(), "set", {&events_key.value(), &events.value()});
@@ -14420,7 +14419,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
         // actions when it starts, which is where they take effect.
         auto applied = callObject(project_settings.value(), "ProjectSettings", "set_setting", 402577236LL,
                                   {&setting_name.value(), &replacement.value()});
-        if (applied.isErr()) return errorJson(applied.error().code, applied.error().message);
+        if (applied.isErr()) return errorJson(applied.error());
         const auto file_before = projectFileStamp();
         auto saved = callObject(project_settings.value(), "ProjectSettings", "save", 166280745LL);
         auto save_code = saved.isOk()
@@ -14485,21 +14484,21 @@ json GodotBridge::execute(const std::string& method, const json& params,
 
     if (method == "script.attachToNode" || method == "script.detachFromNode") {
         auto root = editedSceneRoot(editor);
-        if (root.isErr()) return errorJson(root.error().code, root.error().message);
+        if (root.isErr()) return errorJson(root.error());
         auto node = resolveNode(root.value(), params.value("target_node", ""));
-        if (node.isErr()) return errorJson(node.error().code, node.error().message);
+        if (node.isErr()) return errorJson(node.error());
         if (auto refused = refuseUnsavableEdit(root.value(), node.value(),
                                                params.value("target_node", ""),
                                                SceneEdit::Property)) {
             return *refused;
         }
         auto old_script = callObject(node.value(), "Object", "get_script", 1214101251LL);
-        if (old_script.isErr()) return errorJson(old_script.error().code, old_script.error().message);
+        if (old_script.isErr()) return errorJson(old_script.error());
         auto old_type = GodotApi::instance().variant_get_type(old_script.value().ptr());
         GDExtensionObjectPtr old_object = nullptr;
         if (old_type == GDEXTENSION_VARIANT_TYPE_OBJECT) {
             auto converted = objectFromVariant(old_script.value());
-            if (converted.isErr()) return errorJson(converted.error().code, converted.error().message);
+            if (converted.isErr()) return errorJson(converted.error());
             old_object = converted.value();
         }
 
@@ -14512,8 +14511,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
             auto attachable = loadAttachableScript(node.value(), script_path);
             if (attachable.isErr()) {
                 const auto& failure = attachable.error();
-                return failure.data.is_object() ? errorJson(failure.code, failure.message, failure.data)
-                                                : errorJson(failure.code, failure.message);
+                return errorJson(failure);
             }
             requested_script_object = attachable.value().object;
             new_script = std::move(attachable.value().script);
@@ -14523,13 +14521,13 @@ json GodotBridge::execute(const std::string& method, const json& params,
         }
 
         auto manager = undoManager(editor);
-        if (manager.isErr()) return errorJson(manager.error().code, manager.error().message);
+        if (manager.isErr()) return errorJson(manager.error());
         auto preflight = preflightUndoManagerBindings();
         auto method_bind = requireMethodBind("Object", "set_script", 1114965689LL);
-        if (preflight.isErr()) return errorJson(preflight.error().code, preflight.error().message);
-        if (method_bind.isErr()) return errorJson(method_bind.error().code, method_bind.error().message);
+        if (preflight.isErr()) return errorJson(preflight.error());
+        if (method_bind.isErr()) return errorJson(method_bind.error());
         auto action = createAction(manager.value(), attaching ? "Didi: attach script" : "Didi: detach script", root.value());
-        if (action.isErr()) return errorJson(action.error().code, action.error().message);
+        if (action.isErr()) return errorJson(action.error());
         auto apply = managerMethod(manager.value(), "add_do_method", node.value(), "set_script", {&new_script});
         auto revert = managerMethod(manager.value(), "add_undo_method", node.value(), "set_script", {&old_script.value()});
         if (apply.isErr() || revert.isErr()) {
@@ -14538,14 +14536,14 @@ json GodotBridge::execute(const std::string& method, const json& params,
             return errorJson(500, "Failed to register script UndoRedo transaction");
         }
         auto committed = commitAction(manager.value());
-        if (committed.isErr()) return errorJson(committed.error().code, committed.error().message);
+        if (committed.isErr()) return errorJson(committed.error());
         auto observed_script = callObject(node.value(), "Object", "get_script", 1214101251LL);
-        if (observed_script.isErr()) return errorJson(observed_script.error().code, observed_script.error().message);
+        if (observed_script.isErr()) return errorJson(observed_script.error());
         auto observed_type = GodotApi::instance().variant_get_type(observed_script.value().ptr());
         GDExtensionObjectPtr observed_object = nullptr;
         if (observed_type == GDEXTENSION_VARIANT_TYPE_OBJECT) {
             auto converted = objectFromVariant(observed_script.value());
-            if (converted.isErr()) return errorJson(converted.error().code, converted.error().message);
+            if (converted.isErr()) return errorJson(converted.error());
             observed_object = converted.value();
         }
         if ((attaching && observed_object != requested_script_object) || (!attaching && observed_object)) {
@@ -14600,7 +14598,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
             }
         }
         auto server = singleton("AudioServer");
-        if (server.isErr()) return errorJson(server.error().code, server.error().message);
+        if (server.isErr()) return errorJson(server.error());
 
         const auto indexVariant = [](int64_t index) {
             return makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
@@ -14638,14 +14636,14 @@ json GodotBridge::execute(const std::string& method, const json& params,
         };
 
         auto count = busCount();
-        if (count.isErr()) return errorJson(count.error().code, count.error().message);
+        if (count.isErr()) return errorJson(count.error());
         std::vector<std::string> names;
         std::vector<std::string> sends;
         for (int64_t index = 0; index < count.value(); ++index) {
             auto name = nameOf(index);
-            if (name.isErr()) return errorJson(name.error().code, name.error().message);
+            if (name.isErr()) return errorJson(name.error());
             auto send = sendOf(index);
-            if (send.isErr()) return errorJson(send.error().code, send.error().message);
+            if (send.isErr()) return errorJson(send.error());
             names.push_back(name.value());
             sends.push_back(send.value());
         }
@@ -14726,12 +14724,12 @@ json GodotBridge::execute(const std::string& method, const json& params,
         }
 
         auto at_end = indexVariant(-1);
-        if (at_end.isErr()) return errorJson(at_end.error().code, at_end.error().message);
+        if (at_end.isErr()) return errorJson(at_end.error());
         auto added = callObject(server.value(), "AudioServer", "add_bus", 1025054187LL,
                                 {&at_end.value()});
-        if (added.isErr()) return errorJson(added.error().code, added.error().message);
+        if (added.isErr()) return errorJson(added.error());
         auto grown = busCount();
-        if (grown.isErr()) return errorJson(grown.error().code, grown.error().message);
+        if (grown.isErr()) return errorJson(grown.error());
         if (grown.value() != count.value() + 1) {
             return errorJson(500, "AudioServer.add_bus did not add a bus: the layout has " +
                                       std::to_string(grown.value()) + " buses, expected " +
@@ -14739,7 +14737,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
         }
         const int64_t index = count.value();
         auto bus_index = indexVariant(index);
-        if (bus_index.isErr()) return errorJson(bus_index.error().code, bus_index.error().message);
+        if (bus_index.isErr()) return errorJson(bus_index.error());
         const auto removeAdded = [&]() {
             (void)callObject(server.value(), "AudioServer", "remove_bus", 1286410249LL,
                              {&bus_index.value()});
@@ -14748,13 +14746,13 @@ json GodotBridge::execute(const std::string& method, const json& params,
         auto name_variant = makeString(request.name);
         if (name_variant.isErr()) {
             removeAdded();
-            return errorJson(name_variant.error().code, name_variant.error().message);
+            return errorJson(name_variant.error());
         }
         auto named = callObject(server.value(), "AudioServer", "set_bus_name", 501894301LL,
                                 {&bus_index.value(), &name_variant.value()});
         if (named.isErr()) {
             removeAdded();
-            return errorJson(named.error().code, named.error().message);
+            return errorJson(named.error());
         }
         // Read back rather than trusted. Something else in the editor can add a
         // bus between the check above and this call, and the engine would
@@ -14781,13 +14779,13 @@ json GodotBridge::execute(const std::string& method, const json& params,
         auto send_variant = makeStringName(request.send);
         if (send_variant.isErr()) {
             removeAdded();
-            return errorJson(send_variant.error().code, send_variant.error().message);
+            return errorJson(send_variant.error());
         }
         auto routed = callObject(server.value(), "AudioServer", "set_bus_send", 3780747571LL,
                                  {&bus_index.value(), &send_variant.value()});
         if (routed.isErr()) {
             removeAdded();
-            return errorJson(routed.error().code, routed.error().message);
+            return errorJson(routed.error());
         }
         if (request.volume_db) {
             auto db = makeScalar(GDEXTENSION_VARIANT_TYPE_FLOAT, *request.volume_db);
@@ -14846,7 +14844,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
                         {"volume_db", db.value()}, {"mute", mute.value()}, {"solo", solo.value()}};
         };
         auto after = readState();
-        if (after.isErr()) return errorJson(after.error().code, after.error().message);
+        if (after.isErr()) return errorJson(after.error());
 
         // The file the editor writes is the one it opened the project with,
         // which is the one the project names unless the setting moved while
@@ -14907,7 +14905,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
         auto required = requireMethodBind("ClassDB", "class_exists", 2619796661LL);
         if (required.isErr()) return errorJson(501, required.error().message);
         auto class_db = singleton("ClassDB");
-        if (class_db.isErr()) return errorJson(class_db.error().code, class_db.error().message);
+        if (class_db.isErr()) return errorJson(class_db.error());
 
         json classes = json::array();
         for (const auto& value : names) {
@@ -14933,14 +14931,14 @@ json GodotBridge::execute(const std::string& method, const json& params,
         const std::string group = params.value("group", "");
         if (method != "scene.listGroups") {
             auto valid_group = validateGroupName(group);
-            if (valid_group.isErr()) return errorJson(valid_group.error().code, valid_group.error().message);
+            if (valid_group.isErr()) return errorJson(valid_group.error());
         }
         auto root = editedSceneRoot(editor);
-        if (root.isErr()) return errorJson(root.error().code, root.error().message);
+        if (root.isErr()) return errorJson(root.error());
 
         if (method == "scene.getGroupMembers") {
             auto group_name = makeStringName(group);
-            if (group_name.isErr()) return errorJson(group_name.error().code, group_name.error().message);
+            if (group_name.isErr()) return errorJson(group_name.error());
             json members = json::array();
             // A group name nobody has ever used and one that was just emptied
             // were answered identically, field for field, and scene_list_groups
@@ -15014,7 +15012,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 return Result<void>::ok();
             };
             auto visited = visit(root.value());
-            if (visited.isErr()) return errorJson(visited.error().code, visited.error().message);
+            if (visited.isErr()) return errorJson(visited.error());
             std::sort(members.begin(), members.end());
             json names = json::array();
             for (const auto& name : known_groups) names.push_back(name);
@@ -15030,7 +15028,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
         }
 
         auto node = resolveNode(root.value(), params.value("target_node", ""));
-        if (node.isErr()) return errorJson(node.error().code, node.error().message);
+        if (node.isErr()) return errorJson(node.error());
         if (method != "scene.listGroups") {
             if (auto refused = refuseUnsavableEdit(root.value(), node.value(),
                                                    params.value("target_node", ""),
@@ -15040,20 +15038,20 @@ json GodotBridge::execute(const std::string& method, const json& params,
         }
         if (method == "scene.listGroups") {
             auto groups_value = callObject(node.value(), "Node", "get_groups", 3995934104LL);
-            if (groups_value.isErr()) return errorJson(groups_value.error().code, groups_value.error().message);
+            if (groups_value.isErr()) return errorJson(groups_value.error());
             auto size_value = callVariant(groups_value.value(), "size");
-            if (size_value.isErr()) return errorJson(size_value.error().code, size_value.error().message);
+            if (size_value.isErr()) return errorJson(size_value.error());
             auto size = scalarFromVariant<int64_t>(size_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
-            if (size.isErr()) return errorJson(size.error().code, size.error().message);
+            if (size.isErr()) return errorJson(size.error());
             std::vector<std::string> groups;
             for (int64_t i = 0; i < size.value(); ++i) {
                 auto index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, i);
-                if (index.isErr()) return errorJson(index.error().code, index.error().message);
+                if (index.isErr()) return errorJson(index.error());
                 auto item = callVariant(groups_value.value(), "get", {&index.value()});
-                if (item.isErr()) return errorJson(item.error().code, item.error().message);
+                if (item.isErr()) return errorJson(item.error());
                 auto type = GodotApi::instance().variant_get_type(item.value().ptr());
                 auto text = stringFromVariant(item.value(), type);
-                if (text.isErr()) return errorJson(text.error().code, text.error().message);
+                if (text.isErr()) return errorJson(text.error());
                 groups.push_back(text.value());
             }
             std::sort(groups.begin(), groups.end());
@@ -15062,11 +15060,11 @@ json GodotBridge::execute(const std::string& method, const json& params,
         }
 
         auto group_name = makeStringName(group);
-        if (group_name.isErr()) return errorJson(group_name.error().code, group_name.error().message);
+        if (group_name.isErr()) return errorJson(group_name.error());
         auto membership_value = callObject(node.value(), "Node", "is_in_group", 2619796661LL, {&group_name.value()});
-        if (membership_value.isErr()) return errorJson(membership_value.error().code, membership_value.error().message);
+        if (membership_value.isErr()) return errorJson(membership_value.error());
         auto membership = scalarFromVariant<GDExtensionBool>(membership_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
-        if (membership.isErr()) return errorJson(membership.error().code, membership.error().message);
+        if (membership.isErr()) return errorJson(membership.error());
         const bool adding = method == "scene.addToGroup";
         if (adding && membership.value()) {
         // No retry_with: the node is in the group, so there is no argument
@@ -15084,19 +15082,19 @@ json GodotBridge::execute(const std::string& method, const json& params,
             auto root_value = makeObject(root.value());
             if (packed_scene_value.isErr() || root_value.isErr()) return errorJson(500, "Failed to inspect group persistence");
             auto packed = callObject(packed_scene, "PackedScene", "pack", 2584678054LL, {&root_value.value()});
-            if (packed.isErr()) return errorJson(packed.error().code, packed.error().message);
+            if (packed.isErr()) return errorJson(packed.error());
             auto pack_code = scalarFromVariant<int64_t>(packed.value(), GDEXTENSION_VARIANT_TYPE_INT);
             if (pack_code.isErr() || pack_code.value() != 0) return errorJson(500, "Failed to snapshot scene groups");
             auto state_value = callObject(packed_scene, "PackedScene", "get_state", 3479783971LL);
-            if (state_value.isErr()) return errorJson(state_value.error().code, state_value.error().message);
+            if (state_value.isErr()) return errorJson(state_value.error());
             auto state = objectFromVariant(state_value.value());
             if (state.isErr() || !state.value()) return errorJson(500, "PackedScene returned no SceneState");
             auto count_value = callObject(state.value(), "SceneState", "get_node_count", 3905245786LL);
-            if (count_value.isErr()) return errorJson(count_value.error().code, count_value.error().message);
+            if (count_value.isErr()) return errorJson(count_value.error());
             auto count = scalarFromVariant<int64_t>(count_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
-            if (count.isErr()) return errorJson(count.error().code, count.error().message);
+            if (count.isErr()) return errorJson(count.error());
             auto relative_path = relativePathWithinEditedRoot(root.value(), node.value());
-            if (relative_path.isErr()) return errorJson(relative_path.error().code, relative_path.error().message);
+            if (relative_path.isErr()) return errorJson(relative_path.error());
             original_persistent = false;
             for (int64_t i = 0; i < count.value(); ++i) {
                 auto index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, i);
@@ -15104,24 +15102,24 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 if (index.isErr() || for_parent.isErr()) return errorJson(500, "Failed to inspect SceneState node path");
                 auto state_path_value = callObject(state.value(), "SceneState", "get_node_path", 2272487792LL,
                                                    {&index.value(), &for_parent.value()});
-                if (state_path_value.isErr()) return errorJson(state_path_value.error().code, state_path_value.error().message);
+                if (state_path_value.isErr()) return errorJson(state_path_value.error());
                 auto state_path = stringFromVariant(state_path_value.value(), GDEXTENSION_VARIANT_TYPE_NODE_PATH);
-                if (state_path.isErr()) return errorJson(state_path.error().code, state_path.error().message);
+                if (state_path.isErr()) return errorJson(state_path.error());
                 if (sceneStatePathWithinEditedRoot(state_path.value()) != relative_path.value()) continue;
                 auto groups = callObject(state.value(), "SceneState", "get_node_groups", 647634434LL, {&index.value()});
-                if (groups.isErr()) return errorJson(groups.error().code, groups.error().message);
+                if (groups.isErr()) return errorJson(groups.error());
                 auto group_count_value = callVariant(groups.value(), "size");
-                if (group_count_value.isErr()) return errorJson(group_count_value.error().code, group_count_value.error().message);
+                if (group_count_value.isErr()) return errorJson(group_count_value.error());
                 auto group_count = scalarFromVariant<int64_t>(group_count_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
-                if (group_count.isErr()) return errorJson(group_count.error().code, group_count.error().message);
+                if (group_count.isErr()) return errorJson(group_count.error());
                 for (int64_t group_index = 0; group_index < group_count.value(); ++group_index) {
                     auto native_group_index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, group_index);
-                    if (native_group_index.isErr()) return errorJson(native_group_index.error().code, native_group_index.error().message);
+                    if (native_group_index.isErr()) return errorJson(native_group_index.error());
                     auto stored_group_value = callVariant(groups.value(), "get", {&native_group_index.value()});
-                    if (stored_group_value.isErr()) return errorJson(stored_group_value.error().code, stored_group_value.error().message);
+                    if (stored_group_value.isErr()) return errorJson(stored_group_value.error());
                     auto stored_group = stringFromVariant(stored_group_value.value(),
                         GodotApi::instance().variant_get_type(stored_group_value.value().ptr()));
-                    if (stored_group.isErr()) return errorJson(stored_group.error().code, stored_group.error().message);
+                    if (stored_group.isErr()) return errorJson(stored_group.error());
                     if (stored_group.value() == group) original_persistent = true;
                 }
                 break;
@@ -15129,17 +15127,17 @@ json GodotBridge::execute(const std::string& method, const json& params,
         }
         auto persistent = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL,
                                      static_cast<GDExtensionBool>(original_persistent));
-        if (persistent.isErr()) return errorJson(persistent.error().code, persistent.error().message);
+        if (persistent.isErr()) return errorJson(persistent.error());
         auto manager = undoManager(editor);
-        if (manager.isErr()) return errorJson(manager.error().code, manager.error().message);
+        if (manager.isErr()) return errorJson(manager.error());
         auto preflight = preflightUndoManagerBindings();
-        if (preflight.isErr()) return errorJson(preflight.error().code, preflight.error().message);
+        if (preflight.isErr()) return errorJson(preflight.error());
         auto add_bind = requireMethodBind("Node", "add_to_group", 3683006648LL);
         auto remove_bind = requireMethodBind("Node", "remove_from_group", 3304788590LL);
-        if (add_bind.isErr()) return errorJson(add_bind.error().code, add_bind.error().message);
-        if (remove_bind.isErr()) return errorJson(remove_bind.error().code, remove_bind.error().message);
+        if (add_bind.isErr()) return errorJson(add_bind.error());
+        if (remove_bind.isErr()) return errorJson(remove_bind.error());
         auto action = createAction(manager.value(), adding ? "Didi: add node to group" : "Didi: remove node from group", root.value());
-        if (action.isErr()) return errorJson(action.error().code, action.error().message);
+        if (action.isErr()) return errorJson(action.error());
         auto apply = adding
             ? managerMethod(manager.value(), "add_do_method", node.value(), "add_to_group", {&group_name.value(), &persistent.value()})
             : managerMethod(manager.value(), "add_do_method", node.value(), "remove_from_group", {&group_name.value()});
@@ -15157,15 +15155,15 @@ json GodotBridge::execute(const std::string& method, const json& params,
             return errorJson(500, "Failed to register group UndoRedo transaction");
         }
         auto committed = commitAction(manager.value());
-        if (committed.isErr()) return errorJson(committed.error().code, committed.error().message);
+        if (committed.isErr()) return errorJson(committed.error());
         // Membership read again after the commit, and the answer built from
         // it. added and removed were constants, and membership was read only
         // before the write, so a commit the node did not take read as done
         // (#1019).
         auto after_value = callObject(node.value(), "Node", "is_in_group", 2619796661LL, {&group_name.value()});
-        if (after_value.isErr()) return errorJson(after_value.error().code, after_value.error().message);
+        if (after_value.isErr()) return errorJson(after_value.error());
         auto in_group = scalarFromVariant<GDExtensionBool>(after_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
-        if (in_group.isErr()) return errorJson(in_group.error().code, in_group.error().message);
+        if (in_group.isErr()) return errorJson(in_group.error());
         if (static_cast<bool>(in_group.value()) != adding) {
             return errorJson(500, std::string("The group change was committed and the node is ") +
                                       (in_group.value() ? "still" : "not") + " in group " + group +
@@ -15187,11 +15185,11 @@ json GodotBridge::execute(const std::string& method, const json& params,
         method == "scene.packBranch") {
         if (method == "scene.close") {
             auto root = editedSceneRoot(editor);
-            if (root.isErr()) return errorJson(root.error().code, root.error().message);
+            if (root.isErr()) return errorJson(root.error());
             auto path_value = callObject(root.value(), "Node", "get_scene_file_path", 201670096LL);
-            if (path_value.isErr()) return errorJson(path_value.error().code, path_value.error().message);
+            if (path_value.isErr()) return errorJson(path_value.error());
             auto path = stringFromVariant(path_value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
-            if (path.isErr()) return errorJson(path.error().code, path.error().message);
+            if (path.isErr()) return errorJson(path.error());
             const bool discard_unsaved = params.value("discard_unsaved", false);
             // Godot 4.5 and 4.6 expose only the write side of dirty state
             // (mark_scene_as_unsaved). The read side, get_unsaved_scenes,
@@ -15216,7 +15214,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
                                       {"retry_with", {{"discard_unsaved", true}}}});
                 }
                 auto unsaved = callObject(editor, "EditorInterface", "get_unsaved_scenes", 1139954409LL);
-                if (unsaved.isErr()) return errorJson(unsaved.error().code, unsaved.error().message);
+                if (unsaved.isErr()) return errorJson(unsaved.error());
                 auto unsaved_size = callVariant(unsaved.value(), "size");
                 if (unsaved_size.isErr()) return errorJson(500, unsaved_size.error().message);
                 auto unsaved_count = scalarFromVariant<int64_t>(unsaved_size.value(), GDEXTENSION_VARIANT_TYPE_INT);
@@ -15251,9 +15249,9 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 verified_clean = true;
             }
             auto closed = callObject(editor, "EditorInterface", "close_scene", 166280745LL);
-            if (closed.isErr()) return errorJson(closed.error().code, closed.error().message);
+            if (closed.isErr()) return errorJson(closed.error());
             auto code = scalarFromVariant<int64_t>(closed.value(), GDEXTENSION_VARIANT_TYPE_INT);
-            if (code.isErr()) return errorJson(code.error().code, code.error().message);
+            if (code.isErr()) return errorJson(code.error());
             if (code.value() != 0) {
                 return errorJson(500, "Godot close_scene failed with " +
                                           ::didi::godot::describeGodotError(code.value()));
@@ -15280,17 +15278,17 @@ json GodotBridge::execute(const std::string& method, const json& params,
 
         const std::string scene_path = params.value("scene_path", "");
         auto valid_path = validateResPath(scene_path, ".tscn");
-        if (valid_path.isErr()) return errorJson(valid_path.error().code, valid_path.error().message);
+        if (valid_path.isErr()) return errorJson(valid_path.error());
         auto loader = singleton("ResourceLoader");
-        if (loader.isErr()) return errorJson(loader.error().code, loader.error().message);
+        if (loader.isErr()) return errorJson(loader.error());
         auto path = makeString(scene_path);
         auto packed_hint = makeString("PackedScene");
         if (path.isErr() || packed_hint.isErr()) return errorJson(500, "Failed to construct scene resource arguments");
         auto exists_value = callObject(loader.value(), "ResourceLoader", "exists", 4185558881LL,
                                        {&path.value(), &packed_hint.value()});
-        if (exists_value.isErr()) return errorJson(exists_value.error().code, exists_value.error().message);
+        if (exists_value.isErr()) return errorJson(exists_value.error());
         auto target_exists = scalarFromVariant<GDExtensionBool>(exists_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
-        if (target_exists.isErr()) return errorJson(target_exists.error().code, target_exists.error().message);
+        if (target_exists.isErr()) return errorJson(target_exists.error());
 
         auto open_and_verify = [&]() -> Result<void> {
             auto inherited = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(0));
@@ -15313,10 +15311,10 @@ json GodotBridge::execute(const std::string& method, const json& params,
         if (method == "scene.open") {
             if (!target_exists.value()) return errorJson(404, "PackedScene not found: " + scene_path);
             auto cache_mode = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(1));
-            if (cache_mode.isErr()) return errorJson(cache_mode.error().code, cache_mode.error().message);
+            if (cache_mode.isErr()) return errorJson(cache_mode.error());
             auto resource = callObject(loader.value(), "ResourceLoader", "load", 3358495409LL,
                                        {&path.value(), &packed_hint.value(), &cache_mode.value()});
-            if (resource.isErr()) return errorJson(resource.error().code, resource.error().message);
+            if (resource.isErr()) return errorJson(resource.error());
             auto packed = objectFromVariant(resource.value());
             if (packed.isErr() || !packed.value()) {
                 return errorJson(422, "Resource is not a loadable PackedScene: " + scene_path,
@@ -15334,7 +15332,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
                                  {{"code", "not_a_packed_scene"}});
             }
             auto opened = open_and_verify();
-            if (opened.isErr()) return errorJson(opened.error().code, opened.error().message);
+            if (opened.isErr()) return errorJson(opened.error());
             return liveResult({{"status", "success"}, {"opened", true}, {"scene_path", scene_path}});
         }
 
@@ -15354,7 +15352,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
             namespace fs = std::filesystem;
             auto project_path = resolveGodotProjectPath();
             if (project_path.isErr()) {
-                return errorJson(project_path.error().code, project_path.error().message);
+                return errorJson(project_path.error());
             }
             std::error_code ec;
             const auto root = fs::weakly_canonical(
@@ -15421,7 +15419,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 if (is_node.isErr() || !is_node.value()) {
                     GodotApi::instance().object_destroy(packed_root);
                     return is_node.isErr()
-                        ? errorJson(is_node.error().code, is_node.error().message)
+                        ? errorJson(is_node.error())
                         : errorJson(400, "Godot ClassDB type does not inherit Node: " + root_type);
                 }
             }
@@ -15431,24 +15429,24 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 : Result<VariantValue>(name.error());
             if (named.isErr()) {
                 GodotApi::instance().object_destroy(packed_root);
-                return errorJson(named.error().code, named.error().message);
+                return errorJson(named.error());
             }
         } else {
             auto root = editedSceneRoot(editor);
-            if (root.isErr()) return errorJson(root.error().code, root.error().message);
+            if (root.isErr()) return errorJson(root.error());
             auto target = resolveNode(root.value(), params.value("target_node", ""));
-            if (target.isErr()) return errorJson(target.error().code, target.error().message);
+            if (target.isErr()) return errorJson(target.error());
             auto flags = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(15));
-            if (flags.isErr()) return errorJson(flags.error().code, flags.error().message);
+            if (flags.isErr()) return errorJson(flags.error());
             auto duplicated = callObject(target.value(), "Node", "duplicate", 3511555459LL, {&flags.value()});
-            if (duplicated.isErr()) return errorJson(duplicated.error().code, duplicated.error().message);
+            if (duplicated.isErr()) return errorJson(duplicated.error());
             auto duplicate_object = objectFromVariant(duplicated.value());
             if (duplicate_object.isErr() || !duplicate_object.value()) return errorJson(500, "Godot failed to duplicate the branch");
             packed_root = duplicate_object.value();
             auto owner = makeObject(packed_root);
             if (owner.isErr()) {
                 GodotApi::instance().object_destroy(packed_root);
-                return errorJson(owner.error().code, owner.error().message);
+                return errorJson(owner.error());
             }
             std::function<Result<void>(GDExtensionObjectPtr)> normalize_owner = [&](GDExtensionObjectPtr current) -> Result<void> {
                 auto include_internal = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(0));
@@ -15476,7 +15474,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
             auto normalized = normalize_owner(packed_root);
             if (normalized.isErr()) {
                 GodotApi::instance().object_destroy(packed_root);
-                return errorJson(normalized.error().code, normalized.error().message);
+                return errorJson(normalized.error());
             }
         }
 
@@ -15495,7 +15493,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
         auto packed = callObject(packed_scene, "PackedScene", "pack", 2584678054LL, {&root_value.value()});
         if (packed.isErr()) {
             GodotApi::instance().object_destroy(packed_root);
-            return errorJson(packed.error().code, packed.error().message);
+            return errorJson(packed.error());
         }
         auto pack_code = scalarFromVariant<int64_t>(packed.value(), GDEXTENSION_VARIANT_TYPE_INT);
         if (pack_code.isErr() || pack_code.value() != 0) {
@@ -15511,9 +15509,9 @@ json GodotBridge::execute(const std::string& method, const json& params,
         auto saved = callObject(saver.value(), "ResourceSaver", "save", 2983274697LL,
                                 {&packed_value.value(), &path.value(), &flags.value()});
         GodotApi::instance().object_destroy(packed_root);
-        if (saved.isErr()) return errorJson(saved.error().code, saved.error().message);
+        if (saved.isErr()) return errorJson(saved.error());
         auto save_code = scalarFromVariant<int64_t>(saved.value(), GDEXTENSION_VARIANT_TYPE_INT);
-        if (save_code.isErr()) return errorJson(save_code.error().code, save_code.error().message);
+        if (save_code.isErr()) return errorJson(save_code.error());
         if (save_code.value() != 0) {
             // A 300-character filename reached ResourceSaver and came back as
             // "Error 19": a 500 that says the server broke, with no next move
@@ -15608,29 +15606,29 @@ json GodotBridge::execute(const std::string& method, const json& params,
         // at all, because only one may hold the editor route.
         auto selection_value = callObject(editor, "EditorInterface", "get_selection", 2690272531LL);
         if (selection_value.isErr()) {
-            return errorJson(selection_value.error().code, selection_value.error().message);
+            return errorJson(selection_value.error());
         }
         auto selection = objectFromVariant(selection_value.value());
-        if (selection.isErr()) return errorJson(selection.error().code, selection.error().message);
+        if (selection.isErr()) return errorJson(selection.error());
         if (!selection.value()) {
             return errorJson(500, "Godot returned no EditorSelection");
         }
 
         auto root_result = editedSceneRoot(editor);
         if (root_result.isErr()) {
-            return errorJson(root_result.error().code, root_result.error().message);
+            return errorJson(root_result.error());
         }
         auto root = root_result.value();
 
         auto nodes_value = callObject(selection.value(), "EditorSelection", "get_selected_nodes",
                                       2915620761LL);
         if (nodes_value.isErr()) {
-            return errorJson(nodes_value.error().code, nodes_value.error().message);
+            return errorJson(nodes_value.error());
         }
         auto size_value = callVariant(nodes_value.value(), "size");
-        if (size_value.isErr()) return errorJson(size_value.error().code, size_value.error().message);
+        if (size_value.isErr()) return errorJson(size_value.error());
         auto size = scalarFromVariant<int64_t>(size_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
-        if (size.isErr()) return errorJson(size.error().code, size.error().message);
+        if (size.isErr()) return errorJson(size.error());
 
         // A selection is a handful of nodes, but it is engine-supplied and this
         // runs on the main loop, so it is bounded like every other list.
@@ -15641,11 +15639,11 @@ json GodotBridge::execute(const std::string& method, const json& params,
         json selected = json::array();
         for (int64_t index = 0; index < reported; ++index) {
             auto position = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
-            if (position.isErr()) return errorJson(position.error().code, position.error().message);
+            if (position.isErr()) return errorJson(position.error());
             auto node_value = callVariant(nodes_value.value(), "get", {&position.value()});
-            if (node_value.isErr()) return errorJson(node_value.error().code, node_value.error().message);
+            if (node_value.isErr()) return errorJson(node_value.error());
             auto node = objectFromVariant(node_value.value());
-            if (node.isErr()) return errorJson(node.error().code, node.error().message);
+            if (node.isErr()) return errorJson(node.error());
             // A selected node can be freed between the engine building the list
             // and this reading it. Skipping is right: reporting a null path
             // would be a node path that resolves to nothing.
@@ -15675,7 +15673,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
 
     if (method == "editor.getState" || method == "scene.getHierarchy") {
         auto root_result = editedSceneRoot(editor);
-        if (root_result.isErr()) return errorJson(root_result.error().code, root_result.error().message);
+        if (root_result.isErr()) return errorJson(root_result.error());
         auto root = root_result.value();
         if (method == "editor.getState") {
             // The path the rest of the surface speaks, not Node.get_path().
@@ -15694,7 +15692,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
             // already builds its paths with, so the resource and the tools now
             // describe the same tree in the same vocabulary.
             auto root_path = logicalPathFromEditedRoot(root, root);
-            if (root_path.isErr()) return errorJson(root_path.error().code, root_path.error().message);
+            if (root_path.isErr()) return errorJson(root_path.error());
             // The editor's dirty state travels with its state, so the one
             // reader that asks before deciding anything, didi_control_room,
             // can show an amber light for a scene that is one "don't save"
@@ -15716,16 +15714,16 @@ json GodotBridge::execute(const std::string& method, const json& params,
         }
         const std::string requested_root = params.value("root_path", "/root");
         auto target = resolveNode(root, requested_root);
-        if (target.isErr()) return errorJson(target.error().code, target.error().message);
+        if (target.isErr()) return errorJson(target.error());
         int max_depth = std::clamp(params.value("max_depth", 10), 0, 64);
         auto logical_root = logicalPathFromEditedRoot(root, target.value());
-        if (logical_root.isErr()) return errorJson(logical_root.error().code, logical_root.error().message);
+        if (logical_root.isErr()) return errorJson(logical_root.error());
         auto inherited = inheritedSceneState(root);
-        if (inherited.isErr()) return errorJson(inherited.error().code, inherited.error().message);
+        if (inherited.isErr()) return errorJson(inherited.error());
         HierarchyBudget budget;
         auto hierarchy = buildHierarchy(target.value(), 0, max_depth, logical_root.value(), budget,
                                         root, inherited.value());
-        if (hierarchy.isErr()) return errorJson(hierarchy.error().code, hierarchy.error().message);
+        if (hierarchy.isErr()) return errorJson(hierarchy.error());
         if (hierarchy.value().is_null()) {
             return errorJson(413, "The edited scene root alone exceeds the hierarchy response budget");
         }
@@ -15846,7 +15844,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
             return bridgeError(501, "required_bind_unavailable");
         }
         auto root = editedSceneRoot(editor);
-        if (root.isErr()) return errorJson(root.error().code, root.error().message);
+        if (root.isErr()) return errorJson(root.error());
         const auto target_path = params["target_node"].get<std::string>();
         const auto property = params["property_name"].get<std::string>();
         auto node = resolveNode(root.value(), target_path);
@@ -15855,7 +15853,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
         if (node.isErr()) return errorJson(404, node.error().message);
 
         auto has_property = objectHasProperty(node.value(), property);
-        if (has_property.isErr()) return errorJson(has_property.error().code, has_property.error().message);
+        if (has_property.isErr()) return errorJson(has_property.error());
         if (!has_property.value()) {
             return errorJson(404, "Property not found on target node: " + property);
         }
@@ -16115,7 +16113,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
             // one set of JSON spellings rather than two.
             const auto uniform_type = static_cast<GDExtensionVariantType>(declared_type);
             auto compatible = validateJsonForPropertyType(requested_name, params["value"], uniform_type);
-            if (compatible.isErr()) return errorJson(compatible.error().code, compatible.error().message);
+            if (compatible.isErr()) return errorJson(compatible.error());
 
             // A value outside a declared hint_range is usually a slipped digit
             // or a confusion between a normalised and an absolute scale, and
@@ -16143,7 +16141,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
             auto new_value = uniform_type == GDEXTENSION_VARIANT_TYPE_OBJECT
                 ? makeResourceForProperty(requested_name, params["value"], declared_class)
                 : makeJsonVariantForProperty(params["value"], uniform_type);
-            if (new_value.isErr()) return errorJson(new_value.error().code, new_value.error().message);
+            if (new_value.isErr()) return errorJson(new_value.error());
 
             auto uniform_name = makeStringName(requested_name);
             if (uniform_name.isErr()) return errorJson(500, uniform_name.error().message);
@@ -16157,7 +16155,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
             auto stored_name = makeStringName("shader_parameter/" + requested_name);
             if (stored_name.isErr()) return errorJson(500, stored_name.error().message);
             auto manager = undoManager(editor);
-            if (manager.isErr()) return errorJson(manager.error().code, manager.error().message);
+            if (manager.isErr()) return errorJson(manager.error());
             auto material_value = makeObject(material.value());
             if (material_value.isErr()) return errorJson(500, material_value.error().message);
             auto action = createAction(manager.value(), "Didi: set shader uniform " + requested_name,
@@ -16177,7 +16175,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 return errorJson(500, (do_property.isErr() ? do_property : undo_property).error().message);
             }
             auto committed = commitAction(manager.value());
-            if (committed.isErr()) return errorJson(committed.error().code, committed.error().message);
+            if (committed.isErr()) return errorJson(committed.error());
 
             // Report what it now holds and not what was asked for, the same way
             // scene_set_property does and for the same reason.
@@ -16308,16 +16306,16 @@ json GodotBridge::execute(const std::string& method, const json& params,
 
     if (method == "scene.getProperty" || method == "scene.setProperty") {
         auto root = editedSceneRoot(editor);
-        if (root.isErr()) return errorJson(root.error().code, root.error().message);
+        if (root.isErr()) return errorJson(root.error());
         return method == "scene.setProperty" ? setSceneProperties(editor, root.value(), params)
                                              : getSceneProperties(root.value(), params);
     }
 
     if (method == "scene.instantiateNode") {
         auto root = editedSceneRoot(editor);
-        if (root.isErr()) return errorJson(root.error().code, root.error().message);
+        if (root.isErr()) return errorJson(root.error());
         auto parent = resolveNode(root.value(), params.value("parent_path", "/root"));
-        if (parent.isErr()) return errorJson(parent.error().code, parent.error().message);
+        if (parent.isErr()) return errorJson(parent.error());
         if (auto refused = refuseUnsavableEdit(root.value(), parent.value(),
                                                params.value("parent_path", "/root"),
                                                SceneEdit::AddChild)) {
@@ -16346,10 +16344,10 @@ json GodotBridge::execute(const std::string& method, const json& params,
             // instance of the scene rather than a copy of its nodes.
             auto valid_scene = validateResPath(instance_scene_path, ".tscn");
             if (valid_scene.isErr()) {
-                return errorJson(valid_scene.error().code, valid_scene.error().message);
+                return errorJson(valid_scene.error());
             }
             auto loader = singleton("ResourceLoader");
-            if (loader.isErr()) return errorJson(loader.error().code, loader.error().message);
+            if (loader.isErr()) return errorJson(loader.error());
             auto scene_path_value = makeString(instance_scene_path);
             auto packed_hint = makeString("PackedScene");
             auto cache_mode = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(1));
@@ -16359,12 +16357,12 @@ json GodotBridge::execute(const std::string& method, const json& params,
             auto exists_value = callObject(loader.value(), "ResourceLoader", "exists", 4185558881LL,
                                            {&scene_path_value.value(), &packed_hint.value()});
             if (exists_value.isErr()) {
-                return errorJson(exists_value.error().code, exists_value.error().message);
+                return errorJson(exists_value.error());
             }
             auto scene_exists = scalarFromVariant<GDExtensionBool>(exists_value.value(),
                                                                    GDEXTENSION_VARIANT_TYPE_BOOL);
             if (scene_exists.isErr()) {
-                return errorJson(scene_exists.error().code, scene_exists.error().message);
+                return errorJson(scene_exists.error());
             }
             if (!scene_exists.value()) {
                 return errorJson(404, "PackedScene not found: " + instance_scene_path);
@@ -16373,7 +16371,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
             auto resource = callObject(loader.value(), "ResourceLoader", "load", 3358495409LL,
                                        {&scene_path_value.value(), &packed_hint.value(),
                                         &cache_mode.value()});
-            if (resource.isErr()) return errorJson(resource.error().code, resource.error().message);
+            if (resource.isErr()) return errorJson(resource.error());
             auto packed = objectFromVariant(resource.value());
             if (packed.isErr() || !packed.value()) {
                 return errorJson(422, "Resource is not a loadable PackedScene: " + instance_scene_path,
@@ -16390,7 +16388,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 : Result<GDExtensionBool>(class_value.error());
             if (is_packed.isErr() || !is_packed.value()) {
                 return is_packed.isErr()
-                    ? errorJson(is_packed.error().code, is_packed.error().message)
+                    ? errorJson(is_packed.error())
                     : errorJson(422, "Resource is not a PackedScene: " + instance_scene_path,
                                      {{"code", "not_a_packed_scene"}});
             }
@@ -16399,11 +16397,11 @@ json GodotBridge::execute(const std::string& method, const json& params,
             // in a console the caller cannot read.
             auto can_value = callObject(packed.value(), "PackedScene", "can_instantiate",
                                         36873697LL);
-            if (can_value.isErr()) return errorJson(can_value.error().code, can_value.error().message);
+            if (can_value.isErr()) return errorJson(can_value.error());
             auto can_instantiate = scalarFromVariant<GDExtensionBool>(
                 can_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
             if (can_instantiate.isErr()) {
-                return errorJson(can_instantiate.error().code, can_instantiate.error().message);
+                return errorJson(can_instantiate.error());
             }
             if (!can_instantiate.value()) {
                 return errorJson(422, "PackedScene cannot be instantiated, so something it depends "
@@ -16414,10 +16412,10 @@ json GodotBridge::execute(const std::string& method, const json& params,
             // uses. It is the difference between a saved instance of the scene
             // and a saved copy of the nodes that were in it.
             auto edit_state = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(1));
-            if (edit_state.isErr()) return errorJson(edit_state.error().code, edit_state.error().message);
+            if (edit_state.isErr()) return errorJson(edit_state.error());
             auto instance = callObject(packed.value(), "PackedScene", "instantiate", 2628778455LL,
                                        {&edit_state.value()});
-            if (instance.isErr()) return errorJson(instance.error().code, instance.error().message);
+            if (instance.isErr()) return errorJson(instance.error());
             auto instance_node = objectFromVariant(instance.value());
             if (instance_node.isErr() || !instance_node.value()) {
                 return errorJson(500, "Godot returned no node for PackedScene: " + instance_scene_path);
@@ -16448,7 +16446,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
             if (is_node.isErr() || !is_node.value()) {
                 GodotApi::instance().object_destroy(node);
                 return is_node.isErr()
-                    ? errorJson(is_node.error().code, is_node.error().message)
+                    ? errorJson(is_node.error())
                     : errorJson(400, "Godot ClassDB type does not inherit Node: " + node_type);
             }
         }
@@ -16458,7 +16456,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
                                      : Result<VariantValue>(name.error());
             if (named.isErr()) {
                 GodotApi::instance().object_destroy(node);
-                return errorJson(named.error().code, named.error().message);
+                return errorJson(named.error());
             }
         }
         json initial_properties = params.value("properties", json::object());
@@ -16486,18 +16484,18 @@ json GodotBridge::execute(const std::string& method, const json& params,
             if (has_property.isErr() || !has_property.value()) {
                 GodotApi::instance().object_destroy(node);
                 return has_property.isErr()
-                    ? errorJson(has_property.error().code, has_property.error().message)
+                    ? errorJson(has_property.error())
                     : errorJson(404, "Property not found on new " + node_type + " node: " + it.key());
             }
             auto property_name = makeStringName(it.key());
             if (property_name.isErr()) {
                 GodotApi::instance().object_destroy(node);
-                return errorJson(property_name.error().code, property_name.error().message);
+                return errorJson(property_name.error());
             }
             auto current_value = callObject(node, "Object", "get", 2760726917LL, {&property_name.value()});
             if (current_value.isErr()) {
                 GodotApi::instance().object_destroy(node);
-                return errorJson(current_value.error().code, current_value.error().message);
+                return errorJson(current_value.error());
             }
             auto declared = findPropertyDescriptor(node, it.key());
             auto property_type =
@@ -16514,7 +16512,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
             auto compatible = validateJsonForPropertyType(it.key(), it.value(), property_type);
             if (compatible.isErr()) {
                 GodotApi::instance().object_destroy(node);
-                return errorJson(compatible.error().code, compatible.error().message);
+                return errorJson(compatible.error());
             }
             auto property_value = property_type == GDEXTENSION_VARIANT_TYPE_OBJECT
                 ? makeResourceForProperty(it.key(), it.value(), declared_class)
@@ -16525,13 +16523,13 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 : makeJsonVariantForProperty(it.value(), property_type);
             if (property_value.isErr()) {
                 GodotApi::instance().object_destroy(node);
-                return errorJson(property_value.error().code, property_value.error().message);
+                return errorJson(property_value.error());
             }
             auto set = callObject(node, "Object", "set", 3776071444LL,
                                   {&property_name.value(), &property_value.value()});
             if (set.isErr()) {
                 GodotApi::instance().object_destroy(node);
-                return errorJson(set.error().code, set.error().message);
+                return errorJson(set.error());
             }
             InitialProperty record;
             record.name = it.key();
@@ -16550,7 +16548,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
             initial_written.push_back(std::move(record));
         }
         auto manager = undoManager(editor);
-        if (manager.isErr()) { GodotApi::instance().object_destroy(node); return errorJson(manager.error().code, manager.error().message); }
+        if (manager.isErr()) { GodotApi::instance().object_destroy(node); return errorJson(manager.error()); }
         auto child = makeObject(node);
         auto readable = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(1));
         auto internal = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(0));
@@ -16562,20 +16560,20 @@ json GodotBridge::execute(const std::string& method, const json& params,
         auto logical_parent = logicalPathFromEditedRoot(root.value(), parent.value());
         if (logical_parent.isErr()) {
             GodotApi::instance().object_destroy(node);
-            return errorJson(logical_parent.error().code, logical_parent.error().message);
+            return errorJson(logical_parent.error());
         }
         const std::string logical_name = params.value("name", "").empty() ? node_type : params.value("name", "");
         auto preflight = preflightNodeUndoTransaction();
         if (preflight.isErr()) {
             GodotApi::instance().object_destroy(node);
-            return errorJson(preflight.error().code, preflight.error().message);
+            return errorJson(preflight.error());
         }
         auto action = createAction(manager.value(),
                                    instance_scene_path.empty()
                                        ? "Didi: instantiate " + node_type
                                        : "Didi: instantiate " + instance_scene_path,
                                    root.value());
-        if (action.isErr()) { GodotApi::instance().object_destroy(node); return errorJson(action.error().code, action.error().message); }
+        if (action.isErr()) { GodotApi::instance().object_destroy(node); return errorJson(action.error()); }
         auto keep = managerReference(manager.value(), "add_do_reference", node);
         auto add = managerMethod(manager.value(), "add_do_method", parent.value(), "add_child",
                                  {&child.value(), &readable.value(), &internal.value()});
@@ -16591,7 +16589,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
             return errorJson(500, "Failed to register instantiate UndoRedo transaction");
         }
         auto committed = commitAction(manager.value());
-        if (committed.isErr()) return errorJson(committed.error().code, committed.error().message);
+        if (committed.isErr()) return errorJson(committed.error());
         // Godot uniquifies names on insert: a second Enemy becomes Enemy2. The
         // name was set before add_child, so the path built from it is a guess.
         // Read the real one back now that the node is actually in the tree,
@@ -16656,9 +16654,9 @@ json GodotBridge::execute(const std::string& method, const json& params,
 
     if (method == "scene.removeNode" || method == "scene.duplicateNode" || method == "scene.reparentNode") {
         auto root = editedSceneRoot(editor);
-        if (root.isErr()) return errorJson(root.error().code, root.error().message);
+        if (root.isErr()) return errorJson(root.error());
         auto node = resolveNode(root.value(), params.value("target_node", ""));
-        if (node.isErr()) return errorJson(node.error().code, node.error().message);
+        if (node.isErr()) return errorJson(node.error());
         if (node.value() == root.value()) return errorJson(400, "Cannot mutate the edited scene root");
         if (auto refused = refuseUnsavableEdit(root.value(), node.value(),
                                                params.value("target_node", ""),
@@ -16666,13 +16664,13 @@ json GodotBridge::execute(const std::string& method, const json& params,
             return *refused;
         }
         auto parent_variant = callObject(node.value(), "Node", "get_parent", 3160264692LL);
-        if (parent_variant.isErr()) return errorJson(parent_variant.error().code, parent_variant.error().message);
+        if (parent_variant.isErr()) return errorJson(parent_variant.error());
         auto parent = objectFromVariant(parent_variant.value());
         if (parent.isErr() || !parent.value()) return errorJson(400, "Cannot mutate the edited scene root");
         auto include_internal = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(0));
-        if (include_internal.isErr()) return errorJson(include_internal.error().code, include_internal.error().message);
+        if (include_internal.isErr()) return errorJson(include_internal.error());
         auto old_index = callObject(node.value(), "Node", "get_index", 894402480LL, {&include_internal.value()});
-        if (old_index.isErr()) return errorJson(old_index.error().code, old_index.error().message);
+        if (old_index.isErr()) return errorJson(old_index.error());
         // Where the node was, read before anything moves it, so the change
         // journal can say what a removal or a reparent replaced (#1151).
         json before_node = json::object();
@@ -16687,7 +16685,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
         }
         before_node["type"] = nodeClassName(node.value());
         auto manager = undoManager(editor);
-        if (manager.isErr()) return errorJson(manager.error().code, manager.error().message);
+        if (manager.isErr()) return errorJson(manager.error());
         auto child = makeObject(node.value());
         auto readable = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(1));
         auto internal = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(0));
@@ -16695,7 +16693,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
 
         if (method == "scene.removeNode") {
             auto preflight = preflightNodeUndoTransaction();
-            if (preflight.isErr()) return errorJson(preflight.error().code, preflight.error().message);
+            if (preflight.isErr()) return errorJson(preflight.error());
             auto action = createAction(manager.value(), "Didi: remove node", root.value());
             auto keep = managerReference(manager.value(), "add_undo_reference", node.value());
             auto remove = managerMethod(manager.value(), "add_do_method", parent.value(), "remove_child", {&child.value()});
@@ -16730,7 +16728,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 return errorJson(500, "Failed to register remove UndoRedo transaction");
             }
             auto committed = commitAction(manager.value());
-            if (committed.isErr()) return errorJson(committed.error().code, committed.error().message);
+            if (committed.isErr()) return errorJson(committed.error());
             // Read after the commit: the path the call named no longer
             // resolves. The answer used to be `action` alone, with nothing read
             // after the change (#1019).
@@ -16745,7 +16743,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
 
         if (method == "scene.reparentNode") {
             auto new_parent = resolveNode(root.value(), params.value("new_parent_path", ""));
-            if (new_parent.isErr()) return errorJson(new_parent.error().code, new_parent.error().message);
+            if (new_parent.isErr()) return errorJson(new_parent.error());
             if (auto refused = refuseUnsavableEdit(root.value(), new_parent.value(),
                                                    params.value("new_parent_path", ""),
                                                    SceneEdit::AddChild)) {
@@ -16764,13 +16762,12 @@ json GodotBridge::execute(const std::string& method, const json& params,
             auto descendant_check = callObject(node.value(), "Node", "is_ancestor_of", 3093956946LL,
                                                {&new_parent_value.value()});
             if (descendant_check.isErr()) {
-                return errorJson(descendant_check.error().code, descendant_check.error().message);
+                return errorJson(descendant_check.error());
             }
             auto new_parent_is_descendant = scalarFromVariant<GDExtensionBool>(
                 descendant_check.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
             if (new_parent_is_descendant.isErr()) {
-                return errorJson(new_parent_is_descendant.error().code,
-                                 new_parent_is_descendant.error().message);
+                return errorJson(new_parent_is_descendant.error());
             }
             if (new_parent_is_descendant.value()) {
                 return errorJson(400, "Cannot reparent a node beneath one of its descendants");
@@ -16781,13 +16778,13 @@ json GodotBridge::execute(const std::string& method, const json& params,
             // makes Godot pick a readable one, Twin2, as the editor's own
             // reparent does, and setting it back on undo restores it (#1126).
             auto original_name = nodeString(node.value(), "get_name", 2002593661LL);
-            if (original_name.isErr()) return errorJson(original_name.error().code, original_name.error().message);
+            if (original_name.isErr()) return errorJson(original_name.error());
             auto name_value = makeStringName(original_name.value());
-            if (name_value.isErr()) return errorJson(name_value.error().code, name_value.error().message);
+            if (name_value.isErr()) return errorJson(name_value.error());
             auto preflight = preflightNodeUndoTransaction();
-            if (preflight.isErr()) return errorJson(preflight.error().code, preflight.error().message);
+            if (preflight.isErr()) return errorJson(preflight.error());
             auto action = createAction(manager.value(), "Didi: reparent node", root.value());
-            if (action.isErr()) return errorJson(action.error().code, action.error().message);
+            if (action.isErr()) return errorJson(action.error());
             auto move = managerMethod(manager.value(), "add_do_method", node.value(), "reparent",
                                       {&new_parent_value.value(), &keep_global.value()});
             auto rename = managerMethod(manager.value(), "add_do_method", node.value(), "set_name",
@@ -16803,7 +16800,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 return errorJson(500, "Failed to register reparent UndoRedo transaction");
             }
             auto committed = commitAction(manager.value());
-            if (committed.isErr()) return errorJson(committed.error().code, committed.error().message);
+            if (committed.isErr()) return errorJson(committed.error());
             // Where the node is now, read from the node after the commit. The
             // answer used to be `action` alone, so the caller had to guess the
             // new path to reach the node again (#1019).
@@ -16816,7 +16813,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
                                           wanted_parent + " afterwards");
             }
             auto moved_path = logicalPathFromEditedRoot(root.value(), node.value());
-            if (moved_path.isErr()) return errorJson(moved_path.error().code, moved_path.error().message);
+            if (moved_path.isErr()) return errorJson(moved_path.error());
             json result = {{"status", "success"}, {"action", "reparent_node"},
                            {"node_path", moved_path.value()}, {"undo_redo_registered", true}};
             before_node.erase("index");
@@ -16836,35 +16833,35 @@ json GodotBridge::execute(const std::string& method, const json& params,
         }
 
         auto flags = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(15));
-        if (flags.isErr()) return errorJson(flags.error().code, flags.error().message);
+        if (flags.isErr()) return errorJson(flags.error());
         auto duplicated = callObject(node.value(), "Node", "duplicate", 3511555459LL, {&flags.value()});
-        if (duplicated.isErr()) return errorJson(duplicated.error().code, duplicated.error().message);
+        if (duplicated.isErr()) return errorJson(duplicated.error());
         auto duplicate_node = objectFromVariant(duplicated.value());
         if (duplicate_node.isErr() || !duplicate_node.value()) return errorJson(500, "Godot failed to duplicate node");
         auto source_name = nodeString(node.value(), "get_name", 2002593661LL);
         if (source_name.isErr()) {
             GodotApi::instance().object_destroy(duplicate_node.value());
-            return errorJson(source_name.error().code, source_name.error().message);
+            return errorJson(source_name.error());
         }
         auto copy_name = makeStringName(source_name.value() + "Copy");
         if (copy_name.isErr()) {
             GodotApi::instance().object_destroy(duplicate_node.value());
-            return errorJson(copy_name.error().code, copy_name.error().message);
+            return errorJson(copy_name.error());
         }
         auto named = callObject(duplicate_node.value(), "Node", "set_name", 3304788590LL, {&copy_name.value()});
         if (named.isErr()) {
             GodotApi::instance().object_destroy(duplicate_node.value());
-            return errorJson(named.error().code, named.error().message);
+            return errorJson(named.error());
         }
         auto duplicate_name = nodeString(duplicate_node.value(), "get_name", 2002593661LL);
         if (duplicate_name.isErr()) {
             GodotApi::instance().object_destroy(duplicate_node.value());
-            return errorJson(duplicate_name.error().code, duplicate_name.error().message);
+            return errorJson(duplicate_name.error());
         }
         auto logical_parent = logicalPathFromEditedRoot(root.value(), parent.value());
         if (logical_parent.isErr()) {
             GodotApi::instance().object_destroy(duplicate_node.value());
-            return errorJson(logical_parent.error().code, logical_parent.error().message);
+            return errorJson(logical_parent.error());
         }
         auto duplicate_value = makeObject(duplicate_node.value());
         auto owner = makeObject(root.value());
@@ -16876,17 +16873,17 @@ json GodotBridge::execute(const std::string& method, const json& params,
             collectDuplicateDescendantsToOwn(root.value(), node.value(), duplicate_node.value());
         if (descendants_to_own.isErr()) {
             GodotApi::instance().object_destroy(duplicate_node.value());
-            return errorJson(descendants_to_own.error().code, descendants_to_own.error().message);
+            return errorJson(descendants_to_own.error());
         }
         auto preflight = preflightNodeUndoTransaction();
         if (preflight.isErr()) {
             GodotApi::instance().object_destroy(duplicate_node.value());
-            return errorJson(preflight.error().code, preflight.error().message);
+            return errorJson(preflight.error());
         }
         auto action = createAction(manager.value(), "Didi: duplicate node", root.value());
         if (action.isErr()) {
             GodotApi::instance().object_destroy(duplicate_node.value());
-            return errorJson(action.error().code, action.error().message);
+            return errorJson(action.error());
         }
         auto keep = managerReference(manager.value(), "add_do_reference", duplicate_node.value());
         auto add = managerMethod(manager.value(), "add_do_method", parent.value(), "add_child",
@@ -16915,7 +16912,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
             return errorJson(500, "Failed to register duplicate UndoRedo transaction");
         }
         auto committed = commitAction(manager.value());
-        if (committed.isErr()) return errorJson(committed.error().code, committed.error().message);
+        if (committed.isErr()) return errorJson(committed.error());
         // duplicate_name was read before add_child, so it is the requested name
         // rather than the one Godot settled on. Read the path back from the tree.
         auto duplicate_path = logicalPathFromEditedRoot(root.value(), duplicate_node.value());
@@ -16938,11 +16935,11 @@ json GodotBridge::execute(const std::string& method, const json& params,
     if (method == "editor.undo" || method == "editor.redo") {
         auto root = editedSceneRoot(editor);
         auto manager = undoManager(editor);
-        if (root.isErr()) return errorJson(root.error().code, root.error().message);
-        if (manager.isErr()) return errorJson(manager.error().code, manager.error().message);
+        if (root.isErr()) return errorJson(root.error());
+        if (manager.isErr()) return errorJson(manager.error());
         auto root_value = makeObject(root.value());
         auto history_id = callObject(manager.value(), "EditorUndoRedoManager", "get_object_history_id", 1107568780LL, {&root_value.value()});
-        if (history_id.isErr()) return errorJson(history_id.error().code, history_id.error().message);
+        if (history_id.isErr()) return errorJson(history_id.error());
         auto undo_redo = historyUndoRedo(manager.value(), history_id.value());
         if (undo_redo.isErr()) return errorJson(404, "No UndoRedo history exists for the edited scene");
         const bool is_undo = method == "editor.undo";
@@ -16956,7 +16953,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
             return flag.value() != 0;
         };
         auto scene_has = has_action(undo_redo.value());
-        if (scene_has.isErr()) return errorJson(scene_has.error().code, scene_has.error().message);
+        if (scene_has.isErr()) return errorJson(scene_has.error());
         auto global_id = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(0));
         auto global = global_id.isOk() ? historyUndoRedo(manager.value(), global_id.value())
                                        : Result<GDExtensionObjectPtr>(global_id.error());
@@ -16966,7 +16963,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
                              {{"code", "nothing_to_undo"}});
         }
         auto moved = runEditorHistoryCommand(editor, manager.value(), undo_redo.value(), is_undo);
-        if (moved.isErr()) return errorJson(moved.error().code, moved.error().message);
+        if (moved.isErr()) return errorJson(moved.error());
         if (moved.value() == HistoryMoved::None) {
             return errorJson(409,
                              std::string("The editor ran its own ") + (is_undo ? "Undo" : "Redo") +
@@ -17020,9 +17017,9 @@ json GodotBridge::execute(const std::string& method, const json& params,
                                                        : fs::last_write_time(scene_file, before_error);
         const bool existed_before = !scene_file.empty() && !before_error;
         auto saved = callObject(editor, "EditorInterface", "save_scene", 166280745LL);
-        if (saved.isErr()) return errorJson(saved.error().code, saved.error().message);
+        if (saved.isErr()) return errorJson(saved.error());
         auto code = scalarFromVariant<int64_t>(saved.value(), GDEXTENSION_VARIANT_TYPE_INT);
-        if (code.isErr()) return errorJson(code.error().code, code.error().message);
+        if (code.isErr()) return errorJson(code.error());
         if (code.value() != 0) {
             return errorJson(::didi::godot::isGodotPathError(code.value()) ? 400 : 500,
                              "Godot save_scene failed with " +

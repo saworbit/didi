@@ -43,6 +43,14 @@ json errorJson(int code, const std::string& message, const char* data_code) {
                        {"data", {{"code", data_code}}}}}};
 }
 
+// A Result's error as an answer, its data kept. Rebuilding one from its code
+// and message drops the data, and with it the code that names the refusal's
+// fix (#1267).
+json errorJson(const Error& error) {
+    if (error.data.is_null()) return errorJson(error.code, error.message);
+    return {{"error", {{"code", error.code}, {"message", error.message}, {"data", error.data}}}};
+}
+
 json liveResult(json result, const std::string& session_kind) {
     result["execution_mode"] = "live";
     result["is_live_engine"] = true;
@@ -506,7 +514,7 @@ json executeRuntimeBridge(const std::string& method, const json& params,
     }
 
     auto tree = activeSceneTree();
-    if (tree.isErr()) return errorJson(tree.error().code, tree.error().message);
+    if (tree.isErr()) return errorJson(tree.error());
 
     if (method == "runtime.getTree") {
         if (params.contains("root_path") && !params["root_path"].is_string()) {
@@ -517,21 +525,21 @@ json executeRuntimeBridge(const std::string& method, const json& params,
         }
         const auto root_path = params.value("root_path", std::string("/root"));
         auto valid_path = validateRuntimePath(root_path);
-        if (valid_path.isErr()) return errorJson(valid_path.error().code, valid_path.error().message);
+        if (valid_path.isErr()) return errorJson(valid_path.error());
         const int max_depth = params.value("max_depth", 4);
         auto root = sceneTreeRoot(tree.value());
-        if (root.isErr()) return errorJson(root.error().code, root.error().message);
+        if (root.isErr()) return errorJson(root.error());
         auto target = resolveRuntimeNode(root.value(), root_path);
-        if (target.isErr()) return errorJson(target.error().code, target.error().message);
+        if (target.isErr()) return errorJson(target.error());
         TraversalState state;
         auto serialized = serializeRuntimeNode(target.value(), 0, max_depth, false, state);
-        if (serialized.isErr()) return errorJson(serialized.error().code, serialized.error().message);
+        if (serialized.isErr()) return errorJson(serialized.error());
         if (serialized.value().is_null()) {
             return errorJson(507, "Runtime tree root exceeds the serialized response budget",
                                  "response_too_large");
         }
         auto paused = sceneTreePaused(tree.value());
-        if (paused.isErr()) return errorJson(paused.error().code, paused.error().message);
+        if (paused.isErr()) return errorJson(paused.error());
         auto response = liveResult({{"root_path", root_path}, {"scene_tree", serialized.value()},
                                     {"paused", paused.value()}, {"node_count", state.node_count},
                                     {"max_nodes", kMaxRuntimeNodes}, {"max_depth", max_depth},
@@ -551,9 +559,9 @@ json executeRuntimeBridge(const std::string& method, const json& params,
         }
         const bool requested = params["paused"].get<bool>();
         auto changed = setSceneTreePaused(tree.value(), requested);
-        if (changed.isErr()) return errorJson(changed.error().code, changed.error().message);
+        if (changed.isErr()) return errorJson(changed.error());
         auto observed = sceneTreePaused(tree.value());
-        if (observed.isErr()) return errorJson(observed.error().code, observed.error().message);
+        if (observed.isErr()) return errorJson(observed.error());
         if (observed.value() != requested) {
             return errorJson(500, "Godot SceneTree pause state did not match the requested value",
                                  "pause_state_mismatch");

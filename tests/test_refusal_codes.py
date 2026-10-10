@@ -238,6 +238,34 @@ class BridgeHelperRefusalsNameThemselves(unittest.TestCase):
             + "\n  ".join(offenders))
 
 
+# errorJson(e.code, e.message) rebuilds a Result's error from two of its three
+# parts and drops `data`, and with it the data.code that names the refusal's
+# fix. Nothing was lost while no helper on those paths returned a code, but
+# the first one that did lost it at the rewrap without a word (#1222, #1267).
+REWRAP = re.compile(r"errorJson\(\s*(?P<error>[A-Za-z_][\w.()\->\[\]]*?)\.code\s*,"
+                    r"\s*(?P=error)\.message\s*\)")
+
+
+class ResultErrorsKeepTheirData(unittest.TestCase):
+    def test_no_error_is_rewrapped_without_its_data(self) -> None:
+        offenders = []
+        for path in (BRIDGE, SANDBOX, RUNTIME_BRIDGE):
+            source = path.read_text(encoding="utf-8")
+            # The one overload that takes the Error whole is where the rewrap
+            # belongs, so its own body is the exception.
+            start = source.find("json errorJson(const Error& error) {")
+            if start != -1:
+                end = source.find("\n}\n", start)
+                source = source[:start] + "\n" * source.count("\n", start, end) + source[end:]
+            for match in REWRAP.finditer(source):
+                line = source.count("\n", 0, match.start()) + 1
+                offenders.append(f"{path.name}:{line} {match.group('error')}")
+        self.assertEqual(
+            offenders, [],
+            "errorJson(e.code, e.message) drops e.data and the data.code in "
+            "it. Pass the error whole, errorJson(e):\n  " + "\n  ".join(offenders))
+
+
 class HookRefusalsNameThemselves(unittest.TestCase):
     def test_every_refusal_above_400_carries_a_code(self) -> None:
         lines = HOOK.read_text(encoding="utf-8").splitlines()
