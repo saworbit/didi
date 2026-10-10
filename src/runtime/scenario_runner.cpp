@@ -396,7 +396,9 @@ private:
         return false;
     }
 
-    // Runs `frames` frames of the paused game, at most 60 a call.
+    // Runs `frames` frames of the paused game, at most 60 a call. Checked
+    // after every call, the last one too: wait_until runs one frame a call,
+    // and a step that ends past the deadline did not finish inside it.
     bool driveFrames(size_t index, int frames) {
         while (frames > 0) {
             const int chunk = std::min(frames, kMaxFramesPerStepCall);
@@ -404,7 +406,7 @@ private:
             if (stepped.isErr()) return stepError(index, "could not run its frames", stepped.error());
             m_frames += chunk;
             frames -= chunk;
-            if (frames > 0 && interrupted(index, true)) return false;
+            if (interrupted(index, true)) return false;
         }
         return true;
     }
