@@ -262,7 +262,7 @@ function Get-ObservedPostStateCases {
         # takes scalars, a typed one is built with the key and value types it
         # holds, and an int key travels as the digits of a string.
         @{ Tool = "scene_set_property"; Session = "editor"; Steps = @(
-            (Step "script" "script_create" @{ script_path = "res://observed_tables.gd"; source_text = "extends Node`n`n@export var tags: Dictionary = {}`n@export var scores: Dictionary[String, int] = {}`n@export var waypoints: Dictionary[int, Vector2] = {}`n"; overwrite = $true }),
+            (Step "script" "script_create" @{ script_path = "res://observed_tables.gd"; source_text = "extends Node`n`n@export var tags: Dictionary = {}`n@export var scores: Dictionary[String, int] = {}`n@export var waypoints: Dictionary[int, Vector2] = {}`n@export var table: Dictionary = {1: `"a`", 2: `"b`"}`n"; overwrite = $true }),
             (Step "tabled" "scene_instantiate_node" @{ node_type = "Node"; parent_path = $observedRoot; name = "Tabled" }),
             (Step "attach" "script_attach_to_node" @{ target_node = "$observedRoot/Tabled"; script_path = "res://observed_tables.gd" }),
             (Step "call" "scene_set_property" @{ target_node = "$observedRoot/Tabled"; property_name = "tags"; value = @{ speed = 3; label = "fast"; on = $true } }),
@@ -290,6 +290,16 @@ function Get-ObservedPostStateCases {
            Expect = { param($s)
                Expect "key type" 2 $s.typed.returned.key_builtin
                Expect "value type" 5 $s.typed.returned.value_builtin } },
+        # An untyped dictionary reads its int keys as digits, and a read sent
+        # back keeps them ints, so table[1] still finds its value (#1249).
+        @{ Tool = "scene_set_property"; Session = "editor"; Steps = @(
+            (Step "call" "scene_set_property" @{ target_node = "$observedRoot/Tabled"; property_name = "table"; value = @{ "1" = "a"; "2" = "z" } }),
+            (Witness "witness" "property" @("Tabled", "table")),
+            (Witness "keys" "dictionary_key_types" @("Tabled", "table")))
+           Agree = { param($s)
+               Agree "value" $s.call.value $s.witness.returned
+               Agree "applied" $s.call.applied ($s.witness.returned."2" -eq "z") }
+           Expect = { param($s) Expect "key types" "2,2" (@($s.keys.returned) -join ",") } },
         @{ Tool = "scene_instantiate_node"; Session = "editor"; Steps = @(
             (Witness "before" "children" @(".")),
             (Step "call" "scene_instantiate_node" @{ node_type = "Node3D"; parent_path = $observedRoot; name = "Spawned" }),

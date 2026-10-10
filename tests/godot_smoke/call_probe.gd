@@ -20,6 +20,11 @@ func describe() -> String:
 	return "call probe"
 
 
+## Two parameters with defaults, which a call may leave out (#1251).
+func configure(title: String, width: int = 800, height := 600) -> String:
+	return "%s:%dx%d" % [title, width, height]
+
+
 ## Awaited by its own caller, the way HammerForge's bake is. Calling this is
 ## what proves the tool waits for a coroutine and returns the value the
 ## `completed` signal carried, rather than the GDScriptFunctionState the call

@@ -91,6 +91,22 @@ func dictionary_type(path: String, property_name: String) -> Variant:
 	return {"key_builtin": held.get_typed_key_builtin(), "value_builtin": held.get_typed_value_builtin()}
 
 
+## The types of a Dictionary property's keys, in order. An untyped dictionary
+## keeps 1 and "1" apart, so a write has to keep each key the type it was
+## (#1249).
+func dictionary_key_types(path: String, property_name: String) -> Variant:
+	var node := _node(path)
+	if node == null:
+		return null
+	var held: Variant = node.get(property_name)
+	if typeof(held) != TYPE_DICTIONARY:
+		return null
+	var types := []
+	for key in held.keys():
+		types.append(typeof(key))
+	return types
+
+
 ## A property reached by path, through get_indexed rather than through any
 ## code Didi shares (Q7).
 func property_path(path: String, indexed: String) -> Variant:

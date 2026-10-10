@@ -1410,7 +1410,26 @@ Result<VariantValue> makeDictionaryForProperty(const std::string& property_name,
             if (key == GDEXTENSION_VARIANT_TYPE_STRING_NAME) {
                 return makeJsonVariantForProperty(json(key_text), GDEXTENSION_VARIANT_TYPE_STRING_NAME);
             }
-            return makeJsonVariant(json(key_text));
+            auto as_text = makeJsonVariant(json(key_text));
+            // An untyped Dictionary keeps 1 and "1" apart, and an int key reads
+            // back as its digits. One the property holds as an int, and not as
+            // a String, is written back as that int, so a read sent back
+            // unchanged leaves table[1] where it was (#1249).
+            if (const auto number = dictionaryIntKey(key_text); number && key == GDEXTENSION_VARIANT_TYPE_NIL &&
+                                                               as_text.isOk()) {
+                auto as_int = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, *number);
+                if (as_int.isErr()) return as_int.error();
+                auto holds_int = callVariant(current, "has", {&as_int.value()});
+                auto holds_text = callVariant(current, "has", {&as_text.value()});
+                if (holds_int.isErr()) return holds_int.error();
+                if (holds_text.isErr()) return holds_text.error();
+                auto int_held = scalarFromVariant<GDExtensionBool>(holds_int.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+                auto text_held = scalarFromVariant<GDExtensionBool>(holds_text.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+                if (int_held.isErr()) return int_held.error();
+                if (text_held.isErr()) return text_held.error();
+                if (int_held.value() != 0 && text_held.value() == 0) return std::move(as_int.value());
+            }
+            return as_text;
         }();
         if (built_key.isErr()) return built_key.error();
         auto built = [&]() -> Result<VariantValue> {
@@ -1506,6 +1525,7 @@ Result<json> variantToJson(VariantValue& value, int depth = 0, bool lenient = fa
             auto size = scalarFromVariant<int64_t>(size_result.value(), GDEXTENSION_VARIANT_TYPE_INT);
             if (size.isErr()) return size.error();
             json output = json::object();
+            std::map<std::string, GDExtensionVariantType> key_types;
             for (int64_t i = 0; i < size.value(); ++i) {
                 auto index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, i);
                 if (index.isErr()) return index.error();
@@ -1526,10 +1546,14 @@ Result<json> variantToJson(VariantValue& value, int depth = 0, bool lenient = fa
                     return Error::invalidArgument("Godot Dictionary contains a key that is not a string or an int");
                 }
                 if (key_text.isErr()) return key_text.error();
-                if (output.contains(key_text.value())) {
+                if (const auto first = key_types.find(key_text.value()); first != key_types.end()) {
                     return Error::invalidArgument("Godot Dictionary holds the key \"" + key_text.value() +
-                                                  "\" as both a string and an int, which JSON cannot tell apart");
+                                                  "\" as both a " +
+                                                  godotVariantTypeName(static_cast<int>(first->second)) +
+                                                  " and a " + godotVariantTypeName(static_cast<int>(key_type)) +
+                                                  ", which JSON cannot tell apart");
                 }
+                key_types.emplace(key_text.value(), key_type);
                 auto item = callVariant(value, "get", {&key.value()});
                 if (item.isErr()) return item.error();
                 auto converted = variantToJson(item.value(), depth + 1, lenient);
@@ -6773,14 +6797,26 @@ json GodotBridge::callScriptMethod(const json& params,
     }
 
     const auto declared_arguments = chosen->value("args", json::array());
-    if (!declared_arguments.is_array()) return fail(500, "Godot returned an unreadable method list");
-    if (declared_arguments.size() != arguments.size()) {
-        return errorJson(409, "\"" + method_name + "\" takes " +
-                                  std::to_string(declared_arguments.size()) + " argument(s) and " +
+    const auto default_arguments = chosen->value("default_args", json::array());
+    if (!declared_arguments.is_array() || !default_arguments.is_array() ||
+        default_arguments.size() > declared_arguments.size()) {
+        return fail(500, "Godot returned an unreadable method list");
+    }
+    // The trailing parameters that declare a default may be left out, and the
+    // engine fills them in, as GDScript does for any call. Measured on 4.5.1,
+    // 4.6.2 and 4.7.2: default_args lists them, and a call with only the
+    // required ones runs with the defaults (#1251).
+    const size_t required_arguments = declared_arguments.size() - default_arguments.size();
+    if (arguments.size() < required_arguments || arguments.size() > declared_arguments.size()) {
+        const auto takes = required_arguments == declared_arguments.size()
+            ? std::to_string(declared_arguments.size())
+            : std::to_string(required_arguments) + " to " + std::to_string(declared_arguments.size());
+        return errorJson(409, "\"" + method_name + "\" takes " + takes + " argument(s) and " +
                                   std::to_string(arguments.size()) + " were given",
                          json{{"code", "argument_count_mismatch"},
                               {"field", "arguments"},
                               {"expected", declared_arguments.size()},
+                              {"required", required_arguments},
                               {"given", arguments.size()}});
     }
     // Each argument has to fit the parameter Godot declared, checked before

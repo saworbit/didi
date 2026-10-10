@@ -192,6 +192,9 @@ CallToolResult handleEditorReloadProject(const json& args, std::shared_ptr<ipc::
     }
     if (ipc && ipc->isConnected()) {
         auto res = ipc->sendRequest("editor.reloadProject", args, ::didi::ipc::kWaitForDefinitiveResponse);
+        // As the job and the offline paths do: a reload is asked for after
+        // files changed behind the server, so its own index is stale (#1250).
+        offline::ResourceIndexer::invalidateSharedIndex();
         if (res.isOk()) {
             return CallToolResult::successJson(res.value());
         }
