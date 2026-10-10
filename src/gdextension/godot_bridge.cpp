@@ -59,6 +59,13 @@ json errorJson(int code, const std::string& message, json data) {
     return {{"error", {{"code", code}, {"message", message}, {"data", std::move(data)}}}};
 }
 
+// A Result's error as an answer, its data kept. errorJson(e.code, e.message)
+// drops the data, and with it the code that names the refusal's fix (#1222).
+json errorJson(const Error& error) {
+    if (error.data.is_null()) return errorJson(error.code, error.message);
+    return errorJson(error.code, error.message, error.data);
+}
+
 // A semantic failure, said in a sentence, with the identifier kept as a stable
 // code under `data.code`.
 //
@@ -269,6 +276,13 @@ json bridgeError(int code, const std::string& identifier, json data, const std::
     data["code"] = identifier;
     if (!data.contains("retryable")) data["retryable"] = false;
     return errorJson(code, message, std::move(data));
+}
+
+// The same refusal as a Result's error, for a helper that returns one.
+Error bridgeRefusal(int code, const std::string& identifier) {
+    auto answer = bridgeError(code, identifier);
+    auto& error = answer["error"];
+    return Error(code, error["message"].get<std::string>(), std::move(error["data"]));
 }
 
 #if defined(DIDI_PHASE7_SIGNAL_TEST_SEAMS)
@@ -3899,7 +3913,7 @@ Result<void> undoLastAction(GDExtensionObjectPtr manager, GDExtensionObjectPtr r
     };
     auto scene_has = has_undo(undo_redo.value());
     if (scene_has.isErr()) return scene_has.error();
-    if (!scene_has.value()) return Error(409, "Nothing to undo");
+    if (!scene_has.value()) return Error(409, "Nothing to undo", {{"code", "nothing_to_undo"}});
     auto editor = editorInterface();
     if (editor.isOk()) {
         auto moved = runEditorHistoryCommand(editor.value(), manager, undo_redo.value(), true);
@@ -5085,7 +5099,9 @@ Result<std::vector<std::string>> openScenePaths(GDExtensionObjectPtr editor) {
     constexpr int64_t kMaxOpenScenesRead = 1024;
     if (count.value() > kMaxOpenScenesRead) {
         return Error(409, "The editor has more scenes open than Didi will read (" +
-                              std::to_string(count.value()) + ")");
+                              std::to_string(count.value()) + ")",
+                     {{"code", "too_many_open_scenes"}, {"open_scenes", count.value()},
+                      {"most_read", kMaxOpenScenesRead}});
     }
     std::vector<std::string> paths;
     for (int64_t index = 0; index < count.value(); ++index) {
@@ -7083,7 +7099,8 @@ Result<void> GodotBridge::restoreViewportIsolation(const ViewportIsolationState&
     }
     if (!failures.empty()) {
         return Error(409, "Temporary viewport isolation could not fully restore editor state (" +
-                          std::to_string(failures.size()) + " failure(s))");
+                          std::to_string(failures.size()) + " failure(s))",
+                     {{"code", "isolation_restore_incomplete"}});
     }
     return Result<void>::ok();
 }
@@ -7845,7 +7862,7 @@ Result<VariantValue> queriedWorld(int dimension, const std::string& session_kind
         if (owning.isErr()) return owning.error();
         auto object = objectFromVariant(owning.value());
         if (object.isErr() || !object.value()) {
-            return Error(409, "The edited scene is not inside a viewport");
+            return Error(409, "The edited scene is not inside a viewport", {{"code", "no_world"}});
         }
         viewport = object.value();
     } else {
@@ -7859,7 +7876,8 @@ Result<VariantValue> queriedWorld(int dimension, const std::string& session_kind
     auto object = objectFromVariant(world.value());
     if (object.isErr() || !object.value()) {
         return Error(409, dimension == 2 ? "The queried viewport has no World2D"
-                                         : "The queried viewport has no World3D");
+                                         : "The queried viewport has no World3D",
+                     {{"code", "no_world"}});
     }
     return std::move(world.value());
 }
@@ -7904,7 +7922,7 @@ Result<GDExtensionObjectPtr> openDirectSpaceState(int dimension, const std::stri
     if (state.isErr()) return Error::internal(state.error().message);
     auto state_object = objectFromVariant(state.value());
     if (state_object.isErr() || !state_object.value()) {
-        return Error(409, "The queried world has no direct space state");
+        return Error(409, "The queried world has no direct space state", {{"code", "no_space_state"}});
     }
     return state_object.value();
 }
@@ -8187,7 +8205,7 @@ json physicsClearance(const json& params, const std::string& session_kind) {
     }
 
     auto state = openDirectSpaceState(dimension, session_kind);
-    if (state.isErr()) return errorJson(state.error().code, state.error().message);
+    if (state.isErr()) return errorJson(state.error());
 
     auto shape = makeClearanceShape(request);
     if (shape.isErr()) return errorJson(shape.error().code, shape.error().message);
@@ -8330,13 +8348,13 @@ Result<void> orientFrustum(FrustumBasis& basis, double fx, double fy, double fz,
     double raw_up[3];
     frustumAxis(raw_up, ux, uy, uz);
     if (frustumDot(basis.forward, basis.forward) < 0.5 || frustumDot(raw_up, raw_up) < 0.5) {
-        return Error(409, "The camera basis has no direction to look along");
+        return Error(409, "The camera basis has no direction to look along", {{"code", "camera_frustum_undefined"}});
     }
     frustumCross(basis.right, basis.forward, raw_up);
     frustumAxis(basis.right, basis.right[0], basis.right[1], basis.right[2]);
     if (frustumDot(basis.right, basis.right) < 0.5) {
         return Error(409, "The camera up direction is parallel to the view direction, which leaves "
-                          "the roll of the frustum undefined");
+                          "the roll of the frustum undefined", {{"code", "camera_frustum_undefined"}});
     }
     frustumCross(basis.up, basis.right, basis.forward);
     frustumAxis(basis.up, basis.up[0], basis.up[1], basis.up[2]);
@@ -8412,7 +8430,7 @@ Result<double> projectViewportAspect(std::string& source) {
     auto width = read("display/window/size/viewport_width");
     auto height = read("display/window/size/viewport_height");
     if (width.isErr() || height.isErr() || width.value() <= 0.0 || height.value() <= 0.0) {
-        return Error(409, "The project has no viewport size to take an aspect ratio from");
+        return Error(409, "The project has no viewport size to take an aspect ratio from", {{"code", "no_aspect_ratio"}});
     }
     source = "project_settings";
     return width.value() / height.value();
@@ -8493,10 +8511,10 @@ Result<FrustumBasis> frustumFromCamera(GDExtensionObjectPtr camera, const std::s
         // no place to put. Answering with the centred frustum would describe a
         // volume the camera is not looking through.
         return Error(409, "The camera uses the frustum projection mode, whose off-axis offset this "
-                          "query does not model");
+                          "query does not model", {{"code", "camera_projection_unsupported"}});
     }
     if (projection.value() != 0 && projection.value() != 1) {
-        return Error(409, "The camera uses a projection mode this query does not model");
+        return Error(409, "The camera uses a projection mode this query does not model", {{"code", "camera_projection_unsupported"}});
     }
     auto near_plane = read_number("get_near", 1740695150LL);
     auto far_plane = read_number("get_far", 1740695150LL);
@@ -8505,7 +8523,7 @@ Result<FrustumBasis> frustumFromCamera(GDExtensionObjectPtr camera, const std::s
     basis.near_plane = near_plane.value();
     basis.far_plane = far_plane.value();
     if (!(basis.near_plane > 0.0) || !(basis.far_plane > basis.near_plane)) {
-        return Error(409, "The camera near and far planes do not describe a volume");
+        return Error(409, "The camera near and far planes do not describe a volume", {{"code", "camera_frustum_undefined"}});
     }
 
     if (session_kind == "game") {
@@ -8515,7 +8533,7 @@ Result<FrustumBasis> frustumFromCamera(GDExtensionObjectPtr camera, const std::s
         if (viewport_value.isErr()) return viewport_value.error();
         auto viewport = objectFromVariant(viewport_value.value());
         if (viewport.isErr() || !viewport.value()) {
-            return Error(409, "The camera is not inside a viewport to take an aspect ratio from");
+            return Error(409, "The camera is not inside a viewport to take an aspect ratio from", {{"code", "no_aspect_ratio"}});
         }
         auto rect_value = callObject(viewport.value(), "Viewport", "get_visible_rect", 1639390495LL);
         if (rect_value.isErr()) return rect_value.error();
@@ -8524,7 +8542,7 @@ Result<FrustumBasis> frustumFromCamera(GDExtensionObjectPtr camera, const std::s
         const double width = rect.value()["size"]["x"].get<double>();
         const double height = rect.value()["size"]["y"].get<double>();
         if (!(width > 0.0) || !(height > 0.0)) {
-            return Error(409, "The camera viewport has no visible size to take an aspect ratio from");
+            return Error(409, "The camera viewport has no visible size to take an aspect ratio from", {{"code", "no_aspect_ratio"}});
         }
         basis.aspect = width / height;
         basis.aspect_source = "viewport";
@@ -8543,7 +8561,7 @@ Result<FrustumBasis> frustumFromCamera(GDExtensionObjectPtr camera, const std::s
     if (basis.orthogonal) {
         auto size = read_number("get_size", 1740695150LL);
         if (size.isErr()) return size.error();
-        if (!(size.value() > 0.0)) return Error(409, "The orthogonal camera has no size");
+        if (!(size.value() > 0.0)) return Error(409, "The orthogonal camera has no size", {{"code", "camera_frustum_undefined"}});
         basis.ortho_size = size.value();
         if (keep_width) {
             basis.half_x = size.value() / 2.0;
@@ -8556,7 +8574,7 @@ Result<FrustumBasis> frustumFromCamera(GDExtensionObjectPtr camera, const std::s
         auto fov = read_number("get_fov", 1740695150LL);
         if (fov.isErr()) return fov.error();
         if (!(fov.value() > 0.0) || fov.value() >= 180.0) {
-            return Error(409, "The camera field of view does not describe a frustum");
+            return Error(409, "The camera field of view does not describe a frustum", {{"code", "camera_frustum_undefined"}});
         }
         basis.fov_degrees = fov.value();
         const double half_angle = fov.value() * 3.14159265358979323846 / 360.0;
@@ -8820,7 +8838,7 @@ json visionFrustumQuery(const json& params, const std::string& session_kind) {
                                   {{"code", "camera_path_does_not_resolve_to_camera3d"}});
         }
         auto built = frustumFromCamera(node.value(), session_kind);
-        if (built.isErr()) return errorJson(built.error().code, built.error().message);
+        if (built.isErr()) return errorJson(built.error());
         basis = std::move(built.value());
         camera_json["source"] = "camera_node";
         camera_json["node_path"] = request.camera_node;
@@ -8832,7 +8850,7 @@ json visionFrustumQuery(const json& params, const std::string& session_kind) {
                                       request.look_at.y - request.position.y,
                                       request.look_at.z - request.position.z,
                                       request.up.x, request.up.y, request.up.z);
-        if (oriented.isErr()) return errorJson(oriented.error().code, oriented.error().message);
+        if (oriented.isErr()) return errorJson(oriented.error());
         basis.near_plane = request.near_plane;
         basis.far_plane = request.far_plane;
         basis.aspect = request.aspect;
@@ -8875,7 +8893,7 @@ json visionFrustumQuery(const json& params, const std::string& session_kind) {
     bool sightline_truncated = false;
     if (request.sightline && reported > 0) {
         auto opened = openRaycastSpace(3, session_kind);
-        if (opened.isErr()) return errorJson(opened.error().code, opened.error().message);
+        if (opened.isErr()) return errorJson(opened.error());
         space = opened.value();
     }
 
@@ -8965,7 +8983,7 @@ json physicsRaycastBatch(const json& params, const std::string& session_kind) {
     if (parsed.isErr()) return errorJson(parsed.error().code, parsed.error().message);
     const auto& request = parsed.value();
     auto space = openRaycastSpace(request.dimension(), session_kind);
-    if (space.isErr()) return errorJson(space.error().code, space.error().message);
+    if (space.isErr()) return errorJson(space.error());
 
     json results = json::array();
     size_t hits = 0;
@@ -9008,7 +9026,7 @@ json physicsRaycast(const json& params, const std::string& session_kind) {
     }
 
     auto world = queriedWorld(dimension, session_kind);
-    if (world.isErr()) return errorJson(world.error().code, world.error().message);
+    if (world.isErr()) return errorJson(world.error());
     auto world_object = objectFromVariant(world.value());
     if (world_object.isErr()) return errorJson(500, world_object.error().message);
     auto state = callObject(world_object.value(), dimension == 2 ? "World2D" : "World3D",
@@ -9135,7 +9153,7 @@ json navQueryPath(const json& params, const std::string& session_kind) {
     if (map_bind.isErr()) return errorJson(501, map_bind.error().message);
 
     auto world = queriedWorld(dimension, session_kind);
-    if (world.isErr()) return errorJson(world.error().code, world.error().message);
+    if (world.isErr()) return errorJson(world.error());
     auto world_object = objectFromVariant(world.value());
     if (world_object.isErr()) return errorJson(500, world_object.error().message);
     auto map = callObject(world_object.value(), dimension == 2 ? "World2D" : "World3D",
@@ -10636,13 +10654,14 @@ Result<VariantValue> editedSceneScenario() {
     auto is_spatial = objectIsClass(root.value(), "Node3D");
     if (is_spatial.isErr()) return is_spatial.error();
     if (!is_spatial.value()) {
-        return Error(409, "The edited scene has no 3D world to draw a preview in; its root is not a Node3D");
+        return Error(409, "The edited scene has no 3D world to draw a preview in; its root is not a Node3D",
+                     {{"code", "preview_dimension_mismatch"}});
     }
     auto world = callObject(root.value(), "Node3D", "get_world_3d", 317588385LL);
     if (world.isErr()) return world.error();
     auto world_object = objectFromVariant(world.value());
     if (world_object.isErr() || !world_object.value()) {
-        return Error(409, "The edited scene is not in a viewport with a 3D world");
+        return Error(409, "The edited scene is not in a viewport with a 3D world", {{"code", "no_world"}});
     }
     return callObject(world_object.value(), "World3D", "get_scenario", 2944877500LL);
 }
@@ -10655,7 +10674,8 @@ Result<VariantValue> editedSceneCanvas() {
     auto is_canvas = objectIsClass(root.value(), "CanvasItem");
     if (is_canvas.isErr()) return is_canvas.error();
     if (!is_canvas.value()) {
-        return Error(409, "The edited scene has no 2D canvas to draw a preview in; its root is not a CanvasItem");
+        return Error(409, "The edited scene has no 2D canvas to draw a preview in; its root is not a CanvasItem",
+                     {{"code", "preview_dimension_mismatch"}});
     }
     return callObject(root.value(), "CanvasItem", "get_canvas", 2944877500LL);
 }
@@ -10706,7 +10726,7 @@ json ghostPreviewRender(const json& params) {
     // The argument validation in front of this is why a malformed call was
     // always safe and this one was not.
     Result<VariantValue> world = flat ? editedSceneCanvas() : editedSceneScenario();
-    if (world.isErr()) return errorJson(world.error().code, world.error().message);
+    if (world.isErr()) return errorJson(world.error());
 
     size_t cleared_previews = 0;
     size_t cleared_shapes = 0;
@@ -10942,7 +10962,8 @@ ProjectInputActions projectFileInputActions() {
         declared.failure = Error(409, where +
                                           ". The engine answers ERR_PARSE_ERROR for the whole "
                                           "file, so the project does not open and what it "
-                                          "declares cannot be read.");
+                                          "declares cannot be read.",
+                                 {{"code", "project_file_unparseable"}});
         return declared;
     }
     // The action names the engine registers. Godot writes the name bare, or
@@ -11270,7 +11291,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
         auto editor = editorInterface();
         if (editor.isErr()) return errorJson(editor.error().code, editor.error().message);
         auto open = openScenePaths(editor.value());
-        if (open.isErr()) return errorJson(open.error().code, open.error().message);
+        if (open.isErr()) return errorJson(open.error());
         json answer = {{"open_scenes", open.value()}};
         answer.update(unsavedScenesReport(editor.value()));
         return liveResult(answer);
@@ -11329,7 +11350,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
         auto editor = editorInterface();
         if (editor.isErr()) return errorJson(editor.error().code, editor.error().message);
         auto open = openScenePaths(editor.value());
-        if (open.isErr()) return errorJson(open.error().code, open.error().message);
+        if (open.isErr()) return errorJson(open.error());
         const std::set<std::string> open_scenes(open.value().begin(), open.value().end());
         const json unsaved = open_scenes.empty() ? json::object() : unsavedScenesReport(editor.value());
         bool reloaded_one = false;
@@ -12559,7 +12580,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
                 return Error::internal("Godot signal metadata is malformed");
             }
             if (signal_count.value() > kSignalNativeWorkCeiling) {
-                return Error(413, "signal_metadata_work_limit");
+                return bridgeRefusal(413, "signal_metadata_work_limit");
             }
             for (int64_t index = 0; index < signal_count.value(); ++index) {
                 auto native_descriptor = array_at(signals.value(), index);
@@ -12579,7 +12600,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
                     return Error::internal("Godot signal arguments are malformed");
                 }
                 if (arguments.size() > static_cast<size_t>(kSignalArgumentWorkCeiling)) {
-                    return Error(413, "signal_argument_metadata_work_limit");
+                    return bridgeRefusal(413, "signal_argument_metadata_work_limit");
                 }
                 SignalMetadata metadata;
                 metadata.arguments.reserve(arguments.size());
@@ -13086,7 +13107,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
             }
             auto signal = signal_metadata(emitter.value(), signal_name);
             auto target_metadata = method_metadata(target.value(), target_method);
-            if (signal.isErr()) return errorJson(signal.error().code, signal.error().message);
+            if (signal.isErr()) return errorJson(signal.error());
             if (target_metadata.isErr()) {
                 return errorJson(target_metadata.error().code, target_metadata.error().message);
             }
@@ -13371,7 +13392,7 @@ json GodotBridge::execute(const std::string& method, const json& params,
         if (has_signal.isErr()) return errorJson(500, has_signal.error().message);
         if (!has_signal.value()) return bridgeError(404, "declared_signal_not_found");
         auto metadata = signal_metadata(target.value(), signal_name);
-        if (metadata.isErr()) return errorJson(metadata.error().code, metadata.error().message);
+        if (metadata.isErr()) return errorJson(metadata.error());
         if (metadata.value().arguments.size() != emit_arguments.size()) {
             return bridgeError(409, "signal_emit_arity_mismatch");
         }
@@ -14017,7 +14038,9 @@ json GodotBridge::execute(const std::string& method, const json& params,
                     return errorJson(declared.failure->code,
                                      declared.failure->message +
                                          " Which actions are the project's own cannot be told from "
-                                         "the engine's until the file reads.");
+                                         "the engine's until the file reads.",
+                                     declared.failure->data.is_null() ? json::object()
+                                                                      : declared.failure->data);
                 }
                 // Nobody asked to leave the engine's out, and they cannot be
                 // told apart, so it lists every action and says why below.
@@ -17211,7 +17234,7 @@ Result<double> cameraFarPlane(const std::string& camera_identifier, const std::s
         if (found.isErr()) return found.error();
         auto object = objectFromVariant(found.value());
         if (object.isErr() || !object.value()) {
-            return Error(409, "The game viewport has no 3D camera to take a far plane from");
+            return Error(409, "The game viewport has no 3D camera to take a far plane from", {{"code", "no_camera_far_plane"}});
         }
         camera = object.value();
     } else {
@@ -17224,13 +17247,13 @@ Result<double> cameraFarPlane(const std::string& camera_identifier, const std::s
         if (viewport.isErr()) return viewport.error();
         auto viewport_object = objectFromVariant(viewport.value());
         if (viewport_object.isErr() || !viewport_object.value()) {
-            return Error(409, "The edited scene is not in a viewport with a camera");
+            return Error(409, "The edited scene is not in a viewport with a camera", {{"code", "no_camera_far_plane"}});
         }
         auto found = callObject(viewport_object.value(), "Viewport", "get_camera_3d", 2285090890LL);
         if (found.isErr()) return found.error();
         auto object = objectFromVariant(found.value());
         if (object.isErr() || !object.value()) {
-            return Error(409, "No 3D camera is rendering this viewport to take a far plane from");
+            return Error(409, "No 3D camera is rendering this viewport to take a far plane from", {{"code", "no_camera_far_plane"}});
         }
         camera = object.value();
     }
@@ -17239,7 +17262,7 @@ Result<double> cameraFarPlane(const std::string& camera_identifier, const std::s
     if (far_value.isErr()) return far_value.error();
     auto number = scalarFromVariant<double>(far_value.value(), GDEXTENSION_VARIANT_TYPE_FLOAT);
     if (number.isErr()) return number.error();
-    if (!(number.value() > 0.0)) return Error(409, "The camera far plane is not a distance");
+    if (!(number.value() > 0.0)) return Error(409, "The camera far plane is not a distance", {{"code", "no_camera_far_plane"}});
     return number.value();
 }
 

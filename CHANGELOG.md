@@ -120,6 +120,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Fixed
 
+- `2026-10-10` 26 bridge refusals that reached clients as a bare `conflict` carry a `data.code` and its fix, and a codeless `Error(4xx)` fails the refusal scan. [#1222](https://github.com/saworbit/didi/issues/1222)
 - `2026-10-10` A `project_run_tests` run whose output passed its 1 MiB cap answers `error` `output_truncated`, not `pass`: a load error could be in what was dropped. [#1243](https://github.com/saworbit/didi/issues/1243) · [PR #1248](https://github.com/saworbit/didi/pull/1248)
 - `2026-10-10` Two `project_run_tests` runs of one name at once each read their own report, in a directory of the run's own. [#1242](https://github.com/saworbit/didi/issues/1242) · [PR #1248](https://github.com/saworbit/didi/pull/1248)
 - `2026-10-10` A scenario's `timeout_seconds` and job cancel stop a `wait_until` or `wait` already running, and the run answers `error`, not `pass`. [#1241](https://github.com/saworbit/didi/issues/1241) · [PR #1244](https://github.com/saworbit/didi/pull/1244)

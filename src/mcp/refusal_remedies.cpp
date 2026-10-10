@@ -432,6 +432,31 @@ const std::map<std::string, Rule>& rules() {
             return nextCall("runtime_list_sessions", json::object(),
                             "Navigation queries need a world with a map; try a game session.");
         }},
+        // The bridge's own state refusals, each named where it happened (#1222).
+        {"no_world", [](const Refusal& r) {
+            if (r.tool == "editor_render_ghost_preview") {
+                return noRemedy("The edited scene is not in the editor's viewport; open it in the "
+                                "editor and call again.");
+            }
+            return nextCall("runtime_list_sessions", json::object(),
+                            "A query needs a scene inside a world; try a game session.");
+        }},
+        {"camera_frustum_undefined", [](const Refusal&) { return field("camera"); }},
+        {"camera_projection_unsupported", [](const Refusal&) { return field("camera"); }},
+        {"no_aspect_ratio", [](const Refusal&) { return field("camera"); }},
+        {"no_camera_far_plane", [](const Refusal&) { return field("depth_far"); }},
+        {"preview_dimension_mismatch", [](const Refusal&) { return field("previews"); }},
+        {"too_many_open_scenes", [](const Refusal&) {
+            return noRemedy("Close some of the editor's scene tabs; Didi reads at most 1024.");
+        }},
+        {"isolation_restore_incomplete", [](const Refusal&) {
+            return noRemedy("Some nodes kept the visibility the isolation gave them; reopen the "
+                            "scene without saving to put it back.");
+        }},
+        {"project_file_unparseable", [](const Refusal&) {
+            return noRemedy("project.godot does not parse at the line named; fix it by hand, "
+                            "because the engine cannot read or rewrite it until it does.");
+        }},
         {"conflict", [](const Refusal& r) {
             // The live policy's refusal of the wrong session kind.
             if (r.message.find("needs a game session") != std::string::npos) {
