@@ -3,9 +3,14 @@ extends Node2D
 # Holds a game's frame on one part, for runtime_read_profiler's verdict (Q16).
 #
 # cpu stays busy for 30 ms of every process step. gpu and physics grow their
-# load until a frame takes three 60 Hz frames, then hold it: a fast GPU needs a
-# far heavier shader than a CI runner's software renderer, and a fast CPU far
-# more bodies, so a fixed load is bound on one machine and idle on the next.
+# load until the median frame takes three 60 Hz frames, then hold it: a fast
+# GPU needs a far heavier shader than a CI runner's software renderer, and a
+# fast CPU far more bodies, so a fixed load is bound on one machine and idle on
+# the next. The median, because that is what the verdict judges. A physics load
+# that can still catch up runs a few long frames among short ones; their mean
+# passed 50 ms on CI's runners while the median stayed at 16 ms and read as
+# within budget (#1276). Once the median holds, physics adds a quarter more
+# bodies, so a tick stays dearer than 1/60 s and physics never catches up.
 # The bodies never sleep: a pile allowed to settle fell from 170 ms frames to
 # 21 ms within fifteen seconds of saying ready (4.5.1), and CI's 4.5.1 runner
 # then read it as keeping to its budget.
@@ -22,7 +27,8 @@ const TARGET_FRAME_USEC := 50000
 const RAMP_EVERY_USEC := 400000
 const CPU_STALL_USEC := 30000
 const BODIES_PER_STEP := 150
-const MAX_BODIES := 8000
+const MAX_BODIES := 24000
+const MARGIN_SHARE := 0.25
 const HITCH_EVERY_USEC := 1000000
 const HITCH_USEC := 400000
 
@@ -31,7 +37,9 @@ var _bodies := 0
 var _material: ShaderMaterial
 var _circle := CircleShape2D.new()
 var _ramp_started := 0
-var _ramp_frames := 0
+var _frame_usec: Array[int] = []
+var _last_frame := 0
+var _margin_added := false
 var _rows := 0
 var _last_hitch := 0
 
@@ -62,16 +70,28 @@ func _process(_delta: float) -> void:
 		return
 	if editor_description == "ready":
 		return
-	_ramp_frames += 1
-	if now - _ramp_started < RAMP_EVERY_USEC:
-		return
 	# Measured here rather than taken from delta, which vsync's delta
 	# smoothing rounds to the refresh interval.
-	var average := float(now - _ramp_started) / _ramp_frames
+	if _last_frame != 0:
+		_frame_usec.append(now - _last_frame)
+	_last_frame = now
+	if now - _ramp_started < RAMP_EVERY_USEC:
+		return
 	_ramp_started = now
-	_ramp_frames = 0
-	if average >= TARGET_FRAME_USEC or (load_kind == "physics" and _bodies >= MAX_BODIES):
+	_frame_usec.sort()
+	var median := 0
+	if not _frame_usec.is_empty():
+		median = _frame_usec[_frame_usec.size() >> 1]
+	_frame_usec.clear()
+	if load_kind == "physics" and _bodies >= MAX_BODIES:
 		editor_description = "ready"
+	elif median >= TARGET_FRAME_USEC:
+		if load_kind == "physics" and not _margin_added:
+			_margin_added = true
+			for _row in ceili(_bodies * MARGIN_SHARE / BODIES_PER_STEP):
+				_add_bodies()
+		else:
+			editor_description = "ready"
 	elif load_kind == "gpu":
 		_iterations = mini(_iterations * 2, 1 << 20)
 		_material.set_shader_parameter("iterations", _iterations)
