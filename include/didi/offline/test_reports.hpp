@@ -136,14 +136,15 @@ struct TestRunVerdict {
     std::string verdict;
     // Empty on a pass; otherwise a short identifier: tests_failed, no_tests,
     // nothing_proved, no_report, report_unreadable, scripts_did_not_load,
-    // exit_code_disagrees, timeout, cancelled.
+    // exit_code_disagrees, output_truncated, timeout, cancelled.
     std::string reason;
     std::string summary;
     json report;
 };
 
 // What the run proved. Never a pass for a run with no report, no test that
-// passed, a script that did not load, or an exit code the report contradicts.
+// passed, a script that did not load, an exit code the report contradicts, or
+// output cut short before every script could be seen to load.
 TestRunVerdict judgeTestRun(const TestRunFacts& facts);
 
 }  // namespace didi::offline

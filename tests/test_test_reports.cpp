@@ -234,6 +234,30 @@ void test_a_test_script_that_did_not_load_fails_the_run() {
     ASSERT_EQ(stopped.reason, "scripts_did_not_load");
 }
 
+// Godot's output is kept to its first MiB, and a script that did not load can
+// be named after that, so a run whose output was cut short cannot show every
+// script loaded (#1243).
+void test_output_cut_short_cannot_prove_every_script_loaded() {
+    auto cut = facts(gut(), 0, withoutFailure(kGutFailing), std::string(1024, 'x'));
+    cut.output_truncated = true;
+    const auto unproved = didi::offline::judgeTestRun(cut);
+    ASSERT_EQ(unproved.verdict, "error");
+    ASSERT_EQ(unproved.reason, "output_truncated");
+    ASSERT_EQ(unproved.report["truncated"], true);
+    ASSERT_TRUE(unproved.summary.find("print less") != std::string::npos);
+    // The same output, whole, passes.
+    cut.output_truncated = false;
+    ASSERT_EQ(didi::offline::judgeTestRun(cut).verdict, "pass");
+    // A failing test is still a fail when the output was cut.
+    auto failing = facts(gut(), 1, std::string(kGutFailing), std::string(1024, 'x'));
+    failing.output_truncated = true;
+    ASSERT_EQ(didi::offline::judgeTestRun(failing).verdict, "fail");
+    // A load error in the part that was kept still names its script.
+    auto named = facts(gut(), 0, withoutFailure(kGutFailing), kParseErrorOutput);
+    named.output_truncated = true;
+    ASSERT_EQ(didi::offline::judgeTestRun(named).reason, "scripts_did_not_load");
+}
+
 void test_an_exit_code_the_report_contradicts_is_neither_answer() {
     ASSERT_EQ(didi::offline::judgeTestRun(facts(gut(), 0, std::string(kGutFailing))).reason, "exit_code_disagrees");
     ASSERT_EQ(didi::offline::judgeTestRun(facts(gut(), 1, withoutFailure(kGutFailing))).reason,
@@ -432,6 +456,8 @@ struct RegisterTestReportTests {
         registerTest("TestReports.NothingTestedNeverPasses", test_a_run_that_tested_nothing_never_passes);
         registerTest("TestReports.ScriptThatDidNotLoadFailsTheRun",
                      test_a_test_script_that_did_not_load_fails_the_run);
+        registerTest("TestReports.OutputCutShortCannotPass",
+                     test_output_cut_short_cannot_prove_every_script_loaded);
         registerTest("TestReports.ContradictedExitCodeIsNeither",
                      test_an_exit_code_the_report_contradicts_is_neither_answer);
         registerTest("TestReports.EachFrameworkGetsItsOptions", test_each_framework_is_given_its_own_options);

@@ -709,6 +709,10 @@ json testRunError(const offline::TestRunVerdict& verdict, int timeout_seconds) {
         return {{"code", 422}, {"message", verdict.summary},
                 {"data", {{"code", "no_tests"}, {"reason", reason}, {"field", "paths"}, {"retryable", false}}}};
     }
+    if (reason == "output_truncated") {
+        return {{"code", 422}, {"message", verdict.summary},
+                {"data", {{"code", "output_truncated"}, {"field", "paths"}, {"retryable", false}}}};
+    }
     if (reason == "no_report" && verdict.report.value("not_imported", false)) {
         return {{"code", 409}, {"message", verdict.summary},
                 {"data", {{"code", "project_not_imported"}, {"retryable", false},

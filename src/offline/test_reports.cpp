@@ -732,6 +732,13 @@ TestRunVerdict judgeTestRun(const TestRunFacts& facts) {
     } else if (passed == 0) {
         set("error", "nothing_proved", "No test passed: every one of the " + std::to_string(total) +
                                            " was skipped or asserted nothing.");
+    } else if (facts.output_truncated) {
+        // Godot's output is kept to its first MiB, and a script that did not
+        // load can be named after that. GUT leaves its tests out of the report
+        // and exits 0, so nothing else would show it (#1243).
+        set("error", "output_truncated",
+            "Godot printed more than this run keeps, so a script that did not load could be named in the part "
+            "that was dropped. Have the tests print less, or run fewer paths at a time.");
     } else {
         set("pass", "", std::to_string(passed) + " of " + std::to_string(total) + " tests passed and none failed" +
                             (counts["skipped"].get<int>() + counts["no_assertions"].get<int>() > 0

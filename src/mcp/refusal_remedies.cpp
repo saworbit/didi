@@ -293,6 +293,7 @@ const std::map<std::string, Rule>& rules() {
         {"scripts_did_not_load", [](const Refusal&) {
             return noRemedy("A script in scripts_did_not_load does not parse; fix it first.");
         }},
+        {"output_truncated", [](const Refusal&) { return field("paths"); }},
         {"project_not_imported", [](const Refusal&) {
             return noRemedy("Open the project in the Godot editor once, or run godot --headless --import.");
         }},
