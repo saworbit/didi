@@ -1934,19 +1934,19 @@ Runs the project's own GUT or GdUnit4 tests in a headless Godot and returns a re
 - `timeout_seconds` (`integer`, 5 to 900, default 120).
 - `request_id`: runs it as a job.
 
-GUT is given `-gexit`, `-gdir` and `-ginclude_subdirs` for directories, `-gtest` for files, and `-gjunit_xml_file`; GdUnit4 is given `--ignoreHeadlessMode`, one `-a` per path, and `-rd` with `-rc 1`. The report goes under `.didi/tests/<name>/`, emptied before each run so an older report is never read as this one.
+GUT is given `-gexit`, `-gdir` and `-ginclude_subdirs` for directories, `-gtest` for files, and `-gjunit_xml_file`; GdUnit4 is given `--ignoreHeadlessMode`, one `-a` per path, and `-rd` with `-rc 1`. The report goes under `.didi/tests/<name>/<run>/`, a directory of the run's own, so two runs of one name at once never read or clear each other's report. A later run of the name removes a run's directory once it is older than the longest timeout and five minutes more.
 
 **The verdict is the report's, not the exit code's.** Measured on 4.7.2, GUT exits `0` when it found no tests, and exits `0` without writing any report when the project was never imported; GdUnit4 exits `0` when it found no tests. So `verdict` is:
 
 - `pass`: the report parsed, at least one test passed, none failed or errored, every test script loaded, and the exit code agrees.
 - `fail`: a test failed. `failed_tests` names each, and `tests` carries its `message`, its `file` and, where the framework says, its `line`.
-- `error`: anything that is neither. `reason` says which: `no_tests` (nothing ran), `nothing_proved` (every test was skipped or asserted nothing), `no_report` (the framework wrote none; with `not_imported: true` when its classes do not exist yet, which is fixed by opening the project in the editor once or running `godot --headless --import`), `report_unreadable`, `exit_code_disagrees`, `scripts_did_not_load`, `timeout`, `cancelled`.
+- `error`: anything that is neither. `reason` says which: `no_tests` (nothing ran), `nothing_proved` (every test was skipped or asserted nothing), `no_report` (the framework wrote none; with `not_imported: true` when its classes do not exist yet, which is fixed by opening the project in the editor once or running `godot --headless --import`), `report_unreadable`, `exit_code_disagrees`, `scripts_did_not_load`, `output_truncated` (Godot printed more than the run keeps, so a script that did not load could be in what was dropped; a failing test still reads `fail`), `timeout`, `cancelled`.
 
 **A test file that does not parse fails the run.** GUT leaves it out of its report and exits on whatever the other tests did, and GdUnit4 stops and writes nothing. Both print Godot's `SCRIPT ERROR: Parse Error` with the file and line, so `scripts_did_not_load` lists them and the run cannot pass. A script under `addons/` outside the tested paths is listed in `addon_scripts_did_not_load` instead and does not stop a pass: GUT 9.7.1 has two files that do not parse on 4.5.1 and 4.6.2, and its tests run all the same.
 
 `counts` has `total`, `passed`, `failed`, `errors`, `skipped` and `no_assertions`. GUT marks a test that asserted nothing, and it is counted there rather than as a pass. A run that did not pass carries `output_tail`, the last lines Godot printed.
 
-A run that did not pass answers `isError: true` with the report and an `error` beside it: `422 tests_failed`, `422 no_tests` with `field: "paths"`, `422 scripts_did_not_load`, `409 project_not_imported`, `504 timeout` with `retry_with` a longer `timeout_seconds`.
+A run that did not pass answers `isError: true` with the report and an `error` beside it: `422 tests_failed`, `422 no_tests` with `field: "paths"`, `422 scripts_did_not_load`, `422 output_truncated` with `field: "paths"`, `409 project_not_imported`, `504 timeout` with `retry_with` a longer `timeout_seconds`.
 
 Like `runtime_run_scenario`, the answer records the SHA-256 of `project.godot`, the autoloads, the test scripts and every script they reach, through `res://` literals and the `class_name` identifiers they use; nothing under `addons/` is followed. [`godot://project/scenarios`](RESOURCES_AND_PROMPTS.md#godotprojectscenarios) lists the run with `kind: "tests"` and marks it `stale` when one of those files changes.
 

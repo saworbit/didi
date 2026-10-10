@@ -1,6 +1,7 @@
 #include "didi/offline/test_reports.hpp"
 
 #include "didi/common/project_path.hpp"
+#include "didi/common/secure_random.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -498,6 +499,56 @@ Result<std::vector<std::string>> resolveTestPaths(const TestRunRequest& request,
                   "paths");
 }
 
+Result<std::string> newTestRunId(int64_t started_at_ms) {
+    auto suffix = security::secureRandomHex(6);
+    if (suffix.isErr()) return suffix.error();
+    return std::to_string(started_at_ms) + "-" + suffix.value();
+}
+
+fs::path testRunDirectory(const fs::path& project_root, const std::string& name, const std::string& run) {
+    return project_root / ".didi" / "tests" / name / run;
+}
+
+std::optional<fs::path> findTestReport(const fs::path& run_directory, TestFramework framework) {
+    std::error_code error;
+    if (framework == TestFramework::gut) {
+        const auto file = run_directory / "results.xml";
+        if (fs::is_regular_file(file, error)) return file;
+        return std::nullopt;
+    }
+    for (fs::recursive_directory_iterator it(run_directory, error), end; !error && it != end;
+         it.increment(error)) {
+        if (it->path().filename() == "results.xml") return it->path();
+    }
+    return std::nullopt;
+}
+
+void pruneTestRuns(const fs::path& name_directory, const std::string& keep, int64_t now_ms) {
+    std::error_code error;
+    std::vector<fs::path> stale;
+    for (fs::directory_iterator it(name_directory, error), end; !error && it != end; it.increment(error)) {
+        const auto entry = it->path().filename().string();
+        if (entry == keep) continue;
+        // A run's directory starts with the millisecond it started. Anything
+        // else is what the layout before #1242 left, which no run reads now.
+        const auto dash = entry.find('-');
+        int64_t started = 0;
+        const bool run = dash != std::string::npos && dash > 0 &&
+                         std::all_of(entry.begin(), entry.begin() + static_cast<std::ptrdiff_t>(dash),
+                                     [](unsigned char c) { return std::isdigit(c) != 0; });
+        if (run) {
+            try {
+                started = std::stoll(entry.substr(0, dash));
+            } catch (...) {
+                started = 0;
+            }
+            if (now_ms - started < kTestRunRetentionMs) continue;
+        }
+        stale.push_back(it->path());
+    }
+    for (const auto& path : stale) fs::remove_all(path, error);
+}
+
 std::vector<std::string> testCommandArguments(const InstalledTestFramework& framework,
                                               const std::vector<std::string>& paths,
                                               const std::string& report) {
@@ -681,6 +732,13 @@ TestRunVerdict judgeTestRun(const TestRunFacts& facts) {
     } else if (passed == 0) {
         set("error", "nothing_proved", "No test passed: every one of the " + std::to_string(total) +
                                            " was skipped or asserted nothing.");
+    } else if (facts.output_truncated) {
+        // Godot's output is kept to its first MiB, and a script that did not
+        // load can be named after that. GUT leaves its tests out of the report
+        // and exits 0, so nothing else would show it (#1243).
+        set("error", "output_truncated",
+            "Godot printed more than this run keeps, so a script that did not load could be named in the part "
+            "that was dropped. Have the tests print less, or run fewer paths at a time.");
     } else {
         set("pass", "", std::to_string(passed) + " of " + std::to_string(total) + " tests passed and none failed" +
                             (counts["skipped"].get<int>() + counts["no_assertions"].get<int>() > 0

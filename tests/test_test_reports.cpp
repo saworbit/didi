@@ -7,6 +7,8 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <iterator>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -232,6 +234,30 @@ void test_a_test_script_that_did_not_load_fails_the_run() {
     ASSERT_EQ(stopped.reason, "scripts_did_not_load");
 }
 
+// Godot's output is kept to its first MiB, and a script that did not load can
+// be named after that, so a run whose output was cut short cannot show every
+// script loaded (#1243).
+void test_output_cut_short_cannot_prove_every_script_loaded() {
+    auto cut = facts(gut(), 0, withoutFailure(kGutFailing), std::string(1024, 'x'));
+    cut.output_truncated = true;
+    const auto unproved = didi::offline::judgeTestRun(cut);
+    ASSERT_EQ(unproved.verdict, "error");
+    ASSERT_EQ(unproved.reason, "output_truncated");
+    ASSERT_EQ(unproved.report["truncated"], true);
+    ASSERT_TRUE(unproved.summary.find("print less") != std::string::npos);
+    // The same output, whole, passes.
+    cut.output_truncated = false;
+    ASSERT_EQ(didi::offline::judgeTestRun(cut).verdict, "pass");
+    // A failing test is still a fail when the output was cut.
+    auto failing = facts(gut(), 1, std::string(kGutFailing), std::string(1024, 'x'));
+    failing.output_truncated = true;
+    ASSERT_EQ(didi::offline::judgeTestRun(failing).verdict, "fail");
+    // A load error in the part that was kept still names its script.
+    auto named = facts(gut(), 0, withoutFailure(kGutFailing), kParseErrorOutput);
+    named.output_truncated = true;
+    ASSERT_EQ(didi::offline::judgeTestRun(named).reason, "scripts_did_not_load");
+}
+
 void test_an_exit_code_the_report_contradicts_is_neither_answer() {
     ASSERT_EQ(didi::offline::judgeTestRun(facts(gut(), 0, std::string(kGutFailing))).reason, "exit_code_disagrees");
     ASSERT_EQ(didi::offline::judgeTestRun(facts(gut(), 1, withoutFailure(kGutFailing))).reason,
@@ -367,6 +393,60 @@ void test_the_tool_runs_project_code_and_says_so() {
     ASSERT_EQ(error["data"]["canonical_tool"], "project_run_tests");
 }
 
+std::string readAll(const fs::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+}
+
+// Two runs of one name at once, in the order #1242 caught them in: A writes
+// its report, B starts and clears what earlier runs left, B writes its own,
+// and then each reads. Each has to read its own.
+void test_two_runs_of_one_name_keep_their_own_reports() {
+    using didi::offline::findTestReport;
+    using didi::offline::newTestRunId;
+    using didi::offline::pruneTestRuns;
+    using didi::offline::testRunDirectory;
+    TempProject project;
+    const int64_t now = 1'800'000'000'000;
+    const auto names = project.root / ".didi" / "tests" / "tests";
+
+    // What an older run left: one from long ago, and the layout before this.
+    const auto old_run = std::to_string(now - didi::offline::kTestRunRetentionMs - 1) + "-0a0a0a";
+    project.write(".didi/tests/tests/" + old_run + "/results.xml", "old");
+    project.write(".didi/tests/tests/results.xml", "older layout");
+
+    const auto run_a = newTestRunId(now);
+    ASSERT_TRUE(run_a.isOk());
+    const auto dir_a = testRunDirectory(project.root, "tests", run_a.value());
+    project.write(".didi/tests/tests/" + run_a.value() + "/results.xml", "A");
+
+    const auto run_b = newTestRunId(now);
+    ASSERT_TRUE(run_b.isOk());
+    ASSERT_TRUE(run_a.value() != run_b.value());
+    const auto dir_b = testRunDirectory(project.root, "tests", run_b.value());
+    ASSERT_TRUE(dir_a != dir_b);
+    ASSERT_EQ(dir_b.parent_path(), names);
+    pruneTestRuns(names, run_b.value(), now);
+    project.write(".didi/tests/tests/" + run_b.value() + "/results.xml", "B");
+
+    const auto report_a = findTestReport(dir_a, TestFramework::gut);
+    const auto report_b = findTestReport(dir_b, TestFramework::gut);
+    ASSERT_TRUE(report_a.has_value() && report_b.has_value());
+    ASSERT_EQ(readAll(*report_a), "A");
+    ASSERT_EQ(readAll(*report_b), "B");
+    // What was too old to be running, and the older layout, are gone.
+    ASSERT_TRUE(!fs::exists(names / old_run));
+    ASSERT_TRUE(!fs::exists(names / "results.xml"));
+
+    // GdUnit4 writes report_<n>/results.xml under the directory it is given.
+    project.write(".didi/tests/tests/" + run_b.value() + "/report_1/results.xml", "B4");
+    fs::remove(dir_b / "results.xml");
+    const auto gdunit_report = findTestReport(dir_b, TestFramework::gdunit4);
+    ASSERT_TRUE(gdunit_report.has_value());
+    ASSERT_EQ(readAll(*gdunit_report), "B4");
+    ASSERT_TRUE(!findTestReport(dir_b, TestFramework::gut).has_value());
+}
+
 struct RegisterTestReportTests {
     RegisterTestReportTests() {
         registerTest("TestReports.ReadTestByTest", test_both_frameworks_reports_are_read_test_by_test);
@@ -376,6 +456,8 @@ struct RegisterTestReportTests {
         registerTest("TestReports.NothingTestedNeverPasses", test_a_run_that_tested_nothing_never_passes);
         registerTest("TestReports.ScriptThatDidNotLoadFailsTheRun",
                      test_a_test_script_that_did_not_load_fails_the_run);
+        registerTest("TestReports.OutputCutShortCannotPass",
+                     test_output_cut_short_cannot_prove_every_script_loaded);
         registerTest("TestReports.ContradictedExitCodeIsNeither",
                      test_an_exit_code_the_report_contradicts_is_neither_answer);
         registerTest("TestReports.EachFrameworkGetsItsOptions", test_each_framework_is_given_its_own_options);
@@ -384,6 +466,8 @@ struct RegisterTestReportTests {
         registerTest("TestReports.RecordFollowsClassNames",
                      test_a_test_records_the_classes_it_uses_and_not_the_framework);
         registerTest("TestReports.ToolRunsProjectCode", test_the_tool_runs_project_code_and_says_so);
+        registerTest("TestReports.RunsOfOneNameKeepTheirOwnReports",
+                     test_two_runs_of_one_name_keep_their_own_reports);
     }
 } g_register_test_report_tests;
 
