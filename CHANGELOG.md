@@ -128,7 +128,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Fixed
 
-- `2026-10-11` With a `CLAUDE.md` above the project, `didi setup` puts the agent guide in the project's own `CLAUDE.md`, since Claude Code skips `AGENTS.md` there. [#1144](https://github.com/saworbit/didi/issues/1144)
+- `2026-10-11` With a `CLAUDE.md` above the project, `didi setup` puts the agent guide in the project's own `CLAUDE.md`, since Claude Code skips `AGENTS.md` there. [#1144](https://github.com/saworbit/didi/issues/1144) · [PR #1274](https://github.com/saworbit/didi/pull/1274)
 - `2026-10-10` A property holding a freed node reads as `null` with `freed: true`, and nothing calls into the freed object. [#1266](https://github.com/saworbit/didi/issues/1266) · [PR #1270](https://github.com/saworbit/didi/pull/1270)
 - `2026-10-10` The developer guide and build queue name the new test-run, profiler and text-copy pieces, and the rule a harness fixture's `@tool` script keeps. [#1227](https://github.com/saworbit/didi/issues/1227) · [PR #1265](https://github.com/saworbit/didi/pull/1265)
 - `2026-10-10` The harness fixture's editor probe no longer leaves a freed node in its metadata, which crashed the 4.5.1 editor on a tab switch. [#1227](https://github.com/saworbit/didi/issues/1227) · [PR #1264](https://github.com/saworbit/didi/pull/1264)
