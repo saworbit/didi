@@ -123,9 +123,9 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Fixed
 
-- `2026-10-10` `scene_call_method` takes a call that leaves out parameters with defaults, and runs it with them. [#1251](https://github.com/saworbit/didi/issues/1251)
-- `2026-10-10` `editor_reload_project` without `request_id` drops the server's cached resource index, as the job and offline paths do. [#1250](https://github.com/saworbit/didi/issues/1250)
-- `2026-10-10` An untyped Dictionary's `int` keys stay `int` when a read is written back, so `table[1]` still finds its value. [#1249](https://github.com/saworbit/didi/issues/1249)
+- `2026-10-10` `scene_call_method` takes a call that leaves out parameters with defaults, and runs it with them. [#1251](https://github.com/saworbit/didi/issues/1251) · [PR #1263](https://github.com/saworbit/didi/pull/1263)
+- `2026-10-10` `editor_reload_project` without `request_id` drops the server's cached resource index, as the job and offline paths do. [#1250](https://github.com/saworbit/didi/issues/1250) · [PR #1263](https://github.com/saworbit/didi/pull/1263)
+- `2026-10-10` An untyped Dictionary's `int` keys stay `int` when a read is written back, so `table[1]` still finds its value. [#1249](https://github.com/saworbit/didi/issues/1249) · [PR #1263](https://github.com/saworbit/didi/pull/1263)
 - `2026-10-10` A test report over 16 MiB is refused after reading 16 MiB of it, not after reading all of it. [#1247](https://github.com/saworbit/didi/issues/1247) · [PR #1262](https://github.com/saworbit/didi/pull/1262)
 - `2026-10-10` A GUT run records `.gutconfig.json` and the tests it lists, so its pass goes stale when one of them changes. [#1246](https://github.com/saworbit/didi/issues/1246) · [PR #1262](https://github.com/saworbit/didi/pull/1262)
 - `2026-10-10` A `make_unique` write whose setter refuses the copy no longer changes the resource it shares, and the answer says the node kept its own. [#1245](https://github.com/saworbit/didi/issues/1245) · [PR #1261](https://github.com/saworbit/didi/pull/1261)
