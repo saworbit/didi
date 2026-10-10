@@ -128,7 +128,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Fixed
 
-- `2026-10-11` `runtime_watch_invariants` and `runtime_explore_scene` read `paused` back from the tree, so a watch on a paused game no longer answers `false`. [#1020](https://github.com/saworbit/didi/issues/1020)
+- `2026-10-11` `runtime_watch_invariants` and `runtime_explore_scene` read `paused` back from the tree, so a watch on a paused game no longer answers `false`. [#1020](https://github.com/saworbit/didi/issues/1020) · [PR #1275](https://github.com/saworbit/didi/pull/1275)
 - `2026-10-11` With a `CLAUDE.md` above the project, `didi setup` puts the agent guide in the project's own `CLAUDE.md`, since Claude Code skips `AGENTS.md` there. [#1144](https://github.com/saworbit/didi/issues/1144) · [PR #1274](https://github.com/saworbit/didi/pull/1274)
 - `2026-10-10` A property holding a freed node reads as `null` with `freed: true`, and nothing calls into the freed object. [#1266](https://github.com/saworbit/didi/issues/1266) · [PR #1270](https://github.com/saworbit/didi/pull/1270)
 - `2026-10-10` The developer guide and build queue name the new test-run, profiler and text-copy pieces, and the rule a harness fixture's `@tool` script keeps. [#1227](https://github.com/saworbit/didi/issues/1227) · [PR #1265](https://github.com/saworbit/didi/pull/1265)
