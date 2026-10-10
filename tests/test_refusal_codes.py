@@ -123,6 +123,32 @@ def _error_json_messages(source: str) -> list[tuple[int, str]]:
     return messages
 
 
+def _call_arguments(source: str, pattern: str) -> list[tuple[int, list[str]]]:
+    """Every call matching ``pattern`` (ending at its open parenthesis) as its
+    line number and argument list. String literals are skipped, so a
+    parenthesis inside a message does not end the call."""
+    calls = []
+    for match in re.finditer(pattern, source):
+        depth = 0
+        index = match.end() - 1
+        while index < len(source):
+            char = source[index]
+            if char == '"':
+                index += 1
+                while index < len(source) and source[index] != '"':
+                    index += 2 if source[index] == "\\" else 1
+            elif char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+            index += 1
+        calls.append((source.count("\n", 0, match.start()) + 1,
+                      _split_top_level(source[match.end():index])))
+    return calls
+
+
 def _error_json_arguments(source: str) -> list[tuple[int, list[str]]]:
     """Every ``errorJson(`` call as its line number and argument list."""
     calls = []
@@ -186,6 +212,29 @@ class BridgeHelperRefusalsNameThemselves(unittest.TestCase):
             offenders, [],
             "fail(status, message) carries no data.code, so the floor names "
             "the refusal by its status alone. Use errorJson with a code:\n  "
+            + "\n  ".join(offenders))
+
+
+    def test_no_error_result_above_400_goes_without_a_code(self) -> None:
+        # A helper that returns Result<T> refuses with Error(status, message).
+        # Twenty-six of them in this file had no data, so the floor named each
+        # by its status: "Nothing to undo", "the camera has no size" and "no
+        # World3D" all arrived as conflict, which the remedy table cannot fix
+        # (#1222). A third argument that is a variable is trusted; one written
+        # out in place has to name the code.
+        source = BRIDGE.read_text(encoding="utf-8")
+        offenders = []
+        for line, arguments in _call_arguments(source, r"\bError\("):
+            status = arguments[0].strip()
+            if not status.isdigit() or not 400 < int(status) < 500:
+                continue
+            data = arguments[2].strip() if len(arguments) > 2 else ""
+            if not data or (data.startswith("{") and '"code"' not in data):
+                offenders.append(f"{BRIDGE.name}:{line} ({status})")
+        self.assertEqual(
+            offenders, [],
+            "Error(status, message) carries no data.code, so the floor names "
+            "the refusal by its status alone. Pass {{\"code\", ...}} as its data:\n  "
             + "\n  ".join(offenders))
 
 

@@ -199,6 +199,19 @@ static void test_the_remedy_follows_the_tool() {
     ASSERT_EQ(floored(409, "wrong kind", {{"code", "session_kind_rejected"}}, "runtime_step")
                   ["next_call"]["tool"],
               "runtime_launch");
+    // A query with no world can try a game; a ghost preview is drawn in the
+    // editor, where a game does not help (#1222).
+    ASSERT_EQ(floored(409, "no World3D", {{"code", "no_world"}}, "physics_raycast_query")
+                  ["next_call"]["tool"],
+              "runtime_list_sessions");
+    const auto preview = floored(409, "no world", {{"code", "no_world"}}, "editor_render_ghost_preview");
+    ASSERT_TRUE(preview["no_remedy"].is_string());
+    ASSERT_TRUE(!preview.contains("next_call"));
+    ASSERT_EQ(floored(409, "no size", {{"code", "camera_frustum_undefined"}}, "spatial_query_frustum")
+                  ["field"],
+              "camera");
+    ASSERT_EQ(floored(409, "no far", {{"code", "no_camera_far_plane"}}, "viewport_capture_frame")["field"],
+              "depth_far");
 }
 
 // A missing thing that is not a node is found where that kind of thing is
