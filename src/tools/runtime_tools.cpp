@@ -68,27 +68,7 @@ bool integerInRange(const json& value, int64_t minimum, int64_t maximum) {
 }
 
 std::optional<std::string> validateRuntimePath(const std::string& path) {
-    if (path.empty() || path.size() > 1024 || path.find('\0') != std::string::npos) {
-        return "root_path must be a non-empty UTF-8 path of at most 1024 bytes";
-    }
-    if (path != "/root" && path.rfind("/root/", 0) != 0) {
-        return "root_path must be a canonical absolute path beneath /root";
-    }
-    if (path.back() == '/' || path.find("//") != std::string::npos ||
-        path.find('\\') != std::string::npos || path.find(':') != std::string::npos) {
-        return "root_path must be a canonical absolute NodePath";
-    }
-    size_t start = 1;
-    while (start <= path.size()) {
-        const auto end = path.find('/', start);
-        const auto segment = path.substr(start, end == std::string::npos ? std::string::npos : end - start);
-        if (segment.empty() || segment == "." || segment == ".." || segment.front() == '%') {
-            return "root_path may not contain empty, '.', '..', or unique-name alias segments";
-        }
-        if (end == std::string::npos) break;
-        start = end + 1;
-    }
-    return std::nullopt;
+    return paths::runtimePathProblem(path);
 }
 
 std::optional<std::string> validateExpressionContextPath(const std::string& path) {

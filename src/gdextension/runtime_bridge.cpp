@@ -4,6 +4,7 @@
 #include "didi/gdextension/gdextension_api.hpp"
 #include "didi/gdextension/protocol_servers.hpp"
 #include "didi/common/logger.hpp"
+#include "didi/common/scene_node_path.hpp"
 
 #include <array>
 #include <algorithm>
@@ -19,7 +20,6 @@ namespace {
 
 constexpr size_t kOpaqueBytes = 64;
 constexpr size_t kMaxRuntimeNodes = 10000;
-constexpr size_t kMaxRuntimePathBytes = 1024;
 constexpr size_t kMaxRuntimeTreeNameBytes = 1024;
 constexpr size_t kMaxRuntimeTreeTypeBytes = 256;
 constexpr size_t kMaxRuntimeTreeNodePathBytes = 4096;
@@ -232,27 +232,7 @@ Result<GDExtensionObjectPtr> sceneTreeRoot(GDExtensionObjectPtr tree) {
 }
 
 Result<void> validateRuntimePath(const std::string& path) {
-    if (path.empty() || path.size() > kMaxRuntimePathBytes || path.find('\0') != std::string::npos) {
-        return Error::invalidArgument("root_path must be a non-empty UTF-8 path of at most 1024 bytes");
-    }
-    if (path != "/root" && path.rfind("/root/", 0) != 0) {
-        return Error::invalidArgument("root_path must be a canonical absolute path beneath /root");
-    }
-    if (path.back() == '/' || path.find("//") != std::string::npos ||
-        path.find('\\') != std::string::npos || path.find(':') != std::string::npos) {
-        return Error::invalidArgument("root_path must be a canonical absolute NodePath");
-    }
-    size_t start = 1;
-    while (start <= path.size()) {
-        const auto end = path.find('/', start);
-        const auto segment = path.substr(start, end == std::string::npos ? std::string::npos : end - start);
-        if (segment.empty() || segment == "." || segment == ".." || segment.front() == '%') {
-            return Error::invalidArgument(
-                "root_path may not contain empty, '.', '..', or unique-name alias segments");
-        }
-        if (end == std::string::npos) break;
-        start = end + 1;
-    }
+    if (auto problem = paths::runtimePathProblem(path)) return Error::invalidArgument(*problem);
     return Result<void>::ok();
 }
 
