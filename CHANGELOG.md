@@ -108,9 +108,9 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Changed
 
-- `2026-10-10` The live harness fails, naming the node, when a fixture scene holds a freed object after a scene change. [#1268](https://github.com/saworbit/didi/issues/1268)
-- `2026-10-10` A bridge refusal rebuilt from a helper's error keeps its `data`, and the refusal scan fails a rebuild that drops it. [#1267](https://github.com/saworbit/didi/issues/1267)
-- `2026-10-10` The MCP preflight and the game bridge check a runtime `root_path` with one rule. [#1254](https://github.com/saworbit/didi/issues/1254)
+- `2026-10-10` The live harness fails, naming the node, when a fixture scene holds a freed object after a scene change. [#1268](https://github.com/saworbit/didi/issues/1268) · [PR #1270](https://github.com/saworbit/didi/pull/1270)
+- `2026-10-10` A bridge refusal rebuilt from a helper's error keeps its `data`, and the refusal scan fails a rebuild that drops it. [#1267](https://github.com/saworbit/didi/issues/1267) · [PR #1270](https://github.com/saworbit/didi/pull/1270)
+- `2026-10-10` The MCP preflight and the game bridge check a runtime `root_path` with one rule. [#1254](https://github.com/saworbit/didi/issues/1254) · [PR #1270](https://github.com/saworbit/didi/pull/1270)
 - `2026-10-09` The sanitizer job has 45 minutes, the build matrix's limit, because a cold build after a header change took its whole 30. [#1224](https://github.com/saworbit/didi/issues/1224)
 - `2026-10-05` A release's notes are its changelog section, line for line, instead of GitHub's list of pull request titles. [PR #1199](https://github.com/saworbit/didi/pull/1199)
 - `2026-10-05` The tool reference says when `resource_create` and `project_apply_changes` answer `editor_index_pending`, as it already did for `script_create`. [#1177](https://github.com/saworbit/didi/issues/1177) · [PR #1192](https://github.com/saworbit/didi/pull/1192)
@@ -126,7 +126,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Fixed
 
-- `2026-10-10` A property holding a freed node reads as `null` with `freed: true`, and nothing calls into the freed object. [#1266](https://github.com/saworbit/didi/issues/1266)
+- `2026-10-10` A property holding a freed node reads as `null` with `freed: true`, and nothing calls into the freed object. [#1266](https://github.com/saworbit/didi/issues/1266) · [PR #1270](https://github.com/saworbit/didi/pull/1270)
 - `2026-10-10` The developer guide and build queue name the new test-run, profiler and text-copy pieces, and the rule a harness fixture's `@tool` script keeps. [#1227](https://github.com/saworbit/didi/issues/1227) · [PR #1265](https://github.com/saworbit/didi/pull/1265)
 - `2026-10-10` The harness fixture's editor probe no longer leaves a freed node in its metadata, which crashed the 4.5.1 editor on a tab switch. [#1227](https://github.com/saworbit/didi/issues/1227) · [PR #1264](https://github.com/saworbit/didi/pull/1264)
 - `2026-10-10` `scene_call_method` takes a call that leaves out parameters with defaults, and runs it with them. [#1251](https://github.com/saworbit/didi/issues/1251) · [PR #1263](https://github.com/saworbit/didi/pull/1263)
