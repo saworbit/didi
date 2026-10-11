@@ -134,7 +134,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Fixed
 
-- `2026-10-11` `eval_gdscript` finds a context node whose name starts with a byte-order mark: the sandbox shares the bridge's value constructors now. [#1255](https://github.com/saworbit/didi/issues/1255)
+- `2026-10-11` `eval_gdscript` finds a context node whose name starts with a byte-order mark: the sandbox shares the bridge's value constructors now. [#1255](https://github.com/saworbit/didi/issues/1255) · [PR #1285](https://github.com/saworbit/didi/pull/1285)
 - `2026-10-11` `didi setup` adds a `CLAUDE.md` that imports `AGENTS.md`, so every Claude Code version reads the guide, and `didi doctor` checks each client reaches it. [#1277](https://github.com/saworbit/didi/issues/1277) · [PR #1279](https://github.com/saworbit/didi/pull/1279)
 - `2026-10-11` The README and quick start say where setup puts the guide beside a parent `CLAUDE.md`, and the developer guide how the perf fixtures hold their load. [#1144](https://github.com/saworbit/didi/issues/1144) · [#1276](https://github.com/saworbit/didi/issues/1276) · [PR #1278](https://github.com/saworbit/didi/pull/1278)
 - `2026-10-11` `runtime_watch_invariants` and `runtime_explore_scene` read `paused` back from the tree, so a watch on a paused game no longer answers `false`. [#1020](https://github.com/saworbit/didi/issues/1020) · [PR #1275](https://github.com/saworbit/didi/pull/1275)
