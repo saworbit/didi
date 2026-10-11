@@ -10,14 +10,14 @@ Every number here is derived from the suites themselves rather than written down
 
 | Measure | Count |
 | --- | ---: |
-| Automated tests | **1742** |
+| Automated tests | **1744** |
 | Live-harness assertions | 1640 |
 
 The badge in the [README](../README.md) shows the automated test total. Harness assertions are counted separately because they are assertions inside one live scenario, not independently runnable cases; adding them together would flatter the number.
 
 ## Native C++ suite (`didi_tests`)
 
-**1146 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
+**1148 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
 
 | Suite | Tests |
 | --- | ---: |
@@ -41,7 +41,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `ExportPresetAdd` | 12 |
 | `ExpressionSandbox` | 7 |
 | `FollowUps` | 5 |
-| `GDScript` | 26 |
+| `GDScript` | 27 |
 | `GodotObject` | 2 |
 | `Hierarchy` | 9 |
 | `IPC` | 31 |
@@ -105,7 +105,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `phase7c_profiler` | 11 |
 | `project_settings_file` | 19 |
 | `resource_create` | 5 |
-| `resource_references` | 19 |
+| `resource_references` | 20 |
 | `tool_annotations` | 10 |
 | `tool_input_schema` | 8 |
 | `tool_manifest` | 11 |

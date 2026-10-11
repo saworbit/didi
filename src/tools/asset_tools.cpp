@@ -386,7 +386,11 @@ Result<ExternalReference> resolveExternalReference(const json& value, const std:
     reference.path = path;
     const auto indexer = offline::ResourceIndexer::sharedIndex(".");
     if (const auto* found = indexer->findExact(path)) {
-        reference.type = found->type;
+        // The type the file's own header declares, where it has one. The
+        // index's type comes from the extension, which for every .tres is
+        // Resource, so a texture written a moment earlier was referenced as
+        // type="Resource" (#1316).
+        reference.type = found->declared_type.empty() ? found->type : found->declared_type;
         reference.uid = found->uid;
     } else {
         return Error::notFound("Property \"" + property +

@@ -1183,24 +1183,69 @@ Result<SymbolPatch> GDScriptDiagnostics::patchSymbol(const std::string& source_t
         // create_if_missing set; the refusal above is the default.
         patched.created = true;
         if (symbol_type == "signal" || symbol_type == "variable" || symbol_type == "enum") {
-            // Insert near top after extends/class_name
-            int insert_pos = 0;
+            // After the header lines, and after the class doc comment below
+            // them: Godot takes a class's description from the ## lines before
+            // its first member, so a member put between the two took the
+            // description away (#1305).
+            size_t insert_pos = 0;
             for (size_t i = 0; i < lines.size(); ++i) {
                 std::string trimmed = strings::trim(lines[i]);
                 if (strings::startsWith(trimmed, "extends ") ||
                     strings::startsWith(trimmed, "class_name ") ||
                     strings::startsWith(trimmed, "@tool") ||
                     strings::startsWith(trimmed, "@icon")) {
-                    insert_pos = static_cast<int>(i + 1);
+                    insert_pos = i + 1;
                 }
             }
-            for (int i = 0; i < insert_pos; ++i) {
-                result << lines[i] << "\n";
+            size_t doc = insert_pos;
+            while (doc < lines.size() && strings::trim(lines[doc]).empty()) ++doc;
+            if (doc < lines.size() && strings::startsWith(strings::trim(lines[doc]), "##")) {
+                while (doc < lines.size() && strings::startsWith(strings::trim(lines[doc]), "##")) ++doc;
+                insert_pos = doc;
             }
-            result << "\n" << new_definition << "\n";
+            // Beside the members of its kind: after the last top-level one, and
+            // after the last @onready one for an @onready variable. A
+            // declaration that runs over several lines ends where its brackets
+            // close.
+            const bool onready = strings::startsWith(strings::trim(new_definition), "@onready");
+            std::optional<size_t> last_of_kind;
+            std::optional<size_t> last_onready;
             for (size_t i = insert_pos; i < lines.size(); ++i) {
-                result << lines[i];
-                if (i + 1 < lines.size()) result << "\n";
+                if (lines[i].empty() || lines[i][0] == ' ' || lines[i][0] == '\t') continue;
+                const auto declaration = parseDeclaration(lines[i]);
+                if (!declaration || declaration->kind != symbol_type) continue;
+                size_t end = i;
+                int depth = 0;
+                for (size_t at = i; at < lines.size(); ++at) {
+                    for (const char c : lines[at]) {
+                        if (c == '(' || c == '[' || c == '{') ++depth;
+                        else if (c == ')' || c == ']' || c == '}') --depth;
+                    }
+                    end = at;
+                    if (depth <= 0) break;
+                }
+                last_of_kind = end;
+                if (strings::startsWith(strings::trim(lines[i]), "@onready")) last_onready = end;
+            }
+            const auto beside = onready && last_onready ? last_onready : last_of_kind;
+            if (beside) {
+                std::string definition = new_definition;
+                while (!definition.empty() && (definition.back() == '\n' || definition.back() == '\r')) {
+                    definition.pop_back();
+                }
+                for (size_t i = 0; i <= *beside; ++i) result << lines[i] << "\n";
+                result << definition;
+                for (size_t i = *beside + 1; i < lines.size(); ++i) result << "\n" << lines[i];
+                if (*beside + 1 >= lines.size()) result << "\n";
+            } else {
+                for (size_t i = 0; i < insert_pos; ++i) {
+                    result << lines[i] << "\n";
+                }
+                result << "\n" << new_definition << "\n";
+                for (size_t i = insert_pos; i < lines.size(); ++i) {
+                    result << lines[i];
+                    if (i + 1 < lines.size()) result << "\n";
+                }
             }
         } else {
             // Append at the bottom

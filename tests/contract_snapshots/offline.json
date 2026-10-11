@@ -9548,7 +9548,7 @@
           "openWorldHint": false,
           "readOnlyHint": false
         },
-        "description": "Creates, saves, and opens an empty Node2D, Node3D, or Control scene.",
+        "description": "Creates, saves and opens an empty scene rooted in any Node class.",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {

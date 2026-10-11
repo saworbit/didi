@@ -973,7 +973,7 @@ void ToolRegistry::registerSceneTools() {
         [this](const json& args) { return handleSceneGetGroupMembers(args, m_ipcClient); });
 
     registerPhaseTwo(
-        "scene_create", "Creates, saves, and opens an empty Node2D, Node3D, or Control scene.",
+        "scene_create", "Creates, saves and opens an empty scene rooted in any Node class.",
         {{"type", "object"}, {"properties", {
             {"scene_path", {{"type", "string"}}},
             {"root_type", {{"type", "string"}, {"minLength", 1}, {"maxLength", 128},

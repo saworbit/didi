@@ -142,6 +142,25 @@ void writes_a_tileset_with_an_atlas_source_and_a_texture() {
     ASSERT_EQ(payload["sub_resources_written"].size(), size_t(1));
 }
 
+// A .tres written a moment ago is referenced as the type its own header
+// declares. The index's type comes from the extension, Resource for every
+// .tres, and that was what the [ext_resource] line said (#1316).
+void references_a_written_tres_by_its_declared_type() {
+    ProjectFixture project("declared-type");
+    ASSERT_TRUE(!create({{"save_path", "res://art/ramp.tres"}, {"resource_type", "GradientTexture2D"},
+                         {"properties", json::object()}}).isError);
+    const auto referenced = create({
+        {"save_path", "res://art/atlas.tres"},
+        {"resource_type", "AtlasTexture"},
+        {"properties", json::array({
+            {{"name", "atlas"}, {"value", {{"type", "ExtResource"}, {"path", "res://art/ramp.tres"}}}}})}});
+    ASSERT_TRUE(!referenced.isError);
+    const auto contents = project.read("art/atlas.tres");
+    ASSERT_TRUE(contents.find("[ext_resource type=\"GradientTexture2D\" path=\"res://art/ramp.tres\"") !=
+                std::string::npos);
+    ASSERT_EQ(payloadOf(referenced)["external_references"][0]["resource_type"], json("GradientTexture2D"));
+}
+
 // Break caught: one header entry per file, not per mention. Two entries for one
 // path is a file Godot loads twice and a load_steps that does not match.
 void gives_one_header_entry_to_a_path_named_twice() {
@@ -863,6 +882,8 @@ void follows_a_class_name_chain_to_its_engine_base() {
 
 struct Register {
     Register() {
+        registerTest("resource_references.written_tres_by_declared_type",
+                     references_a_written_tres_by_its_declared_type);
         registerTest("resource_references.class_name_type_written_as_godot_does",
                      writes_a_class_name_type_the_way_godot_does);
         registerTest("resource_references.class_name_sub_resource_written_as_godot_does",
