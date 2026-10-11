@@ -1937,6 +1937,15 @@ try {
         (Tool-Request 1020 "project_get_setting" @{ setting = "application/config/tags" }),
         (Tool-Request 1021 "project_set_setting" @{ setting = "application/boot_splash/show_image"; value = $true }),
         (Tool-Request 1022 "project_set_setting" @{ setting = "application/config/tags"; value = @() }),
+        # A Color setting takes the {r, g, b} project_get_setting answers, and
+        # a plugin list keeps its PackedStringArray and says the editor loads
+        # plugins when it starts (#1293, #1304). The list names the one plugin
+        # twice, because every res:// entry has to exist. Both are put back.
+        (Tool-Request 426 "project_set_setting" @{ setting = "rendering/environment/defaults/default_clear_color"; value = @{ r = 0.07; g = 0.05; b = 0.08 } }),
+        (Tool-Request 427 "project_get_setting" @{ setting = "rendering/environment/defaults/default_clear_color" }),
+        (Tool-Request 428 "project_set_setting" @{ setting = "rendering/environment/defaults/default_clear_color"; remove = $true }),
+        (Tool-Request 429 "project_set_setting" @{ setting = "editor_plugins/enabled"; value = @("res://addons/didi/plugin.cfg", "res://addons/didi/plugin.cfg") }),
+        (Tool-Request 433 "project_set_setting" @{ setting = "editor_plugins/enabled"; value = @("res://addons/didi/plugin.cfg") }),
         (Tool-Request 51 "script_attach_to_node" @{ target_node = "/root/SmokeRoot/Subject"; script_path = "res://subject.gd" }),
         (Tool-Request 52 "script_detach_from_node" @{ target_node = "/root/SmokeRoot/Subject" }),
         (Tool-Request 53 "editor_undo" @{}),
@@ -4439,6 +4448,15 @@ try {
     $arraySetting = (Tool-Payload $byId[1020]).value
     Assert-True ($arraySetting -is [array] -and $arraySetting.Count -eq 2 -and $arraySetting[1] -eq "didi_typed_b") "config/tags did not read back as the two-element array: $($byId[1020].result.content[0].text)"
     Assert-True (-not $byId[1021].result.isError -and -not $byId[1022].result.isError) "Restoring show_image or config/tags failed: $($byId[1021].result.content[0].text) $($byId[1022].result.content[0].text)"
+    $clearColor = Tool-Payload $byId[426]
+    Assert-True ($clearColor.persisted -eq $true -and $clearColor.value_written -match '^Color\(') "A Color setting refused the {r, g, b} it reads back as: $($byId[426].result.content[0].text)"
+    $clearRead = (Tool-Payload $byId[427]).value
+    Assert-True ([math]::Abs($clearRead.r - 0.07) -lt 0.001 -and [math]::Abs($clearRead.b - 0.08) -lt 0.001) "The clear colour did not read back as written: $($byId[427].result.content[0].text)"
+    Assert-True (-not $byId[428].result.isError) "Restoring the clear colour failed: $($byId[428].result.content[0].text)"
+    $pluginWrite = Tool-Payload $byId[429]
+    Assert-True ($pluginWrite.requires_editor_restart -eq $true -and $pluginWrite.value_written -match '^PackedStringArray\(' -and @($pluginWrite.follow_up | Where-Object { $_.work -eq "restart" }).Count -eq 1) "A plugin list change did not keep its type or name the restart: $($byId[429].result.content[0].text)"
+    $pluginRestore = Tool-Payload $byId[433]
+    Assert-True ($pluginRestore.value_written -eq 'PackedStringArray("res://addons/didi/plugin.cfg")') "The plugin list was not put back as it was: $($byId[433].result.content[0].text)"
 
     Assert-True ((Tool-Payload $byId[51]).undo_redo_registered) "Script attachment bypassed UndoRedo."
     Assert-True ((Tool-Payload $byId[52]).detached -eq $true) "Script detachment was not observed."
