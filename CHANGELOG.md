@@ -134,6 +134,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Fixed
 
+- `2026-10-11` The docs say a scenario asserts on a paused game, where a sound reads as stopped, and the quick start says to ignore `.didi/`. [#1306](https://github.com/saworbit/didi/issues/1306) · [#1307](https://github.com/saworbit/didi/issues/1307) · [#1301](https://github.com/saworbit/didi/issues/1301)
 - `2026-10-11` `eval_gdscript` finds a context node whose name starts with a byte-order mark: the sandbox shares the bridge's value constructors now. [#1255](https://github.com/saworbit/didi/issues/1255) · [PR #1285](https://github.com/saworbit/didi/pull/1285)
 - `2026-10-11` `didi setup` adds a `CLAUDE.md` that imports `AGENTS.md`, so every Claude Code version reads the guide, and `didi doctor` checks each client reaches it. [#1277](https://github.com/saworbit/didi/issues/1277) · [PR #1279](https://github.com/saworbit/didi/pull/1279)
 - `2026-10-11` The README and quick start say where setup puts the guide beside a parent `CLAUDE.md`, and the developer guide how the perf fixtures hold their load. [#1144](https://github.com/saworbit/didi/issues/1144) · [#1276](https://github.com/saworbit/didi/issues/1276) · [PR #1278](https://github.com/saworbit/didi/pull/1278)
