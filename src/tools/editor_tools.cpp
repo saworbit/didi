@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <optional>
 #include <thread>
+#include "didi/mcp/tool_registration.hpp"
 
 namespace didi {
 namespace mcp {
@@ -208,6 +209,54 @@ CallToolResult handleEditorReloadProject(const json& args, std::shared_ptr<ipc::
         {"status", "offline"},
         {"message", "Offline caches re-indexed."}
     });
+}
+
+// The tools whose handlers this file holds. registerAllDefaultTools calls
+// each domain's in turn (#1256).
+void ToolRegistry::registerEditorTools() {
+
+    {
+        ToolDefinition t;
+        t.name = "editor_undo";
+        t.description = "Reverts the last operation through Godot's EditorUndoRedoManager.";
+        // Q15: one change journal entry instead of whatever is newest. The
+        // refusal says why an entry cannot be undone on its own.
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties",
+             {{"journal_entry",
+               {{"type", "integer"},
+                {"minimum", 1},
+                {"description", "Undo only this godot://project/journal entry."}}}}}};
+        t.handler = [this](const json& args) { return handleEditorUndo(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "editor_redo";
+        t.description = "Replays the previously reverted editor transaction.";
+        t.inputSchema = {{"type", "object"}};
+        t.handler = [this](const json& args) { return handleEditorRedo(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "editor_save_scene";
+        t.description = "Saves the active scene to disk.";
+        t.inputSchema = {{"type", "object"}};
+        t.handler = [this](const json& args) { return handleEditorSaveScene(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "editor_reload_project";
+        t.description = "Runs a full EditorFileSystem.scan in the connected editor and answers once it is applied; request_id waits as a job. Not a restart: a resource the editor has loaded is not reloaded.";
+        t.inputSchema = {{"type", "object"}, {"properties", {
+            {"request_id", {{"type", "string"}, {"minLength", 8}}}
+        }}};
+        t.handler = [this](const json& args) { return handleEditorReloadProject(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
 }
 
 } // namespace mcp

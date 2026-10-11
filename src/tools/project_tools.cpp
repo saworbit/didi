@@ -8,6 +8,7 @@
 #include <cctype>
 #include <filesystem>
 #include <set>
+#include "didi/mcp/tool_registration.hpp"
 
 namespace didi::mcp {
 namespace {
@@ -540,6 +541,184 @@ CallToolResult handleProjectSearchSymbols(const json& args, std::shared_ptr<ipc:
     auto result = search.searchSymbols(options);
     if (result.isErr()) return searchError(result.error());
     return CallToolResult::successJson(result.value().toJson());
+}
+
+// The tools whose handlers this file holds. registerAllDefaultTools calls
+// each domain's in turn (#1256).
+void ToolRegistry::registerProjectTools() {
+    {
+        ToolDefinition t;
+        t.name = "project_search_text";
+        t.description = "Searches literal text in the bounded project-owned text files a Godot project keeps references in: .gd, .cs, .tscn, .tres, .gdshader, .gdshaderinc, .godot, .cfg, .json and .import, without opening a Godot session. The result reports how many files were not candidates and which extensions they had, so an empty result can be told apart from a string the project does not contain.";
+        t.inputSchema = {{"type", "object"}, {"properties", {
+            {"query", {{"type", "string"}, {"minLength", 1}, {"maxLength", 256}}},
+            {"search_path", {{"type", "string"}, {"default", "res://"}, {"minLength", 6}, {"maxLength", 1024}}},
+            {"extensions", {{"type", "array"}, {"minItems", 1}, {"maxItems", 10}, {"uniqueItems", true},
+                            {"items", {{"type", "string"},
+                                       {"enum", {".gd", ".cs", ".tscn", ".tres", ".gdshader",
+                                                 ".gdshaderinc", ".godot", ".cfg", ".json",
+                                                 ".import"}}}}}},
+            {"case_sensitive", {{"type", "boolean"}, {"default", true}}},
+            {"whole_word", {{"type", "boolean"}, {"default", false}}},
+            {"max_results", {{"type", "integer"}, {"default", 100}, {"minimum", 1}, {"maximum", 500}}}
+        }}, {"required", {"query"}}};
+        t.handler = [this](const json& args) { return handleProjectSearchText(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "project_search_symbols";
+        t.description = "Lexically searches bounded GDScript and C# declarations without opening a Godot session.";
+        t.inputSchema = {{"type", "object"}, {"properties", {
+            {"query", {{"type", "string"}, {"minLength", 1}, {"maxLength", 256}}},
+            {"search_path", {{"type", "string"}, {"default", "res://"}, {"minLength", 6}, {"maxLength", 1024}}},
+            {"extensions", {{"type", "array"}, {"minItems", 1}, {"maxItems", 4}, {"uniqueItems", true},
+                            {"items", {{"type", "string"}, {"enum", {".gd", ".cs", ".tscn", ".tres"}}}}}},
+            {"case_sensitive", {{"type", "boolean"}, {"default", true}}},
+            {"max_results", {{"type", "integer"}, {"default", 100}, {"minimum", 1}, {"maximum", 500}}},
+            {"match", {{"type", "string"}, {"default", "prefix"}, {"enum", {"exact", "prefix", "contains"}}}},
+            {"kinds", {{"type", "array"}, {"minItems", 1}, {"maxItems", 6}, {"uniqueItems", true},
+                       {"items", {{"type", "string"}, {"enum", {"class", "function", "signal", "variable", "constant", "enum"}}}}}}
+        }}, {"required", {"query"}}};
+        t.handler = [this](const json& args) { return handleProjectSearchSymbols(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+
+    registerPhaseTwo(
+        "project_list_autoloads", "Lists persisted project autoload entries.",
+        {{"type", "object"}, {"properties", json::object()}},
+        [this](const json& args) { return handleProjectListAutoloads(args, m_ipcClient); });
+    registerPhaseTwo(
+        "project_set_autoload", "Creates or explicitly replaces a persisted project autoload.",
+        {{"type", "object"}, {"properties", {
+            {"name", {{"type", "string"}}}, {"path", {{"type", "string"}}},
+            {"singleton", {{"type", "boolean"}, {"default", true}}},
+            {"replace", {{"type", "boolean"}, {"default", false}}}
+        }}, {"required", {"name", "path"}}},
+        [this](const json& args) { return handleProjectSetAutoload(args, m_ipcClient); });
+    registerPhaseTwo(
+        "project_remove_autoload", "Removes an existing persisted project autoload.",
+        {{"type", "object"}, {"properties", {{"name", {{"type", "string"}}}}}, {"required", {"name"}}},
+        [this](const json& args) { return handleProjectRemoveAutoload(args, m_ipcClient); });
+
+    registerPhaseTwo(
+        "project_list_input_actions",
+        "Lists the project's InputMap actions and their events, each marked defined_by_project. "
+        "include_engine_defaults: true adds the engine's ui_* map, and action reads one by name.",
+        {{"type", "object"}, {"properties", {
+            {"include_engine_defaults", {{"type", "boolean"}}},
+            {"action", {{"type", "string"}, {"minLength", 1}}}}}},
+        [this](const json& args) { return handleProjectListInputActions(args, m_ipcClient); });
+    registerPhaseTwo(
+        "project_set_input_action", "Creates or explicitly replaces a persisted InputMap action.",
+        {{"type", "object"}, {"properties", {
+            {"action", {{"type", "string"}}},
+            {"deadzone", {{"type", "number"}, {"minimum", 0.0}, {"maximum", 1.0}, {"default", 0.2}}},
+            // The handler is closed: it refuses an unknown property, an
+            // unsupported type, a missing type and a non-integer keycode, every
+            // time. None of that was published -- items was {"type": "object"},
+            // which says an event is any object at all -- so a host validating
+            // against the schema sent whatever the model invented and learned
+            // the vocabulary one round trip at a time (#736). runtime_inject_input
+            // publishes a oneOf over its own event shapes; this is the same
+            // thing for the four this tool takes. They are different lists on
+            // purpose: an InputMap binding has no pressed state and no mouse
+            // motion, and an injected event has no persistence.
+            {"events", {{"type", "array"}, {"minItems", 0}, {"maxItems", 64},
+                {"description",
+                 "The input events bound to the action, each a closed object in Godot's "
+                 "InputEvent shape."},
+                {"items", {{"oneOf", json::array({
+                    json{{"type", "object"}, {"additionalProperties", false},
+                         {"properties", {
+                             {"type", {{"const", "key"}}},
+                             {"keycode", {{"type", "integer"}, {"minimum", 1},
+                                          {"maximum", 4294967295},
+                                          {"description",
+                                           "A Godot Key enum value, not an ASCII code or a "
+                                           "character. Space is 32, Escape is 4194305, A is 65, "
+                                           "F1 is 4194332; script_reflect_class on Key lists "
+                                           "them all."}}},
+                             {"physical_keycode", {{"type", "integer"}, {"minimum", 1},
+                                                   {"maximum", 4294967295},
+                                                   {"description",
+                                                    "The same Key enum, read by physical position "
+                                                    "rather than by the active layout."}}},
+                             {"unicode", {{"type", "integer"}, {"minimum", 1},
+                                          {"maximum", 1114111}}},
+                             {"shift_pressed", {{"type", "boolean"}}},
+                             {"alt_pressed", {{"type", "boolean"}}},
+                             {"ctrl_pressed", {{"type", "boolean"}}},
+                             {"meta_pressed", {{"type", "boolean"}}},
+                             {"shift", {{"type", "boolean"},
+                                        {"description", "Alias for shift_pressed. Send one."}}},
+                             {"alt", {{"type", "boolean"},
+                                      {"description", "Alias for alt_pressed. Send one."}}},
+                             {"ctrl", {{"type", "boolean"},
+                                       {"description", "Alias for ctrl_pressed. Send one."}}},
+                             {"meta", {{"type", "boolean"},
+                                       {"description", "Alias for meta_pressed. Send one."}}},
+                             {"device", {{"type", "integer"}, {"minimum", -1}}}
+                         }},
+                         {"required", json::array({"type"})},
+                         {"anyOf", json::array({
+                             json{{"required", json::array({"keycode"})}},
+                             json{{"required", json::array({"physical_keycode"})}},
+                             json{{"required", json::array({"unicode"})}}
+                         })}},
+                    json{{"type", "object"}, {"additionalProperties", false},
+                         {"properties", {
+                             {"type", {{"const", "mouse_button"}}},
+                             {"button_index", {{"type", "integer"}, {"minimum", 1},
+                                               {"maximum", 9}}},
+                             {"device", {{"type", "integer"}, {"minimum", -1}}}
+                         }},
+                         {"required", json::array({"type", "button_index"})}},
+                    json{{"type", "object"}, {"additionalProperties", false},
+                         {"properties", {
+                             {"type", {{"const", "joypad_button"}}},
+                             {"button_index", {{"type", "integer"}, {"minimum", 0},
+                                               {"maximum", 127}}},
+                             {"device", {{"type", "integer"}, {"minimum", -1}}}
+                         }},
+                         {"required", json::array({"type", "button_index"})}},
+                    json{{"type", "object"}, {"additionalProperties", false},
+                         {"properties", {
+                             {"type", {{"const", "joypad_motion"}}},
+                             {"axis", {{"type", "integer"}, {"minimum", 0}, {"maximum", 9}}},
+                             {"axis_value", {{"type", "number"}, {"minimum", -1},
+                                             {"maximum", 1}}},
+                             {"device", {{"type", "integer"}, {"minimum", -1}}}
+                         }},
+                         {"required", json::array({"type", "axis", "axis_value"})}}
+                })}}}}},
+            {"replace", {{"type", "boolean"}, {"default", false}}}
+        }}, {"required", {"action"}}},
+        [this](const json& args) { return handleProjectSetInputAction(args, m_ipcClient); });
+    registerPhaseTwo(
+        "project_remove_input_action", "Removes an existing persisted InputMap action.",
+        {{"type", "object"}, {"properties", {{"action", {{"type", "string"}}}}}, {"required", {"action"}}},
+        [this](const json& args) { return handleProjectRemoveInputAction(args, m_ipcClient); });
+
+    registerPhaseTwo(
+        "project_get_setting", "Reads an existing ProjectSettings value as bounded JSON.",
+        {{"type", "object"}, {"properties", {{"setting", {{"type", "string"}}}}}, {"required", {"setting"}}},
+        [this](const json& args) { return handleProjectGetSetting(args, m_ipcClient); });
+    registerPhaseTwo(
+        "project_set_setting", "Persists or explicitly removes a ProjectSettings value. With an editor attached, a name the engine does not define is refused unless create says otherwise, because a typo and a deliberate custom setting were written identically. Offline there is no engine to ask, so the name is written unchecked and the result says so in limitation. A res:// path in the value, and each one in an array, must name a file in the project; internationalization/locale/translations takes the .translation files a CSV import writes, or a .po, .mo or .res, and never the CSV itself.",
+        {{"type", "object"}, {"properties", {
+            {"setting", {{"type", "string"},
+                         {"description", "Slash-delimited ProjectSettings name, such as display/window/size/viewport_width. Use the typed autoload and InputMap tools for those namespaces."}}},
+            {"value", {{"type", anyJsonType()}}},
+            {"remove", {{"type", "boolean"}, {"default", false},
+                        {"description", "Remove the setting instead of writing a value. Pass this or value, not both."}}},
+            {"create", {{"type", "boolean"}, {"default", false},
+                        {"description", "Write a setting name the engine does not already define. Off by default, because a misspelled built-in name is indistinguishable from a deliberate custom one and costs a key nothing reads. Only an attached editor can check the name, and the result then reports defined_by_engine. Offline the check cannot run: the name is written whether create is set or not, defined_by_engine is null, and limitation says so. Attach an editor to have the name checked."}}}
+        }}, {"required", {"setting"}}},
+        [this](const json& args) { return handleProjectSetSetting(args, m_ipcClient); },
+        // The files an array names need no engine, so both routes and a dry run
+        // refuse the same values (#989).
+        checkSettingValuePaths);
 }
 
 } // namespace didi::mcp

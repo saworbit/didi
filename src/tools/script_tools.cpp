@@ -24,6 +24,7 @@
 #include <string>
 #include <vector>
 #include <filesystem>
+#include "didi/mcp/tool_registration.hpp"
 
 namespace didi {
 namespace mcp {
@@ -822,6 +823,131 @@ CallToolResult handleScriptAttachToNode(const json& args, std::shared_ptr<ipc::I
 
 CallToolResult handleScriptDetachFromNode(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     return forwardLiveScriptWiring(args, ipc, "script.detachFromNode", "detach a script from a node");
+}
+
+// The tools whose handlers this file holds. registerAllDefaultTools calls
+// each domain's in turn (#1256).
+void ToolRegistry::registerScriptTools() {
+
+    {
+        ToolDefinition t;
+        t.name = "script_check_syntax";
+        t.description = "Checks GDScript with Didi's lexical rules and the open editor's language server, or for a file with no editor a headless Godot compile.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"file_path", {{"type", "string"}, {"description", "Path to script file"}}},
+                {"source_text", {{"type", "string"}, {"description",
+                    "An unsaved buffer to check instead of the file at file_path. With no editor "
+                    "attached only the lexical rules run on it; limitation says so."}}}
+            }}
+        };
+        // The source client, not the lease dispatch wrapper. This tool sends no
+        // request; it reads the selected session descriptor to say whether the
+        // Godot it spawned is the engine the caller is attached to, and the
+        // wrapper is not a session client. Same reason script_reflect_class
+        // takes it (#617).
+        t.handler = [this](const json& args) { return handleScriptCheckSyntax(args, m_sourceIpcClient); };
+        registerTool(t);
+
+        // Alias
+        t.name = "analyze_script_diagnostics";
+        t.handler = [this](const json& args) { return handleScriptCheckSyntax(args, m_sourceIpcClient); };
+        registerTool(t);
+    }
+    {
+        ToolDefinition t;
+        t.name = "script_reflect_class";
+        t.description = "Looks up a class in Didi's limited built-in offline reference map; this is not live ClassDB reflection.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"class_name", {{"type", "string"}, {"description", "Godot class name (e.g. CharacterBody3D)"}}}
+            }},
+            {"required", {"class_name"}}
+        };
+        // Node alone answers in about 13 KB, three quarters of it methods, so a
+        // caller after one property list should not pay for the rest (Q5).
+        t.sections = {"description", "methods", "properties", "signals", "enums"};
+        // The source client, not the lease dispatch wrapper. This tool never
+        // sends a request; it reads the selected session descriptor to say
+        // whether the pinned class reference matches the attached engine, and
+        // the wrapper is not a session client.
+        t.handler = [this](const json& args) { return handleScriptReflectClass(args, m_sourceIpcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "script_get_symbols";
+        t.description = "Extracts AST symbols, functions, signals, and typed variables from any script file.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"file_path", {{"type", "string"}, {"description", "Path to script"}}},
+                {"source_text", {{"type", "string"}, {"description", "Optional source code"}}},
+                {"max_symbols", {{"type", "integer"},
+                                 {"default", offline::GDScriptDiagnostics::kDefaultMaxSymbols},
+                                 {"minimum", 1},
+                                 {"maximum", 100000}}}
+            }}
+        };
+        t.handler = [this](const json& args) { return handleScriptGetSymbols(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition create;
+        create.name = "script_create";
+        create.description = "Writes a new GDScript file under the project root and returns the diagnostics for what it wrote.";
+        create.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"script_path", {{"type", "string"}, {"description", "Target res:// path ending in .gd"}}},
+                {"source_text", {{"type", "string"}, {"description", "File contents"}}},
+                {"overwrite", {{"type", "boolean"}, {"default", false}}}
+            }},
+            {"required", {"script_path", "source_text"}}
+        };
+        create.handler = [this](const json& args) { return handleScriptCreate(args, m_sourceIpcClient); };
+        registerTool(std::move(create));
+    }
+    {
+        ToolDefinition t;
+        t.name = "script_patch_method";
+        t.description = "Safely rewrites a single method or symbol body in a .gd file without touching other functions.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"file_path", {{"type", "string"}, {"minLength", 1}, {"description", "Target script path"}}},
+                {"method_name", {{"type", "string"}, {"minLength", 1}, {"description", "Method name to replace"}}},
+                {"new_definition", {{"type", "string"}, {"minLength", 1},
+                                    {"description", "New method implementation. It has to declare the symbol named by method_name."}}},
+                {"symbol_type", {{"type", "string"},
+                                 {"enum", offline::GDScriptDiagnostics::symbolTypes()},
+                                 {"default", "function"}}},
+                {"create_if_missing", {{"type", "boolean"}, {"default", false}}}
+            }},
+            {"required", {"file_path", "method_name", "new_definition"}}
+        };
+        t.handler = [this](const json& args) { return handleScriptPatchMethod(args, m_sourceIpcClient); };
+        registerTool(t);
+
+        // Alias
+        t.name = "patch_script_symbols";
+        t.handler = [this](const json& args) { return handleScriptPatchMethod(args, m_sourceIpcClient); };
+        registerTool(t);
+    }
+
+    registerPhaseTwo(
+        "script_attach_to_node", "Attaches an existing Script resource to a live node through UndoRedo.",
+        {{"type", "object"}, {"properties", {
+            {"target_node", {{"type", "string"}}}, {"script_path", {{"type", "string"}}}
+        }}, {"required", {"target_node", "script_path"}}},
+        [this](const json& args) { return handleScriptAttachToNode(args, m_ipcClient); });
+    registerPhaseTwo(
+        "script_detach_from_node", "Detaches the current Script resource from a live node through UndoRedo.",
+        {{"type", "object"}, {"properties", {{"target_node", {{"type", "string"}}}}},
+         {"required", {"target_node"}}},
+        [this](const json& args) { return handleScriptDetachFromNode(args, m_ipcClient); });
 }
 
 } // namespace mcp

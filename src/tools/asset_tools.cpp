@@ -34,6 +34,7 @@
 #include <set>
 #include <string>
 #include <vector>
+#include "didi/mcp/tool_registration.hpp"
 
 namespace didi {
 namespace mcp {
@@ -2836,6 +2837,424 @@ CallToolResult handleAssetConfigureImport(const json& args, std::shared_ptr<ipc:
         {"engine_diagnostics", diagnostics},
         {"execution_mode", "live"}};
     return CallToolResult::successJson(std::move(payload));
+}
+
+// The tools whose handlers this file holds. registerAllDefaultTools calls
+// each domain's in turn (#1256).
+void ToolRegistry::registerAssetTools() {
+    {
+        ToolDefinition t;
+        t.name = "asset_reimport";
+        t.description = "Reimports project source assets and waits for the editor to go idle. A batch with a new file scans first and answers once the scan is applied, so a new script's class is registered. A refused import names the failed paths; the engine's reason is under engine_diagnostics.";
+        // Above 10000 only as a job (Q8): the handler refuses it otherwise.
+        t.inputSchema = {{"type", "object"}, {"properties", {
+            {"paths", {{"type", "array"}, {"minItems", 1}, {"maxItems", 256}, {"uniqueItems", true},
+                       {"items", {{"type", "string"}, {"minLength", 7}, {"maxLength", 1024}}}}},
+            {"timeout_ms", {{"type", "integer"}, {"default", 10000}, {"minimum", 1}, {"maximum", 900000}}},
+            {"request_id", {{"type", "string"}, {"minLength", 8}}}
+        }}, {"required", {"paths"}}};
+        t.handler = [this](const json& args) { return handleAssetReimport(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "asset_configure_import";
+        t.description =
+            "Changes an imported asset's import options in its .import file, reimports it in the "
+            "attached editor, and checks what the engine then loads. This is how a music track "
+            "is made to loop: loop: true for an OGG or MP3, edit/loop_mode 2 (Forward) for a "
+            "WAV. It sets the loop options of WAV, OGG and MP3 imports only, and refuses any "
+            "other importer or option. Godot checks none of these values, so the tool does: a "
+            "value of the wrong type, a loop mode Godot has no name for, an offset or a loop "
+            "window outside the track. If the reimported asset does not load with what was "
+            "asked, the previous file is put back and reimported. resource_inspect reports an "
+            "asset's current import options.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"asset_path", {{"type", "string"}, {"minLength", 1}, {"maxLength", 1024}}},
+                {"options", {
+                    {"type", "object"},
+                    {"properties", {
+                        {"loop", {{"type", "boolean"},
+                                  {"description", "OGG and MP3: whether the track loops."}}},
+                        {"loop_offset", {{"type", "number"}, {"minimum", 0},
+                                         {"description", "OGG and MP3: the second the track loops back "
+                                                         "to, from 0 up to its length."}}},
+                        {"edit/loop_mode", {{"type", json::array({"integer", "string"})},
+                                            {"description",
+                                             "WAV: 0 Detect From WAV, 1 Disabled, 2 Forward, 3 "
+                                             "Ping-Pong, 4 Backward, as the number or the name."}}},
+                        {"edit/loop_begin", {{"type", "integer"}, {"minimum", 0},
+                                             {"description", "WAV: the first frame of the loop, "
+                                                             "under loop modes 2 to 4."}}},
+                        {"edit/loop_end", {{"type", "integer"}, {"minimum", -1},
+                                           {"description", "WAV: the frame the loop ends at, or -1 "
+                                                           "for the last one, under loop modes 2 to 4."}}}
+                    }}
+                }}
+            }},
+            {"required", json::array({"asset_path", "options"})},
+            {"additionalProperties", false}
+        };
+        t.handler = [this](const json& args) { return handleAssetConfigureImport(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "project_verify_changes";
+        t.description = "Checks a set of proposed file contents together in an isolated copy of the project, so a script that preloads a sibling sees the proposed sibling, and nothing reaches the working tree whether the proposal is good or not.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"changes", {
+                    {"type", "array"}, {"minItems", 1}, {"maxItems", 64},
+                    {"description", "The proposal. Each file is written into the isolated copy before anything is checked, so the set is checked as a set."},
+                    {"items", {
+                        {"type", "object"},
+                        {"properties", {
+                            {"path", {{"type", "string"}, {"description", "A res:// path inside the project. The same containment rules script_create applies."}}},
+                            {"content", {{"type", "string"}, {"description", "The whole proposed contents of that file, at most 1 MiB."}}}
+                        }},
+                        {"required", json::array({"path", "content"})},
+                        {"additionalProperties", false}
+                    }}
+                }},
+                {"run_scene", {{"type", "string"},
+                               {"description", "Optional. A .tscn or .scn inside the project to open in the copy once the proposal is written, so the check is more than a parse. The copy has no import cache, so the first run also imports what the scene touches."}}},
+                {"run_frames", {{"type", "integer"}, {"minimum", 1}, {"maximum", 6000}, {"default", 120},
+                                {"description", "Iterations to let the scene run before Godot quits by itself. Only meaningful with run_scene."}}},
+                {"timeout_seconds", {{"type", "integer"}, {"minimum", 1}, {"maximum", 600}, {"default", 120}}}
+            }},
+            {"required", json::array({"changes"})},
+            {"additionalProperties", false}
+        };
+        t.handler = [](const json& args) { return handleProjectVerifyChanges(args); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "project_apply_changes";
+        t.description = "Checks a proposal in an isolated copy of the project and, only if it passes, writes it into the working tree in one staged pass. A proposal that does not pass is reported and nothing is written.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"changes", {
+                    {"type", "array"}, {"minItems", 1}, {"maxItems", 64},
+                    {"description", "The proposal. The same shape project_verify_changes takes, checked the same way before any of it reaches the working tree."},
+                    {"items", {
+                        {"type", "object"},
+                        {"properties", {
+                            {"path", {{"type", "string"}, {"description", "A res:// path inside the project. The same containment rules script_create applies."}}},
+                            {"content", {{"type", "string"}, {"description", "The whole proposed contents of that file, at most 1 MiB."}}}
+                        }},
+                        {"required", json::array({"path", "content"})},
+                        {"additionalProperties", false}
+                    }}
+                }},
+                {"run_scene", {{"type", "string"},
+                               {"description", "Optional. A .tscn or .scn to open in the copy before deciding, so a scene that fails to load stops the write."}}},
+                {"run_frames", {{"type", "integer"}, {"minimum", 1}, {"maximum", 6000}, {"default", 120},
+                                {"description", "Iterations to let the scene run before Godot quits by itself. Only meaningful with run_scene."}}},
+                {"timeout_seconds", {{"type", "integer"}, {"minimum", 1}, {"maximum", 600}, {"default", 120}}},
+                {"discard_unsaved", {{"type", "boolean"},
+                                     {"description", "Allow reloading an open tab that may hold unsaved edits."}}}
+            }},
+            {"required", json::array({"changes"})},
+            {"additionalProperties", false}
+        };
+        t.handler = [this](const json& args) { return handleProjectApplyChanges(args, m_sourceIpcClient); };
+        registerTool(std::move(t));
+    }
+
+    {
+        ToolDefinition t;
+        t.name = "resource_create";
+        t.description = "Writes textual .tres content under the project root. Every value is rendered as a Godot literal or the call is refused naming the property, so a resource is never reported as written when part of it was thrown away. With an editor attached, the editor's copy of the file is reloaded from what was written.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"resource_type", {{"type", "string"}, {"default", "StandardMaterial3D"}}},
+                {"save_path", {{"type", "string"}, {"description", "Target res:// path ending in .tres. A .res is Godot's binary format and is refused."}}},
+                {"properties", {
+                    {"type", json::array({"object", "array"})},
+                    {"description",
+                     "An object, whose keys are written in sorted order, or an array of "
+                     "{name, value} entries written in the order given. Use the array when order "
+                     "matters: Godot applies indexed sub-properties in file order, so tracks/0/type "
+                     "has to come before the rest of track 0. A value is a string, number, boolean, "
+                     "array, or an object. An object with x/y, x/y/z, x/y/z/w or r/g/b(/a) numbers "
+                     "becomes whichever Vector or Color the property is declared as, and the "
+                     "matching one by shape when the class reference does not carry the property; "
+                     "any other object is a Dictionary. So tile_size on a TileSet takes {x, y} and "
+                     "is written Vector2i, and a fractional component in an integer vector is "
+                     "refused rather than truncated. To "
+                     "choose the type yourself, give the object a \"type\": Vector2i, Vector3i, "
+                     "Vector4i, Quaternion and Color take their components; NodePath and StringName "
+                     "take their text under \"value\"; the packed arrays take their elements under "
+                     "\"values\", and the composite ones -- PackedVector2Array, PackedVector3Array, "
+                     "PackedVector4Array and PackedColorArray -- take either an element per entry or "
+                     "the components already flattened, which is Godot's own format. The declared "
+                     "type also decides what kind of value the slot takes: int a whole number, float "
+                     "a number, bool true or false, String, StringName and NodePath a string, Array "
+                     "and the packed arrays an array, and Color either components or a \"#rrggbbaa\" "
+                     "string. Anything else is refused, because Godot keeps the property's default "
+                     "for a value it cannot convert and says nothing. A property can also point at "
+                     "another resource: {\"type\": "
+                     "\"ExtResource\", \"path\": \"res://art/tiles.png\"} references a file in "
+                     "the project, and {\"type\": \"SubResource\", \"id\": \"Atlas_1\"} "
+                     "references an entry of sub_resources declared above it. A type this cannot "
+                     "write is refused rather than guessed at."},
+                    {"oneOf", json::array({
+                        json{{"type", "object"}},
+                        json{{"type", "array"},
+                             {"items", {{"type", "object"},
+                                        {"properties", {{"name", {{"type", "string"},
+                                                                  {"minLength", 1}}},
+                                                        {"value", json::object()}}},
+                                        {"required", json::array({"name", "value"})}}}}
+                    })}
+                }},
+                {"sub_resources", {
+                    {"description",
+                     "The [sub_resource] blocks this resource carries inside itself, in the order "
+                     "they should appear. Each entry is {id, resource_type, properties}, and its "
+                     "properties follow exactly the same rules as the top-level ones. A property "
+                     "anywhere in the file names one with {\"type\": \"SubResource\", \"id\": "
+                     "...}, and only an id declared earlier can be named, because Godot resolves a "
+                     "SubResource against what it has already read. load_steps is computed from "
+                     "these and the external references; do not pass it."},
+                    {"type", "array"},
+                    {"maxItems", 64},
+                    {"items", {{"type", "object"},
+                               {"properties", {{"id", {{"type", "string"}, {"minLength", 1}}},
+                                               {"resource_type", {{"type", "string"}, {"minLength", 1}}},
+                                               {"properties", json::object()}}},
+                               {"required", json::array({"id", "resource_type"})}}}
+                }},
+                {"overwrite", {{"type", "boolean"}, {"default", false}}},
+                {"allow_unknown_type", {{"type", "boolean"}, {"default", false},
+                                        {"description",
+                                         "Write a resource_type that no engine list and no project "
+                                         "class_name names. Off by default, because Godot cannot "
+                                         "load a resource whose type it does not know and a "
+                                         "misspelling is the common case. Turn it on for a "
+                                         "GDExtension type with no session attached; an attached "
+                                         "engine's ClassDB already lists one. The result then reports "
+                                         "property_check as unchecked, or "
+                                         "type_unknown_to_attached_engine and a limitation when the "
+                                         "engine answered and does not have the type."}}}
+            }},
+            {"required", {"save_path"}}
+        };
+        // The source client, not the lease dispatch wrapper. This tool sends no
+        // request; it reads the selected session descriptor to say whether the
+        // pinned class reference its property_check used matches the attached
+        // engine, and the wrapper is not a session client, so the two fields were
+        // never emitted (#735). Same reason script_reflect_class takes it.
+        t.handler = [this](const json& args) { return handleResourceCreate(args, m_sourceIpcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "resource_inspect";
+        t.description = "Returns offline indexed file metadata, detected type, UID, and parsed dependencies for a resource path.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"resource_path", {{"type", "string"}}}
+            }},
+            {"required", {"resource_path"}}
+        };
+        t.handler = [this](const json& args) { return handleResourceInspect(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "project_list_resources";
+        t.description = "Scans res:// for assets filtered by type (e.g., .glb, .png, .tres).";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"search_path", {{"type", "string"}, {"default", "res://"}}},
+                {"type_filter", {{"type", "string"}}},
+                {"fuzzy_query", {{"type", "string"}}},
+                {"include_uid", {{"type", "boolean"}, {"default", true}}}
+            }}
+        };
+        t.handler = [this](const json& args) { return handleQueryProjectResources(args, m_ipcClient); };
+        registerTool(t);
+
+        // Alias
+        t.name = "query_project_resources";
+        t.handler = [this](const json& args) { return handleQueryProjectResources(args, m_ipcClient); };
+        registerTool(t);
+    }
+    {
+        ToolDefinition t;
+        t.name = "project_get_uid_map";
+        t.description = "Resolves uid:// and res:// references to each other, and returns the UID map scanned from the project files.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"resolve", {{"type", "array"},
+                             {"items", {{"type", "string"}}},
+                             {"minItems", 1}, {"maxItems", 256},
+                             {"description", "uid:// or res:// values to resolve. A connected editor answers them from ResourceUID and each result reports whether the project files agree (index_state). Omit to get the scanned map alone."}}}
+            }},
+            {"additionalProperties", false}
+        };
+        t.handler = [this](const json& args) { return handleProjectGetUidMap(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "project_audit_assets";
+        t.description = "Audits the project for unreferenced assets, references that resolve to nothing, declared signals nothing uses, scene connections to methods nothing declares, and unhealthy Godot import metadata. Reports evidence, not verdicts. A file scan in every case; a connected editor additionally verifies unresolved uid:// findings against ResourceUID and clears the ones it disproves.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"include_orphans", {{"type", "boolean"}, {"default", true},
+                                     {"description", "Assets that nothing references. Asset types only: scenes and scripts are excluded because nothing has to reference the level you open by hand."}}},
+                {"include_broken_references", {{"type", "boolean"}, {"default", true},
+                                               {"description", "res:// paths and uid:// references that resolve to no file in the project."}}},
+                {"include_dead_signals", {{"type", "boolean"}, {"default", true},
+                                          {"description", "Signals declared in GDScript that no file emits, connects to, or wires in a scene."}}},
+                {"include_broken_connections", {{"type", "boolean"}, {"default", true},
+                                                {"description", "Scene [connection] entries whose method the receiving node's script, the scripts it extends and its engine class do not declare. Judged only where every step resolves."}}},
+                {"include_import_health", {{"type", "boolean"}, {"default", true},
+                                           {"description", "Existing Godot .import metadata with missing sources or outputs, malformed/unsafe paths, or source files newer than their outputs."}}},
+                {"include_addon_orphans", {{"type", "boolean"}, {"default", false},
+                                           {"description", "Count files under res://addons/ as orphans. Off by default: addons are third-party code a developer did not write and is not responsible for tidying. excluded_addon_orphans reports how many were left out."}}},
+                {"max_findings", {{"type", "integer"}, {"minimum", 1}, {"maximum", 5000}, {"default", 500}}}
+            }},
+            {"additionalProperties", false}
+        };
+        t.handler = [this](const json& args) { return handleProjectAuditAssets(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "project_analyze_impact";
+        t.description = "Traces every place a symbol, signal, resource path, or static node path is named, including scene connections and animation tracks that a text search finds but cannot explain.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"target", {{"type", "string"}, {"minLength", 1}, {"maxLength", 256},
+                            {"description", "A canonical res:// path, lowercase-alphanumeric uid:// value, static Godot node path such as Player/Sprite, /root, or Hand/Sword/%Hilt, or a single Godot identifier such as a variable, function, or signal name."}}},
+                {"max_impacts", {{"type", "integer"}, {"minimum", 1}, {"maximum", 5000}, {"default", 500}}}
+            }},
+            {"required", json::array({"target"})},
+            {"additionalProperties", false}
+        };
+        t.handler = [this](const json& args) { return handleProjectAnalyzeImpact(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "project_rename_references";
+        t.description = "Renames a symbol in the scene connections and animation tracks that serialize it, atomically across every file, and reports the references it deliberately does not touch, the project.godot [autoload] key among them.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"target", {{"type", "string"}, {"minLength", 1}, {"maxLength", 256},
+                            {"description", "The Godot identifier to rename: a variable, function or signal name. A res:// path or a node path is a different operation and is refused."}}},
+                {"new_name", {{"type", "string"}, {"minLength", 1}, {"maxLength", 256},
+                              {"description", "The identifier to rename it to. Refused if a scene connection or animation track already uses it, because that would merge two different symbols."}}},
+                {"max_impacts", {{"type", "integer"}, {"minimum", 1}, {"maximum", 5000}, {"default", 500}}},
+                {"discard_unsaved", {{"type", "boolean"},
+                                     {"description", "Allow reloading an open tab that may hold unsaved edits."}}}
+            }},
+            {"required", json::array({"target", "new_name"})},
+            {"additionalProperties", false}
+        };
+        t.handler = [this](const json& args) { return handleProjectRenameReferences(args, m_sourceIpcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "audio_list_buses";
+        t.description = "Lists the audio buses with volume, mute, solo, bypass, routing, and effect chains. Live when the editor is attached, from the project bus layout otherwise.";
+        t.inputSchema = {{"type", "object"}, {"properties", json::object()},
+                         {"additionalProperties", false}};
+        t.handler = [this](const json& args) { return handleAudioListBuses(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "audio_configure_bus";
+        t.description = "Sets an audio bus volume, mute or solo on the running engine, and returns the values it replaced.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                // The type beside the oneOf is for a host that reads only
+                // `type`, which would send index 1 as "1", a bus name. Claude
+                // Code reads the oneOf too and sent the integer without it.
+                {"bus", {{"type", json::array({"string", "integer"})},
+                         {"description", "The bus name or its index."},
+                         {"oneOf", json::array({json{{"type", "string"}, {"minLength", 1}, {"maxLength", 128}},
+                                                json{{"type", "integer"}, {"minimum", 0}}})}}},
+                {"volume_db", {{"type", "number"}, {"minimum", -80}, {"maximum", 24}}},
+                {"mute", {{"type", "boolean"}}},
+                {"solo", {{"type", "boolean"}}}
+            }},
+            {"required", json::array({"bus"})},
+            {"additionalProperties", false}
+        };
+        t.handler = [this](const json& args) { return handleAudioConfigureBus(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "audio_add_bus";
+        t.description =
+            "Adds one audio bus to the end of the layout in the attached editor, names it and "
+            "routes it, so a game can have the Music and SFX buses a settings menu sets; a fresh "
+            "project has only Master. It only adds: a name in use, or one differing only in "
+            "letter case, is refused, and so is a send to a bus that does not exist, which Godot "
+            "would silently route to Master. The editor writes the project's bus layout file "
+            "itself shortly afterwards, and the result says whether it has. Add the bus before "
+            "setting an AudioStreamPlayer's bus to it.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"name", {{"type", "string"}, {"minLength", 1}, {"maxLength", 256}}},
+                {"send", {{"type", "string"}, {"minLength", 1}, {"maxLength", 256},
+                          {"default", "Master"}}},
+                {"volume_db", {{"type", "number"}, {"minimum", -80}, {"maximum", 24}}},
+                {"mute", {{"type", "boolean"}}},
+                {"solo", {{"type", "boolean"}}}
+            }},
+            {"required", json::array({"name"})},
+            {"additionalProperties", false}
+        };
+        t.handler = [this](const json& args) { return handleAudioAddBus(args, m_ipcClient); };
+        // The name, send and value rules need no engine, so a caller with no
+        // editor open hears about a bad name now rather than after opening one.
+        t.argumentCheck = [](const json& args) -> std::optional<Error> {
+            auto parsed = runtime::parseAudioAddBusRequest(args);
+            if (parsed.isErr()) return parsed.error();
+            return std::nullopt;
+        };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "instantiate_asset";
+        t.description = "Creates an instance of a resource or scene and parents it with automatic collision assignment.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"asset_path", {{"type", "string"}}},
+                {"parent_path", {{"type", "string"}, {"default", "/root"}}},
+                {"transform", {{"type", "object"}}},
+                {"collision_mode", {{"type", "string"}, {"default", "none"}}}
+            }},
+            {"required", {"asset_path"}}
+        };
+        t.handler = [this](const json& args) { return handleInstantiateAsset(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
 }
 
 } // namespace mcp

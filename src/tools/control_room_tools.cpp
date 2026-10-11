@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include "didi/mcp/tool_registration.hpp"
 
 namespace didi {
 namespace mcp {
@@ -206,6 +207,40 @@ CallToolResult handleControlRoom(const json& args, const std::shared_ptr<ipc::II
     }
     model["execution_mode"] = "local_status";
     return CallToolResult::successJson(model);
+}
+
+// The tools whose handlers this file holds. registerAllDefaultTools calls
+// each domain's in turn (#1256).
+void ToolRegistry::registerControlRoomTools() {
+    {
+        ToolDefinition t;
+        t.name = "didi_control_room";
+        t.description =
+            "Reports Didi's own state: bridge and session status with the pid or session behind "
+            "it, the current execution mode of every registered tool, the safety posture, and a "
+            "tail of this server's log. Read-only. Hosts that support the MCP Apps extension "
+            "render it as an interactive dashboard; every other client gets the same payload as "
+            "text.";
+        t.inputSchema = {{"type", "object"}, {"properties", {
+            {"log_limit", {{"type", "integer"}, {"minimum", 0}, {"maximum", 500},
+                           {"default", 120},
+                           {"description", "How many of the newest log records to return. The default is a glance; ask for more only when a person is going to read them."}}}
+        }}};
+        // A status call for one light used to fetch every tool's mode as well:
+        // the tools array was 77% of the answer (#776). lights is required by
+        // the output schema, so it is always returned and is not a section.
+        t.sections = {"server", "project", "surface", "facts", "tools", "sessions", "log", "journal"};
+        t.handler = [this](const json& args) {
+            // The source client, not the lease-dispatch wrapper: the wrapper is a
+            // route lease provider but not a session client, and route
+            // classification reads that difference as an unreachable route. The
+            // protocol layer passes the source client, so this must too, or the
+            // dashboard reports modes tools/list does not.
+            return handleControlRoom(args, m_sourceIpcClient, m_runtimeSessionClient,
+                                     m_skipConfirmations, m_recovery != nullptr);
+        };
+        registerTool(std::move(t));
+    }
 }
 
 }  // namespace mcp

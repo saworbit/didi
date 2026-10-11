@@ -9,6 +9,7 @@
 #include <string_view>
 #include <tuple>
 #include <map>
+#include "didi/mcp/tool_registration.hpp"
 
 namespace didi {
 namespace mcp {
@@ -252,6 +253,62 @@ CallToolResult handleGridmapSetCells(const ResolvedToolBinding& binding, const j
         return requestError(binding, "invalid_gridmap_set_cells_request");
     }
     return sendPhase7LiveRequest(binding, request, ipc);
+}
+
+// The tools whose handlers this file holds. registerAllDefaultTools calls
+// each domain's in turn (#1256).
+void ToolRegistry::registerTilemapGridTools() {
+
+    {
+        ToolDefinition t;
+        t.name = "tilemap_set_cells";
+        t.description = "Batch updates 2D TileMapLayer cells with source IDs, atlas coordinates, and alternate tiles.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"tilemap_path", {{"type", "string"}}},
+                {"cells", {{"type", "array"}, {"description", "Array of {coords: [x, y], source_id: int, atlas_coords: [x, y]}"}}}
+            }},
+            {"required", {"tilemap_path", "cells"}}
+        };
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleTilemapSetCells(binding, args, m_ipcClient);
+        };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "tilemap_get_used_rect";
+        t.description = "Returns used cell boundaries and layer structures.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"tilemap_path", {{"type", "string"}}}
+            }},
+            {"required", {"tilemap_path"}}
+        };
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleTilemapGetUsedRect(binding, args, m_ipcClient);
+        };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "gridmap_set_cells";
+        t.description = "Places 3D mesh library tiles inside a GridMap with coordinate orientations.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"gridmap_path", {{"type", "string"}}},
+                {"cells", {{"type", "array"}, {"description", "Array of {position: [x, y, z], item: int, orientation: int}"}}}
+            }},
+            {"required", {"gridmap_path", "cells"}}
+        };
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleGridmapSetCells(binding, args, m_ipcClient);
+        };
+        registerTool(std::move(t));
+    }
 }
 
 } // namespace mcp

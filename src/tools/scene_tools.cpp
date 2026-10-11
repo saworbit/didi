@@ -11,6 +11,7 @@
 #include <initializer_list>
 #include <optional>
 #include <map>
+#include "didi/mcp/tool_registration.hpp"
 
 namespace didi {
 namespace mcp {
@@ -701,6 +702,259 @@ CallToolResult handleScenePackBranch(const json& args, std::shared_ptr<ipc::IIpc
     const auto scene_path = payload.value("scene_path", args.value("scene_path", std::string()));
     reportEditorCopy(payload, refreshEditorCopies(ipc, {scene_path}, true));
     return CallToolResult::successJson(payload);
+}
+
+// The tools whose handlers this file holds. registerAllDefaultTools calls
+// each domain's in turn (#1256).
+void ToolRegistry::registerSceneTools() {
+    {
+        ToolDefinition t;
+        t.name = "scene_get_hierarchy";
+        t.description = "Returns a live name/type/path hierarchy or an offline parsed .tscn hierarchy; live bulk properties, scripts, and signals are explicitly omitted.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"root_path", {{"type", "string"}, {"default", "/root"}, {"description", "Node path in the edited scene, or an in-project .tscn file path. A .tscn path is read from the file whether or not an editor is attached."}}},
+                {"max_depth", {{"type", "integer"}, {"default", 10}, {"minimum", 0}, {"maximum", 64},
+                               {"description", "Stop descending below this depth. Branches that were cut report children_omitted and children_summary, and the response carries truncated."}}},
+                {"include_properties", {{"type", "boolean"}, {"default", true}}},
+                {"max_nodes", {{"type", "integer"}, {"minimum", 1}, {"maximum", 100000},
+                               {"description", "Stop after this many nodes, depth first. Branches that were cut report children_omitted and children_summary."}}},
+                {"class_filter", {{"type", "array"}, {"items", {{"type", "string"}}},
+                                  {"minItems", 1}, {"maxItems", 64},
+                                  {"description", "Keep only nodes of these types and the ancestors that lead to them. Matches are flagged with matched: true."}}},
+                {"summary", {{"type", "boolean"}, {"default", false},
+                             {"description", "Return node counts by type plus one level of branch structure, with no properties. Cannot be combined with max_nodes or class_filter."}}}
+            }}
+        };
+        t.handler = [this](const json& args) { return handleGetSceneHierarchy(args, m_ipcClient); };
+        registerTool(t);
+
+        // Alias
+        t.name = "get_scene_hierarchy";
+        t.handler = [this](const json& args) { return handleGetSceneHierarchy(args, m_ipcClient); };
+        registerTool(t);
+    }
+    {
+        ToolDefinition t;
+        t.name = "scene_instantiate_node";
+        t.description = "Creates a built-in ClassDB node, or an instance of a packed scene, in the active edited scene with UndoRedo.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"node_type", {{"type", "string"}, {"minLength", 1}, {"description", "Built-in ClassDB Node type to instantiate. One of node_type or scene_path is required; there is no default, because an empty request must not add a node. Ignored when scene_path is given: the instance is whatever the scene's root is, and the result reports its class."}}},
+                {"scene_path", {{"type", "string"}, {"description", "A res:// .tscn to instance instead of constructing a type, as the editor does when a scene is dropped into the tree. What the scene file records is an instance of that scene, not a copy of its nodes."}}},
+                {"parent_path", {{"type", "string"}, {"default", "/root"}}},
+                {"name", {{"type", "string"}, {"description", "Node name"}}},
+                // These values reach the same validator as scene_set_property's
+                // `value`, one level down, so they carry the same type contract.
+                {"properties", {{"type", "object"},
+                                {"additionalProperties",
+                                 {{"type", json::array({"null", "boolean", "integer", "number", "string", "object", "array"})}}},
+                                {"examples", json::array({json::object({{"position", json{{"x", 480}, {"y", 270}}},
+                                                                        {"visible", true},
+                                                                        {"text", "Score"}})})},
+                                {"description", "Initial property values, keyed by property name. Each value takes the JSON type matching the property on the new node: number for float (1.0, not \"1.0\"), integer for int, boolean for bool, string for String/StringName/NodePath, null for nil, {x,y} or {x,y,z} for Vector2/Vector2i/Vector3/Vector3i, {r,g,b} with optional a or a \"#rrggbb\" string for Color, a res:// path for a Resource slot, and an array or object for an Array or Dictionary."}}}
+            }}
+        };
+        t.handler = [this](const json& args) { return handleSceneInstantiateNode(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "scene_remove_node";
+        t.description = "Detaches a node through UndoRedo while retaining its lifetime for undo and redo.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"target_node", {{"type", "string"}, {"description", "NodePath of target node"}}}
+            }},
+            {"required", {"target_node"}}
+        };
+        t.handler = [this](const json& args) { return handleSceneRemoveNode(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "scene_reparent_node";
+        t.description = "Moves a node to a new parent while preserving global transforms.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"target_node", {{"type", "string"}, {"description", "NodePath to reparent"}}},
+                {"new_parent_path", {{"type", "string"}, {"description", "New parent NodePath"}}},
+                {"keep_global_transform", {{"type", "boolean"}, {"default", true}}}
+            }},
+            {"required", {"target_node", "new_parent_path"}}
+        };
+        t.handler = [this](const json& args) { return handleSceneReparentNode(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "scene_set_property";
+        t.description = "Sets an existing node property through UndoRedo with strict JSON/Godot type compatibility. The property is read back after the commit, so value is what it now holds. When applied is false, not_applied says why, with the range or enum the engine declares. writes sets several, on any nodes, as one undo step.";
+        // The value spellings, shared by a single write and each batch item.
+        const json value_types = json::array({"null", "boolean", "integer", "number", "string", "object", "array"});
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"target_node", {{"type", "string"}, {"minLength", 1}, {"maxLength", 1024}, {"description", "Target NodePath"}}},
+                {"property_name", {{"type", "string"}, {"minLength", 1}, {"maxLength", 1024}, {"description", "Property name, or a path into a resource it holds: theme_override_styles/panel:bg_color, material:shader_parameter/tint"}}},
+                // The accepted JSON types are fixed by validateJsonForPropertyType
+                // in the bridge, and the schema is the only place a client can
+                // learn them. Left untyped, a client guesses between 1.0 and
+                // "1.0", guesses differently from one turn to the next, and
+                // reads the rejection as a Didi bug rather than a type error.
+                {"value", {{"type", value_types},
+                           {"examples", json::array({1.0, 42, true, "Player", nullptr,
+                                                     json{{"x", 480}, {"y", 270}},
+                                                     json{{"r", 1}, {"g", 0.5}, {"b", 0}},
+                                                     "res://tiles/arena_tileset.tres"})},
+                           {"description", "New property value, as the JSON type matching the Godot property: number for float (1.0, not \"1.0\"), integer for int, boolean for bool, string for String/StringName/NodePath, null for nil, {x,y} or {x,y,z} for vectors (whole numbers for the integer ones), {r,g,b} with optional a or \"#rrggbb\" for Color, Godot's own members for the rest (Rect2 {position,size}, Transform3D {basis,origin}), an array for an Array or packed array, an object for a Dictionary, and a res:// path for a Resource slot (null clears it). A member the type does not have is refused."}}},
+                {"writes", {{"type", "array"}, {"minItems", 1}, {"maxItems", 64},
+                            {"items", {{"type", "object"},
+                                       {"properties", {{"target_node", {{"type", "string"}}},
+                                                       {"property_name", {{"type", "string"}}},
+                                                       {"value", {{"type", value_types}}}}},
+                                       {"required", {"target_node", "property_name", "value"}},
+                                       {"additionalProperties", false}}},
+                            {"description", "Instead of the three above: writes of the same shape, all checked first, then committed as one undo step. One that fails refuses the batch."}}},
+                {"make_unique", {{"type", "boolean"}, {"default", false},
+                                 {"description", "Write into copies of the resources the path enters, as Make Unique does."}}}
+            }}
+        };
+        t.handler = [this](const json& args) { return handleSceneSetProperty(args, m_ipcClient); };
+        registerTool(t);
+    }
+    {
+        ToolDefinition t;
+        t.name = "scene_call_method";
+        t.description = "Calls a method the target node's own script declares, and returns what it returned. Project methods only: engine methods are out of reach by construction, because the allowlist is the script's own method list.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"target_node", {{"type", "string"}, {"minLength", 1}, {"maxLength", 1024},
+                                 {"description", "Node path inside the active edited scene."}}},
+                {"method_name", {{"type", "string"}, {"minLength", 1}, {"maxLength", 128},
+                                 {"description", "A method the node's script declares. Names beginning with an underscore are refused: that is Godot's mark for an engine callback or a private helper."}}},
+                {"arguments", {{"type", "array"}, {"maxItems", 8},
+                               {"description", "Positional arguments. JSON null, booleans, integers, finite reals, strings, arrays and string-keyed dictionaries, nested at most 4 levels and 8 KiB in total. The count and each type must match what the script declares."}}},
+                {"timeout_seconds", {{"type", "integer"}, {"minimum", 1}, {"maximum", 120}, {"default", 10},
+                                     {"description", "How long to wait when the method turns out to be a coroutine. A timeout reports that it was still running rather than claiming a result."}}}
+            }},
+            {"required", {"target_node", "method_name"}}
+        };
+        t.handler = [this](const json& args) { return handleSceneCallMethod(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "scene_get_property";
+        t.description = "Returns a node property from the live edited scene, with its declared type and any range, enum or resource type the engine declares.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"target_node", {{"type", "string"}, {"minLength", 1}, {"maxLength", 1024}, {"description", "Target NodePath"}}},
+                {"property_name", {{"type", "string"}, {"minLength", 1}, {"maxLength", 1024}, {"description", "Property name, or a path such as theme_override_styles/panel:bg_color"}}},
+                {"reads", {{"type", "array"}, {"minItems", 1}, {"maxItems", 64},
+                           {"items", {{"type", "object"},
+                                      {"properties", {{"target_node", {{"type", "string"}}},
+                                                      {"property_name", {{"type", "string"}}}}},
+                                      {"required", {"target_node", "property_name"}},
+                                      {"additionalProperties", false}}},
+                           {"description", "Instead of the two above: several reads, answered in order."}}}
+            }}
+        };
+        t.handler = [this](const json& args) { return handleSceneGetProperty(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "scene_duplicate_node";
+        t.description = "Duplicates an existing node branch with unique names.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"target_node", {{"type", "string"}, {"description", "Target NodePath to duplicate"}}}
+            }},
+            {"required", {"target_node"}}
+        };
+        t.handler = [this](const json& args) { return handleSceneDuplicateNode(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "mutate_scene_tree";
+        t.description = "Adds, removes, reparents, duplicates, or edits nodes via UndoRedo transactions.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"action", {{"type", "string"}, {"enum", {"add", "remove", "modify", "reparent", "duplicate"}}}},
+                {"target_node", {{"type", "string"}}},
+                {"payload", {{"type", "object"}}}
+            }},
+            {"required", {"action", "target_node"}}
+        };
+        t.handler = [this](const json& args) { return handleMutateSceneTree(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+
+    registerPhaseTwo(
+        "scene_list_groups", "Lists the groups assigned to a live edited-scene node.",
+        {{"type", "object"}, {"properties", {{"target_node", {{"type", "string"}}}}}, {"required", {"target_node"}}},
+        [this](const json& args) { return handleSceneListGroups(args, m_ipcClient); });
+    registerPhaseTwo(
+        "scene_add_to_group", "Adds a live node to a group through UndoRedo.",
+        {{"type", "object"}, {"properties", {
+            {"target_node", {{"type", "string"}}}, {"group", {{"type", "string"}}},
+            {"persistent", {{"type", "boolean"}, {"default", true}}}
+        }}, {"required", {"target_node", "group"}}},
+        [this](const json& args) { return handleSceneAddToGroup(args, m_ipcClient); });
+    registerPhaseTwo(
+        "scene_remove_from_group", "Removes a live node from a group through UndoRedo.",
+        {{"type", "object"}, {"properties", {
+            {"target_node", {{"type", "string"}}}, {"group", {{"type", "string"}}}
+        }}, {"required", {"target_node", "group"}}},
+        [this](const json& args) { return handleSceneRemoveFromGroup(args, m_ipcClient); });
+    registerPhaseTwo(
+        "scene_get_group_members", "Returns edited-scene-confined members of a group.",
+        {{"type", "object"}, {"properties", {{"group", {{"type", "string"}}}}}, {"required", {"group"}}},
+        [this](const json& args) { return handleSceneGetGroupMembers(args, m_ipcClient); });
+
+    registerPhaseTwo(
+        "scene_create", "Creates, saves, and opens an empty Node2D, Node3D, or Control scene.",
+        {{"type", "object"}, {"properties", {
+            {"scene_path", {{"type", "string"}}},
+            {"root_type", {{"type", "string"}, {"minLength", 1}, {"maxLength", 128},
+                           {"default", "Node2D"},
+                           {"description",
+                            "Any Godot class that inherits Node, the same set scene_instantiate_node "
+                            "takes: CharacterBody2D for a player, Area2D for a pickup, CanvasLayer "
+                            "for a HUD. A class the engine does not know, or one that is not a Node, "
+                            "is refused naming it."}}},
+            {"root_name", {{"type", "string"}, {"default", "Root"}}},
+            {"overwrite", {{"type", "boolean"}, {"default", false}}}
+        }}, {"required", {"scene_path"}}},
+        [this](const json& args) { return handleSceneCreate(args, m_ipcClient); });
+    registerPhaseTwo(
+        "scene_open", "Opens or switches to an existing PackedScene in the editor.",
+        {{"type", "object"}, {"properties", {{"scene_path", {{"type", "string"}}}}}, {"required", {"scene_path"}}},
+        [this](const json& args) { return handleSceneOpen(args, m_ipcClient); });
+    registerPhaseTwo(
+        "scene_close", "Closes the active scene, refusing when unsaved changes are reported or cannot be ruled out.",
+        {{"type", "object"}, {"properties", {
+            {"discard_unsaved", {{"type", "boolean"}, {"default", false},
+                                 {"description", "Close without checking. Required where the engine cannot report dirty state (before Godot 4.7), where the scene has never been saved, or where the engine reports it as unsaved. Results carry dirty_state_readable and dirty_state."}}}
+        }}},
+        [this](const json& args) { return handleSceneClose(args, m_ipcClient); });
+    registerPhaseTwo(
+        "scene_pack_branch", "Packs a duplicated live branch into a reusable PackedScene resource.",
+        {{"type", "object"}, {"properties", {
+            {"target_node", {{"type", "string"}}}, {"scene_path", {{"type", "string"}}},
+            {"overwrite", {{"type", "boolean"}, {"default", false}}}
+        }}, {"required", {"target_node", "scene_path"}}},
+        [this](const json& args) { return handleScenePackBranch(args, m_ipcClient); });
 }
 
 } // namespace mcp
