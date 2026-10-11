@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <map>
 #include <optional>
 #include <set>
@@ -123,6 +124,28 @@ private:
     // which there are many, passes the same error data floor on the way (#486).
     CallToolResult dispatchTool(const std::string& name, const json& arguments,
                                 const RequestScope& scope);
+
+    // Each registers the tools whose handlers live in its file under
+    // src/tools, with their schemas beside them (#1256).
+    void registerAssetTools();
+    void registerBlackboardTools();
+    void registerControlRoomTools();
+    void registerDeepDomainTools();
+    void registerEditorTools();
+    void registerPhysicsNavTools();
+    void registerProjectTools();
+    void registerRuntimeTools();
+    void registerScenarioTools();
+    void registerSceneTools();
+    void registerScriptTools();
+    void registerSignalTools();
+    void registerTilemapGridTools();
+    void registerVisualTools();
+    // The Phase 2 tools' shared shape: a name, a description, a schema and a
+    // handler, with an optional argument check.
+    void registerPhaseTwo(const char* name, const char* description, json schema,
+                          std::function<CallToolResult(const json&)> handler,
+                          std::function<std::optional<Error>(const json&)> argument_check = {});
 
     std::unordered_map<std::string, ToolDefinition> m_tools;
     std::shared_ptr<ipc::IIpcClient> m_sourceIpcClient;

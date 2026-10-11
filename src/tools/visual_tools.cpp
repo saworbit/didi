@@ -17,6 +17,7 @@
 #include <sstream>
 #include <string_view>
 #include <vector>
+#include "didi/mcp/tool_registration.hpp"
 
 namespace didi {
 namespace mcp {
@@ -458,6 +459,227 @@ CallToolResult handleViewportToggleDebugDraw(const ResolvedToolBinding& binding,
                      "turn on from here.");
     }
     return sendPhase7LiveRequest(binding, args, ipc);
+}
+
+namespace {
+
+using namespace output_schema;
+
+json viewportCaptureFrameOutputSchema() {
+    return object_schema(
+        {{"execution_mode", string_type},
+         // Why this is the offline answer, when something is known. See
+         // scene_get_hierarchy for the full note (#536).
+         {"offline_reason", {{"type", "object"}}},
+         {"is_live_frame", boolean_type},
+         {"camera_identifier", string_type},
+         {"source", string_type},
+         {"status", string_type},
+         {"message", string_type},
+         {"capture_id", string_type},
+         {"resolution", object_schema({{"width", integer_type}, {"height", integer_type}},
+                                      {"width", "height"})}},
+        {"execution_mode", "is_live_frame"});
+}
+
+}  // namespace
+
+// The tools whose handlers this file holds. registerAllDefaultTools calls
+// each domain's in turn (#1256).
+void ToolRegistry::registerVisualTools() {
+
+    {
+        ToolDefinition t;
+        t.name = "viewport_capture_frame";
+        t.description = "Captures the active editor 2D/3D viewport as PNG when live, or returns an attributed synthetic grid preview offline.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"camera_identifier", {{"type", "string"}, {"default", "active_editor_view"}}},
+                {"resolution", {{"type", "object"}, {"default", {{"width", 256}, {"height", 192}}}, {"description", "Offline preview size; reserved and ignored by live capture"}}},
+                {"render_debug_flags", {{"type", "array"}}},
+                {"node_isolation_path", {{"type", "string"}}},
+                {"isolation_background", {{"type", "string"}, {"enum", {"original", "transparent"}}, {"default", "original"}}},
+                {"select_main_screen", {{"type", "boolean"}, {"default", false}}}
+            }}
+        };
+        t.handler = [this](const json& args) { return handleCaptureViewport(args, m_ipcClient); };
+        t.outputSchema = viewportCaptureFrameOutputSchema();
+        registerTool(t);
+
+        // Alias
+        t.name = "capture_viewport";
+        t.handler = [this](const json& args) { return handleCaptureViewport(args, m_ipcClient); };
+        registerTool(t);
+    }
+    {
+        ToolDefinition t;
+        t.name = "viewport_diff_capture";
+        t.description = "Captures a fresh live editor viewport frame and returns an exact RGBA pixel diff against a prior process-local capture ID.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"baseline_capture_id", {{"type", "string"}, {"minLength", 32}, {"maxLength", 32}, {"pattern", "^[0-9a-f]{32}$"}}},
+                {"camera_identifier", {{"type", "string"}, {"default", "active_editor_view"}}},
+                {"resolution", {{"type", "object"}, {"description", "Reserved and ignored by live capture"}}},
+                {"node_isolation_path", {{"type", "string"}}},
+                {"isolation_background", {{"type", "string"}, {"enum", {"original", "transparent"}}, {"default", "original"}}},
+                {"threshold", {{"type", "integer"}, {"minimum", 0}, {"maximum", 255}, {"default", 0}}},
+                {"min_ssim", {{"type", "number"}, {"minimum", 0.0}, {"maximum", 1.0},
+                              {"description", "Structural similarity at or above which the frames count as perceptually identical. Sets perceptually_identical in the result."}}},
+                {"max_hamming_distance", {{"type", "integer"}, {"minimum", 0}, {"maximum", 64},
+                                          {"description", "Largest perceptual-hash distance that still counts as perceptually identical. Sets perceptually_identical in the result."}}},
+                {"select_main_screen", {{"type", "boolean"}, {"default", false}}}
+            }},
+            {"required", {"baseline_capture_id"}}
+        };
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleViewportDiffCapture(binding, args, m_ipcClient);
+        };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "viewport_set_camera_transform";
+        t.description = "Updates an in-scene Camera3D transform and optional field of view through the editor UndoRedo history.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"camera_path", {{"type", "string"}}},
+                {"position", {{"type", "object"}, {"description", "Vector3 {x, y, z}"}}},
+                {"rotation_degrees", {{"type", "object"}, {"description", "Optional Vector3 {x, y, z} in degrees"}}},
+                {"fov", {{"type", "number"}}}
+            }},
+            {"required", {"camera_path", "position"}}
+        };
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleViewportSetCameraTransform(binding, args, m_ipcClient);
+        };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "viewport_create_test_lab";
+        t.description = "Writes a basic offline sandbox .tscn at res://didi_test_lab.tscn with lighting, a ground box, and three cameras. A PackedScene target is instanced under the lab as TargetInstance; any other resource is attached to a TargetInstance holder as metadata/didi_target, and the result says which with target_instanced.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"target_resource_path", {{"type", "string"}}},
+                {"environment", {{"type", "string"}, {"default", "studio_neutral"}}},
+                {"orthographic", {{"type", "boolean"}, {"default", false}}},
+                {"camera_rig", {{"type", "array"}, {"default", {"front", "top", "isometric"}}, {"description", "Metadata only; generated scene contains front, top, and isometric cameras"}}},
+                {"overwrite", {{"type", "boolean"}, {"default", false}}}
+            }},
+            {"required", {"target_resource_path"}}
+        };
+        t.handler = [this](const json& args) { return handleCreateVisualTestLab(args, m_sourceIpcClient); };
+        registerTool(t);
+
+        // Alias
+        t.name = "create_visual_test_lab";
+        t.handler = [this](const json& args) { return handleCreateVisualTestLab(args, m_sourceIpcClient); };
+        registerTool(t);
+    }
+    {
+        ToolDefinition t;
+        t.name = "viewport_toggle_debug_draw";
+        t.description = "Sets editor SceneTree collision and navigation debug hints for future games run from that editor.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"collision_shapes", {{"type", "boolean"}, {"default", true}}},
+                {"navigation_mesh", {{"type", "boolean"}, {"default", false}}},
+                {"wireframe", {{"type", "boolean"}, {"default", false}}}
+            }}
+        };
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleViewportToggleDebugDraw(binding, args, m_ipcClient);
+        };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "editor_render_ghost_preview";
+        t.description = "Draws translucent wireframe boxes in the open editor viewport to show where a proposed mutation would land, without adding anything to the scene, so the scene never becomes dirty and there is nothing to undo.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"previews", {
+                    {"type", "array"}, {"minItems", 1}, {"maxItems", 64},
+                    {"description", "Shapes to draw. All of them share one dimension, because a 2D rectangle and a 3D box are drawn into different worlds."},
+                    {"items", {
+                        {"type", "object"},
+                        {"properties", {
+                            {"position", {{"type", "object"}, {"description", "Centre of the shape: {x,y} for 2D or {x,y,z} for 3D."}}},
+                            {"size", {{"type", "object"}, {"description", "Full extents, the size a person would type into the inspector. Every axis must be greater than 0."}}},
+                            {"rotation_degrees", {{"type", "object"}, {"description", "3D only: {x,y,z} Euler degrees. A 2D preview is an axis-aligned rectangle."}}},
+                            {"kind", {{"type", "string"}, {"enum", json::array({"addition", "translation", "deletion"})},
+                                      {"default", "addition"},
+                                      {"description", "Chooses the colour: cyan for an addition, yellow for a translation, red for a deletion."}}},
+                            {"color", {{"type", "object"}, {"description", "Overrides the colour the kind would pick. Components r, g and b from 0 to 1."}}},
+                            {"label", {{"type", "string"}, {"maxLength", 256}, {"description", "Echoed back so a caller can tell one shape from another. It is not drawn."}}}
+                        }},
+                        {"required", json::array({"position", "size"})},
+                        {"additionalProperties", false}
+                    }}
+                }},
+                {"replace", {{"type", "boolean"}, {"default", true},
+                             {"description", "Clear the previews already on screen first. A preview usually stands for one proposal, so replacing is the default."}}}
+            }},
+            {"required", json::array({"previews"})},
+            {"additionalProperties", false}
+        };
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleEditorRenderGhostPreview(binding, args, m_ipcClient);
+        };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "editor_clear_ghost_previews";
+        t.description = "Removes wireframe previews from the editor viewport. With no argument it clears every preview, which is the call that works whatever left them behind.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"preview_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", 64},
+                                {"description", "Clear just this batch. Omit to clear all of them."}}}
+            }},
+            {"additionalProperties", false}
+        };
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleEditorClearGhostPreviews(binding, args, m_ipcClient);
+        };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "viewport_capture_passes";
+        t.description = "Draws the live 3D scene again with replacement materials and returns a depth or world-space normal image alongside the ordinary colour frame, so which thing is nearer and which way a surface faces can be read off the pixels rather than guessed.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"passes", {
+                    {"type", "array"}, {"minItems", 1}, {"maxItems", 4},
+                    // Declared, not only described: the engine refuses a repeat,
+                    // and a caller offline deserves the same answer.
+                    {"uniqueItems", true},
+                    {"description", "Which pictures to take, returned as one image each in this order. A pass named twice is refused."},
+                    {"items", {{"type", "string"},
+                               {"enum", json::array({"color", "depth", "normal", "segmentation"})}}}
+                }},
+                {"camera_identifier", {{"type", "string"}, {"description", "Editor sessions only; a game has one root viewport."}}},
+                {"depth_far", {{"type", "number"}, {"exclusiveMinimum", 0}, {"maximum", 1000000},
+                               {"description", "The distance mapped to white in the depth pass. Defaults to the rendering camera's own far plane, and the value used is reported back."}}},
+                {"select_main_screen", {{"type", "boolean"}, {"default", false}}}
+            }},
+            {"required", json::array({"passes"})},
+            {"additionalProperties", false}
+        };
+        t.handler = [this](const json& args) {
+            return handleViewportCapturePasses(args, m_ipcClient);
+        };
+        registerTool(std::move(t));
+    }
 }
 
 } // namespace mcp

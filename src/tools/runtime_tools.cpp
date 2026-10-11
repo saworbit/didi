@@ -21,6 +21,7 @@
 #include <filesystem>
 #include <optional>
 #include <thread>
+#include "didi/mcp/tool_registration.hpp"
 
 namespace didi {
 namespace mcp {
@@ -649,6 +650,365 @@ CallToolResult handleRuntimeWatchInvariants(const ResolvedToolBinding& binding, 
 CallToolResult handleRuntimeExploreScene(const ResolvedToolBinding& binding, const json& args,
                          std::shared_ptr<ipc::IIpcClient> ipc) {
     return sendPhase7LiveRequest(binding, args, ipc);
+}
+
+namespace {
+
+using namespace output_schema;
+
+json runtimeListSessionsOutputSchema() {
+    return object_schema({{"execution_mode", string_type},
+                          {"sessions", {{"type", "array"}}},
+                          {"diagnostics", {{"type", "array"}}}},
+                         {"execution_mode", "sessions"});
+}
+
+// runtime_detach_session answers with no session attached, because detach
+// is a cleanup and a cleanup reports the state rather than failing on it
+// (#537). That makes its success payload producible offline, which is what
+// the rule asks for before a schema is published: an unchecked schema is
+// the defect #510 was about.
+json runtimeDetachSessionOutputSchema() {
+    return object_schema({{"detached", {{"type", "boolean"}}},
+                          {"connected", {{"type", "boolean"}}},
+                          // Only when this call is the one that released
+                          // something, which is the point of the field.
+                          {"detached_session", {{"type", "object"}}},
+                          {"handshake", {{"type", "object"}}},
+                          {"server_build_id", string_type},
+                          {"bridge_build_matches", {{"type", "boolean"}}},
+                          {"bridge_build_note", string_type},
+                          {"execution_mode", string_type}},
+                         {"execution_mode", "detached", "connected"});
+}
+
+}  // namespace
+
+// The tools whose handlers this file holds. registerAllDefaultTools calls
+// each domain's in turn (#1256).
+void ToolRegistry::registerRuntimeTools() {
+
+    for (const auto* name : {"runtime_recovery_status", "runtime_checkpoint", "runtime_restore_checkpoint", "runtime_recover_editor"}) {
+        ToolDefinition t;
+        t.name = name;
+        t.description = t.name == "runtime_recovery_status"
+            ? "Reports owned editor recovery state, saved-file checkpoint coverage and unresolved operations. Managed mode only."
+            : t.name == "runtime_checkpoint"
+            ? "Snapshots current saved project files in managed mode. Does not save unsaved editor buffers. Accept uncertain saved files explicitly after inspecting them."
+            : t.name == "runtime_recover_editor"
+            ? "Reconnects a dead Didi-owned editor using the single restart budget. Never replays an edit or clears an uncertain outcome. Does not restart a living or normally closed editor."
+            : "Restores a saved-file checkpoint in managed mode, preserves the current workspace, and starts a new owned editor. Does not replay mutations.";
+        t.inputSchema = {{"type", "object"}, {"additionalProperties", false}, {"properties", json::object()}};
+        if (t.name == "runtime_checkpoint") t.inputSchema["properties"]["accept_current_files"] = {{"type", "boolean"}, {"default", false}};
+        if (t.name == "runtime_restore_checkpoint") {
+            t.inputSchema["properties"]["checkpoint_id"] = {{"type", "string"}};
+            t.inputSchema["required"] = json::array({"checkpoint_id"});
+        }
+        t.handler = [this, operation = t.name](const json& args) {
+            // Off is a state, not a request that was wrong and not a tool
+            // nobody wrote: 409 with a stable code, the same answer callTool
+            // gives before the confirmation gate (#599).
+            if (!m_recovery) {
+                return CallToolResult::errorJson(
+                    409,
+                    "Managed recovery is disabled. Start Didi with --managed-editor and "
+                    "--recovery-workspace to use an isolated project copy.",
+                    {{"code", "managed_mode_disabled"}, {"retryable", false}});
+            }
+            if (operation == "runtime_recovery_status") return CallToolResult::successJson(m_recovery->status());
+            if (operation == "runtime_recover_editor") {
+                auto recovered = m_recovery->ensureEditor();
+                if (recovered.isErr()) return withRecoveryNote(CallToolResult::fromError(recovered.error()), m_recovery->note());
+                return CallToolResult::successJson(m_recovery->status());
+            }
+            Result<json> response = operation == "runtime_checkpoint"
+                ? m_recovery->checkpoint(args.value("accept_current_files", false))
+                : m_recovery->restore(args.value("checkpoint_id", ""));
+            if (response.isErr()) return withRecoveryNote(CallToolResult::fromError(response.error()), m_recovery->note());
+            return CallToolResult::successJson(response.value());
+        };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "runtime_list_sessions";
+        t.description = "Lists validated local Godot runtime sessions without opening a session.";
+        t.inputSchema = {{"type", "object"}, {"properties", {
+            {"project_path", {{"type", "string"}}}
+        }}};
+        t.handler = [this](const json& args) { return handleRuntimeListSessions(args, m_runtimeSessionClient); };
+        t.outputSchema = runtimeListSessionsOutputSchema();
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "runtime_attach_session";
+        t.description = "Attaches transactionally to a discovered Godot runtime session.";
+        t.inputSchema = {{"type", "object"}, {"properties", {
+            {"session_id", {{"type", "string"}, {"description", "Exact lowercase 32-hex discovered session ID"},
+                            {"minLength", 32}, {"maxLength", 32},
+                            {"pattern", "^[0-9a-f]{32}$"}}},
+            {"allow_foreign_project", {{"type", "boolean"}, {"default", false},
+                                       {"description", "Attach a session whose editor has a different project open than this server's root. Refused without it, because every live call would then read and write that other project."}}}
+        }}, {"required", {"session_id"}}};
+        t.handler = [this](const json& args) { return handleRuntimeAttachSession(args, m_runtimeSessionClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "runtime_detach_session";
+        t.description = "Detaches from the active Godot runtime session.";
+        t.inputSchema = {{"type", "object"}};
+        t.handler = [this](const json& args) { return handleRuntimeDetachSession(args, m_runtimeSessionClient); };
+        t.outputSchema = runtimeDetachSessionOutputSchema();
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "runtime_get_session";
+        // runtime_get_session deliberately publishes no outputSchema. It needs an
+        // attached session to produce a success payload at all, so nothing driving
+        // the real binary offline can check one. runtime_list_sessions does publish
+        // one: it scans descriptors and answers with no attachment.
+        t.description = "Performs a fresh authenticated handshake and returns token-free authoritative session identity metadata.";
+        t.inputSchema = {{"type", "object"}};
+        // Derived from the registry, never listed. A written list would satisfy
+        // a fixed test and then drift; this one cannot be wrong unless
+        // capabilityForTool is, which the docs validator already covers.
+        t.handler = [this](const json& args) {
+            std::vector<std::string> offline;
+            for (const auto& tool : listTools()) {
+                if (!tool.capability.implemented) continue;
+                const auto& modes = tool.capability.modes;
+                if (std::find(modes.begin(), modes.end(), "offline_fallback") == modes.end()) continue;
+                offline.push_back(tool.name);
+            }
+            std::sort(offline.begin(), offline.end());
+            return handleRuntimeGetSession(args, m_runtimeSessionClient, std::move(offline));
+        };
+        registerTool(std::move(t));
+    }
+    const auto register_live_runtime = [this](const char* name, const char* description, json schema,
+                                              std::function<CallToolResult(const json&, std::shared_ptr<ipc::IIpcClient>)> handler) {
+        ToolDefinition t;
+        t.name = name;
+        t.description = description;
+        t.inputSchema = std::move(schema);
+        t.handler = [this, handler = std::move(handler)](const json& args) { return handler(args, m_ipcClient); };
+        registerTool(std::move(t));
+    };
+    register_live_runtime("runtime_read_logs", "Reads incremental structured logs from the active runtime session, paged by cursor. Page until has_more is false.",
+        {{"type", "object"}, {"properties", {
+            {"cursor", {{"type", "integer"}, {"default", 0}, {"minimum", 0}}},
+            {"limit", {{"type", "integer"}, {"default", 100}, {"minimum", 1}, {"maximum", 500}}},
+            {"minimum_level", {{"type", "string"}, {"enum", {"debug", "info", "warning", "error"}}}}
+        }}}, handleRuntimeReadLogs);
+    register_live_runtime("runtime_read_output",
+        "Reads output the engine itself produced -- print() from a running game and script errors with their file and line -- as an incremental cursor-paged stream, separate from Didi's own diagnostics. Page until has_more is false.",
+        {{"type", "object"}, {"properties", {
+            {"cursor", {{"type", "integer"}, {"default", 0}, {"minimum", 0}}},
+            {"limit", {{"type", "integer"}, {"default", 100}, {"minimum", 1}, {"maximum", 500}}},
+            {"minimum_level", {{"type", "string"}, {"enum", {"debug", "info", "warning", "error"}}}}
+        }}}, handleRuntimeReadOutput);
+    register_live_runtime("runtime_set_paused", "Sets and verifies the active game session pause state.",
+        {{"type", "object"}, {"properties", {{"paused", {{"type", "boolean"}}}}}, {"required", {"paused"}}},
+        handleRuntimeSetPaused);
+    register_live_runtime("runtime_step", "Advances a paused game session by a bounded number of frames.",
+        {{"type", "object"}, {"properties", {{"frames", {{"type", "integer"}, {"default", 1}, {"minimum", 1}, {"maximum", 60}}}}}},
+        handleRuntimeStep);
+    register_live_runtime("runtime_stop", "Requests graceful shutdown of the active game session.",
+        {{"type", "object"}, {"properties", {{"exit_code", {{"type", "integer"}, {"default", 0}, {"minimum", 0}, {"maximum", 255}}}}}},
+        handleRuntimeStop);
+    register_live_runtime("runtime_get_tree", "Returns a UTF-8 field-bounded, 256 KiB tree from the active runtime session.",
+        {{"type", "object"}, {"properties", {
+            {"root_path", {{"type", "string"}, {"description", "Canonical /root NodePath; server enforces a 1024-byte UTF-8 cap"}, {"default", "/root"},
+                           {"minLength", 1}, {"maxLength", 1024}}},
+            {"max_depth", {{"type", "integer"}, {"default", 4}, {"minimum", 0}, {"maximum", 16}}}
+        }}}, handleRuntimeGetTree);
+    register_live_runtime("eval_gdscript", "Evaluates a bounded read-only GDScript expression in the active runtime session.",
+        {{"type", "object"}, {"properties", {
+            {"expression", {{"type", "string"}, {"description", "Read-only expression; server enforces a 2048-byte UTF-8 cap"}, {"minLength", 1}, {"maxLength", 2048}}},
+            {"context_node", {{"type", "string"}, {"description", "The node the expression's `node` is bound to. Read a native property of it with node.get(\"position\"); reading through an object with node.position is refused, because that can run a script getter. Defaults to the edited-scene root for an editor and the running scene root for a game. Optional in-subtree canonical NodePath; server enforces a 1024-byte UTF-8 cap"}, {"minLength", 1}, {"maxLength", 1024}}},
+            {"timeout_ms", {{"type", "integer"}, {"default", 1000}, {"minimum", 1}, {"maximum", 5000}}}
+        }}, {"required", {"expression"}}}, handleEvalGdscript);
+
+    {
+        ToolDefinition t;
+        t.name = "runtime_launch";
+        t.description = "Starts a separate Godot process, captures stdout/stderr, classifies errors after exit, and enforces a 1-120 second timeout.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"scene_path", {{"type", "string"}}},
+                {"timeout_seconds", {{"type", "integer"}, {"default", 10}, {"minimum", 1}, {"maximum", 120}}},
+                {"headless", {{"type", "boolean"}, {"default", true}}},
+                {"break_on_error", {{"type", "boolean"}, {"default", true}, {"description", "Classify captured ERROR lines as failure after process exit; does not terminate the child early"}}},
+                {"extra_args", {{"type", "array"}, {"items", {{"type", "string"}}}}},
+                {"fixed_fps", {{"type", json::array({"boolean", "integer"})},
+                               {"description",
+                                "true for the project's tick rate, or 1 to 1000, so each stepped "
+                                "frame is one physics tick. Unpaused, it runs as fast as it can."}}},
+                {"detach", {{"type", "boolean"}, {"default", false},
+                            {"description",
+                             "Leave the game running and return once it has published a session. "
+                             "Nothing is captured: read it with runtime_read_output and end it with "
+                             "runtime_stop."}}}
+            }}
+        };
+        t.description = "Starts a separate Godot process. Blocking by default: captures stdout/stderr, classifies errors after exit, and enforces a 1-120 second timeout. With detach: true it leaves the game running and answers with the session to drive it through.";
+        // The source client, not the lease dispatcher: this tool spawns its own
+        // Godot and takes no live route, and the wrapper is not a session
+        // client, so reading the session through it answered "no session" next
+        // to a live editor (#687). script_check_syntax and shader_check_compile
+        // already read the source client for the same reason.
+        t.handler = [this](const json& args) { return handleExecuteTestSession(args, m_sourceIpcClient); };
+        registerTool(t);
+
+        // Alias
+        t.name = "execute_test_session";
+        t.handler = [this](const json& args) { return handleExecuteTestSession(args, m_sourceIpcClient); };
+        registerTool(t);
+    }
+    {
+        ToolDefinition t;
+        t.name = "runtime_inject_input";
+        t.description = "Dispatches input events into the running game. A mouse event's position is in "
+                        "window pixels, as ui_list_controls' screen_rect is. While the game is paused a "
+                        "batch is held for the first frame that processes, unless paused_delivery is now.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"event_type", {{"type", "string"}, {"default", "action"}}},
+                {"action_name", {{"type", "string"}}},
+                {"key_code", {{"type", "string"}}},
+                {"pressed", {{"type", "boolean"}, {"default", true}}},
+                {"strength", {{"type", "number"}, {"default", 1.0}}},
+                {"duration_ms", {{"type", "integer"}, {"default", 100}}}
+            }},
+            {"required", {"event_type"}}
+        };
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleInjectInputEvent(binding, args, m_ipcClient);
+        };
+        registerTool(t);
+
+        // Alias
+        t.name = "inject_input_event";
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleInjectInputEvent(binding, args, m_ipcClient);
+        };
+        registerTool(t);
+    }
+    {
+        ToolDefinition t;
+        t.name = "runtime_get_call_stack";
+        t.description = "Fetches current debugger call stack and variable scopes on engine break/crash.";
+        t.inputSchema = {{"type", "object"}};
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleRuntimeGetCallStack(binding, args, m_ipcClient);
+        };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "runtime_read_profiler";
+        t.description = "Samples Performance monitors and judges whether CPU, GPU or physics bounds the frame.";
+        t.inputSchema = {{"type", "object"}};
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleRuntimeReadProfiler(binding, args, m_ipcClient);
+        };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "runtime_watch_invariants";
+        t.description = "Watches declared conditions every frame of a running game and stops the game on the frame that breaks one, reporting which condition, the value that broke it, and when.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"duration_ms", {{"type", "integer"}, {"minimum", 1}, {"maximum", 30000}, {"default", 2000},
+                                 {"description", "How long to watch. The watch ends early on the first violation."}}},
+                {"pause_on_violation", {{"type", "boolean"}, {"default", true},
+                                        {"description", "Pause the game on the violating frame so the state that failed is still there to read."}}},
+                {"invariants", {
+                    {"type", "array"}, {"minItems", 1}, {"maxItems", 8},
+                    {"description", "Conditions that must stay true."},
+                    {"items", {
+                        {"type", "object"},
+                        {"properties", {
+                            {"name", {{"type", "string"}, {"minLength", 1}, {"maxLength", 64}}},
+                            {"kind", {{"type", "string"},
+                                      {"enum", json::array({"performance_between", "expression_between", "no_engine_errors"})}}},
+                            {"metric", {{"type", "string"}, {"description", "performance_between only: a Performance monitor name such as TIME_FPS."}}},
+                            {"expression", {{"type", "string"}, {"maxLength", 512}, {"description", "expression_between only: a sandbox expression evaluating to a number or a boolean, such as node.get(\"position\").x. node.get reads native ClassDB properties only; a script's own variables are refused, because reading one can run project code."}}},
+                            {"context_node", {{"type", "string"}, {"maxLength", 256}, {"description", "expression_between only: the node the expression is evaluated against."}}},
+                            {"minimum", {{"type", "number"}}},
+                            {"maximum", {{"type", "number"}}}
+                        }},
+                        {"required", json::array({"kind"})},
+                        {"additionalProperties", false}
+                    }}
+                }}
+            }},
+            {"required", json::array({"invariants"})},
+            {"additionalProperties", false}
+        };
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleRuntimeWatchInvariants(binding, args, m_ipcClient);
+        };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "runtime_explore_scene";
+        t.description = "Drives a running game for a bounded window by holding the project's own input actions on a seeded schedule, samples values you name every frame, and reports where they went and the intervals in which nothing it pressed moved anything. It reports observations, not a verdict: it does not decide whether a level is beatable or whether a stuck interval is a bug. A paused game is refused rather than explored, because a paused tree queues injected input instead of delivering it and the stillness would be the pause rather than the game.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"actions", {
+                    {"type", "array"}, {"minItems", 1}, {"maxItems", 8},
+                    {"items", {{"type", "string"}, {"minLength", 1}, {"maxLength", 128}}},
+                    {"description", "InputMap action names the bot may hold, and the only way it moves anything. An arbitrary project moves its player with its own controller, so pressing the project's own actions is what runs that controller. Names must not repeat."}
+                }},
+                {"probes", {
+                    {"type", "array"}, {"minItems", 1}, {"maxItems", 4},
+                    {"description", "What counts as movement in this project, which this cannot know for itself. A frame in which no probe changed is a still frame."},
+                    {"items", {
+                        {"type", "object"},
+                        {"properties", {
+                            {"name", {{"type", "string"}, {"minLength", 1}, {"maxLength", 64}}},
+                            {"expression", {{"type", "string"}, {"minLength", 1}, {"maxLength", 512},
+                                            {"description", "A sandbox expression evaluating to a number or a boolean, such as node.get(\"position\").x. The same sandbox runtime_watch_invariants uses: node is the context node, a native ClassDB property is read with node.get(\"name\") and a script's own variables are refused, and a bare position.x is refused because it reads through an object. A probe that never returns a value is listed in unread_probes and sets measured to false."}}},
+                            {"context_node", {{"type", "string"}, {"maxLength", 256},
+                                              {"description", "The node the expression is evaluated against, and what node stands for in the expression."}}}
+                        }},
+                        {"required", json::array({"expression"})},
+                        {"additionalProperties", false}
+                    }}
+                }},
+                {"duration_ms", {{"type", "integer"}, {"minimum", 250}, {"maximum", 60000}, {"default", 5000},
+                                 {"description", "How long to drive for. The run ends early on a stuck interval or an engine error unless you turn those off."}}},
+                {"action_hold_ms", {{"type", "integer"}, {"minimum", 16}, {"maximum", 10000}, {"default", 250},
+                                    {"description", "How long one action is held before the schedule moves on. One action is down at a time."}}},
+                {"stuck_ms", {{"type", "integer"}, {"minimum", 100}, {"maximum", 60000}, {"default", 3000},
+                              {"description", "How long every probe has to stay still before that is reported as a stuck interval. Defaults to 3000 or duration_ms, whichever is smaller. Must not exceed duration_ms."}}},
+                {"movement_epsilon", {{"type", "number"}, {"minimum", 0}, {"default", 0.001},
+                                      {"description", "What counts as a value having moved. A float position never repeats exactly, so any change at all would report a standing character as a moving one."}}},
+                {"pause_on_stuck", {{"type", "boolean"}, {"default", true},
+                                    {"description", "Stop on the first stuck interval and pause the game there, so the state that stopped responding is still on screen. False surveys the whole window and reports every interval it found."}}},
+                {"stop_on_engine_error", {{"type", "boolean"}, {"default", true},
+                                          {"description", "Stop on the first error-level engine record, which is what an unhandled script error looks like from outside the script. The elapsed time in the response is when it happened."}}},
+                {"seed", {{"type", "integer"}, {"minimum", 0}, {"default", 1},
+                          {"description", "The action schedule is drawn from this and from nothing else, so a report names a run that can be made again."}}}
+            }},
+            {"required", json::array({"actions", "probes"})},
+            {"additionalProperties", false}
+        };
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleRuntimeExploreScene(binding, args, m_ipcClient);
+        };
+        registerTool(std::move(t));
+    }
 }
 
 } // namespace mcp

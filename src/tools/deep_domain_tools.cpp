@@ -28,6 +28,7 @@
 #include <regex>
 #include <set>
 #include <sstream>
+#include "didi/mcp/tool_registration.hpp"
 
 namespace didi::mcp {
 namespace {
@@ -1376,6 +1377,274 @@ CallToolResult handleSceneGetSelection(const json& args, std::shared_ptr<ipc::II
         return CallToolResult::errorJson(502, "Live editor selection returned a malformed response");
     }
     return CallToolResult::successJson(response.value());
+}
+
+namespace {
+
+using namespace output_schema;
+
+json projectAddExportPresetOutputSchema() {
+    return object_schema({{"status", string_type},
+                          {"preset", {{"type", "object"}}},
+                          {"written_to", string_type},
+                          {"file_created", boolean_type},
+                          {"section_written", string_type},
+                          {"preset_count", integer_type},
+                          {"next_step", string_type},
+                          // The restart an unattached editor needs (Q6).
+                          {"follow_up", {{"type", "array"}}},
+                          // Whether the folder export_path names is there,
+                          // since Godot will not create it (#932).
+                          {"export_path_folder_exists", boolean_type},
+                          {"export_path_note", string_type},
+                          // Whether an attached editor was made to read
+                          // the file again, and why not when it was not.
+                          {"editor_reloaded", boolean_type},
+                          {"editor_reload_error", {{"type", "object"}}},
+                          {"is_live_engine", boolean_type},
+                          {"limitation", string_type}},
+                         {"execution_mode", "status", "preset", "editor_reloaded"});
+}
+
+json projectListExportPresetsOutputSchema() {
+    return object_schema({{"presets", {{"type", "array"}}},
+                          {"preset_count", integer_type},
+                          // How many of them Godot will detect (#921).
+                          {"detected_count", integer_type},
+                          {"presets_file_exists", boolean_type},
+                          // Named rather than silently dropped: a caller
+                          // has to know the answer is not the whole file.
+                          {"sensitive_options_omitted", boolean_type}},
+                         {"execution_mode", "presets"});
+}
+
+}  // namespace
+
+// The tools whose handlers this file holds. registerAllDefaultTools calls
+// each domain's in turn (#1256).
+void ToolRegistry::registerDeepDomainTools() {
+
+    {
+        ToolDefinition t;
+        t.name = "shader_get_visual_graph";
+        t.description = "Returns the nodes and connections of a VisualShader graph held by a node in the edited scene, per shader type, as structured JSON.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"target_node", {{"type", "string"}, {"minLength", 1}, {"maxLength", 1024}}},
+                {"property_name", {{"type", "string"}, {"minLength", 1}, {"maxLength", 256},
+                                   {"description", "The property the ShaderMaterial sits in, the same pair shader_list_uniforms takes."}}}
+            }},
+            {"required", json::array({"target_node", "property_name"})},
+            {"additionalProperties", false}
+        };
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleShaderGetVisualGraph(binding, args, m_ipcClient);
+        };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "shader_set_uniform";
+        t.description = "Sets one shader uniform on a ShaderMaterial held by a node in the edited scene, through the editor UndoRedo stack, and reports what the uniform holds afterwards.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"target_node", {{"type", "string"}, {"minLength", 1}, {"maxLength", 1024}}},
+                {"property_name", {{"type", "string"}, {"minLength", 1}, {"maxLength", 256},
+                                   {"description", "The property the ShaderMaterial sits in, such as material_override."}}},
+                {"uniform_name", {{"type", "string"}, {"minLength", 1}, {"maxLength", 256},
+                                  {"description", "Must be a uniform the shader declares. A name it does not know is refused rather than written and ignored."}}},
+                {"value", {{"type", json::array({"null", "boolean", "integer", "number", "string", "object", "array"})},
+                           {"description", "The new value, in the same JSON spelling scene_set_property takes for that Godot type: a number for float, {x,y} or {x,y,z} for a vector, {r,g,b} with optional a or a \"#rrggbb\" string for a colour, and a res:// path for a texture or other resource uniform."}}}
+            }},
+            {"required", json::array({"target_node", "property_name", "uniform_name", "value"})},
+            {"additionalProperties", false}
+        };
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleShaderSetUniform(binding, args, m_ipcClient);
+        };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "shader_list_uniforms";
+        t.description = "Reads the shader uniforms of a ShaderMaterial held by a node in the edited scene, with each uniform's declared type, its current value, and whether the material overrides it.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"target_node", {{"type", "string"}, {"minLength", 1}, {"maxLength", 1024},
+                                 {"description", "Node in the edited scene holding the material."}}},
+                {"property_name", {{"type", "string"}, {"minLength", 1}, {"maxLength", 256},
+                                   {"description", "The property the ShaderMaterial sits in, such as material_override on a MeshInstance3D or material on a CanvasItem. Named rather than guessed; scene_get_property will say which properties a node has."}}}
+            }},
+            {"required", json::array({"target_node", "property_name"})},
+            {"additionalProperties", false}
+        };
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleShaderListUniforms(binding, args, m_ipcClient);
+        };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "scene_get_selection";
+        t.description = "Reports the nodes selected in the Godot editor, which is what a person means by \"this node\". Live and editor only: a selection exists only in a running editor.";
+        t.inputSchema = {{"type", "object"}, {"properties", json::object()},
+                         {"additionalProperties", false}};
+        t.handler = [this](const json& args) { return handleSceneGetSelection(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+
+    {
+        ToolDefinition t;
+        t.name = "csharp_check_build";
+        t.description = "Runs a bounded dotnet build and returns structured C# compiler diagnostics.";
+        t.inputSchema = {{"type", "object"}, {"properties", {
+            {"project_file", {{"type", "string"}}},
+            {"configuration", {{"type", "string"}, {"enum", {"Debug", "Release"}}, {"default", "Debug"}}},
+            {"timeout_seconds", {{"type", "integer"}, {"minimum", 1}, {"maximum", 300}, {"default", 60}}},
+            {"request_id", {{"type", "string"}, {"minLength", 8}}}
+        }}};
+        t.handler = [this](const json& args) { return handleCSharpCheckBuild(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "shader_check_compile";
+        t.description = "Loads one gdshader through bounded headless Godot and returns engine diagnostics.";
+        t.inputSchema = {{"type", "object"}, {"properties", {
+            {"shader_path", {{"type", "string"}}},
+            {"timeout_seconds", {{"type", "integer"}, {"minimum", 1}, {"maximum", 300}, {"default", 30}}}
+        }}, {"required", {"shader_path"}}};
+        // The source client, for the same reason script_check_syntax takes it.
+        t.handler = [this](const json& args) { return handleShaderCheckCompile(args, m_sourceIpcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        // Q9 part 2: the project's own GUT or GdUnit4 tests, run headless. The
+        // verdict rules are in src/offline/test_reports.cpp.
+        ToolDefinition t;
+        t.name = "project_run_tests";
+        t.description =
+            "Runs the project's GUT or GdUnit4 tests in a headless Godot and returns a result per test, "
+            "read from the JUnit report rather than the exit code. verdict is pass only when tests ran, "
+            "one passed, none failed and every test script loaded.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"framework", {{"type", "string"}, {"enum", json::array({"auto", "gut", "gdunit4"})},
+                               {"default", "auto"},
+                               {"description", "auto runs whichever of the two the project has."}}},
+                {"paths", {{"type", "array"}, {"maxItems", 32}, {"items", {{"type", "string"}}},
+                           {"description", "res:// directories or .gd files. Default res://test, or GUT's .gutconfig.json."}}},
+                {"name", {{"type", "string"}, {"pattern", "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"}, {"default", "tests"},
+                          {"description", "Recorded as .didi/scenarios/<name>.json."}}},
+                {"timeout_seconds", {{"type", "integer"}, {"minimum", 5}, {"maximum", 900}, {"default", 120}}},
+                {"request_id", {{"type", "string"}, {"minLength", 8}}}
+            }},
+            {"additionalProperties", false}
+        };
+        t.handler = [this](const json& args) { return handleProjectRunTests(args, m_sourceIpcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "project_list_export_presets";
+        t.description = "Lists non-sensitive fields from the project's export presets.";
+        t.inputSchema = {{"type", "object"}, {"properties", json::object()}};
+        t.handler = [this](const json& args) { return handleProjectListExportPresets(args, m_ipcClient); };
+        t.outputSchema = projectListExportPresetsOutputSchema();
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "project_export";
+        t.description = "Runs a bounded headless export for an existing preset under path and overwrite guards.";
+        t.inputSchema = {{"type", "object"}, {"properties", {
+            {"preset", {{"type", "string"}}}, {"output_path", {{"type", "string"}}},
+            {"mode", {{"type", "string"}, {"enum", {"release", "debug", "pack"}}, {"default", "release"}}},
+            {"overwrite", {{"type", "boolean"}, {"default", false}}},
+            {"timeout_seconds", {{"type", "integer"}, {"minimum", 1}, {"maximum", 900}, {"default", 300}}},
+            {"request_id", {{"type", "string"}, {"minLength", 8}}}
+        }}, {"required", {"preset", "output_path"}}};
+        t.handler = [this](const json& args) { return handleProjectExport(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "project_add_export_preset";
+        t.description =
+            "Adds one export preset to export_presets.cfg, which project_export needs and a project "
+            "nobody has exported by hand does not have. It only adds: a name already in the file "
+            "is refused. It writes the fewest keys every supported Godot loads cleanly and leaves "
+            "the rest to the editor. With an editor attached, the editor is made to read the file "
+            "again, because an open editor otherwise writes its own list back over it.";
+        t.inputSchema = {{"type", "object"}, {"properties", {
+            {"name", {{"type", "string"}, {"minLength", 1}, {"maxLength", 256}}},
+            {"platform", {{"type", "string"},
+                          {"enum", {"Windows Desktop", "Linux", "macOS", "Android", "iOS", "Web",
+                                    "visionOS"}}}},
+            {"export_path", {{"type", "string"}, {"maxLength", 1024}}}
+        }}, {"required", {"name", "platform"}}};
+        t.handler = [this](const json& args) { return handleProjectAddExportPreset(args, m_ipcClient); };
+        t.outputSchema = projectAddExportPresetOutputSchema();
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "gridmap_export_mesh_library";
+        t.description = "Converts direct scene children into a deterministic GridMap MeshLibrary through headless Godot.";
+        t.inputSchema = {{"type", "object"}, {"properties", {
+            {"source_scene", {{"type", "string"}}}, {"output_path", {{"type", "string"}}},
+            {"generate_collisions", {{"type", "boolean"}, {"default", true}}},
+            {"overwrite", {{"type", "boolean"}, {"default", false}}},
+            {"timeout_seconds", {{"type", "integer"}, {"minimum", 1}, {"maximum", 300}, {"default", 60}}}
+        }}, {"required", {"source_scene", "output_path"}}};
+        t.handler = [this](const json& args) { return handleGridmapExportMeshLibrary(args, m_sourceIpcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "ui_list_controls";
+        t.description =
+            "Lists live Control nodes under a root with each one's viewport-space rectangle, "
+            "class, visibility, mouse filter and text. In a game, screen_rect is that rectangle in "
+            "the window pixels runtime_inject_input takes. In a localised game text is the key; "
+            "displayed_text, when it differs, is what the player reads. Read-only. ui_hit_test "
+            "answers the opposite question: what sits under a point.";
+        t.inputSchema = {{"type", "object"}, {"properties", {
+            {"root_path", {{"type", "string"}, {"maxLength", 1024},
+                           {"description", "Where to start. Defaults to the edited scene root in an editor and /root in a game."}}},
+            {"max_results", {{"type", "integer"}, {"minimum", 1}, {"maximum", 256}, {"default", 64}}},
+            {"visible_only", {{"type", "boolean"}, {"default", true},
+                              {"description", "Skip Controls that are not visible in the tree, and everything beneath them."}}},
+            {"include_text", {{"type", "boolean"}, {"default", true},
+                              {"description", "Read the text property where the Control has one, and displayed_text where the Control draws it translated. Each is capped at 256 bytes."}}},
+            {"class_filter", {{"type", "array"}, {"items", {{"type", "string"}, {"maxLength", 64}}},
+                              {"minItems", 1}, {"maxItems", 16},
+                              {"description", "Keep only Controls that are one of these classes, inheritance included."}}}
+        }}};
+        t.handler = [this](const json& args) { return handleUiListControls(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "ui_hit_test";
+        t.description = "Hit-tests live Control nodes at a point without injecting input, in an editor's "
+                        "edited scene or a game's running one.";
+        t.inputSchema = {{"type", "object"}, {"properties", {
+            {"point", {{"type", "object"}, {"properties", {
+                {"x", {{"type", "number"}}}, {"y", {{"type", "number"}}}
+            }}, {"required", {"x", "y"}}}},
+            {"root_path", {{"type", "string"}, {"default", "/root"}}},
+            {"include_mouse_filter_ignore", {{"type", "boolean"}, {"default", false}}},
+            {"max_results", {{"type", "integer"}, {"minimum", 1}, {"maximum", 256}, {"default", 32}}},
+            {"space", {{"type", "string"}, {"enum", {"viewport", "screen"}}, {"default", "viewport"}}}
+        }}, {"required", {"point"}}};
+        t.handler = [this](const json& args) { return handleUiHitTest(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
 }
 
 } // namespace didi::mcp

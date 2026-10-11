@@ -9,6 +9,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include "didi/mcp/tool_registration.hpp"
 
 namespace didi {
 namespace mcp {
@@ -268,6 +269,84 @@ CallToolResult handleSignalEmit(const ResolvedToolBinding& binding, const json& 
         return signalRequestError(binding, refused->code, refused->message);
     }
     return sendPhase7LiveRequest(binding, normalized, ipc);
+}
+
+// The tools whose handlers this file holds. registerAllDefaultTools calls
+// each domain's in turn (#1256).
+void ToolRegistry::registerSignalTools() {
+
+    {
+        ToolDefinition t;
+        t.name = "signal_list_connections";
+        t.description = "Lists the signals a node declares and the connections going out of each. The node is the emitter; connections into it are not listed.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"target_node", {{"type", "string"}, {"description", "Target NodePath"}}}
+            }},
+            {"required", {"target_node"}}
+        };
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleSignalListConnections(binding, args, m_ipcClient);
+        };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "signal_connect";
+        t.description = "Binds a signal from an emitter node to a target method or callable.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"emitter_node", {{"type", "string"}, {"description", "Emitter NodePath"}}},
+                {"signal_name", {{"type", "string"}, {"description", "Signal name"}}},
+                {"target_node", {{"type", "string"}, {"description", "Receiver NodePath"}}},
+                {"target_method", {{"type", "string"}, {"description", "Method name to call"}}}
+            }},
+            {"required", {"emitter_node", "signal_name", "target_node", "target_method"}}
+        };
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleSignalConnect(binding, args, m_ipcClient);
+        };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "signal_disconnect";
+        t.description = "Unbinds existing signal connections.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"emitter_node", {{"type", "string"}, {"description", "Emitter NodePath"}}},
+                {"signal_name", {{"type", "string"}, {"description", "Signal name"}}},
+                {"target_node", {{"type", "string"}, {"description", "Receiver NodePath"}}},
+                {"target_method", {{"type", "string"}, {"description", "Method name"}}}
+            }},
+            {"required", {"emitter_node", "signal_name", "target_node", "target_method"}}
+        };
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleSignalDisconnect(binding, args, m_ipcClient);
+        };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "signal_emit";
+        t.description = "Emits a custom signal manually with arguments for event testing.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"target_node", {{"type", "string"}, {"description", "Emitter NodePath"}}},
+                {"signal_name", {{"type", "string"}, {"description", "Signal name"}}},
+                {"arguments", {{"type", "array"}, {"description", "Positional signal arguments"}}}
+            }},
+            {"required", {"target_node", "signal_name"}}
+        };
+        t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
+            return handleSignalEmit(binding, args, m_ipcClient);
+        };
+        registerTool(std::move(t));
+    }
 }
 
 } // namespace mcp

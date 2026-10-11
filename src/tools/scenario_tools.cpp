@@ -26,6 +26,7 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include "didi/mcp/tool_registration.hpp"
 
 namespace didi {
 namespace mcp {
@@ -425,6 +426,70 @@ CallToolResult handleRuntimeRunScenario(const json& args, std::shared_ptr<ipc::I
     auto result = CallToolResult::successJson(report);
     result.isError = true;
     return result;
+}
+
+// The tools whose handlers this file holds. registerAllDefaultTools calls
+// each domain's in turn (#1256).
+void ToolRegistry::registerScenarioTools() {
+    {
+        // Q9: launch, drive frame by frame, check, stop, in one call. The
+        // refusals and the verdict rules are in src/runtime/scenario_runner.cpp;
+        // the schema carries the vocabulary and TOOL_REFERENCE the rest.
+        ToolDefinition t;
+        t.name = "runtime_run_scenario";
+        t.description =
+            "Proves a behaviour in one call: runs scene_path in a paused game of its own, steps "
+            "it frame by frame through steps, and stops it. verdict is pass only when every step "
+            "ran and every assertion held; a scenario with no assertion is refused. "
+            "godot://project/scenarios marks a pass stale once a file it ran against changes.";
+        const json number = {{"type", "number"}};
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"name", {{"type", "string"}, {"pattern", "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"},
+                          {"description", "Recorded as .didi/scenarios/<name>.json."}}},
+                {"scene_path", {{"type", "string"}, {"description", "The res:// scene the game starts in."}}},
+                {"steps", {
+                    {"type", "array"}, {"minItems", 1}, {"maxItems", 64},
+                    {"items", {
+                        {"type", "object"},
+                        {"properties", {
+                            {"kind", {{"type", "string"},
+                                      {"enum", json::array({"wait", "wait_until", "press", "assert",
+                                                            "assert_output", "capture"})}}},
+                            {"label", {{"type", "string"}, {"maxLength", 64}}},
+                            {"frames", {{"type", "integer"}, {"minimum", 1}, {"maximum", 600},
+                                        {"description", "wait: frames to run. press: frames held, default 1. wait_until: at most."}}},
+                            {"action", {{"type", "string"}, {"description", "press: an InputMap action."}}},
+                            {"expression", {{"type", "string"}, {"maxLength", 512},
+                                            {"description", "assert, wait_until: a sandbox expression such as node.get(\"position\").y; true, or a number within minimum and maximum."}}},
+                            {"context_node", {{"type", "string"}}},
+                            {"minimum", number},
+                            {"maximum", number},
+                            {"text", {{"type", "string"}, {"maxLength", 256},
+                                      {"description", "assert_output: a line of the game's output containing this."}}},
+                            {"level", {{"type", "string"},
+                                       {"enum", json::array({"debug", "info", "warning", "error"})}}},
+                            {"absent", {{"type", "boolean"},
+                                        {"description", "assert_output: require that no such line appeared."}}}
+                        }},
+                        {"required", json::array({"kind"})},
+                        {"additionalProperties", false}
+                    }}
+                }},
+                {"headless", {{"type", "boolean"}, {"default", true},
+                              {"description", "false renders frames, which a capture step needs."}}},
+                {"timeout_seconds", {{"type", "integer"}, {"minimum", 5}, {"maximum", 300}, {"default", 60}}},
+                {"request_id", {{"type", "string"}, {"minLength", 8}}}
+            }},
+            {"required", json::array({"name", "scene_path", "steps"})},
+            {"additionalProperties", false}
+        };
+        // The source client, as runtime_launch has: it starts its own Godot
+        // and opens its own route to it, and never takes the caller's.
+        t.handler = [this](const json& args) { return handleRuntimeRunScenario(args, m_sourceIpcClient); };
+        registerTool(std::move(t));
+    }
 }
 
 }  // namespace mcp

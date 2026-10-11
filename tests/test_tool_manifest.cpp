@@ -942,12 +942,32 @@ static void test_the_names_that_are_not_the_obvious_guess_are_spelled_out() {
     ASSERT_TRUE(emitter.find("emit") != std::string::npos);
 }
 
+// tools/list follows listTools. It went in hash order, which differed between
+// standard libraries and moved whenever a tool was registered from another
+// file, so it is by name instead (#1256). An alias keeps the schema of the
+// tool it was copied from.
+static void test_tools_are_listed_by_name() {
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    const auto tools = registry.listTools();
+    ASSERT_TRUE(tools.size() > 100);
+    for (size_t i = 1; i < tools.size(); ++i) {
+        ASSERT_TRUE(tools[i - 1].name < tools[i].name);
+    }
+    const auto* canonical = registry.getTool("scene_get_hierarchy");
+    const auto* alias = registry.getTool("get_scene_hierarchy");
+    ASSERT_TRUE(canonical != nullptr && alias != nullptr);
+    ASSERT_TRUE(canonical->outputSchema.is_object());
+    ASSERT_EQ(alias->outputSchema, canonical->outputSchema);
+}
+
 struct RegisterToolManifestTests {
     RegisterToolManifestTests() {
         registerTest("tool_manifest.declared_legacy_marked",
                      test_manifest_declared_legacy_names_are_registered_and_marked);
         registerTest("tool_manifest.no_undeclared_legacy",
                      test_manifest_no_undeclared_legacy_tools);
+        registerTest("tool_manifest.tools_listed_by_name", test_tools_are_listed_by_name);
         registerTest("tool_manifest.partitions_surface",
                      test_manifest_partitions_the_surface);
         registerTest("tool_manifest.implemented_partitions_canonical",

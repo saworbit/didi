@@ -24,6 +24,7 @@
 #include <string>
 #include <vector>
 #include <filesystem>
+#include "didi/mcp/tool_registration.hpp"
 
 namespace didi {
 namespace mcp {
@@ -822,6 +823,241 @@ CallToolResult handleScriptAttachToNode(const json& args, std::shared_ptr<ipc::I
 
 CallToolResult handleScriptDetachFromNode(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     return forwardLiveScriptWiring(args, ipc, "script.detachFromNode", "detach a script from a node");
+}
+
+namespace {
+
+using namespace output_schema;
+
+json scriptCheckSyntaxOutputSchema() {
+    // The four engine fields are nullable because a check that spawned no
+    // Godot -- a source_text-only check, or a machine with none installed
+    // -- has no engine to name, and an unknown version is not a match
+    // (#617).
+    static const json nullable_string = {{"type", {"string", "null"}}};
+    return object_schema({{"execution_mode", string_type},
+                          {"has_errors", boolean_type},
+                          {"diagnostics", {{"type", "array"}}},
+                          {"diagnostics_count", integer_type},
+                          {"file_path", string_type},
+                          {"engine_version", nullable_string},
+                          {"engine_executable", nullable_string},
+                          {"attached_engine_version", nullable_string},
+                          {"matches_attached_engine", {{"type", {"boolean", "null"}}}},
+                          // Present when an engine was asked, so a caller
+                          // can see the subprocess ran rather than infer
+                          // it from a version string. A check that never
+                          // produced a verdict is now an error instead of
+                          // a clean answer, so these never describe one
+                          // that did not happen (#677).
+                          {"engine_available", boolean_type},
+                          {"engine_exit_code", {{"type", {"integer", "null"}}}},
+                          {"engine_duration_seconds", {{"type", "number"}}},
+                          {"engine_unavailable_reason", string_type},
+                          {"engine_timed_out", boolean_type},
+                          {"truncated", boolean_type},
+                          // Which engine answered: the attached editor's
+                          // language server, or a headless compile, and
+                          // why the server was not used when an editor
+                          // was there (Q11).
+                          {"engine_backend", string_type},
+                          {"language_server_unavailable_reason", string_type},
+                          // Always returned, and the field to branch on.
+                          // The four nullable engine fields above read the
+                          // same for a check that never asked a compiler
+                          // and one whose compiler would not start, and
+                          // those are different states with different
+                          // repairs (#728).
+                          {"engine_checked", boolean_type},
+                          // Both added together by annotateConfiguredEngine,
+                          // and only when GODOT_BIN was set and could not be
+                          // used. Returned and undeclared, which the output
+                          // schema contract catches wherever a run happens
+                          // to have a rejected GODOT_BIN.
+                          {"engine_executable_configured", string_type},
+                          {"engine_executable_configured_rejected", string_type},
+                          // Present exactly when engine_checked is false,
+                          // saying what the verdict does and does not
+                          // cover and where to get the other half.
+                          {"limitation", string_type}},
+                         {"execution_mode", "has_errors", "engine_checked"});
+}
+
+json scriptGetSymbolsOutputSchema() {
+    return object_schema({{"file_path", string_type},
+                          {"classes", {{"type", "array"}}},
+                          {"functions", {{"type", "array"}}},
+                          {"variables", {{"type", "array"}}},
+                          {"constants", {{"type", "array"}}},
+                          {"enums", {{"type", "array"}}},
+                          {"signals", {{"type", "array"}}},
+                          // What was left out, which nothing here said
+                          // before: a 10 MB script answered with 15 MB of
+                          // JSON and no field a caller could read to know
+                          // whether it was complete (#575).
+                          {"symbol_count_total", integer_type},
+                          {"returned_count", integer_type},
+                          {"truncated", boolean_type},
+                          {"max_symbols", integer_type},
+                          {"max_response_bytes", integer_type}},
+                         {"execution_mode", "file_path"});
+}
+
+json scriptReflectClassOutputSchema() {
+    return object_schema({{"class_name", string_type},
+                          {"inherits", string_type},
+                          {"description", string_type},
+                          {"api_version", string_type},
+                          {"source", string_type},
+                          // False is a real answer, not an error: a name
+                          // the shipped reference does not carry is
+                          // reported rather than refused.
+                          {"is_known_class", boolean_type},
+                          {"is_instantiable", boolean_type},
+                          // Both added together by annotateApiVersion, and
+                          // only when a session is attached. Both are
+                          // nullable: an engine version it cannot read is
+                          // null rather than absent, because saying nothing
+                          // would read as a match (#466).
+                          {"attached_engine_version", {{"type", {"string", "null"}}}},
+                          {"api_version_matches_attached_engine",
+                           {{"type", {"boolean", "null"}}}},
+                          // Maps keyed by name, not arrays. Only signals
+                          // is a list.
+                          {"methods", {{"type", "object"}}},
+                          {"properties", {{"type", "object"}}},
+                          {"signals", {{"type", "array"}}}},
+                         {"execution_mode", "class_name"});
+}
+
+}  // namespace
+
+// The tools whose handlers this file holds. registerAllDefaultTools calls
+// each domain's in turn (#1256).
+void ToolRegistry::registerScriptTools() {
+
+    {
+        ToolDefinition t;
+        t.name = "script_check_syntax";
+        t.description = "Checks GDScript with Didi's lexical rules and the open editor's language server, or for a file with no editor a headless Godot compile.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"file_path", {{"type", "string"}, {"description", "Path to script file"}}},
+                {"source_text", {{"type", "string"}, {"description",
+                    "An unsaved buffer to check instead of the file at file_path. With no editor "
+                    "attached only the lexical rules run on it; limitation says so."}}}
+            }}
+        };
+        // The source client, not the lease dispatch wrapper. This tool sends no
+        // request; it reads the selected session descriptor to say whether the
+        // Godot it spawned is the engine the caller is attached to, and the
+        // wrapper is not a session client. Same reason script_reflect_class
+        // takes it (#617).
+        t.handler = [this](const json& args) { return handleScriptCheckSyntax(args, m_sourceIpcClient); };
+        t.outputSchema = scriptCheckSyntaxOutputSchema();
+        registerTool(t);
+
+        // Alias
+        t.name = "analyze_script_diagnostics";
+        t.handler = [this](const json& args) { return handleScriptCheckSyntax(args, m_sourceIpcClient); };
+        registerTool(t);
+    }
+    {
+        ToolDefinition t;
+        t.name = "script_reflect_class";
+        t.description = "Looks up a class in Didi's limited built-in offline reference map; this is not live ClassDB reflection.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"class_name", {{"type", "string"}, {"description", "Godot class name (e.g. CharacterBody3D)"}}}
+            }},
+            {"required", {"class_name"}}
+        };
+        // Node alone answers in about 13 KB, three quarters of it methods, so a
+        // caller after one property list should not pay for the rest (Q5).
+        t.sections = {"description", "methods", "properties", "signals", "enums"};
+        // The source client, not the lease dispatch wrapper. This tool never
+        // sends a request; it reads the selected session descriptor to say
+        // whether the pinned class reference matches the attached engine, and
+        // the wrapper is not a session client.
+        t.handler = [this](const json& args) { return handleScriptReflectClass(args, m_sourceIpcClient); };
+        t.outputSchema = scriptReflectClassOutputSchema();
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "script_get_symbols";
+        t.description = "Extracts AST symbols, functions, signals, and typed variables from any script file.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"file_path", {{"type", "string"}, {"description", "Path to script"}}},
+                {"source_text", {{"type", "string"}, {"description", "Optional source code"}}},
+                {"max_symbols", {{"type", "integer"},
+                                 {"default", offline::GDScriptDiagnostics::kDefaultMaxSymbols},
+                                 {"minimum", 1},
+                                 {"maximum", 100000}}}
+            }}
+        };
+        t.handler = [this](const json& args) { return handleScriptGetSymbols(args, m_ipcClient); };
+        t.outputSchema = scriptGetSymbolsOutputSchema();
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition create;
+        create.name = "script_create";
+        create.description = "Writes a new GDScript file under the project root and returns the diagnostics for what it wrote.";
+        create.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"script_path", {{"type", "string"}, {"description", "Target res:// path ending in .gd"}}},
+                {"source_text", {{"type", "string"}, {"description", "File contents"}}},
+                {"overwrite", {{"type", "boolean"}, {"default", false}}}
+            }},
+            {"required", {"script_path", "source_text"}}
+        };
+        create.handler = [this](const json& args) { return handleScriptCreate(args, m_sourceIpcClient); };
+        registerTool(std::move(create));
+    }
+    {
+        ToolDefinition t;
+        t.name = "script_patch_method";
+        t.description = "Safely rewrites a single method or symbol body in a .gd file without touching other functions.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"file_path", {{"type", "string"}, {"minLength", 1}, {"description", "Target script path"}}},
+                {"method_name", {{"type", "string"}, {"minLength", 1}, {"description", "Method name to replace"}}},
+                {"new_definition", {{"type", "string"}, {"minLength", 1},
+                                    {"description", "New method implementation. It has to declare the symbol named by method_name."}}},
+                {"symbol_type", {{"type", "string"},
+                                 {"enum", offline::GDScriptDiagnostics::symbolTypes()},
+                                 {"default", "function"}}},
+                {"create_if_missing", {{"type", "boolean"}, {"default", false}}}
+            }},
+            {"required", {"file_path", "method_name", "new_definition"}}
+        };
+        t.handler = [this](const json& args) { return handleScriptPatchMethod(args, m_sourceIpcClient); };
+        registerTool(t);
+
+        // Alias
+        t.name = "patch_script_symbols";
+        t.handler = [this](const json& args) { return handleScriptPatchMethod(args, m_sourceIpcClient); };
+        registerTool(t);
+    }
+
+    registerPhaseTwo(
+        "script_attach_to_node", "Attaches an existing Script resource to a live node through UndoRedo.",
+        {{"type", "object"}, {"properties", {
+            {"target_node", {{"type", "string"}}}, {"script_path", {{"type", "string"}}}
+        }}, {"required", {"target_node", "script_path"}}},
+        [this](const json& args) { return handleScriptAttachToNode(args, m_ipcClient); });
+    registerPhaseTwo(
+        "script_detach_from_node", "Detaches the current Script resource from a live node through UndoRedo.",
+        {{"type", "object"}, {"properties", {{"target_node", {{"type", "string"}}}}},
+         {"required", {"target_node"}}},
+        [this](const json& args) { return handleScriptDetachFromNode(args, m_ipcClient); });
 }
 
 } // namespace mcp

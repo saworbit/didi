@@ -7,6 +7,7 @@
 
 #include <memory>
 #include <string>
+#include "didi/mcp/tool_registration.hpp"
 
 namespace didi {
 namespace mcp {
@@ -343,6 +344,303 @@ CallToolResult handleBlackboardTaskList(const json& args, std::shared_ptr<ipc::I
     if (!reader.ok()) return CallToolResult::errorJson(400, reader.failure);
 
     return finish(offline::blackboardTaskList(request));
+}
+
+namespace {
+
+using namespace output_schema;
+
+json blackboardListKeysOutputSchema() {
+    return object_schema({{"board", string_type},
+                          {"prefix", string_type},
+                          {"keys", array_of(string_type)},
+                          {"total", integer_type},
+                          {"returned", integer_type},
+                          {"truncated", boolean_type}},
+                         {"execution_mode", "keys"});
+}
+
+json blackboardReadOutputSchema() {
+    return object_schema({{"board", string_type},
+                          {"path", string_type},
+                          {"deep", boolean_type},
+                          {"truncated", boolean_type},
+                          // A path with nothing at it is `found: false`
+                          // rather than an error, so the flag is the
+                          // answer and `value` may be anything or absent.
+                          {"found", boolean_type},
+                          {"value", json::object()},
+                          // Which kind of nothing, when there is nothing.
+                          // "expired" means a ttl lapsed and the board
+                          // still remembers it; "no_record" means the
+                          // board has nothing to say, which covers never
+                          // written, cleared, and lapsed longer ago than
+                          // it remembers. The two used to answer
+                          // identically, and they lead opposite ways
+                          // (#680).
+                          {"reason", {{"type", "string"},
+                                      {"enum", json::array({"expired", "no_record"})}}},
+                          {"expired_at_ms", integer_type},
+                          {"expired_author", string_type},
+                          {"expired_reason", string_type},
+                          {"cleared_at_ms", integer_type},
+                          {"cleared_by", string_type},
+                          {"cleared_reason", string_type},
+                          {"last_board_clear", {{"type", "object"}}},
+                          // What a writer pins a change to: the board's
+                          // revision for blackboard_patch, this path's
+                          // write time for blackboard_write. 0 means
+                          // nothing is there (#682).
+                          {"revision", integer_type},
+                          {"updated_at_ms", integer_type}},
+                         {"execution_mode", "found"});
+}
+
+json blackboardTaskListOutputSchema() {
+    return object_schema({{"board", string_type},
+                          {"tasks", {{"type", "array"}}},
+                          {"total", integer_type},
+                          {"returned", integer_type},
+                          {"truncated", boolean_type}},
+                         {"execution_mode", "tasks"});
+}
+
+}  // namespace
+
+// The tools whose handlers this file holds. registerAllDefaultTools calls
+// each domain's in turn (#1256).
+void ToolRegistry::registerBlackboardTools() {
+    {
+        ToolDefinition t;
+        t.name = "blackboard_write";
+        t.description = "Writes a value at a dot or slash path on a shared board, so a later agent in another process can read the decision instead of re-deriving it.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"board", {{"type", "string"}, {"default", "default"}, {"minLength", 1}, {"maxLength", 64},
+                           {"description", "Board name. Letters, digits, underscore and hyphen. Separate boards do not see each other."}}},
+                {"path", {{"type", "string"}, {"minLength", 1}, {"maxLength", 512},
+                          {"description", "Dot or slash path such as architecture.inventory.slots. Segments cannot be empty, '.' or '..'."}}},
+                {"value", {{"type", anyJsonType()},
+                           {"description", "Any JSON value. Stored and returned verbatim; Didi never interprets or executes it."}}},
+                {"author", {{"type", "string"}, {"maxLength", 128},
+                            {"description", "Who wrote it. Recorded as metadata, never verified. The task tools call the same idea agent_id, because there it is an identity a lease is checked against rather than provenance."}}},
+                {"reason", {{"type", "string"}, {"maxLength", 512},
+                            {"description", "Why it was written. Recorded as metadata."}}},
+                {"ttl_seconds", {{"type", "integer"}, {"minimum", 1}, {"maximum", 2592000},
+                                 {"description", "Drop the entry once this many seconds have passed. Expiry is applied on the next read, listing or write."}}},
+                {"expected_updated_at_ms", {{"type", "integer"}, {"minimum", 0},
+                                          {"description", "Only write if the path is still at this updated_at_ms, which blackboard_read returns. 0 means the path must not exist yet. A mismatch is refused 409 with reason_code stale_write and the time it actually holds, the shape blackboard_task_claim already uses for a claim somebody else holds. Omit it for a last-writer-wins write."}}}
+            }},
+            {"required", json::array({"path", "value"})},
+            {"additionalProperties", false}
+        };
+        t.handler = [this](const json& args) { return handleBlackboardWrite(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "blackboard_read";
+        t.description = "Reads a board or a subtree of one. Deep returns the whole subtree; shallow returns one level and marks nested containers rather than dropping them.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"board", {{"type", "string"}, {"default", "default"}, {"minLength", 1}, {"maxLength", 64},
+                           {"description", "Board name. Letters, digits, underscore and hyphen. Separate boards do not see each other."}}},
+                {"path", {{"type", "string"}, {"maxLength", 512},
+                          {"description", "Dot or slash path. Omit to read the whole board."}}},
+                {"deep", {{"type", "boolean"}, {"default", true},
+                          {"description", "False returns one level, with nested containers replaced by a _truncated marker carrying their size."}}},
+                {"include_metadata", {{"type", "boolean"}, {"default", false},
+                                      {"description", "Include the author, reason, write time and expiry recorded for each path."}}}
+            }},
+            {"additionalProperties", false}
+        };
+        t.handler = [this](const json& args) { return handleBlackboardRead(args, m_ipcClient); };
+        t.outputSchema = blackboardReadOutputSchema();
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "blackboard_patch";
+        t.description = "Applies RFC 6902 operations to a board, all or nothing, so a parallel change is not silently overwritten by a read-modify-write.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"board", {{"type", "string"}, {"default", "default"}, {"minLength", 1}, {"maxLength", 64},
+                           {"description", "Board name. Letters, digits, underscore and hyphen. Separate boards do not see each other."}}},
+                {"operations", {{"type", "array"}, {"minItems", 1}, {"maxItems", 100},
+                                {"description", "RFC 6902 operations against the board root. If any one fails, none is applied and the board is unchanged."},
+                                {"items", {{"type", "object"}}}}},
+                {"author", {{"type", "string"}, {"maxLength", 128},
+                            {"description", "Who applied the patch. Recorded as metadata, never verified. The task tools call the same idea agent_id, because there it is an identity a lease is checked against rather than provenance."}}},
+                {"reason", {{"type", "string"}, {"maxLength", 512}}},
+                {"expected_revision", {{"type", "integer"}, {"minimum", 0},
+                                       {"description", "Only apply if the board is still at this revision, which every read and write returns. A patch spans paths, so its unit is the board rather than one key. A mismatch is refused 409 with reason_code stale_patch."}}}
+            }},
+            {"required", json::array({"operations"})},
+            {"additionalProperties", false}
+        };
+        t.handler = [this](const json& args) { return handleBlackboardPatch(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "blackboard_list_keys";
+        t.description = "Lists the paths on a board, namespaces and values alike, so an agent can discover what another one recorded without reading the whole board.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"board", {{"type", "string"}, {"default", "default"}, {"minLength", 1}, {"maxLength", 64},
+                           {"description", "Board name. Letters, digits, underscore and hyphen. Separate boards do not see each other."}}},
+                {"prefix", {{"type", "string"}, {"maxLength", 512},
+                            {"description", "Only paths at or beneath this one. Omit to list everything."}}},
+                {"max_keys", {{"type", "integer"}, {"minimum", 1}, {"maximum", 10000}, {"default", 500}}},
+                {"include_metadata", {{"type", "boolean"}, {"default", false}}}
+            }},
+            {"additionalProperties", false}
+        };
+        t.handler = [this](const json& args) { return handleBlackboardListKeys(args, m_ipcClient); };
+        t.outputSchema = blackboardListKeysOutputSchema();
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "blackboard_clear";
+        t.description = "Removes a subtree, or the whole board when no path is given. This is the one that destroys work another agent is relying on, so it is confirmed.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"board", {{"type", "string"}, {"default", "default"}, {"minLength", 1}, {"maxLength", 64},
+                           {"description", "Board name. Letters, digits, underscore and hyphen. Separate boards do not see each other."}}},
+                {"path", {{"type", "string"}, {"maxLength", 512},
+                          {"description", "Dot or slash path to remove. Omit to clear the entire board."}}},
+                {"author", {{"type", "string"}, {"maxLength", 128},
+                            {"description", "Who removed it. Recorded where a later reader can find it, since the keys themselves are gone: a read of a cleared path answers reason: cleared and names you."}}},
+                {"reason", {{"type", "string"}, {"maxLength", 512},
+                            {"description", "Why it was removed. Recorded beside the author."}}}
+            }},
+            {"additionalProperties", false}
+        };
+        t.handler = [this](const json& args) { return handleBlackboardClear(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "blackboard_task_create";
+        t.description = "Registers a unit of work on the board, optionally waiting on other tasks. A task whose prerequisites are unmet is blocked until every one of them completes.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"board", {{"type", "string"}, {"default", "default"}, {"maxLength", 64}}},
+                {"task_id", {{"type", "string"}, {"maxLength", 128},
+                             {"description", "Letters, digits, underscore, hyphen and dot. Generated as TASK-n when omitted."}}},
+                {"title", {{"type", "string"}, {"minLength", 1}, {"maxLength", 512}}},
+                {"description", {{"type", "string"}, {"maxLength", 4096}}},
+                {"author", {{"type", "string"}, {"maxLength", 128},
+                            {"description", "Who asked for this task, which is not who should do it. Recorded as metadata, never verified. The claim and update tools take agent_id instead, because there it is an identity the lease is checked against rather than provenance."}}},
+                {"assigned_to", {{"type", "string"}, {"maxLength", 128},
+                                 {"description", "A suggestion only. Claiming is what actually assigns work."}}},
+                {"dependencies", {{"type", "array"}, {"maxItems", 64}, {"items", {{"type", "string"}}},
+                                  {"description", "Task ids that must reach completed first. Each must already exist: depending on something that does not exist would block forever with nothing to explain it."}}},
+                {"tags", {{"type", "array"}, {"maxItems", 16}, {"items", {{"type", "string"}}}}},
+                {"priority", {{"type", "integer"}, {"minimum", -1000}, {"maximum", 1000}, {"default", 0},
+                              {"description", "Higher is claimed first. Ties go to the older task."}}}
+            }},
+            {"required", json::array({"title"})},
+            {"additionalProperties", false}
+        };
+        t.handler = [this](const json& args) { return handleBlackboardTaskCreate(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "blackboard_task_claim";
+        t.description = "Atomically leases the next ready task, or a named one. Reading that a task is free and writing that it is yours happen under one lock, so two agents cannot both win it.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"board", {{"type", "string"}, {"default", "default"}, {"maxLength", 64}}},
+                {"agent_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", 128},
+                              {"description", "Who is taking the work. Recorded as the lease owner and required to update or complete it."}}},
+                {"task_id", {{"type", "string"}, {"maxLength", 128},
+                             {"description", "Claim this task specifically. Omit to take the highest priority ready one."}}},
+                {"tag", {{"type", "string"}, {"maxLength", 64},
+                         {"description", "Only consider tasks carrying this tag."}}},
+                {"lease_seconds", {{"type", "integer"}, {"minimum", 1}, {"maximum", 86400}, {"default", 300},
+                                   {"description", "How long the claim holds. When it lapses the task returns to the pool, so an agent that dies does not strand the work."}}}
+            }},
+            {"required", json::array({"agent_id"})},
+            {"additionalProperties", false}
+        };
+        t.handler = [this](const json& args) { return handleBlackboardTaskClaim(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "blackboard_task_update";
+        t.description = "Records progress, adds a note, renews the lease, or hands the task back for review. Requires the live lease, except for reopening a needs_review or failed task.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"board", {{"type", "string"}, {"default", "default"}, {"maxLength", 64}}},
+                {"task_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", 128}}},
+                {"agent_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", 128},
+                              {"description", "Must hold the live lease, unless reopening a needs_review or failed task, which is by definition somebody else's call."}}},
+                {"progress", {{"type", "integer"}, {"minimum", 0}, {"maximum", 100}}},
+                {"note", {{"type", "string"}, {"maxLength", 4096},
+                          {"description", "Appended to the task's notes. The oldest is dropped past 100."}}},
+                {"status", {{"type", "string"}, {"enum", json::array({"needs_review", "failed", "pending"})},
+                            {"description", "needs_review and failed both release the lease. pending reopens a reviewed or failed task."}}},
+                {"renew_lease_seconds", {{"type", "integer"}, {"minimum", 1}, {"maximum", 86400},
+                                         {"description", "Push the lease expiry out. Nothing renews a lease on an agent's behalf."}}}
+            }},
+            {"required", json::array({"task_id", "agent_id"})},
+            {"additionalProperties", false}
+        };
+        t.handler = [this](const json& args) { return handleBlackboardTaskUpdate(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "blackboard_task_complete";
+        t.description = "Marks a task done and releases whatever was waiting on it. Only the agent holding the live lease may complete it, because completing someone else's task releases dependents on work that is still half done.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"board", {{"type", "string"}, {"default", "default"}, {"maxLength", 64}}},
+                {"task_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", 128}}},
+                {"agent_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", 128},
+                              {"description", "Must hold the live lease."}}},
+                {"artifacts", {{"type", anyJsonType()},
+                               {"description", "Free-form record of what changed: files, node paths, board keys. Stored and returned verbatim."}}}
+            }},
+            {"required", json::array({"task_id", "agent_id"})},
+            {"additionalProperties", false}
+        };
+        t.handler = [this](const json& args) { return handleBlackboardTaskComplete(args, m_ipcClient); };
+        registerTool(std::move(t));
+    }
+    {
+        ToolDefinition t;
+        t.name = "blackboard_task_list";
+        t.description = "Lists tasks with their status, lease and dependencies, filtered by status, assignee or tag. Lapsed leases are reclaimed before the list is built, so nothing reads as held by an agent that is gone.";
+        t.inputSchema = {
+            {"type", "object"},
+            {"properties", {
+                {"board", {{"type", "string"}, {"default", "default"}, {"maxLength", 64}}},
+                {"status", {{"type", "string"},
+                            {"enum", json::array({"blocked", "pending", "in_progress", "needs_review", "completed", "failed"})}}},
+                {"assigned_to", {{"type", "string"}, {"maxLength", 128}}},
+                {"tag", {{"type", "string"}, {"maxLength", 64}}},
+                {"max_tasks", {{"type", "integer"}, {"minimum", 1}, {"maximum", 2000}, {"default", 200}}}
+            }},
+            {"additionalProperties", false}
+        };
+        t.handler = [this](const json& args) { return handleBlackboardTaskList(args, m_ipcClient); };
+        t.outputSchema = blackboardTaskListOutputSchema();
+        registerTool(std::move(t));
+    }
 }
 
 } // namespace mcp
