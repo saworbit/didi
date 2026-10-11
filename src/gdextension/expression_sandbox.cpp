@@ -56,40 +56,6 @@ private:
     GDExtensionObjectPtr m_object{nullptr};
 };
 
-Result<VariantValue> variantFromNative(GDExtensionVariantType type, void* native) {
-    auto constructor = GodotApi::instance().get_variant_from_type_constructor(type);
-    if (!constructor) return Error::internal("Missing Godot Variant constructor");
-    VariantValue result(VariantValue::Uninitialized{});
-    constructor(result.ptr(), native);
-    result.markInitialized();
-    return std::move(result);
-}
-
-template <typename T>
-Result<VariantValue> makeScalar(GDExtensionVariantType type, T value) {
-    return variantFromNative(type, &value);
-}
-
-Result<VariantValue> makeString(const std::string& text) {
-    auto& api = GodotApi::instance();
-    if (!api.string_new_with_utf8_chars) return Error::internal("Godot String constructor is unavailable");
-    NativeValue native(GDEXTENSION_VARIANT_TYPE_STRING);
-    api.string_new_with_utf8_chars(native.ptr(), text.c_str());
-    native.markInitialized();
-    return variantFromNative(GDEXTENSION_VARIANT_TYPE_STRING, native.ptr());
-}
-
-Result<VariantValue> makeStringName(const std::string& text) {
-    NativeName native(text);
-    if (!native.valid()) return Error::internal("Godot StringName constructor is unavailable");
-    return variantFromNative(GDEXTENSION_VARIANT_TYPE_STRING_NAME,
-                             const_cast<void*>(native.ptr()));
-}
-
-Result<VariantValue> makeObject(GDExtensionObjectPtr object) {
-    return variantFromNative(GDEXTENSION_VARIANT_TYPE_OBJECT, &object);
-}
-
 Result<VariantValue> makeContainer(GDExtensionVariantType type) {
     auto constructor = GodotApi::instance().variant_get_ptr_constructor(type, 0);
     if (!constructor) return Error::internal("Godot container constructor is unavailable");
@@ -97,82 +63,6 @@ Result<VariantValue> makeContainer(GDExtensionVariantType type) {
     constructor(native.ptr(), nullptr);
     native.markInitialized();
     return variantFromNative(type, native.ptr());
-}
-
-Result<VariantValue> callVariant(VariantValue& target, const std::string& method_name,
-                                 const std::vector<const VariantValue*>& arguments = {}) {
-    auto& api = GodotApi::instance();
-    NativeName method(method_name);
-    if (!method.valid() || !api.variant_call) return Error::internal("Godot Variant call API is unavailable");
-    std::vector<const void*> raw_arguments;
-    raw_arguments.reserve(arguments.size());
-    for (const auto* argument : arguments) raw_arguments.push_back(argument->ptr());
-    VariantValue result(VariantValue::Uninitialized{});
-    GDExtensionCallError call_error{};
-    api.variant_call(target.ptr(), method.ptr(), raw_arguments.empty() ? nullptr : raw_arguments.data(),
-                     static_cast<GDExtensionInt>(raw_arguments.size()), result.ptr(), &call_error);
-    result.markInitialized();
-    if (call_error.error != GDEXTENSION_CALL_OK) {
-        return Error::internal("Godot Variant." + method_name + " failed");
-    }
-    return std::move(result);
-}
-
-Result<VariantValue> callObject(GDExtensionObjectPtr object, const char* class_name,
-                                const char* method_name, int64_t hash,
-                                const std::vector<const VariantValue*>& arguments = {}) {
-    if (!object) return Error::notFound(std::string("Cannot call ") + method_name + " on a null Godot object");
-    auto& api = GodotApi::instance();
-    NativeName klass(class_name);
-    NativeName method(method_name);
-    if (!klass.valid() || !method.valid() || !api.classdb_get_method_bind || !api.object_method_bind_call) {
-        return Error::internal("Godot method binding API is unavailable");
-    }
-    auto binding = api.classdb_get_method_bind(klass.ptr(), method.ptr(), hash);
-    if (!binding) {
-        return Error::internal(std::string("Godot method binding unavailable: ") +
-                               class_name + "." + method_name);
-    }
-    std::vector<const void*> raw_arguments;
-    raw_arguments.reserve(arguments.size());
-    for (const auto* argument : arguments) raw_arguments.push_back(argument->ptr());
-    VariantValue result(VariantValue::Uninitialized{});
-    GDExtensionCallError call_error{};
-    api.object_method_bind_call(binding, object,
-                                raw_arguments.empty() ? nullptr : raw_arguments.data(),
-                                static_cast<GDExtensionInt>(raw_arguments.size()),
-                                result.ptr(), &call_error);
-    result.markInitialized();
-    if (call_error.error != GDEXTENSION_CALL_OK) {
-        return Error::internal(std::string("Godot call failed: ") + class_name + "." +
-                               method_name + " (call error " +
-                               std::to_string(call_error.error) + ")");
-    }
-    return std::move(result);
-}
-
-template <typename T>
-Result<T> scalarFromVariant(VariantValue& value, GDExtensionVariantType type) {
-    auto constructor = GodotApi::instance().get_variant_to_type_constructor(type);
-    if (!constructor) return Error::internal("Missing Godot Variant-to-native constructor");
-    T result{};
-    constructor(&result, value.ptr());
-    return result;
-}
-
-// Godot hands an extension the pointer a Variant holds without asking whether
-// the object still exists (Variant::operator Object *, read at 4.5.1-stable),
-// so a value read from project state can name a freed node: an enemy's target
-// after the target was freed. Calling into one crashes once its memory is
-// reused, and reads garbage until then (#1266). A Variant's truth asks ObjectDB,
-// so a freed object comes back as null here and nothing calls into it.
-Result<GDExtensionObjectPtr> objectFromVariant(VariantValue& value) {
-    auto object = scalarFromVariant<GDExtensionObjectPtr>(value, GDEXTENSION_VARIANT_TYPE_OBJECT);
-    if (object.isErr() || !object.value()) return object;
-    const auto& api = GodotApi::instance();
-    if (!api.variant_booleanize) return Error::internal("Godot's Variant truth test is unavailable");
-    if (!api.variant_booleanize(value.ptr())) return GDExtensionObjectPtr{nullptr};
-    return object;
 }
 
 Result<std::string> nativeStringToUtf8(
@@ -237,16 +127,6 @@ Result<size_t> stringVariantUtf8Length(VariantValue& value,
     const auto length = api.string_to_utf8_chars(text.ptr(), nullptr, 0);
     if (length < 0) return Error::internal("Godot String UTF-8 length query failed");
     return static_cast<size_t>(length);
-}
-
-Result<GDExtensionObjectPtr> singleton(const std::string& name) {
-    NativeName native_name(name);
-    if (!native_name.valid() || !GodotApi::instance().global_get_singleton) {
-        return Error::internal("Godot singleton API is unavailable");
-    }
-    auto result = GodotApi::instance().global_get_singleton(native_name.ptr());
-    if (!result) return Error::notConnected("Godot singleton is unavailable: " + name);
-    return result;
 }
 
 Result<GDExtensionObjectPtr> activeSceneTree() {
@@ -419,20 +299,6 @@ Result<void> validateContextPath(std::string_view path) {
         start = end + 1;
     }
     return Result<void>::ok();
-}
-
-Result<VariantValue> makeNodePath(const std::string& path) {
-    NativeValue native_string(GDEXTENSION_VARIANT_TYPE_STRING);
-    GodotApi::instance().string_new_with_utf8_chars(native_string.ptr(), path.c_str());
-    native_string.markInitialized();
-    auto constructor = GodotApi::instance().variant_get_ptr_constructor(
-        GDEXTENSION_VARIANT_TYPE_NODE_PATH, 2);
-    if (!constructor) return Error::internal("Godot NodePath constructor is unavailable");
-    NativeValue native_path(GDEXTENSION_VARIANT_TYPE_NODE_PATH);
-    const void* arguments[] = {native_string.ptr()};
-    constructor(native_path.ptr(), arguments);
-    native_path.markInitialized();
-    return variantFromNative(GDEXTENSION_VARIANT_TYPE_NODE_PATH, native_path.ptr());
 }
 
 Result<GDExtensionObjectPtr> nodeFromVariant(VariantValue& value,

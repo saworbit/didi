@@ -10,8 +10,8 @@ Every number here is derived from the suites themselves rather than written down
 
 | Measure | Count |
 | --- | ---: |
-| Automated tests | **1733** |
-| Live-harness assertions | 1616 |
+| Automated tests | **1734** |
+| Live-harness assertions | 1618 |
 
 The badge in the [README](../README.md) shows the automated test total. Harness assertions are counted separately because they are assertions inside one live scenario, not independently runnable cases; adding them together would flatter the number.
 
@@ -114,7 +114,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 
 ## Python contract suites (`tests/test_*.py`)
 
-**592 tests.** Derived from `test_*` methods on every `unittest.TestCase` subclass, read with `ast`.
+**593 tests.** Derived from `test_*` methods on every `unittest.TestCase` subclass, read with `ast`.
 
 | File | Tests |
 | --- | ---: |
@@ -137,7 +137,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `test_field_trial.py` | 158 |
 | `test_follow_ups.py` | 5 |
 | `test_fuzz_target_lists.py` | 6 |
-| `test_include_layers.py` | 3 |
+| `test_include_layers.py` | 4 |
 | `test_initialize_instructions.py` | 5 |
 | `test_managed_recovery.py` | 3 |
 | `test_managed_recovery_adversarial.py` | 3 |
@@ -158,7 +158,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 
 ## Live Godot harness (`tests/*.ps1`)
 
-**1616 assertions.** Derived from `Assert-True` call sites. The harness is one long live scenario rather than a set of named cases, so this counts assertions and says so.
+**1618 assertions.** Derived from `Assert-True` call sites. The harness is one long live scenario rather than a set of named cases, so this counts assertions and says so.
 
 | File | Assertions |
 | --- | ---: |
@@ -170,7 +170,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `phase7_success.ps1` | 2 |
 | `refusal_remedies.ps1` | 3 |
 | `reimport_job.ps1` | 19 |
-| `run_godot_integration.ps1` | 1416 |
+| `run_godot_integration.ps1` | 1418 |
 | `scenario_runner.ps1` | 29 |
 | `scene_tab_reload.ps1` | 26 |
 | `test_runner.ps1` | 15 |

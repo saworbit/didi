@@ -93,6 +93,33 @@ class IncludeLayerTests(unittest.TestCase):
                     found.append(f"{path.relative_to(ROOT).as_posix()}:{line} {match.group(0).strip()}")
         self.assertEqual(found, [], "use godot_values.hpp instead of a copy")
 
+    def test_value_constructors_have_one_definition(self) -> None:
+        # The bridge's and the sandbox's copies of these had drifted: the
+        # sandbox's string constructors dropped a leading byte-order mark the
+        # bridge's kept, so a context node whose name starts with one was not
+        # found (#948, #1255). They are defined in godot_values.cpp only.
+        names = ("variantFromNative", "constructNativeString", "makeString", "makeStringName",
+                 "makeNodePath", "makeObject", "makeScalar", "scalarFromVariant", "objectFromVariant",
+                 "singleton", "callObject", "callVariant")
+        head = re.compile(r"^[A-Za-z][\w:<>,\s\*&]*?\b(" + "|".join(names) + r")\(", re.MULTILINE)
+        shared = {ROOT / "src" / "gdextension" / "godot_values.cpp",
+                  ROOT / "include" / "didi" / "gdextension" / "godot_values.hpp"}
+        found = []
+        for parent in (ROOT / "src", ROOT / "include" / "didi"):
+            for path in sorted(parent.rglob("*")):
+                if path.suffix not in {".cpp", ".hpp", ".h"} or path in shared:
+                    continue
+                text = path.read_text(encoding="utf-8", errors="replace")
+                for match in head.finditer(text):
+                    # A definition reaches its body before a semicolon; a
+                    # default argument of {} is not a body.
+                    rest = text[match.end():].replace("{}", "")
+                    brace, semicolon = rest.find("{"), rest.find(";")
+                    if brace != -1 and (semicolon == -1 or brace < semicolon):
+                        line = text.count("\n", 0, match.start()) + 1
+                        found.append(f"{path.relative_to(ROOT).as_posix()}:{line} {match.group(1)}")
+        self.assertEqual(found, [], "use godot_values.hpp instead of a copy")
+
 
 if __name__ == "__main__":
     unittest.main()
