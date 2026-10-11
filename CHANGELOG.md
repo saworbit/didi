@@ -134,8 +134,8 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Fixed
 
-- `2026-10-12` An unknown argument is named in `argument` rather than a `field` it never sent, and a near miss of an optional argument gets `did_you_mean`. [#1301](https://github.com/saworbit/didi/issues/1301)
-- `2026-10-12` A hidden editor viewport's capture refusal offers `select_main_screen: true`, and a test run with no `res://test` offers the folder its tests are in. [#1302](https://github.com/saworbit/didi/issues/1302)
+- `2026-10-12` An unknown argument is named in `argument` rather than a `field` it never sent, and a near miss of an optional argument gets `did_you_mean`. [#1301](https://github.com/saworbit/didi/issues/1301) · [PR #1336](https://github.com/saworbit/didi/pull/1336)
+- `2026-10-12` A hidden editor viewport's capture refusal offers `select_main_screen: true`, and a test run with no `res://test` offers the folder its tests are in. [#1302](https://github.com/saworbit/didi/issues/1302) · [PR #1336](https://github.com/saworbit/didi/pull/1336)
 - `2026-10-12` The change journal names the scene an `editor_save_scene` saved, the one entry that touches disk. [#1317](https://github.com/saworbit/didi/issues/1317) · [PR #1335](https://github.com/saworbit/didi/pull/1335)
 - `2026-10-12` `project_audit_assets` leaves dead signals under `res://addons/` out by default, as it does orphans, and counts them. [#1318](https://github.com/saworbit/didi/issues/1318) · [PR #1335](https://github.com/saworbit/didi/pull/1335)
 - `2026-10-12` A game's log names its crash report with one separator, in the `/` form every other path Didi reports takes. [#1324](https://github.com/saworbit/didi/issues/1324) · [PR #1335](https://github.com/saworbit/didi/pull/1335)
