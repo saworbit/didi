@@ -278,6 +278,65 @@ void waitForEditor(Report& report, const std::shared_ptr<runtime::IRuntimeSessio
     }
 }
 
+// Whether each configured client's instructions file reaches the didi block
+// (#1277). Claude Code reads the project's CLAUDE.md files and what they
+// import; every other client here reads AGENTS.md.
+void reportAgentGuides(Report& report, const std::filesystem::path& root, const std::vector<Client>& named) {
+    const auto agents = root / "AGENTS.md";
+    const auto relative = [&root](const std::filesystem::path& file) { return utf8(std::filesystem::relative(file, root)); };
+    if (std::find(named.begin(), named.end(), Client::ClaudeCode) != named.end()) {
+        const auto claude = projectClaudeFiles(root);
+        std::string state = "warn";
+        std::string detail;
+        std::optional<std::filesystem::path> through = claude.empty() ? std::nullopt : std::optional(claude.front());
+        for (const auto& file : claude) {
+            const auto holder = agentGuideReachedFrom(file);
+            if (!holder) continue;
+            state = "ok";
+            through = file;
+            detail = *holder == file ? relative(file) + " holds the didi block"
+                                    : relative(file) + " imports " + relative(*holder) + ", which holds the didi block";
+            break;
+        }
+        if (state == "ok") {
+            // Named above, with the file it was found through.
+        } else if (!claude.empty()) {
+            std::string names;
+            for (size_t i = 0; i < claude.size(); ++i) names += (i ? ", " : "") + relative(claude[i]);
+            detail = "Claude Code reads " + names + " here and not AGENTS.md, and " +
+                     (claude.size() == 1 ? "it neither holds the didi block nor imports"
+                                         : "none of them holds the didi block or imports") +
+                     " a file that does. Run didi setup --client claude-code.";
+        } else if (hasAgentGuide(agents)) {
+            if (const auto above = claudeFileAbove(root)) {
+                detail = "The guide is in AGENTS.md, which Claude Code never reads below " + utf8(*above) + ".";
+            } else {
+                detail = "The guide is in AGENTS.md, which Claude Code reads on its own only from v2.1.277, and "
+                         "not in every session.";
+            }
+            detail += " Run didi setup --client claude-code to add a CLAUDE.md that imports it.";
+        } else {
+            detail = "No CLAUDE.md or AGENTS.md here holds the didi block. Run didi setup --client claude-code.";
+        }
+        auto& step = report.add("agent-guide:claude-code", "Agent guide (Claude Code)", state, detail);
+        if (through) step.data["file"] = utf8(*through);
+    }
+    std::string readers;
+    std::string first;
+    for (const auto client : named) {
+        if (client == Client::ClaudeCode) continue;
+        readers += (readers.empty() ? "" : ", ") + std::string(clientSpec(client).display);
+        if (first.empty()) first = clientSpec(client).name;
+    }
+    if (readers.empty()) return;
+    const bool held = hasAgentGuide(agents);
+    auto& step = report.add("agent-guide:agents-md", "Agent guide (" + readers + ")", held ? "ok" : "warn",
+                            held ? "AGENTS.md holds the didi block"
+                                 : "AGENTS.md holds no didi block, and " + readers +
+                                       " read it. Run didi setup --client " + first + ".");
+    step.data["file"] = utf8(agents);
+}
+
 void printSetupHelp() {
     std::cout
         << "Usage: didi setup --project <dir> [options]\n\n"
@@ -481,13 +540,16 @@ int runSetupCommand(const std::vector<std::string>& arguments) {
     }
 
     if (agent_guide) {
-        const bool claude_code = std::find(clients.begin(), clients.end(), Client::ClaudeCode) != clients.end();
-        const auto claude_above = claude_code ? claudeFileAbove(root) : std::nullopt;
-        for (const auto& file : agentGuideFiles(root, clients, claude_above)) {
+        // A project with no CLAUDE.md of its own gets one that imports the
+        // AGENTS.md the guide goes into (#1277).
+        const auto import_file = agentsImportFile(root, clients);
+        bool guide_failed = false;
+        for (const auto& file : agentGuideFiles(root, clients)) {
             const auto relative = utf8(std::filesystem::relative(file, root));
             auto written = writeAgentGuide(file);
             if (written.isErr()) {
                 report.add("agent-guide", "Agent guide", "fail", written.error().message);
+                guide_failed = true;
                 continue;
             }
             const bool unchanged = written.value() == FileAction::Unchanged;
@@ -496,8 +558,26 @@ int runSetupCommand(const std::vector<std::string>& arguments) {
                                               : (written.value() == FileAction::Created ? "created " : "wrote the didi block into ") +
                                                     relative);
             step.data["file"] = utf8(file);
-            if (claude_above && file == root / "CLAUDE.md" && written.value() == FileAction::Created) {
-                step.detail += ", because Claude Code does not read AGENTS.md below " + utf8(*claude_above);
+        }
+        // Without the guide there is nothing for the import to reach, and the
+        // next run would find the import and take it as done.
+        if (import_file && !guide_failed) {
+            auto written = writeAgentsImport(*import_file);
+            if (written.isErr()) {
+                report.add("agent-guide", "Agent guide", "fail", written.error().message);
+            } else {
+                const auto relative = utf8(std::filesystem::relative(*import_file, root));
+                std::string detail = written.value() == FileAction::Unchanged
+                                         ? relative + " already imports AGENTS.md"
+                                         : "created " + relative +
+                                               ", which imports AGENTS.md. Claude Code reads AGENTS.md on its own "
+                                               "only from v2.1.277, and not in every session";
+                if (const auto above = claudeFileAbove(root); above && written.value() == FileAction::Created) {
+                    detail += ", and never below " + utf8(*above);
+                }
+                auto& step = report.add("agent-guide", "Agent guide",
+                                        written.value() == FileAction::Unchanged ? "unchanged" : "done", detail);
+                step.data["file"] = utf8(*import_file);
             }
         }
     }
@@ -673,10 +753,12 @@ int runDoctorCommand(const std::vector<std::string>& arguments) {
     sessions->disconnect();
 
     bool any_client = false;
+    std::vector<Client> named;
     for (const auto& spec : clientSpecs()) {
         const auto configured = readClientConfig(root, spec.id);
         if (!configured.file_present) continue;
         any_client = true;
+        if (configured.entry_present) named.push_back(spec.id);
         const auto id = std::string("client:") + spec.name;
         const auto title = std::string(spec.display) + " (" + spec.config_file + ")";
         if (!configured.problem.empty()) {
@@ -726,6 +808,7 @@ int runDoctorCommand(const std::vector<std::string>& arguments) {
                    "No client configuration in this project. Run didi setup --client <name>, or configure a "
                    "client whose file lives outside the project by hand.");
     }
+    reportAgentGuides(report, root, named);
     return finish(report, as_json);
 }
 

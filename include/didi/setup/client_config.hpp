@@ -73,14 +73,36 @@ std::string agentGuideBlock();
 // the project or above it. The user's own ~/.claude/CLAUDE.md does not count.
 std::optional<std::filesystem::path> claudeFileAbove(const std::filesystem::path& project_root);
 
+// The project's own CLAUDE.md, .claude/CLAUDE.md and CLAUDE.local.md, those
+// that exist, in that order. Claude Code reads every one of them, and any one
+// stops it reading AGENTS.md. The user's ~/.claude/CLAUDE.md is not the
+// project's, even in a project at the home directory.
+std::vector<std::filesystem::path> projectClaudeFiles(const std::filesystem::path& project_root);
+
+// The files an instructions file imports with Claude Code's `@path` syntax,
+// resolved against the file's own directory. Code spans and fenced blocks are
+// skipped, as Claude Code skips them.
+std::vector<std::filesystem::path> claudeImports(const std::filesystem::path& file);
+
+// The file holding the didi block that Claude Code reaches from `file`: the
+// file itself, or one it imports, within the four hops Claude Code follows.
+std::optional<std::filesystem::path> agentGuideReachedFrom(const std::filesystem::path& file);
+
 // The instructions file each named client reads. AGENTS.md for every one of
-// them, except Claude Code: beside the project's own CLAUDE.md the guide goes
-// there, and with one only above the project it goes into a new CLAUDE.md
-// here, since Claude Code then skips AGENTS.md and the one above is not the
-// project's to write.
+// them, except Claude Code beside the project's own CLAUDE.md: the guide goes
+// into the file there that already holds it or is imported for it, and
+// otherwise into that CLAUDE.md.
 std::vector<std::filesystem::path> agentGuideFiles(const std::filesystem::path& project_root,
-                                                   const std::vector<Client>& clients,
-                                                   const std::optional<std::filesystem::path>& claude_above);
+                                                   const std::vector<Client>& clients);
+
+// Where Claude Code needs a CLAUDE.md that imports AGENTS.md: in a project
+// with none of its own when Claude Code is named. It reads AGENTS.md directly
+// only from v2.1.277, not in every session, and never below a CLAUDE.md in a
+// directory above. The import works on every version and is never read twice.
+std::optional<std::filesystem::path> agentsImportFile(const std::filesystem::path& project_root,
+                                                      const std::vector<Client>& clients);
+inline constexpr const char* kAgentsImport = "@AGENTS.md";
+Result<FileAction> writeAgentsImport(const std::filesystem::path& file);
 
 Result<FileAction> writeAgentGuide(const std::filesystem::path& file);
 bool hasAgentGuide(const std::filesystem::path& file);

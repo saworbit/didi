@@ -4,6 +4,7 @@
 #include "didi/common/json.hpp"
 #include "didi/common/project_path.hpp"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -498,21 +499,68 @@ std::optional<std::filesystem::path> userClaudeFile() {
     return std::filesystem::path(home) / ".claude" / "CLAUDE.md";
 }
 
-// The first of the files that stop Claude Code reading AGENTS.md, in one
-// directory.
-std::optional<std::filesystem::path> claudeFileIn(const std::filesystem::path& directory,
-                                                  const std::optional<std::filesystem::path>& user) {
+// The files in one directory that stop Claude Code reading AGENTS.md.
+std::vector<std::filesystem::path> claudeFilesIn(const std::filesystem::path& directory,
+                                                 const std::optional<std::filesystem::path>& user) {
+    std::vector<std::filesystem::path> found;
     for (const char* name : {"CLAUDE.md", ".claude/CLAUDE.md", "CLAUDE.local.md"}) {
         std::error_code error;
         const auto candidate = directory / paths::projectPathFromUtf8(name);
         if (!std::filesystem::is_regular_file(candidate, error) || error) continue;
         if (user && std::filesystem::equivalent(candidate, *user, error) && !error) continue;
-        return candidate;
+        found.push_back(candidate);
+    }
+    return found;
+}
+
+bool samePath(const std::filesystem::path& a, const std::filesystem::path& b) {
+    std::error_code error;
+    const auto left = std::filesystem::weakly_canonical(a, error);
+    if (error) return paths::normalizedProjectPath(a) == paths::normalizedProjectPath(b);
+    const auto right = std::filesystem::weakly_canonical(b, error);
+    if (error) return paths::normalizedProjectPath(a) == paths::normalizedProjectPath(b);
+    return paths::normalizedProjectPath(left) == paths::normalizedProjectPath(right);
+}
+
+bool importsFile(const std::filesystem::path& file, const std::filesystem::path& target) {
+    for (const auto& imported : claudeImports(file)) {
+        if (samePath(imported, target)) return true;
+    }
+    return false;
+}
+
+std::optional<std::filesystem::path> reachedFrom(const std::filesystem::path& file, int hops) {
+    if (hasAgentGuide(file)) return file;
+    if (hops == 0) return std::nullopt;
+    for (const auto& imported : claudeImports(file)) {
+        if (auto found = reachedFrom(imported, hops - 1)) return found;
     }
     return std::nullopt;
 }
 
+// Where Claude Code's copy of the guide goes. With no CLAUDE.md of the
+// project's own that is AGENTS.md, which agentsImportFile has it import.
+std::filesystem::path claudeGuideFile(const std::filesystem::path& project_root) {
+    const auto agents = project_root / "AGENTS.md";
+    const auto claude = projectClaudeFiles(project_root);
+    if (claude.empty()) return agents;
+    // A block Claude Code already reaches in the project is the one a rerun
+    // rewrites, so the guide never lands in two files it reads.
+    for (const auto& file : claude) {
+        const auto holder = reachedFrom(file, 4);
+        if (holder && paths::isWithinProject(project_root, *holder)) return *holder;
+    }
+    for (const auto& file : claude) {
+        if (importsFile(file, agents)) return agents;
+    }
+    return claude.front();
+}
+
 }  // namespace
+
+std::vector<std::filesystem::path> projectClaudeFiles(const std::filesystem::path& project_root) {
+    return claudeFilesIn(project_root, userClaudeFile());
+}
 
 std::optional<std::filesystem::path> claudeFileAbove(const std::filesystem::path& project_root) {
     std::error_code error;
@@ -522,7 +570,8 @@ std::optional<std::filesystem::path> claudeFileAbove(const std::filesystem::path
     const auto user = userClaudeFile();
     // A root is its own parent, which is where the walk stops.
     for (auto parent = directory.parent_path(); !parent.empty();) {
-        if (auto found = claudeFileIn(parent, user)) return found;
+        const auto found = claudeFilesIn(parent, user);
+        if (!found.empty()) return found.front();
         auto next = parent.parent_path();
         if (next == parent) break;
         parent = std::move(next);
@@ -530,9 +579,83 @@ std::optional<std::filesystem::path> claudeFileAbove(const std::filesystem::path
     return std::nullopt;
 }
 
+std::vector<std::filesystem::path> claudeImports(const std::filesystem::path& file) {
+    std::vector<std::filesystem::path> imports;
+    auto found = readText(file);
+    if (found.isErr() || !found.value().exists) return imports;
+    char fence = 0;
+    size_t fence_width = 0;
+    for (const auto& line : lines(found.value().body)) {
+        const auto trimmed = strings::trim(line);
+        const char first = trimmed.empty() ? 0 : trimmed[0];
+        if (first == '`' || first == '~') {
+            const auto width = trimmed.find_first_not_of(first);
+            const auto run = width == std::string::npos ? trimmed.size() : width;
+            if (run >= 3) {
+                if (!fence) {
+                    fence = first;
+                    fence_width = run;
+                    continue;
+                }
+                if (first == fence && run >= fence_width) {
+                    fence = 0;
+                    continue;
+                }
+            }
+        }
+        if (fence) continue;
+        size_t span = 0;  // the backtick run that opened the code span we are in
+        for (size_t i = 0; i < line.size(); ++i) {
+            if (line[i] == '`') {
+                size_t run = 1;
+                while (i + run < line.size() && line[i + run] == '`') ++run;
+                if (!span) {
+                    span = run;
+                } else if (run == span) {
+                    span = 0;
+                }
+                i += run - 1;
+                continue;
+            }
+            if (span || line[i] != '@') continue;
+            if (i > 0 && line[i - 1] != ' ' && line[i - 1] != '\t') continue;
+            std::string path;
+            size_t end = i + 1;
+            for (; end < line.size(); ++end) {
+                // A backslash before a space keeps the space in the path.
+                if (line[end] == '\\' && end + 1 < line.size() && line[end + 1] == ' ') {
+                    path += ' ';
+                    ++end;
+                    continue;
+                }
+                if (line[end] == ' ' || line[end] == '\t') break;
+                path += line[end];
+            }
+            i = end - 1;
+            // A quoted path is not imported at all.
+            if (path.empty() || path.front() == '"' || path.front() == '\'') continue;
+            std::filesystem::path target;
+            if (path.rfind("~/", 0) == 0) {
+                const auto user = userClaudeFile();
+                if (!user) continue;
+                target = user->parent_path().parent_path() / paths::projectPathFromUtf8(path.substr(2));
+            } else {
+                target = paths::projectPathFromUtf8(path);
+                if (target.is_relative()) target = file.parent_path() / target;
+            }
+            imports.push_back(target.lexically_normal());
+        }
+    }
+    return imports;
+}
+
+std::optional<std::filesystem::path> agentGuideReachedFrom(const std::filesystem::path& file) {
+    // Claude Code follows imports four hops deep.
+    return reachedFrom(file, 4);
+}
+
 std::vector<std::filesystem::path> agentGuideFiles(const std::filesystem::path& project_root,
-                                                   const std::vector<Client>& clients,
-                                                   const std::optional<std::filesystem::path>& claude_above) {
+                                                   const std::vector<Client>& clients) {
     std::vector<std::filesystem::path> files;
     const auto add = [&files](const std::filesystem::path& file) {
         for (const auto& existing : files) {
@@ -546,16 +669,32 @@ std::vector<std::filesystem::path> agentGuideFiles(const std::filesystem::path& 
             any_other = true;
             continue;
         }
-        // Each of these stops Claude Code reading AGENTS.md, and so does one in
-        // any directory above the project. That one is not the project's to
-        // write, so the guide goes into a CLAUDE.md here, which Claude Code reads
-        // beside it (#1144).
-        auto claude = claudeFileIn(project_root, userClaudeFile());
-        if (!claude && claude_above) claude = project_root / "CLAUDE.md";
-        add(claude.value_or(project_root / "AGENTS.md"));
+        add(claudeGuideFile(project_root));
     }
     if (any_other) add(project_root / "AGENTS.md");
     return files;
+}
+
+std::optional<std::filesystem::path> agentsImportFile(const std::filesystem::path& project_root,
+                                                      const std::vector<Client>& clients) {
+    if (std::find(clients.begin(), clients.end(), Client::ClaudeCode) == clients.end()) return std::nullopt;
+    if (!projectClaudeFiles(project_root).empty()) return std::nullopt;
+    return project_root / "CLAUDE.md";
+}
+
+Result<FileAction> writeAgentsImport(const std::filesystem::path& file) {
+    auto found = readText(file);
+    if (found.isErr()) return found.error();
+    if (found.value().exists) {
+        if (importsFile(file, file.parent_path() / "AGENTS.md")) return FileAction::Unchanged;
+        return Error::invalidArgument(utf8(file) + " does not import AGENTS.md, so it was not rewritten.");
+    }
+    // Claude Code strips the comment before the model reads the file.
+    const std::string body = std::string("<!-- didi setup wrote this so that every Claude Code version reads AGENTS.md. -->\n") +
+                             kAgentsImport + "\n";
+    auto written = writeText(file, found.value(), body);
+    if (written.isErr()) return written.error();
+    return FileAction::Created;
 }
 
 Result<FileAction> writeAgentGuide(const std::filesystem::path& file) {
