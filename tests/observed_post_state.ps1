@@ -12,8 +12,10 @@
 #   with neither a case nor an exemption fails here, and in
 #   tests/test_observed_post_state.py on every build.
 # - Presence. Every exchange the harness makes goes through Invoke-Didi, which
-#   records the checked tools' answers here. Every successful answer, dry runs
-#   aside, carries every observed field, wherever in the run it was made.
+#   records the checked tools' answers here. Every successful answer carries
+#   every observed field, wherever in the run it was made, apart from a dry
+#   run and a job's read while the job is still working, which report no
+#   post-state yet.
 # - Agreement. Each case drives one tool against observed_post_state.tscn or
 #   the attached game, then reads the same state back through something that
 #   shares no code with the tool: observed_witness.gd for the editor, the

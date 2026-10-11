@@ -11134,8 +11134,8 @@ json GodotBridge::bridgeRuntimeTreeAndPause(const std::string& method, const jso
     return executeRuntimeBridge(method, params, session_kind);
 }
 
-// A game has no EditorInterface, so this runs before the editor lookup
-// the editor-only methods below depend on.
+// A game has no EditorInterface, so this is one of the methods methodTable()
+// runs before the editor lookup the editor-only methods depend on.
 json GodotBridge::bridgeRuntimeInjectInput(const std::string& /*method*/, const json& params, const std::string& session_kind) {
     return injectInput(params, session_kind);
 }
