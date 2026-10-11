@@ -108,6 +108,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Changed
 
+- `2026-10-11` The live harness compares `asset_reimport`'s `announced` with the `.import` files on disk, so six mutating tools are left unchecked, not seven. [#1020](https://github.com/saworbit/didi/issues/1020)
 - `2026-10-11` `GodotBridge::execute` serves its methods from one table, and a test fails when the table and the editor hook's routed methods differ. [#1255](https://github.com/saworbit/didi/issues/1255) · [PR #1282](https://github.com/saworbit/didi/pull/1282)
 - `2026-10-11` Each file under `src/tools` registers its own tools with their output schemas, and `tools/list` lists tools by name. Every definition is unchanged. [#1256](https://github.com/saworbit/didi/issues/1256) · [PR #1281](https://github.com/saworbit/didi/pull/1281)
 - `2026-10-11` The live harness compares `runtime_launch`'s `pid` with the launched game's own process id, so seven mutating tools are left unchecked, not eight. [#1020](https://github.com/saworbit/didi/issues/1020) · [PR #1280](https://github.com/saworbit/didi/pull/1280)
