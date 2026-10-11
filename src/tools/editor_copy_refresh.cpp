@@ -100,6 +100,40 @@ json refreshParams(const std::vector<std::string>& paths, size_t start, size_t e
     return params;
 }
 
+// The bridge puts what the engine printed during a request on its answer.
+constexpr size_t kMaxRefreshDiagnostics = 16;
+
+void collectDiagnostics(EditorCopyRefresh& refresh, const Result<json>& answer) {
+    if (answer.isErr() || !answer.value().is_object()) return;
+    const auto& body = answer.value();
+    const auto found = body.find("engine_diagnostics");
+    if (found != body.end() && found->is_array()) {
+        for (const auto& line : *found) {
+            if (refresh.engine_diagnostics.size() < kMaxRefreshDiagnostics) {
+                refresh.engine_diagnostics.push_back(line);
+            } else {
+                ++refresh.engine_diagnostics_omitted;
+            }
+        }
+    }
+    const auto omitted = body.find("engine_diagnostics_omitted");
+    if (omitted != body.end() && omitted->is_number_unsigned()) {
+        refresh.engine_diagnostics_omitted += omitted->get<size_t>();
+    }
+}
+
+void reportDiagnostics(json& payload, const EditorCopyRefresh& refresh) {
+    if (refresh.engine_diagnostics.empty() || payload.contains("engine_diagnostics")) return;
+    payload["engine_diagnostics"] = refresh.engine_diagnostics;
+    if (refresh.engine_diagnostics_omitted > 0) {
+        payload["engine_diagnostics_omitted"] = refresh.engine_diagnostics_omitted;
+    }
+    payload["engine_diagnostics_note"] =
+        "The attached editor printed these ERROR or WARNING lines while it reloaded, rebuilt or "
+        "indexed the files this call wrote. They are the engine's own words; what the call did "
+        "is the rest of this answer.";
+}
+
 bool readableAnswer(const Result<json>& answer, bool batch) {
     return answer.isOk() && answer.value().is_object() &&
            (!batch || (answer.value().contains("results") && answer.value()["results"].is_array()));
@@ -126,6 +160,7 @@ EditorCopyRefresh refreshEditorCopies(const std::shared_ptr<ipc::IIpcClient>& ip
         auto answer = ipc->sendRequest("resource.refreshCached",
                                        refreshParams(res_paths, start, end, discard_unsaved),
                                        kRefreshTimeoutMs);
+        collectDiagnostics(refresh, answer);
         if (!readableAnswer(answer, batch)) {
             // Nothing asked yet has been answered, so nothing is known and
             // nothing is said. Once an editor has answered, a later request
@@ -161,6 +196,7 @@ EditorCopyRefresh refreshEditorCopies(const std::shared_ptr<ipc::IIpcClient>& ip
         auto answer = ipc->sendRequest("resource.refreshCached",
                                        refreshParams(asked, 0, asked.size(), discard_unsaved),
                                        kRefreshTimeoutMs);
+        collectDiagnostics(refresh, answer);
         if (!readableAnswer(answer, batch)) {
             const std::string reason =
                 "The editor did not answer the request to reload the scene's tab" +
@@ -333,6 +369,7 @@ void reportEditorCopy(json& payload, const EditorCopyRefresh& refresh) {
         }
     }
     if (!refresh.failed.empty()) payload["editor_copy_error"] = refresh.failed.front()["reason"];
+    reportDiagnostics(payload, refresh);
 }
 
 void reportEditorCopies(json& payload, const EditorCopyRefresh& refresh) {
@@ -341,6 +378,7 @@ void reportEditorCopies(json& payload, const EditorCopyRefresh& refresh) {
     payload["editor_scenes_reloaded"] = refresh.scenes_reloaded;
     if (!refresh.index_pending.empty()) payload["editor_index_pending"] = refresh.index_pending;
     if (!refresh.failed.empty()) payload["editor_copy_errors"] = refresh.failed;
+    reportDiagnostics(payload, refresh);
 }
 
 } // namespace didi::mcp

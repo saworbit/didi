@@ -43,6 +43,12 @@ struct EditorCopyRefresh {
     // not list once the scan asked for them was applied or the wait ran out
     // (#1177). A class_name such a file declares is unknown to every check.
     std::vector<std::string> index_pending;
+    // What the editor printed while it reloaded, rebuilt or indexed the files,
+    // as each answer's engine_diagnostics carried it. A local writer reported
+    // none of it, so a compile error the new script caused, or a connection
+    // a rebuilt tab dropped, never reached the caller (#1289).
+    json engine_diagnostics = json::array();
+    size_t engine_diagnostics_omitted{0};
 };
 
 // discard_unsaved lets a tab that has unsaved changes, or one the engine

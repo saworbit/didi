@@ -4673,14 +4673,23 @@ public:
             }
             return result;
         };
-        if (!params.contains("paths")) return answer(params.value("path", std::string()));
-        didi::json results = didi::json::array();
-        for (const auto& path : params["paths"]) results.push_back(answer(path.get<std::string>()));
-        return didi::json{{"results", std::move(results)}};
+        didi::json body;
+        if (!params.contains("paths")) {
+            body = answer(params.value("path", std::string()));
+        } else {
+            didi::json results = didi::json::array();
+            for (const auto& path : params["paths"]) results.push_back(answer(path.get<std::string>()));
+            body = didi::json{{"results", std::move(results)}};
+        }
+        // What the engine printed while it served the request, as the bridge
+        // attaches it to any answer.
+        if (!engine_lines.empty()) body["engine_diagnostics"] = engine_lines;
+        return body;
     }
 
     std::set<std::string> held;
     std::set<std::string> broken;
+    didi::json engine_lines = didi::json::array();
     // Files the bridge says it still does not list after the scan it waited
     // for (#1177).
     std::set<std::string> unlisted;
@@ -4784,6 +4793,33 @@ static void test_every_file_a_batch_writer_names_is_accounted_for() {
     didi::json quiet = didi::json::object();
     didi::mcp::reportEditorCopies(quiet, didi::mcp::refreshEditorCopies(silent, paths));
     ASSERT_TRUE(quiet.empty());
+}
+
+static void test_a_local_writer_reports_what_the_editor_printed() {
+    // A local writer made the attached editor index, compile or rebuild what
+    // it wrote, and the lines the editor printed doing it went nowhere: the
+    // answer said diagnostics: [] while the editor's log had a compile error
+    // (#1289). They are on the answer now, as on a live call's.
+    ScopedToolProject project("local-writer-diagnostics");
+    writeImpactFixture();
+    declareVitality();
+    auto editor = std::make_shared<EditorCopyClient>();
+    editor->open = {"res://scenes/hud.tscn"};
+    editor->engine_lines = didi::json::array(
+        {{{"level", "error"}, {"message", "Attempt to connect nonexistent signal 'x'."}}});
+    const auto renamed = didi::mcp::handleProjectRenameReferences(
+        {{"target", "character_health"}, {"new_name", "vitality"}}, editor);
+    ASSERT_TRUE(!renamed.isError);
+    const auto report = didi::json::parse(renamed.content[0].text);
+    ASSERT_EQ(report["engine_diagnostics"].size(), 1u);
+    ASSERT_EQ(report["engine_diagnostics"][0]["level"], "error");
+    ASSERT_TRUE(report["engine_diagnostics_note"].get<std::string>().find("reloaded") != std::string::npos);
+
+    // Nothing printed, nothing said.
+    auto quiet = std::make_shared<EditorCopyClient>();
+    didi::json none = didi::json::object();
+    didi::mcp::reportEditorCopies(none, didi::mcp::refreshEditorCopies(quiet, {"res://a.tres"}));
+    ASSERT_TRUE(!none.contains("engine_diagnostics"));
 }
 
 static void test_a_rename_reloads_the_editor_copies_it_rewrote() {
@@ -10389,6 +10425,8 @@ struct RegisterToolTests {
                      test_a_rename_reloads_the_scenes_open_in_clean_tabs);
         registerTest("Tools.RenameRefusesASceneOpenWithUnsavedChanges",
                      test_a_rename_refuses_a_scene_open_with_unsaved_changes);
+        registerTest("Tools.ALocalWriterReportsWhatTheEditorPrinted",
+                     test_a_local_writer_reports_what_the_editor_printed);
         registerTest("Tools.RenameRefusesATabThatWouldDropItsConnection",
                      test_a_rename_refuses_a_tab_that_would_drop_its_connection);
         registerTest("Tools.ASignalDeclaredAnywhereIsLeftToTheEngine",
