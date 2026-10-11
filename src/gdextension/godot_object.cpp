@@ -1,6 +1,7 @@
 #include "didi/gdextension/godot_object.hpp"
 
 #include "didi/gdextension/gdextension_api.hpp"
+#include "didi/gdextension/godot_values.hpp"
 
 #include <array>
 #include <cstddef>
@@ -8,30 +9,6 @@
 namespace didi {
 namespace godot {
 namespace {
-
-class NativeName {
-public:
-    explicit NativeName(const char* value) {
-        auto& api = GodotApi::instance();
-        if (api.string_name_new_with_utf8_chars) {
-            api.string_name_new_with_utf8_chars(m_storage.data(), value);
-            m_initialized = true;
-        }
-    }
-    ~NativeName() {
-        if (!m_initialized) return;
-        auto destructor = GodotApi::instance().variant_get_ptr_destructor(GDEXTENSION_VARIANT_TYPE_STRING_NAME);
-        if (destructor) destructor(m_storage.data());
-    }
-    NativeName(const NativeName&) = delete;
-    NativeName& operator=(const NativeName&) = delete;
-    const void* ptr() const { return m_storage.data(); }
-    bool valid() const { return m_initialized; }
-
-private:
-    alignas(16) std::array<std::byte, 64> m_storage{};
-    bool m_initialized{false};
-};
 
 } // namespace
 

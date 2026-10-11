@@ -73,6 +73,26 @@ class IncludeLayerTests(unittest.TestCase):
         if found:
             self.fail("\n".join(["includes against the layer order:", *found]))
 
+    def test_value_wrappers_have_one_definition(self) -> None:
+        # Each GDExtension source used to keep its own copy of these, so a fix
+        # had to reach every copy by hand (#1255). They live in
+        # include/didi/gdextension/godot_values.hpp now.
+        shared = ROOT / "include" / "didi" / "gdextension" / "godot_values.hpp"
+        pattern = re.compile(
+            r"^\s*(?:class (?:NativeValue|VariantValue|NativeName)\b"
+            r"|(?:inline )?json errorJson\((?:int code, const std::string& message(?:, json data)?|const Error& error)\))",
+            re.MULTILINE)
+        found = []
+        for parent in (ROOT / "src", ROOT / "include" / "didi"):
+            for path in sorted(parent.rglob("*")):
+                if path.suffix not in {".cpp", ".hpp", ".h"} or path == shared:
+                    continue
+                text = path.read_text(encoding="utf-8", errors="replace")
+                for match in pattern.finditer(text):
+                    line = text.count("\n", 0, match.start()) + 1
+                    found.append(f"{path.relative_to(ROOT).as_posix()}:{line} {match.group(0).strip()}")
+        self.assertEqual(found, [], "use godot_values.hpp instead of a copy")
+
 
 if __name__ == "__main__":
     unittest.main()

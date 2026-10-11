@@ -3,6 +3,7 @@
 #include "didi/gdextension/godot_object.hpp"
 
 #include "didi/gdextension/gdextension_api.hpp"
+#include "didi/gdextension/godot_values.hpp"
 
 #include <array>
 #include <chrono>
@@ -19,7 +20,6 @@ namespace didi {
 namespace godot {
 namespace {
 
-constexpr size_t kOpaqueBytes = 64;
 constexpr size_t kMaxContextPathBytes = 1024;
 constexpr size_t kMaxResultBytes = 256 * 1024;
 constexpr size_t kMaxContainerElements = 4096;
@@ -29,11 +29,6 @@ constexpr size_t kMaxClassNameBytes = 256;
 constexpr int kMaxClassHierarchyDepth = 64;
 constexpr size_t kResponseTimingReserve = 64;
 constexpr int kMaxResultDepth = 16;
-using Opaque = std::array<std::byte, kOpaqueBytes>;
-
-json errorJson(int code, const std::string& message) {
-    return {{"error", {{"code", code}, {"message", message}}}};
-}
 
 // The same refusal with the identifier a caller branches on. Without this
 // overload every refusal here reached applyErrorDataFloor with no data.code
@@ -44,101 +39,6 @@ json errorJson(int code, const std::string& message, const char* data_code) {
                        {"data", {{"code", data_code}}}}}};
 }
 
-// A Result's error as an answer, its data kept. Rebuilding one from its code
-// and message drops the data, and with it the code that names the refusal's
-// fix (#1267).
-json errorJson(const Error& error) {
-    if (error.data.is_null()) return errorJson(error.code, error.message);
-    return {{"error", {{"code", error.code}, {"message", error.message}, {"data", error.data}}}};
-}
-
-
-class NativeValue {
-public:
-    explicit NativeValue(GDExtensionVariantType type) : m_type(type) {}
-    NativeValue(const NativeValue&) = delete;
-    NativeValue& operator=(const NativeValue&) = delete;
-    ~NativeValue() {
-        if (m_initialized) {
-            auto destructor = GodotApi::instance().variant_get_ptr_destructor(m_type);
-            if (destructor) destructor(m_storage.data());
-        }
-    }
-    void* ptr() { return m_storage.data(); }
-    const void* ptr() const { return m_storage.data(); }
-    void markInitialized() { m_initialized = true; }
-
-private:
-    alignas(16) Opaque m_storage{};
-    GDExtensionVariantType m_type;
-    bool m_initialized{false};
-};
-
-class VariantValue {
-public:
-    struct Uninitialized {};
-
-    VariantValue() {
-        if (GodotApi::instance().variant_new_nil) {
-            GodotApi::instance().variant_new_nil(m_storage.data());
-            m_initialized = true;
-        }
-    }
-    explicit VariantValue(Uninitialized) {}
-    VariantValue(const VariantValue&) = delete;
-    VariantValue& operator=(const VariantValue&) = delete;
-    VariantValue(VariantValue&& other) noexcept
-        : m_storage(other.m_storage), m_initialized(other.m_initialized) {
-        other.m_initialized = false;
-    }
-    VariantValue& operator=(VariantValue&& other) noexcept {
-        if (this == &other) return *this;
-        destroy();
-        m_storage = other.m_storage;
-        m_initialized = other.m_initialized;
-        other.m_initialized = false;
-        return *this;
-    }
-    ~VariantValue() { destroy(); }
-    void* ptr() { return m_storage.data(); }
-    const void* ptr() const { return m_storage.data(); }
-    void markInitialized() { m_initialized = true; }
-
-private:
-    void destroy() {
-        if (m_initialized && GodotApi::instance().variant_destroy) {
-            GodotApi::instance().variant_destroy(m_storage.data());
-        }
-        m_initialized = false;
-    }
-    alignas(16) Opaque m_storage{};
-    bool m_initialized{false};
-};
-
-class NativeName {
-public:
-    explicit NativeName(const std::string& value) {
-        if (GodotApi::instance().string_name_new_with_utf8_chars) {
-            GodotApi::instance().string_name_new_with_utf8_chars(m_storage.data(), value.c_str());
-            m_initialized = true;
-        }
-    }
-    NativeName(const NativeName&) = delete;
-    NativeName& operator=(const NativeName&) = delete;
-    ~NativeName() {
-        if (m_initialized) {
-            auto destructor = GodotApi::instance().variant_get_ptr_destructor(
-                GDEXTENSION_VARIANT_TYPE_STRING_NAME);
-            if (destructor) destructor(m_storage.data());
-        }
-    }
-    const void* ptr() const { return m_storage.data(); }
-    bool valid() const { return m_initialized; }
-
-private:
-    alignas(16) Opaque m_storage{};
-    bool m_initialized{false};
-};
 
 class OwnedObject {
 public:

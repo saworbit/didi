@@ -9,6 +9,7 @@
 #include "didi/common/logger.hpp"
 #include "didi/common/project_path.hpp"
 #include "didi/offline/deep_domain_support.hpp"
+#include "didi/gdextension/godot_values.hpp"
 
 #include <array>
 #include <cstddef>
@@ -25,29 +26,6 @@ namespace didi {
 namespace godot {
 
 namespace {
-
-class NativeName {
-public:
-    explicit NativeName(const char* value) {
-        auto& api = GodotApi::instance();
-        if (api.string_name_new_with_utf8_chars) {
-            api.string_name_new_with_utf8_chars(m_storage.data(), value);
-            m_initialized = true;
-        }
-    }
-    ~NativeName() {
-        if (m_initialized) {
-            auto destructor = GodotApi::instance().variant_get_ptr_destructor(GDEXTENSION_VARIANT_TYPE_STRING_NAME);
-            if (destructor) destructor(m_storage.data());
-        }
-    }
-    const void* ptr() const { return m_storage.data(); }
-    bool valid() const { return m_initialized; }
-
-private:
-    alignas(16) std::array<std::byte, 64> m_storage{};
-    bool m_initialized{false};
-};
 
 bool engineIsEditorHint() {
     auto& api = GodotApi::instance();
