@@ -5,6 +5,7 @@
 #include "didi/runtime/godot_arguments.hpp"
 #include "didi/common/logger.hpp"
 #include "didi/common/scene_node_path.hpp"
+#include "didi/gdextension/godot_values.hpp"
 
 #include <array>
 #include <algorithm>
@@ -18,7 +19,6 @@ namespace didi {
 namespace godot {
 namespace {
 
-constexpr size_t kOpaqueBytes = 64;
 constexpr size_t kMaxRuntimeNodes = 10000;
 constexpr size_t kMaxRuntimeTreeNameBytes = 1024;
 constexpr size_t kMaxRuntimeTreeTypeBytes = 256;
@@ -28,11 +28,6 @@ constexpr size_t kMaxRuntimeTreeResponseBytes = 256 * 1024;
 // validated on-disk representation is capped at 64 KiB. Keep the engine tree
 // sufficiently below the public limit for that provenance and fixed metadata.
 constexpr size_t kRuntimeTreeEnvelopeReserveBytes = 72 * 1024;
-using Opaque = std::array<std::byte, kOpaqueBytes>;
-
-json errorJson(int code, const std::string& message) {
-    return {{"error", {{"code", code}, {"message", message}}}};
-}
 
 // The same refusal with the identifier a caller branches on. Without this
 // overload every refusal here reached applyErrorDataFloor with no data.code
@@ -43,67 +38,12 @@ json errorJson(int code, const std::string& message, const char* data_code) {
                        {"data", {{"code", data_code}}}}}};
 }
 
-// A Result's error as an answer, its data kept. Rebuilding one from its code
-// and message drops the data, and with it the code that names the refusal's
-// fix (#1267).
-json errorJson(const Error& error) {
-    if (error.data.is_null()) return errorJson(error.code, error.message);
-    return {{"error", {{"code", error.code}, {"message", error.message}, {"data", error.data}}}};
-}
-
 json liveResult(json result, const std::string& session_kind) {
     result["execution_mode"] = "live";
     result["is_live_engine"] = true;
     result["session_kind"] = session_kind;
     return result;
 }
-
-class NativeValue {
-public:
-    explicit NativeValue(GDExtensionVariantType type) : m_type(type) {}
-    NativeValue(const NativeValue&) = delete;
-    NativeValue& operator=(const NativeValue&) = delete;
-    ~NativeValue() {
-        if (m_initialized) {
-            auto destructor = GodotApi::instance().variant_get_ptr_destructor(m_type);
-            if (destructor) destructor(m_storage.data());
-        }
-    }
-    void* ptr() { return m_storage.data(); }
-    const void* ptr() const { return m_storage.data(); }
-    void markInitialized() { m_initialized = true; }
-
-private:
-    alignas(16) Opaque m_storage{};
-    GDExtensionVariantType m_type;
-    bool m_initialized{false};
-};
-
-class NativeName {
-public:
-    explicit NativeName(const char* value) {
-        auto& api = GodotApi::instance();
-        if (api.string_name_new_with_utf8_chars) {
-            api.string_name_new_with_utf8_chars(m_storage.data(), value);
-            m_initialized = true;
-        }
-    }
-    NativeName(const NativeName&) = delete;
-    NativeName& operator=(const NativeName&) = delete;
-    ~NativeName() {
-        if (m_initialized) {
-            auto destructor = GodotApi::instance().variant_get_ptr_destructor(
-                GDEXTENSION_VARIANT_TYPE_STRING_NAME);
-            if (destructor) destructor(m_storage.data());
-        }
-    }
-    const void* ptr() const { return m_storage.data(); }
-    bool valid() const { return m_initialized; }
-
-private:
-    alignas(16) Opaque m_storage{};
-    bool m_initialized{false};
-};
 
 Result<GDExtensionMethodBindPtr> methodBind(const char* class_name,
                                             const char* method_name,
