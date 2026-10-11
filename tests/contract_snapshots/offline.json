@@ -1614,13 +1614,14 @@
           "broken_connections": [],
           "broken_references": [],
           "dead_signals": [],
+          "excluded_addon_dead_signals": 0,
           "excluded_addon_orphans": 0,
           "execution_mode": "local",
           "import_issue_count": 0,
           "import_issues": [],
           "limitations": [
             "A path a script builds at runtime cannot be followed, so an asset in use may still be listed as an orphan.",
-            "Files under res://addons/ are third-party and are not counted as orphans by default. excluded_addon_orphans says how many were left out; pass include_addon_orphans to see them.",
+            "Files under res://addons/ are third-party and are not counted as orphans by default, nor their signals as dead. excluded_addon_orphans and excluded_addon_dead_signals say how many were left out; pass include_addon_orphans to see them.",
             "A signal is reported as dead only when no file emits it, connects to it, or wires it in a scene. A connection made through a variable name cannot be seen, and neither can a member call written with the name and the .connect on different lines.",
             "broken_connections reports only what it can prove. A connection whose receiving node sits inside an instanced or inherited scene, has a built-in or non-GDScript script, or extends something outside the project or the class reference is not judged, so an empty list is not a promise that every connection resolves.",
             "source_changed_since_import and output_changed_since_import compare the source and the outputs against the source_md5 and dest_md5 Godot recorded in the .md5 it wrote beside the output. Those are two of the three questions the engine asks; it also checks the importer's version, which is not checked here, so no finding is not a promise that Godot will leave the asset alone. import_freshness_unchecked says a record is there and a half of it was not compared, and its detail says which half and why. source_newer_than_output is the fallback where there is no record at all: it compares modification times, which a clone, a checkout or a worktree does not preserve, so it is evidence rather than a verdict, and the remedy is to open the project in the editor once so a record exists.",
@@ -6110,7 +6111,7 @@
           "properties": {
             "include_addon_orphans": {
               "default": false,
-              "description": "Count files under res://addons/ as orphans. Off by default: addons are third-party code a developer did not write and is not responsible for tidying. excluded_addon_orphans reports how many were left out.",
+              "description": "Count files under res://addons/ as orphans and their signals as dead. Off by default: addons are third-party code. excluded_addon_orphans and excluded_addon_dead_signals say how many were left out.",
               "type": "boolean"
             },
             "include_broken_connections": {

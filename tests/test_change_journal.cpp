@@ -211,6 +211,7 @@ void test_files_come_from_what_the_answer_says_it_wrote() {
     saved.answer = {{"scene_path", "res://main.tscn"}, {"file_bytes", 120}};
     const auto save = journal::entryFor(saved);
     ASSERT_EQ(save["files"], json::array({"res://main.tscn"}));
+    ASSERT_EQ(save["scene"], "res://main.tscn");
     ASSERT_TRUE(save["undo_note"].get<std::string>().find("no step") != std::string::npos);
 }
 

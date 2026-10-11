@@ -1338,7 +1338,9 @@ static void test_posix_reconnect_and_io_share_request_deadline() {
         std::chrono::steady_clock::now() - started);
     client->disconnect();
     ASSERT_TRUE(result.isErr());
-    ASSERT_TRUE(elapsed < std::chrono::milliseconds(180));
+    // Well under the 500 ms a separate reconnect budget would take, with room
+    // for a loaded hosted runner: 180 ms failed once on macOS (#1325).
+    ASSERT_TRUE(elapsed < std::chrono::milliseconds(400));
     ASSERT_TRUE(hasTransportState(result.error(), false, false, true));
 }
 

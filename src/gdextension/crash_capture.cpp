@@ -418,7 +418,10 @@ bool armCrashCapture(const std::string& fallback_directory) {
     const auto base = root / ("godot_crash_" + std::to_string(GetCurrentProcessId()));
     const auto report = std::filesystem::path(base).replace_extension(".log");
     const auto dump = std::filesystem::path(base).replace_extension(".dmp");
-    g_report_path = report.string();
+    // The form every other path Didi reports takes: UTF-8 with / throughout.
+    // string() joined the project's D:/ path to .didi\crash and was in the
+    // ANSI code page besides (#1324). The handler writes through the wide one.
+    g_report_path = paths::projectPathToUtf8(report);
     g_report_path_wide = report.wstring();
     g_dump_path_wide = dump.wstring();
     g_main_thread_id = GetCurrentThreadId();

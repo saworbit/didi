@@ -134,6 +134,10 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Fixed
 
+- `2026-10-12` The change journal names the scene an `editor_save_scene` saved, the one entry that touches disk. [#1317](https://github.com/saworbit/didi/issues/1317) · [PR #1335](https://github.com/saworbit/didi/pull/1335)
+- `2026-10-12` `project_audit_assets` leaves dead signals under `res://addons/` out by default, as it does orphans, and counts them. [#1318](https://github.com/saworbit/didi/issues/1318) · [PR #1335](https://github.com/saworbit/didi/pull/1335)
+- `2026-10-12` A game's log names its crash report with one separator, in the `/` form every other path Didi reports takes. [#1324](https://github.com/saworbit/didi/issues/1324) · [PR #1335](https://github.com/saworbit/didi/pull/1335)
+- `2026-10-12` `IPC.PosixReconnectSharesDeadline` allows 400 ms, still well under the 500 ms a separate reconnect budget would take. [#1325](https://github.com/saworbit/didi/issues/1325) · [PR #1335](https://github.com/saworbit/didi/pull/1335)
 - `2026-10-12` `runtime_run_scenario` and `project_run_tests` refuse a name whose record belongs to the other, rather than replacing it. [#1321](https://github.com/saworbit/didi/issues/1321) · [PR #1334](https://github.com/saworbit/didi/pull/1334)
 - `2026-10-12` An `assert_output` with an empty `text` says to leave `text` out to match any line at its level, and the reference says how to assert no errors. [#1320](https://github.com/saworbit/didi/issues/1320) · [PR #1334](https://github.com/saworbit/didi/pull/1334)
 - `2026-10-12` A working job's `elapsed_ms` is how long it has run, not 0 until its first progress update. [#1312](https://github.com/saworbit/didi/issues/1312) · [PR #1333](https://github.com/saworbit/didi/pull/1333)
