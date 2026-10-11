@@ -930,8 +930,13 @@ function Assert-BeforeReported {
 function Assert-ObservedAnswersRecorded {
     $missing = @()
     foreach ($tool in @($observedFields.Keys | Sort-Object)) {
+        # A job read while the job is still working answers with its progress,
+        # not the tool's result, so like a dry run it has no post-state yet.
+        # The reimport job block reads several of those on a slow runner (Q8).
         $answered = @($observedExchanges | Where-Object {
-            $_.Tool -eq $tool -and -not ($null -ne $_.Arguments.PSObject.Properties["dry_run"] -and $_.Arguments.dry_run) -and $null -ne (Get-ObservedPayload $_.Response)
+            $payload = Get-ObservedPayload $_.Response
+            $_.Tool -eq $tool -and -not ($null -ne $_.Arguments.PSObject.Properties["dry_run"] -and $_.Arguments.dry_run) -and $null -ne $payload -and
+                -not ($payload.status -eq "working" -and $null -ne $payload.PSObject.Properties["job"])
         })
         if ($answered.Count -eq 0) {
             $missing += "$tool never answered successfully"
