@@ -129,6 +129,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Fixed
 
+- `2026-10-11` The README and quick start say where setup puts the guide beside a parent `CLAUDE.md`, and the developer guide how the perf fixtures hold their load. [#1144](https://github.com/saworbit/didi/issues/1144) · [#1276](https://github.com/saworbit/didi/issues/1276) · [PR #1278](https://github.com/saworbit/didi/pull/1278)
 - `2026-10-11` `runtime_watch_invariants` and `runtime_explore_scene` read `paused` back from the tree, so a watch on a paused game no longer answers `false`. [#1020](https://github.com/saworbit/didi/issues/1020) · [PR #1275](https://github.com/saworbit/didi/pull/1275)
 - `2026-10-11` With a `CLAUDE.md` above the project, `didi setup` puts the agent guide in the project's own `CLAUDE.md`, since Claude Code skips `AGENTS.md` there. [#1144](https://github.com/saworbit/didi/issues/1144) · [PR #1274](https://github.com/saworbit/didi/pull/1274)
 - `2026-10-10` A property holding a freed node reads as `null` with `freed: true`, and nothing calls into the freed object. [#1266](https://github.com/saworbit/didi/issues/1266) · [PR #1270](https://github.com/saworbit/didi/pull/1270)

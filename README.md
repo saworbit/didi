@@ -217,7 +217,8 @@ See the [Roadmap](docs/ROADMAP.md), [Phase 7 feasibility evidence](docs/PHASE_7_
    build/Release/didi.exe setup --project D:/my_game --client claude-code --godot C:/Godot/Godot_v4.7.2-stable_win64.exe
    ```
    This installs the addon that matches the binary, enables it, writes `.mcp.json` and an
-   agent guide in `AGENTS.md`, starts the editor and waits until it answers. `--client`
+   agent guide in `AGENTS.md`, or in a `CLAUDE.md` where Claude Code would skip `AGENTS.md`,
+   starts the editor and waits until it answers. `--client`
    also takes `cursor`, `vscode`, `codex` or `all`, and `didi doctor --project D:/my_game`
    checks the result from outside the editor. Steps 3 and 4 below are the same thing by hand.
 3. **Enable Godot Plugin**:
