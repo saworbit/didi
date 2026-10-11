@@ -14,6 +14,11 @@ can be driven the way an agent drives it: one tool call per step.
 Every call and its full answer is appended to `--log` as a JSON line, with the
 engine lines the editor printed during it, so a session leaves a transcript
 behind that a finding can quote.
+
+The socket listens on 127.0.0.1 with no authentication, so any process of any
+local user can send calls through this server and its attachment. Run it for a
+session on a machine you own and stop it after; it is a test harness, not a way
+to share a server.
 """
 
 from __future__ import annotations

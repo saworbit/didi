@@ -51,6 +51,11 @@ The `README.md` inside the archive has the notes for that platform. On macOS, cl
 > after an upgrade: it replaces an older addon, and refuses to replace a newer one without
 > `--replace-addon`. `didi doctor --project D:/my_game` checks all of it from outside the
 > editor. The rest of this step is the same thing by hand.
+>
+> Add `.didi/` to the project's `.gitignore`. Didi keeps its change journal, file locks,
+> crash reports and run records there, and the journal holds the arguments of every change,
+> so none of it belongs in version control. `didi setup` does not add the line yet (#1307).
+> The `.mcp.json` it writes names this machine's paths to `didi` and the project.
 
 1. Copy the built `build/addons/didi` folder (or the archive's `addons/didi`) into your Godot project root, as `addons/didi`:
    ```
