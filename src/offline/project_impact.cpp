@@ -958,7 +958,9 @@ Result<RenamePlan> planRename(const std::string& root_dir, const ProjectRenameOp
             "resource_reference for a scene or resource line this does not rewrite, "
             "autoload for the [autoload] key in project.godot. "
             "script_patch_method is the tool for the code_reference entries and cannot touch "
-            "the others, so read the kind before acting on the list.",
+            "the others, so read the kind before acting on the list. It rewrites a whole "
+            "declaration and cannot rename one: add the new one with create_if_missing, or "
+            "rewrite the script with script_create and overwrite: true.",
             "A code_reference is reported rather than rewritten because the language is "
             "dynamically typed, so a whole-word match may be this symbol or an unrelated local "
             "that shares the name, and rewriting on that evidence would be its own silent "

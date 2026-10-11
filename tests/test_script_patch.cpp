@@ -353,6 +353,57 @@ static void test_gdscript_symbol_patch_signal() {
     ASSERT_TRUE(patched.find("signal health_changed(new_hp: int)") != std::string::npos);
 }
 
+// A created member lands beside the members of its kind, and never between
+// the header and the class doc comment, which Godot reads from the ## lines
+// before the first member (#1305).
+static void test_gdscript_symbol_patch_creates_a_member_beside_its_kind() {
+    const std::string original =
+        "class_name Player\n"
+        "extends CharacterBody2D\n"
+        "## Twin-stick hero.\n"
+        "\n"
+        "signal health_updated(current: int)\n"
+        "\n"
+        "@export var speed := 10.0\n"
+        "var table := {\n"
+        "\t\"a\": 1,\n"
+        "}\n"
+        "@onready var sprite: Sprite2D = $Sprite\n"
+        "var health := 3\n"
+        "\n"
+        "func _ready():\n"
+        "\tvar local := 1\n";
+    const auto create = [&](const std::string& source, const std::string& name, const std::string& definition,
+                            const std::string& type) {
+        auto patched = didi::offline::GDScriptDiagnostics::patchSymbol(source, name, definition, type, true);
+        ASSERT_TRUE(patched.isOk());
+        ASSERT_TRUE(patched.value().created);
+        return patched.value().source_text;
+    };
+    auto text = create(original, "shoot_sfx", "@onready var shoot_sfx: AudioStreamPlayer2D = $ShootSfx\n", "variable");
+    ASSERT_TRUE(text.find("@onready var sprite: Sprite2D = $Sprite\n@onready var shoot_sfx: AudioStreamPlayer2D = $ShootSfx\nvar health := 3\n") !=
+                std::string::npos);
+    ASSERT_TRUE(text.find("extends CharacterBody2D\n## Twin-stick hero.\n") != std::string::npos);
+
+    text = create(original, "lives", "var lives := 2", "variable");
+    ASSERT_TRUE(text.find("var health := 3\nvar lives := 2\n\nfunc _ready():") != std::string::npos);
+    // Not inside a function, where a local of the same kind sits.
+    ASSERT_TRUE(text.find("\tvar local := 1\n") != std::string::npos);
+
+    text = create(original, "died", "signal died", "signal");
+    ASSERT_TRUE(text.find("signal health_updated(current: int)\nsignal died\n") != std::string::npos);
+
+    // A declaration whose brackets run over lines ends where they close.
+    const std::string tabled = "extends Node\n\nvar table := {\n\t\"a\": 1,\n}\n\nfunc f():\n\tpass\n";
+    text = create(tabled, "after", "var after := 1", "variable");
+    ASSERT_TRUE(text.find("}\nvar after := 1\n") != std::string::npos);
+
+    // Nothing of its kind yet: below the header and the doc comment.
+    const std::string bare = "extends Node\n## Documented.\n## Second line.\n\nfunc f():\n\tpass\n";
+    text = create(bare, "first", "var first := 1", "variable");
+    ASSERT_TRUE(text.find("extends Node\n## Documented.\n## Second line.\n\nvar first := 1\n") != std::string::npos);
+}
+
 static void test_gdscript_symbol_patch_preserves_ordinary_comments() {
     std::string original =
         "# Copyright 2026 Example Project\n"
@@ -984,6 +1035,8 @@ struct RegisterScriptPatchTests {
         registerTest("GDScript.Godot45CompilerOutput", test_godot_45_multiline_compiler_output_is_preserved);
         registerTest("GDScript.PatchFunction", test_gdscript_symbol_patch_function);
         registerTest("GDScript.PatchSignal", test_gdscript_symbol_patch_signal);
+        registerTest("GDScript.PatchCreatesAMemberBesideItsKind",
+                     test_gdscript_symbol_patch_creates_a_member_beside_its_kind);
         registerTest("GDScript.PatchPreservesOrdinaryComments", test_gdscript_symbol_patch_preserves_ordinary_comments);
         registerTest("GDScript.PatchPreservesSiblingPreamble", test_gdscript_symbol_patch_preserves_next_sibling_preamble);
         registerTest("GDScript.PatchKeepsTrailingBlankLines",
