@@ -108,7 +108,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Changed
 
-- `2026-10-11` The live harness compares `runtime_launch`'s `pid` with the launched game's own process id, so seven mutating tools are left unchecked, not eight. [#1020](https://github.com/saworbit/didi/issues/1020)
+- `2026-10-11` The live harness compares `runtime_launch`'s `pid` with the launched game's own process id, so seven mutating tools are left unchecked, not eight. [#1020](https://github.com/saworbit/didi/issues/1020) · [PR #1280](https://github.com/saworbit/didi/pull/1280)
 - `2026-10-11` The physics-bound profiler fixture waits for its median frame, which the verdict judges, to pass 50 ms before it says ready. [#1276](https://github.com/saworbit/didi/issues/1276) · [PR #1275](https://github.com/saworbit/didi/pull/1275)
 - `2026-10-11` Includes between source folders go one way, and a test fails any include that goes the other way. [#1257](https://github.com/saworbit/didi/issues/1257) · [PR #1273](https://github.com/saworbit/didi/pull/1273)
 - `2026-10-11` The architecture guide lists never calling into a freed object as a bridge guarantee, and the developer guide says how a bridge error keeps its data. [#1266](https://github.com/saworbit/didi/issues/1266) · [PR #1272](https://github.com/saworbit/didi/pull/1272)
