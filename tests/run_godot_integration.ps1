@@ -2088,6 +2088,12 @@ try {
         ((Tool-Request 2530 "scene_set_property" @{ target_node = "/root/DupRoot"; property_name = "editor_description"; value = "__BOM__note" }).Replace("__BOM__", '\ufeff')),
         (Tool-Request 2531 "scene_get_property" @{ target_node = "/root/DupRoot"; property_name = "editor_description" }),
         (Tool-Request 2532 "scene_set_property" @{ target_node = "/root/DupRoot"; property_name = "editor_description"; value = "a$([char]0)b" }),
+        # The same mark at the start of a node name, reached as an expression's
+        # context node. The sandbox built the path below the scene root with
+        # Godot's UTF-8 reader, which dropped the mark, so the node was not
+        # found (#1255).
+        ((Tool-Request 2533 "scene_instantiate_node" @{ node_type = "Node"; parent_path = "/root/DupRoot"; name = "__BOM__Marked" }).Replace("__BOM__", '\ufeff')),
+        ((Tool-Request 2534 "eval_gdscript" @{ expression = "node.get_child_count()"; context_node = "/root/DupRoot/__BOM__Marked" }).Replace("__BOM__", '\ufeff')),
         (Tool-Request 2507 "scene_close" @{ discard_unsaved = $true }),
         # A resource slot whose declared type is a list. Godot spells the
         # classes a property accepts as one comma-separated hint_string and
@@ -4708,6 +4714,8 @@ try {
     Assert-True ($marked.Length -eq 5 -and [int]$marked[0] -eq 0xFEFF) "A value that starts with a byte-order mark lost it on the way to the engine: $(([int[]][char[]]$marked) -join ',')"
     Assert-True ((Tool-Payload $byId[2530]).applied -eq $true) "A value that starts with a byte-order mark was not reported applied: $((Tool-Payload $byId[2530]) | ConvertTo-Json -Compress)"
     Assert-True ($byId[2532].result.isError -and $byId[2532].result.content[0].text -match "'value' holds a NUL") "A value holding a NUL was not refused by name: $($byId[2532].result.content[0].text)"
+    Assert-True (-not $byId[2533].result.isError) "A node whose name starts with a byte-order mark could not be added: $($byId[2533].result.content[0].text)"
+    Assert-True (-not $byId[2534].result.isError -and (Tool-Payload $byId[2534]).value -eq 0) "An expression could not use a node whose name starts with a byte-order mark as its context: $($byId[2534].result.content[0].text)"
     $duplicateProbe = Get-Content -LiteralPath (Join-Path $fixtureRoot "duplicate_probe.tscn") -Raw
     Assert-True ($duplicateProbe -match 'name="DupLeaf" type="Node" parent="DupBranchCopy"') "A duplicated branch reached the saved file without its children: $duplicateProbe"
     Assert-True ($duplicateProbe -match 'name="DupDeep" type="Node" parent="DupBranchCopy/DupLeaf"') "A duplicated branch reached the saved file without its grandchildren: $duplicateProbe"

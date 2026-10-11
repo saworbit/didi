@@ -6,8 +6,10 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace didi {
 namespace godot {
@@ -138,6 +140,38 @@ inline json errorJson(const Error& error) {
     if (error.data.is_null()) return errorJson(error.code, error.message);
     return errorJson(error.code, error.message, error.data);
 }
+
+
+// Values built from text keep a leading byte-order mark, which Godot's UTF-8
+// reader drops on its own (#948).
+Result<VariantValue> variantFromNative(GDExtensionVariantType type, void* native);
+void constructNativeString(NativeValue& native, const std::string& text);
+Result<VariantValue> makeString(const std::string& text);
+Result<VariantValue> makeStringName(const std::string& text);
+Result<VariantValue> makeNodePath(const std::string& text);
+Result<VariantValue> makeObject(GDExtensionObjectPtr object);
+
+template <typename T>
+Result<VariantValue> makeScalar(GDExtensionVariantType type, T value) {
+    return variantFromNative(type, &value);
+}
+
+template <typename T>
+Result<T> scalarFromVariant(VariantValue& value, GDExtensionVariantType type) {
+    auto ctor = GodotApi::instance().get_variant_to_type_constructor(type);
+    if (!ctor) return Error::internal("Missing Variant-to-native constructor for type " + std::to_string(type));
+    T result{};
+    ctor(&result, value.ptr());
+    return result;
+}
+
+Result<GDExtensionObjectPtr> objectFromVariant(VariantValue& value);
+Result<GDExtensionObjectPtr> singleton(const std::string& name);
+Result<VariantValue> callObject(GDExtensionObjectPtr object, const char* class_name,
+                                const char* method_name, int64_t hash,
+                                const std::vector<const VariantValue*>& arguments = {});
+Result<VariantValue> callVariant(VariantValue& target, const std::string& method_name,
+                                 const std::vector<const VariantValue*>& arguments = {});
 
 } // namespace godot
 } // namespace didi
