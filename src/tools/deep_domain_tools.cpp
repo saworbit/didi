@@ -1575,17 +1575,17 @@ void ToolRegistry::registerDeepDomainTools() {
         ToolDefinition t;
         t.name = "project_add_export_preset";
         t.description =
-            "Adds one export preset to export_presets.cfg, which project_export needs and a project "
-            "nobody has exported by hand does not have. It only adds: a name already in the file "
-            "is refused. It writes the fewest keys every supported Godot loads cleanly and leaves "
-            "the rest to the editor. With an editor attached, the editor is made to read the file "
-            "again, because an open editor otherwise writes its own list back over it.";
+            "Adds one export preset to export_presets.cfg, which project_export needs. A name "
+            "already in the file is refused. It writes the fewest keys every Godot line loads "
+            "cleanly. Its builds leave out addons/didi. An attached editor is made to reread the "
+            "file, or it would write its own list over it.";
         t.inputSchema = {{"type", "object"}, {"properties", {
             {"name", {{"type", "string"}, {"minLength", 1}, {"maxLength", 256}}},
             {"platform", {{"type", "string"},
                           {"enum", {"Windows Desktop", "Linux", "macOS", "Android", "iOS", "Web",
                                     "visionOS"}}}},
-            {"export_path", {{"type", "string"}, {"maxLength", 1024}}}
+            {"export_path", {{"type", "string"}, {"maxLength", 1024}}},
+            {"include_didi_addon", {{"type", "boolean"}, {"default", false}}}
         }}, {"required", {"name", "platform"}}};
         t.handler = [this](const json& args) { return handleProjectAddExportPreset(args, m_ipcClient); };
         t.outputSchema = projectAddExportPresetOutputSchema();

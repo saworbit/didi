@@ -769,7 +769,8 @@ std::optional<Error> exportPlatformRefusal(const json& args) {
 Result<ExportPresetAddition> planExportPresetAddition(const std::optional<std::string>& existing,
                                                       const std::string& name,
                                                       const std::string& platform,
-                                                      const std::string& export_path) {
+                                                      const std::string& export_path,
+                                                      bool include_didi_addon) {
     if (name.empty()) return invalidPresetArgument("name", "name must not be empty");
     if (paths::codePointCount(name) > kMaxPresetNameCharacters) {
         return invalidPresetArgument("name", "name must be at most " +
@@ -882,7 +883,12 @@ Result<ExportPresetAddition> planExportPresetAddition(const std::optional<std::s
         "runnable=false",
         "export_filter=\"all_resources\"",
         "include_filter=\"\"",
-        "exclude_filter=\"\"",
+        // A pack exported with this filter holds no addon file and no
+        // extension list, and starts with no engine line; a release build
+        // gets no didi_extension.dll beside it. Without it the shipped game
+        // loads the library and starts the session host ADMIN_GUIDE says to
+        // keep out of production, measured on 4.5.1, 4.6.2 and 4.7.2 (#1291).
+        include_didi_addon ? "exclude_filter=\"\"" : "exclude_filter=\"addons/didi/*\"",
         "export_path=" + configFileString(export_path),
         "",
         "[preset." + index + ".options]",
@@ -914,6 +920,9 @@ Result<ExportPresetAddition> planExportPresetForProject(const json& args) {
     }
     if (args.contains("export_path") && !args["export_path"].is_string()) {
         return invalidPresetArgument("export_path", "export_path must be a string");
+    }
+    if (args.contains("include_didi_addon") && !args["include_didi_addon"].is_boolean()) {
+        return invalidPresetArgument("include_didi_addon", "include_didi_addon must be a boolean");
     }
 
     // Stored the way the Export dialog stores a path inside the project:
@@ -962,7 +971,8 @@ Result<ExportPresetAddition> planExportPresetForProject(const json& args) {
         existing = buffer.str();
     }
     return planExportPresetAddition(existing, args["name"].get<std::string>(),
-                                    args["platform"].get<std::string>(), export_path);
+                                    args["platform"].get<std::string>(), export_path,
+                                    args.value("include_didi_addon", false));
 }
 
 } // namespace didi::offline

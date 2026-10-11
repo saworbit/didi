@@ -482,7 +482,7 @@ platform="<platform>"
 runnable=false
 export_filter="all_resources"
 include_filter=""
-exclude_filter=""
+exclude_filter="addons/didi/*"
 export_path="<export_path>"
 
 [preset.N.options]
@@ -496,7 +496,7 @@ Each line is there because an engine needs it:
 | :--- | :--- |
 | `name`, `platform` | The engine finds the platform first and then addresses the preset by name. |
 | `runnable=false` | 4.5.1 and 4.6.2 read `runnable` with no default, so leaving it out prints `Couldn't find the given section "preset.0" and key "runnable", and no default was given` on every load. 4.7.2 reads it only for compatibility, and `false` is the value it ignores. |
-| `export_filter`, `include_filter`, `exclude_filter` | Read with no default on all three lines. Each one left out prints the same ERROR on every load. |
+| `export_filter`, `include_filter`, `exclude_filter` | Read with no default on all three lines. Each one left out prints the same ERROR on every load. `exclude_filter` holds `addons/didi/*` unless the call passes `include_didi_addon: true`, so a build does not ship the addon and its extension library, which would start the session host in the game (#1291). |
 | `export_path` | Read with a default, so it is optional to the engine. It is written because every line writes it, and it is where the Export dialog puts the file. |
 | `[preset.N.options]` with one key | The engine asks for the keys of this section unconditionally and prints `Cannot get keys from nonexistent section "preset.0.options"` when there is none. A header with nothing under it counts as no section, because `ConfigFile` does not keep an empty one. `custom_template/debug` is declared by all seven platforms on all three lines, and `""` is its default, so the line changes nothing. |
 

@@ -5824,7 +5824,7 @@
           "openWorldHint": false,
           "readOnlyHint": false
         },
-        "description": "Adds one export preset to export_presets.cfg, which project_export needs and a project nobody has exported by hand does not have. It only adds: a name already in the file is refused. It writes the fewest keys every supported Godot loads cleanly and leaves the rest to the editor. With an editor attached, the editor is made to read the file again, because an open editor otherwise writes its own list back over it.",
+        "description": "Adds one export preset to export_presets.cfg, which project_export needs. A name already in the file is refused. It writes the fewest keys every Godot line loads cleanly. Its builds leave out addons/didi. An attached editor is made to reread the file, or it would write its own list over it.",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {
@@ -5837,6 +5837,11 @@
               "description": "Where the editor's Export dialog proposes to write the build, relative to the project or as res://. Optional: project_export takes its own output_path either way. Stored relative to the project, the way the editor stores a path inside it.",
               "maxLength": 1024,
               "type": "string"
+            },
+            "include_didi_addon": {
+              "default": false,
+              "description": "Ship addons/didi in this preset's builds, which starts Didi's session host in the game.",
+              "type": "boolean"
             },
             "name": {
               "description": "The preset's name, which project_export's preset argument then takes. It must not be a name the file already has, because Godot exports the first preset with a name and the second could never be reached. One line, no control characters. No %20 and no - at the start either, because project_export asks Godot for the preset by name on its command line, where Godot decodes %20 into a space and reads a leading - as one of its own options.",
