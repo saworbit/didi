@@ -15,6 +15,9 @@ func _ready() -> void:
 	print("didi_output_canary_message")
 	push_warning("didi_output_canary_warning")
 	stop_during_step = OS.get_environment("DIDI_TEST_STOP_DURING_STEP") == "1"
+	# The game's own process id, in a native property eval_gdscript can read,
+	# as the witness for runtime_launch's pid (#1020).
+	editor_description = str(OS.get_process_id())
 	set_meta("frame_counter", 0)
 	set_meta("huge_metadata", "x".repeat(300000))
 	detached_probe = Node.new()

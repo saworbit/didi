@@ -191,8 +191,10 @@
       "witness": "the runtime fixture's _input, which reads Input the way a game does"
     },
     "runtime_launch": {
-      "exempt": "Starts a game process, and the conformance block works against the game the harness already attached.",
-      "issue": 1020
+      "observed": [
+        "pid"
+      ],
+      "witness": "the launched game's own OS.get_process_id(), read with eval_gdscript through the session the launch selected"
     },
     "runtime_recover_editor": {
       "exempt": "Managed mode only, which the live harness does not start; tests/test_managed_recovery_live.py drives it without comparing the answer with the engine.",
