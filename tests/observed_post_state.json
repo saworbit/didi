@@ -20,8 +20,10 @@
       "witness": "The asset loaded with CACHE_MODE_IGNORE through observed_witness.gd"
     },
     "asset_reimport": {
-      "exempt": "Its answer comes from the editor's own import pass (#994), and no case reads the imported files independently of it.",
-      "issue": 1020
+      "observed": [
+        "announced"
+      ],
+      "witness": "observed_witness.gd's without_import_sidecar, which looks for each path's .import file on disk"
     },
     "audio_add_bus": {
       "observed": [
