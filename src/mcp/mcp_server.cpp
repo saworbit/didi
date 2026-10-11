@@ -635,7 +635,9 @@ json McpServer::answerJob(const JobView& view, bool as_task, const ResponseEcono
     }
     CallToolResult answer;
     if (view.state == JobState::Working) {
-        job["elapsed_ms"] = std::max<int64_t>(0, view.updated_at_ms - view.created_at_ms);
+        // Since it started. Created to last update was 0 for a job that
+        // reports no progress, so an export ten seconds in said 0 (#1312).
+        job["elapsed_ms"] = std::max<int64_t>(0, m_jobs.now() - view.created_at_ms);
         job["poll_interval_ms"] = view.poll_interval_ms;
         json payload = {
             {"status", "working"},

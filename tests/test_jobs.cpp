@@ -417,6 +417,9 @@ void test_a_request_id_makes_a_job_that_answers_its_repeat_without_running_again
     ASSERT_FALSE(first.result.value("isError", false));
     const auto working = textPayload(first);
     ASSERT_EQ(working["status"], "working");
+    // How long it has run, which is at least the wait before answering, not
+    // the 0 between creation and a last update a build never makes (#1312).
+    ASSERT_TRUE(working["job"]["elapsed_ms"].get<int64_t>() >= 150);
     ASSERT_EQ(working["job"]["request_id"], "build-0001");
     ASSERT_EQ(working["job"]["state"], "working");
     ASSERT_EQ(working["follow_up"][0]["work"], "poll");
