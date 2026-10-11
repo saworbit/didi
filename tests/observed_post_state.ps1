@@ -692,6 +692,15 @@ function Get-ObservedPostStateCases([string]$GameSessionId = "", [string]$Launch
                $cell = @($s.call.cells)[0]
                Agree "cells.item" $cell.item $s.witness.returned.item
                Agree "cells.orientation" $cell.orientation $s.witness.returned.orientation } },
+        # announced is read off the disk after the editor's import pass: the
+        # paths that have no .import sidecar then. A script never gets one and
+        # the imported SVG keeps its own, so an answer copied from the request,
+        # or a constant, disagrees. imported is not cased: whether a path lands
+        # there depends on whether the editor had indexed it before the call.
+        @{ Tool = "asset_reimport"; Session = "editor"; Steps = @(
+            (Step "call" "asset_reimport" @{ paths = @("res://subject.gd", "res://reimport_probe.svg"); timeout_ms = 10000 }),
+            (Witness "witness" "without_import_sidecar" @(,@("res://subject.gd", "res://reimport_probe.svg"))))
+           Agree = { param($s) Agree "announced" @($s.call.announced) @($s.witness.returned) } },
         # The save reads the file it wrote, since save_scene answers OK whether
         # or not the editor wrote it (#1019). Last of the editor cases, so the
         # observed scene goes to disk with every edit above. file_bytes has no
@@ -921,8 +930,13 @@ function Assert-BeforeReported {
 function Assert-ObservedAnswersRecorded {
     $missing = @()
     foreach ($tool in @($observedFields.Keys | Sort-Object)) {
+        # A job read while the job is still working answers with its progress,
+        # not the tool's result, so like a dry run it has no post-state yet.
+        # The reimport job block reads several of those on a slow runner (Q8).
         $answered = @($observedExchanges | Where-Object {
-            $_.Tool -eq $tool -and -not ($null -ne $_.Arguments.PSObject.Properties["dry_run"] -and $_.Arguments.dry_run) -and $null -ne (Get-ObservedPayload $_.Response)
+            $payload = Get-ObservedPayload $_.Response
+            $_.Tool -eq $tool -and -not ($null -ne $_.Arguments.PSObject.Properties["dry_run"] -and $_.Arguments.dry_run) -and $null -ne $payload -and
+                -not ($payload.status -eq "working" -and $null -ne $payload.PSObject.Properties["job"])
         })
         if ($answered.Count -eq 0) {
             $missing += "$tool never answered successfully"

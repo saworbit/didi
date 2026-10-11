@@ -277,6 +277,16 @@ func file_length(path: String) -> int:
 	return file.get_length() if file != null else -1
 
 
+## The paths among these that have no .import sidecar on disk, which is what
+## asset_reimport answers as announced (#1020).
+func without_import_sidecar(paths: Array) -> Array:
+	var missing := []
+	for path in paths:
+		if not FileAccess.file_exists(String(path) + ".import"):
+			missing.append(path)
+	return missing
+
+
 ## What project.godot holds for one setting, read with ConfigFile rather than
 ## ProjectSettings and written back out the way the file spells it. Null when
 ## the file has no line for it.
