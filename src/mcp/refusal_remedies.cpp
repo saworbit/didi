@@ -378,6 +378,7 @@ const std::map<std::string, Rule>& rules() {
                             path.empty() ? json::object() : json{{"shader_path", path}},
                             "Compile the shader to see the line that fails.");
         }},
+        {"record_name_taken", [](const Refusal&) { return field("name"); }},
         {"dirty_state_unavailable", [](const Refusal&) {
             return nextCall("editor_save_scene", json::object(),
                             "This engine cannot say whether the scene is saved; save it first.");

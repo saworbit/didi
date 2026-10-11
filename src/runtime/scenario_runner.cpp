@@ -221,7 +221,9 @@ Result<ScenarioStep> parseStep(const json& step, size_t index) {
             if (step.contains("text")) {
                 if (!step["text"].is_string() || step["text"].get<std::string>().empty() ||
                     step["text"].get<std::string>().size() > 256) {
-                    return refuse(stepName(index) + ".text must be a string of 1 to 256 bytes.",
+                    return refuse(stepName(index) + ".text must be a string of 1 to 256 bytes. Leave "
+                                  "it out to match any line at level, or with absent: true to "
+                                  "assert that none appeared.",
                                   "steps", {{"step", index}});
                 }
                 parsed.text = step["text"].get<std::string>();
@@ -1025,6 +1027,26 @@ std::vector<ScenarioFile> scenarioFilesFromJson(const json& files, bool* malform
 
 fs::path scenarioRecordDirectory(const fs::path& project_root) {
     return project_root / ".didi" / "scenarios";
+}
+
+std::optional<Error> refuseRecordOfOtherKind(const fs::path& project_root, const std::string& name,
+                                             const std::string& kind) {
+    const auto bytes = readBytes(scenarioRecordDirectory(project_root) / (name + ".json"));
+    if (!bytes) return std::nullopt;
+    const json record = json::parse(*bytes, nullptr, false);
+    if (!record.is_object()) return std::nullopt;
+    const std::string held = record.value("kind", std::string("scenario"));
+    if (held == kind) return std::nullopt;
+    const std::string other = held == "tests" ? "project_run_tests" : "runtime_run_scenario";
+    return Error(409,
+                 ".didi/scenarios/" + name + ".json is " + other + "'s record, and a " +
+                     (kind == "tests" ? std::string("test run") : std::string("scenario")) +
+                     " under that name would replace it. Nothing was run. Give this one another name.",
+                 {{"code", "record_name_taken"},
+                  {"field", "name"},
+                  {"record", ".didi/scenarios/" + name + ".json"},
+                  {"record_kind", held},
+                  {"retryable", false}});
 }
 
 json scenarioRecordsView(const fs::path& project_root) {

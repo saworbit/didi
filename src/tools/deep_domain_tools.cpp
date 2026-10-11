@@ -742,6 +742,9 @@ CallToolResult handleProjectRunTests(const json& args, std::shared_ptr<ipc::IIpc
     // writing, in this server or another, is never read or cleared as this
     // run's (#1242). The name is a plain file name, so this stays inside .didi.
     const auto& name = request.value().name;
+    if (auto taken = runtime::refuseRecordOfOtherKind(root.value(), name, "tests")) {
+        return CallToolResult::fromError(*taken);
+    }
     const auto started_at_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                                    std::chrono::system_clock::now().time_since_epoch())
                                    .count();

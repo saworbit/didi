@@ -134,6 +134,8 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Fixed
 
+- `2026-10-12` `runtime_run_scenario` and `project_run_tests` refuse a name whose record belongs to the other, rather than replacing it. [#1321](https://github.com/saworbit/didi/issues/1321)
+- `2026-10-12` An `assert_output` with an empty `text` says to leave `text` out to match any line at its level, and the reference says how to assert no errors. [#1320](https://github.com/saworbit/didi/issues/1320)
 - `2026-10-12` A working job's `elapsed_ms` is how long it has run, not 0 until its first progress update. [#1312](https://github.com/saworbit/didi/issues/1312) · [PR #1333](https://github.com/saworbit/didi/pull/1333)
 - `2026-10-12` A detached `runtime_launch` reports `duration_seconds` for the whole call, spawn to session selected, not the spawn alone. [#1313](https://github.com/saworbit/didi/issues/1313) · [PR #1333](https://github.com/saworbit/didi/pull/1333)
 - `2026-10-12` `shader_check_compile` checks a Shader kept in a `.tres` or `.res`, the form `resource_create` writes, and `resource_create` says the code was not compiled. [#1299](https://github.com/saworbit/didi/issues/1299) · [PR #1332](https://github.com/saworbit/didi/pull/1332)

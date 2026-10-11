@@ -192,6 +192,50 @@ Error refusal(const json& arguments) {
 
 std::string fieldOf(const Error& error) { return error.data.value("field", std::string()); }
 
+// An empty text is refused, and the refusal says the form that asserts no
+// line at a level: text left out (#1320). That form parses.
+void test_no_errors_is_asserted_by_leaving_text_out() {
+    const json run = json::array({{{"kind", "wait"}, {"frames", 3}},
+                                  {{"kind", "assert"}, {"expression", kY}, {"maximum", 1000}}});
+    json with_empty = run;
+    with_empty.push_back({{"kind", "assert_output"}, {"level", "error"}, {"text", ""}, {"absent", true}});
+    const auto empty = refusal(scenario(with_empty));
+    ASSERT_TRUE(empty.message.find("Leave it out") != std::string::npos);
+    json no_text = run;
+    no_text.push_back({{"kind", "assert_output"}, {"level", "error"}, {"absent", true}});
+    const auto spec = parsed(scenario(no_text));
+    ASSERT_TRUE(spec.steps.back().text.empty());
+    ASSERT_EQ(spec.steps.back().level, "error");
+    ASSERT_TRUE(spec.steps.back().absent);
+}
+
+// A scenario and a test run record under the same names, and one replaced the
+// other's record with nothing said (#1321). Each refuses the other's.
+void test_a_record_of_the_other_kind_is_not_replaced() {
+    const auto root = fs::temp_directory_path() /
+                      ("didi-record-kinds-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    const auto records = didi::runtime::scenarioRecordDirectory(root);
+    fs::create_directories(records);
+    std::ofstream(records / "tests.json", std::ios::binary) << R"({"kind": "tests", "verdict": "pass"})";
+    std::ofstream(records / "jump.json", std::ios::binary) << R"({"verdict": "pass", "scene_path": "res://a.tscn"})";
+    using didi::runtime::refuseRecordOfOtherKind;
+    const auto scenario_over_tests = refuseRecordOfOtherKind(root, "tests", "scenario");
+    ASSERT_TRUE(scenario_over_tests.has_value());
+    ASSERT_EQ(scenario_over_tests->code, 409);
+    ASSERT_EQ(scenario_over_tests->data["code"], "record_name_taken");
+    ASSERT_EQ(scenario_over_tests->data["record_kind"], "tests");
+    ASSERT_EQ(scenario_over_tests->data["field"], "name");
+    const auto tests_over_scenario = refuseRecordOfOtherKind(root, "jump", "tests");
+    ASSERT_TRUE(tests_over_scenario.has_value());
+    ASSERT_EQ(tests_over_scenario->data["record_kind"], "scenario");
+    // The same kind replaces its own record, and a new name has none.
+    ASSERT_TRUE(!refuseRecordOfOtherKind(root, "tests", "tests").has_value());
+    ASSERT_TRUE(!refuseRecordOfOtherKind(root, "jump", "scenario").has_value());
+    ASSERT_TRUE(!refuseRecordOfOtherKind(root, "fresh", "scenario").has_value());
+    std::error_code ignored;
+    fs::remove_all(root, ignored);
+}
+
 void test_a_scenario_with_no_assertion_is_refused() {
     const auto none = refusal(scenario(json::array({{{"kind", "wait"}, {"frames", 10}},
                                                     {{"kind", "press"}, {"action", "jump"}}})));
@@ -697,6 +741,10 @@ void test_refusals_reach_the_caller_with_what_fixes_them() {
 struct RegisterScenarioRunnerTests {
     RegisterScenarioRunnerTests() {
         registerTest("ScenarioRunner.NoAssertionIsRefused", test_a_scenario_with_no_assertion_is_refused);
+        registerTest("ScenarioRunner.NoErrorsIsAssertedByLeavingTextOut",
+                     test_no_errors_is_asserted_by_leaving_text_out);
+        registerTest("ScenarioRunner.ARecordOfTheOtherKindIsNotReplaced",
+                     test_a_record_of_the_other_kind_is_not_replaced);
         registerTest("ScenarioRunner.ArgumentsAreRefusedBeforeLaunch",
                      test_arguments_are_refused_before_a_game_starts);
         registerTest("ScenarioRunner.HeadlessCaptureNamesTheFix",

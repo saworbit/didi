@@ -187,6 +187,13 @@ std::vector<ScenarioFile> scenarioFilesFromJson(const json& files, bool* malform
 // <project>/.didi/scenarios
 std::filesystem::path scenarioRecordDirectory(const std::filesystem::path& project_root);
 
+// runtime_run_scenario and project_run_tests both record under
+// .didi/scenarios/<name>.json, so a scenario named tests replaced the last test
+// run's record (#1321). Refuses, before anything runs, a name whose record
+// belongs to the other kind ("scenario" or "tests"), naming the record.
+std::optional<Error> refuseRecordOfOtherKind(const std::filesystem::path& project_root,
+                                             const std::string& name, const std::string& kind);
+
 // What godot://project/scenarios answers: every stored record, newest first,
 // each with whether a file it ran against has changed since.
 json scenarioRecordsView(const std::filesystem::path& project_root);
