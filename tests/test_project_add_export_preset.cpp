@@ -76,7 +76,8 @@ json call(const json& arguments) {
 
 // The block the amendment records, byte for byte. Every line is one that an
 // engine reads with no default, or one it writes itself, and the text loads
-// with no ERROR or WARNING line on 4.5.1, 4.6.2 and 4.7.2.
+// with no ERROR or WARNING line on 4.5.1, 4.6.2 and 4.7.2. The exclude filter
+// keeps the addon and its extension library out of the build (#1291).
 const char* const kWindowsBlock =
     "[preset.0]\n"
     "\n"
@@ -85,7 +86,7 @@ const char* const kWindowsBlock =
     "runnable=false\n"
     "export_filter=\"all_resources\"\n"
     "include_filter=\"\"\n"
-    "exclude_filter=\"\"\n"
+    "exclude_filter=\"addons/didi/*\"\n"
     "export_path=\"build/game.exe\"\n"
     "\n"
     "[preset.0.options]\n"
@@ -271,6 +272,34 @@ void writes_what_every_engine_loads() {
         "project_export", {{"preset", "Windows Build"}, {"output_path", "res://out.pck"},
                            {"mode", "pack"}, {"dry_run", true}});
     ASSERT_TRUE(!preview.isError);
+}
+
+// A preset that ships the addon is one a caller asks for. Anything but a
+// boolean is refused before the file is touched (#1291).
+void the_addon_ships_only_when_asked() {
+    ScopedProject project("include-addon");
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    registry.setIpcClient(nullptr);
+    const auto refused = registry.callTool(
+        "project_add_export_preset",
+        {{"name", "Debug"}, {"platform", "Linux"}, {"include_didi_addon", "yes"}});
+    ASSERT_TRUE(refused.isError);
+    ASSERT_EQ(payloadOf(refused)["error"]["data"]["field"], json("include_didi_addon"));
+    ASSERT_TRUE(!std::filesystem::exists("export_presets.cfg"));
+
+    const auto payload =
+        call({{"name", "Debug"}, {"platform", "Linux"}, {"include_didi_addon", true}});
+    ASSERT_TRUE(payload["section_written"].get<std::string>().find("addons/didi") ==
+                std::string::npos);
+    const auto text = readFile("export_presets.cfg");
+    ASSERT_TRUE(text.find("exclude_filter=\"\"\n") != std::string::npos);
+    ASSERT_TRUE(text.find("addons/didi") == std::string::npos);
+
+    const auto excluded = call({{"name", "Release"}, {"platform", "Linux"},
+                                {"include_didi_addon", false}});
+    ASSERT_TRUE(excluded["section_written"].get<std::string>().find("exclude_filter=\"addons/didi/*\"") !=
+                std::string::npos);
 }
 
 void append_keeps_the_file() {
@@ -464,7 +493,9 @@ void registration() {
     ASSERT_TRUE(schema["properties"].contains("dry_run"));
     ASSERT_TRUE(!schema["properties"].contains("confirmation_token"));
     ASSERT_EQ(schema["properties"]["platform"]["enum"], json(didi::offline::shippedExportPlatforms()));
-    for (const auto* parameter : {"name", "platform", "export_path"}) {
+    ASSERT_EQ(schema["properties"]["include_didi_addon"]["type"], json("boolean"));
+    ASSERT_EQ(schema["properties"]["include_didi_addon"]["default"], json(false));
+    for (const auto* parameter : {"name", "platform", "export_path", "include_didi_addon"}) {
         ASSERT_TRUE(schema["properties"][parameter].contains("description"));
     }
 
@@ -625,6 +656,7 @@ struct Register {
         registerTest("ExportPresetAdd.WritesWhatEveryEngineLoads", writes_what_every_engine_loads);
         registerTest("ExportPresetAdd.SaysWhenTheExportFolderIsMissing",
                      says_when_the_export_folder_is_missing);
+        registerTest("ExportPresetAdd.TheAddonShipsOnlyWhenAsked", the_addon_ships_only_when_asked);
         registerTest("ExportPresetAdd.AppendKeepsTheFile", append_keeps_the_file);
         registerTest("ExportPresetAdd.Refusals", refusals);
         registerTest("ExportPresetAdd.DryRunWritesNothing", dry_run_writes_nothing);

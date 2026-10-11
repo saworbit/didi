@@ -279,6 +279,9 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
          "Where the editor's Export dialog proposes to write the build, relative to the project "
          "or as res://. Optional: project_export takes its own output_path either way. Stored "
          "relative to the project, the way the editor stores a path inside it."},
+        {"project_add_export_preset.include_didi_addon",
+         "Ship addons/didi in this preset's builds, which starts Didi's session host in the "
+         "game."},
         {"project_export.preset",
          "The export preset name, exactly as export_presets.cfg spells it."},
         {"project_export.output_path",

@@ -1985,7 +1985,7 @@ A project with no export presets answers the same way whether or not `export_pre
 
 ### `project_add_export_preset` — Offline and live
 
-Adds one export preset to the project-root `export_presets.cfg`, which `project_export` needs and a project nobody has exported by hand does not have (#779). Takes `name`, `platform` and an optional `export_path`, and supports `dry_run`. There is no confirmation token: it only adds.
+Adds one export preset to the project-root `export_presets.cfg`, which `project_export` needs and a project nobody has exported by hand does not have (#779). Takes `name`, `platform`, an optional `export_path` and an optional `include_didi_addon`, and supports `dry_run`. There is no confirmation token: it only adds.
 
 `platform` is one of the seven export platforms Godot ships, spelled exactly: `Windows Desktop`, `Linux`, `macOS`, `Android`, `iOS`, `Web` or `visionOS`. The schema publishes them as an enum, so a client can offer exactly those, and any other value is refused with the list, as a `400` naming `parameter: "platform"`. A value close to one of the seven, such as `HTML5`, `Windows`, `windows desktop` or `Linux/X11`, is refused with the one Godot uses as `did_you_mean` and `retry_with`; the schema's own enum check used to answer first, so that hint never reached a caller. `name` is 1 to 256 characters on one line with no control characters, and is written with the `ConfigFile` string escapes, so a quote, a backslash or a bracket reads back unchanged. Two more rules come from `project_export`, which asks Godot for the preset by name on its command line: a name may not contain `%20`, which Godot turns into a space there, and may not start with `-`, which Godot reads as one of its own options when it has one by that name (`--headless`, `-e` and `--verbose` all are). A space at either end is kept and exports, because `project_export` sends it in a form Godot does not trim. `export_path` is where the editor's Export dialog proposes to write the build. It is confined to the project the way `project_export`'s `output_path` is, may be given as `res://`, and is stored relative to the project, the way the editor stores a path inside it. A path ending in `/` or `\` names a directory and is refused, whether or not the directory exists. Godot does not create a missing folder when it exports a preset to its own path, measured on 4.5.1, 4.6.2 and 4.7.2, so the result reports `export_path_folder_exists` for a preset with an `export_path`, and `export_path_note` naming the folder when it is not there. The tool creates no folder.
 
@@ -1999,13 +1999,15 @@ platform="<platform>"
 runnable=false
 export_filter="all_resources"
 include_filter=""
-exclude_filter=""
+exclude_filter="addons/didi/*"
 export_path="<export_path>"
 
 [preset.N.options]
 
 custom_template/debug=""
 ```
+
+`exclude_filter` keeps `addons/didi` out of every build made from the preset (#1291). Without it a pack carries the addon's 26 files and the extension list, and prints three engine errors at every start, `GDExtension dynamic library not found` among them, and a release build gets `didi_extension.dll` beside the executable, which starts Didi's session host in the shipped game. With the filter the pack holds no addon file and starts with no engine line, and the release build has no library, measured on 4.5.1, 4.6.2 and 4.7.2 (the release build with the 4.7.1 templates). `include_didi_addon: true` writes `exclude_filter=""` instead, for a debug build run on this machine. `section_written` shows which one was written.
 
 A missing file is created. An existing one is appended to: every byte already there is kept, the new section starts after a blank line, and a file written with CRLF line endings gets its section in CRLF. `N` is the first number after the unbroken run from 0. Refused, at the dry run and on the call alike, and without touching the file:
 

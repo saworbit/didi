@@ -38,7 +38,7 @@ If Windows cannot construct this security descriptor, startup fails before any n
 
 ### 2. Editor and Game Session Exposure
 
-Phase 3 starts the session host at scene initialization in both editor and game processes so local tooling can attach to a running game. Treat the addon as a development component: exclude `addons/didi` and its extension library from production exports unless a local attachment endpoint is explicitly acceptable. The pipe/socket is token-authenticated; POSIX defaults are owner-only, while Windows grants the owning SID and local administrators. It is not a remote or hostile-host security boundary.
+Phase 3 starts the session host at scene initialization in both editor and game processes so local tooling can attach to a running game. Treat the addon as a development component: exclude `addons/didi` and its extension library from production exports unless a local attachment endpoint is explicitly acceptable. A preset `project_add_export_preset` writes excludes them unless it is called with `include_didi_addon: true`. The pipe/socket is token-authenticated; POSIX defaults are owner-only, while Windows grants the owning SID and local administrators. It is not a remote or hostile-host security boundary.
 
 Phase 4 live capture IDs and raw RGBA buffers exist only inside the selected extension process. The cache is bounded to eight entries and 64 MiB and is cleared by process exit; Didi does not persist capture pixels or IDs. Project search remains local and bounded but may return source-line previews, so treat its MCP output as project-sensitive data.
 

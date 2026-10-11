@@ -189,10 +189,15 @@ struct ExportPresetAddition {
 // an ERROR, measured on 4.5.1, 4.6.2 and 4.7.2 and recorded in the
 // project_add_export_preset amendment in docs/SURFACE_AMENDMENTS.md. The
 // editor fills in the rest from its own defaults, which differ by line.
+//
+// The preset leaves addons/didi out of its builds unless `include_didi_addon`
+// says otherwise, because a build that carries the addon ships the extension
+// library, which starts Didi's session host in the game (#1291).
 Result<ExportPresetAddition> planExportPresetAddition(const std::optional<std::string>& existing,
                                                       const std::string& name,
                                                       const std::string& platform,
-                                                      const std::string& export_path);
+                                                      const std::string& export_path,
+                                                      bool include_didi_addon = false);
 
 // The same plan for the project in the current directory, from the arguments
 // project_add_export_preset receives: it reads export_presets.cfg and confines
