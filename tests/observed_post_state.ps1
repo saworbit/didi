@@ -169,7 +169,7 @@ function Get-ObservedNewChild($Before, $After) {
 # allows float32 precision on purpose, so no case relies on one. A field with
 # no counterpart in the request, such as a uid the engine mints or a file's
 # length, cannot be echoed; a case for it guards against a constant instead.
-function Get-ObservedPostStateCases {
+function Get-ObservedPostStateCases([string]$GameSessionId = "", [string]$LaunchLogPath = "") {
     return @(
         # Paths are checked as normalized res:// .tscn paths before the editor
         # sees them, so no spelling reaches it that it would store differently.
@@ -747,7 +747,19 @@ function Get-ObservedPostStateCases {
         @{ Tool = "runtime_watch_invariants"; Session = "game"; Steps = @(
             (Step "call" "runtime_watch_invariants" @{ duration_ms = 200; invariants = @(@{ name = "children_present"; kind = "expression_between"; expression = "node.get_child_count()"; context_node = "/root/RuntimeRoot"; minimum = 1 }) }),
             (Step "witness" "runtime_get_tree" @{ root_path = "/root/RuntimeRoot"; max_depth = 1 }))
-           Agree = { param($s) Agree "paused" $s.call.paused $s.witness.paused } }
+           Agree = { param($s) Agree "paused" $s.call.paused $s.witness.paused } },
+        # The launched game's own process id is the witness: runtime_main.tscn
+        # records OS.get_process_id() at _ready, and the read goes through the
+        # session the launch selected. A pid taken from the launcher, which on
+        # a console build is not the game (#773), or a launch that left the
+        # calls going to the harness's game, disagrees. Last of the game cases:
+        # it stops the game it started and attaches the harness's game again.
+        @{ Tool = "runtime_launch"; Session = "game"; Steps = @(
+            (Step "call" "runtime_launch" @{ scene_path = "res://runtime_main.tscn"; timeout_seconds = 30; headless = $true; detach = $true; extra_args = @("--log-file", $LaunchLogPath) }),
+            (Step "witness" "eval_gdscript" @{ expression = "node.get('editor_description')"; context_node = "/root/RuntimeRoot" }),
+            (Step "stop" "runtime_stop" @{ exit_code = 0 }),
+            (Step "back" "runtime_attach_session" @{ session_id = $GameSessionId }))
+           Agree = { param($s) Agree "pid" $s.call.pid ([int64]$s.witness.value) } }
     )
 }
 
@@ -788,8 +800,8 @@ function Invoke-ObservedPostStateBatch([string]$SessionId, [object[]]$Steps, [st
 # Drives every case against the editor's observed_post_state.tscn and the
 # attached game. The editor batch runs with --yolo because the witness is
 # reached through scene_call_method, which is always confirmed otherwise.
-function Invoke-ObservedPostStateCases([string]$FixtureRoot, [string]$EditorSessionId, [string]$GameSessionId) {
-    $cases = @(Get-ObservedPostStateCases)
+function Invoke-ObservedPostStateCases([string]$FixtureRoot, [string]$EditorSessionId, [string]$GameSessionId, [string]$LaunchLogPath) {
+    $cases = @(Get-ObservedPostStateCases -GameSessionId $GameSessionId -LaunchLogPath $LaunchLogPath)
     # A case that uses a file another block made names that block, so moving
     # or dropping the block fails here and says why, not on a missing asset
     # several steps in (#1022).
@@ -822,6 +834,9 @@ function Invoke-ObservedPostStateCases([string]$FixtureRoot, [string]$EditorSess
             $steps += Step "front" "runtime_set_paused" @{ paused = $gamePaused }
             $gameById = Invoke-ObservedPostStateBatch $GameSessionId $steps @("--project", $FixtureRoot)
             Assert-True ((Get-ObservedPayload $gameById[8000 + $steps.Count - 1]).paused -eq $gamePaused) "The observed post-state block did not leave the game paused as it found it: $($gameById[8000 + $steps.Count - 1] | ConvertTo-Json -Compress -Depth 20)"
+            # The engine-output gate reads the launched game's log, and skips a
+            # file that is not there.
+            Assert-True (Test-Path -LiteralPath $LaunchLogPath) "The game runtime_launch started wrote no engine log at $LaunchLogPath."
         }
     }
 

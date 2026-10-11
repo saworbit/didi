@@ -123,6 +123,8 @@ $gameEngineLogPath = Join-Path $repoRoot "build\godot_game_engine.log"
 $shutdownGameStdoutPath = Join-Path $repoRoot "build\godot_shutdown_game_integration.out"
 $shutdownGameStderrPath = Join-Path $repoRoot "build\godot_shutdown_game_integration.err"
 $shutdownGameEngineLogPath = Join-Path $repoRoot "build\godot_shutdown_game_engine.log"
+# The game the observed post-state block starts through runtime_launch.
+$observedLaunchEngineLogPath = Join-Path $repoRoot "build\godot_observed_launch_engine.log"
 $previousGodotBin = $env:GODOT_BIN
 
 if (-not (Test-Path -LiteralPath $GodotExecutable)) {
@@ -235,7 +237,7 @@ if ($smokePluginUid -notmatch '^uid://[0-9a-z]+$') {
 New-Item -ItemType Directory -Path $sessionDirectory | Out-Null
 $env:DIDI_SESSION_DIR = $sessionDirectory
 
-Remove-Item -LiteralPath $stdoutPath, $stderrPath, $gameStdoutPath, $gameStderrPath, $editorEngineLogPath, $gameEngineLogPath, $shutdownGameStdoutPath, $shutdownGameStderrPath, $shutdownGameEngineLogPath -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $stdoutPath, $stderrPath, $gameStdoutPath, $gameStderrPath, $editorEngineLogPath, $gameEngineLogPath, $shutdownGameStdoutPath, $shutdownGameStderrPath, $shutdownGameEngineLogPath, $observedLaunchEngineLogPath -Force -ErrorAction SilentlyContinue
 # The reports are named after the engine pid, so they accumulate rather than
 # overwrite. A stale one read as this run's would be worse than none.
 Remove-Item -Path (Join-Path $buildRoot "godot_crash_*.log") -Force -ErrorAction SilentlyContinue
@@ -5814,7 +5816,7 @@ text = "Not a key"
 
     # Last, while the editor and the game are both still attached, so no block
     # after it depends on what its cases leave behind. Q2 in docs/BUILD_QUEUE.md.
-    Invoke-ObservedPostStateCases -FixtureRoot $fixtureRoot -EditorSessionId $editorSession.session_id -GameSessionId $gameSession.session_id
+    Invoke-ObservedPostStateCases -FixtureRoot $fixtureRoot -EditorSessionId $editorSession.session_id -GameSessionId $gameSession.session_id -LaunchLogPath $observedLaunchEngineLogPath
 
     $stopRequests = @(
         (@{ jsonrpc = "2.0"; id = 330; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
@@ -6070,7 +6072,7 @@ text = "Not a key"
     $logTranscript = @(
         Get-Content $stdoutPath, $stderrPath, $gameStdoutPath, $gameStderrPath,
             $editorEngineLogPath, $gameEngineLogPath, $shutdownGameStdoutPath,
-            $shutdownGameStderrPath, $shutdownGameEngineLogPath -ErrorAction SilentlyContinue
+            $shutdownGameStderrPath, $shutdownGameEngineLogPath, $observedLaunchEngineLogPath -ErrorAction SilentlyContinue
     )
     $completePublicTranscript = (@($responseTranscript) + @($logTranscript)) -join "`n"
     Assert-True ($completePublicTranscript -notmatch [regex]::Escape($editorSessionToken)) "Editor session token leaked into a response or complete engine/process log transcript."
@@ -6083,7 +6085,7 @@ text = "Not a key"
     # the extension's.
     $gameEngineTranscript = @(
         Get-Content $gameStdoutPath, $gameStderrPath, $gameEngineLogPath,
-            $shutdownGameStdoutPath, $shutdownGameStderrPath, $shutdownGameEngineLogPath `
+            $shutdownGameStdoutPath, $shutdownGameStderrPath, $shutdownGameEngineLogPath, $observedLaunchEngineLogPath `
             -ErrorAction SilentlyContinue
     ) -join "`n"
     Assert-True ($gameEngineTranscript -notmatch "ObjectDB instance") "A game process exited with a leaked ObjectDB instance."
@@ -6119,7 +6121,7 @@ text = "Not a key"
     )
     $engineLineTally = @{}
     $unexpectedEngineLines = @()
-    foreach ($engineLog in @(@{ Name = "editor"; Path = $editorEngineLogPath }, @{ Name = "game"; Path = $gameEngineLogPath }, @{ Name = "shutdown game"; Path = $shutdownGameEngineLogPath })) {
+    foreach ($engineLog in @(@{ Name = "editor"; Path = $editorEngineLogPath }, @{ Name = "game"; Path = $gameEngineLogPath }, @{ Name = "shutdown game"; Path = $shutdownGameEngineLogPath }, @{ Name = "launched game"; Path = $observedLaunchEngineLogPath })) {
         if (-not (Test-Path -LiteralPath $engineLog.Path)) { continue }
         $engineLogLines = @(Get-Content -LiteralPath $engineLog.Path)
         for ($lineIndex = 0; $lineIndex -lt $engineLogLines.Count; $lineIndex++) {
