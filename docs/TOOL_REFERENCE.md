@@ -187,7 +187,7 @@ Creates a built-in ClassDB node, or an instance of a packed scene, under the act
 - `node_type` (`string`). One of `node_type` or `scene_path` is required; there is no default, because an empty request must not add a node. Ignored when `scene_path` is given.
 - `parent_path` (`string`, default `"/root"`).
 - `name` (`string`, optional). Godot forbids `.`, `:`, `@`, `/`, `%` and `"` in a node name and substitutes rather than refusing, and it uniquifies a name a sibling already has. When a name was given, the result reports `node_name`, the name the engine used; when that is not the name asked for, it also reports `requested_name` and `name_substituted: true`, so a caller building its next `NodePath` from the name it chose finds out here rather than from the `404` four calls later. Omitting `name`, or passing an empty one, asks the engine to name the node after its class and is not a substitution.
-- `properties` (`object`, optional): Initial property values. Each value is the JSON form the table under `scene_set_property` lists for that property's Godot type, the same contract as `scene_set_property`'s `value`. Each is read back once the node is in the tree, and one the engine did not keep is listed under `properties_not_applied`, with `property_name`, `requested_value`, `value` and the `outcome`, `detail` and `engine_constraint` `scene_set_property` reports in `not_applied`. An `AudioStreamPlayer` created with a `bus` no bus has is the common case: the engine reads it back as `Master`, the scene saves no `bus` line, and the constraint lists the buses there are. The key is absent when every value landed.
+- `properties` (`object`, optional): Initial property values. Each value is the JSON form the table under `scene_set_property` lists for that property's Godot type, the same contract as `scene_set_property`'s `value`. Each is set before the node has a parent and again once it is in the tree, for a property whose effect depends on the parent, such as a Control's `anchors_preset`, which Godot discards on a node with none (#1297). Each is read back once the node is in the tree, and one the engine did not keep is listed under `properties_not_applied`, with `property_name`, `requested_value`, `value` and the `outcome`, `detail` and `engine_constraint` `scene_set_property` reports in `not_applied`. An `AudioStreamPlayer` created with a `bus` no bus has is the common case: the engine reads it back as `Master`, the scene saves no `bus` line, and the constraint lists the buses there are. The key is absent when every value landed.
 - `scene_path` (`string`, optional): a `res://` `.tscn` to instance rather than a type to construct. The instance is made with `GEN_EDIT_STATE_INSTANCE`, which is what the editor's own scene drop uses, so the scene file records an instance of that scene and not a copy of its nodes. `properties` still applies, to the instance root. The result reports the instance's own class in `node_type` and echoes `scene_path`. A missing scene is `404`, a resource that is not a PackedScene is `422`, and so is one whose dependencies did not load, because instantiating that returns nothing and puts the reason in a console the caller cannot read.
 
 A `parent_path` inside an instanced sub-scene the edited scene has not marked editable is refused with `409` and `data.code: "node_not_owned"`, because the packer drops such a node together with its parent on save. A `scene_path` naming the edited scene, or any scene whose PackedScene dependencies reach it, is refused with `409` and `data.code: "cyclic_instance"`, with the chain of scene files under `data.chain`. That is the check the editor's own scene drop makes: Godot accepts the recursive tree and then refuses to save it in a dialog, while `EditorInterface.save_scene` still returns OK. Both refusals also answer the dry run, which previews against the parent.
@@ -359,7 +359,7 @@ Results carry `target_node`, `method_name`, `awaited`, and `returned`, and on Go
 
 ### `scene_duplicate_node` — Live
 
-Duplicates a node branch through UndoRedo and names the copy from `<source-name>Copy`, subject to Godot's uniqueness rules.
+Duplicates a node branch through UndoRedo and names the copy the way the editor's Duplicate does: the source's name, made unique among its siblings by Godot, so `NE` becomes `NE2`, following the project's `editor/naming` settings. Before #1319 it was `NECopy`, a name the editor never gives. `duplicated_node` is the path Godot settled on.
 
 The copy's descendants are owned the way the source branch's are, so the whole branch survives the next save. Godot's own `duplicate` leaves them unowned and the packer keeps only what the edited root owns, which is why this is stated rather than assumed. A child the source branch had at runtime and the scene never owned stays unowned in the copy too, and a node inside an instanced sub-scene stays owned by that instance.
 
@@ -821,7 +821,7 @@ Fires one ray segment through the attached session's physics world and reports w
 - `from`, `to` (required): `{x, y}` or `{x, y, z}`, both the same dimension, every coordinate finite and within -1000000..1000000, and not the same point.
 - `collision_mask` (`integer`, 1..4294967295, default 1). Godot's masks are 32-bit, so `4294967295` is every layer.
 
-Query flags are fixed by the contract: bodies and areas are both hit, hit-from-inside is off, and back faces are hit in 3D. The result is `{dimension, hit, collider_path, collider_class, position, normal, collision_layer}`; on a miss every detail field is `null`. A collider that is not a Node in the tree reports `collider_path: null` with a bounded class name, never an object id.
+Query flags are fixed by the contract: bodies and areas are both hit, hit-from-inside is off, and back faces are hit in 3D. The result is `{dimension, hit, collider_path, collider_class, position, normal, collision_layer}`; on a miss every detail field is `null`. A collider that is not a Node in the tree reports `collider_path: null` with a bounded class name, never an object id. `collision_layer` is read only from a `CollisionObject2D` or `CollisionObject3D`; a `TileMapLayer`, `GridMap` or CSG shape collides without being one and reports `collision_layer: null`. Calling the getter on one read whatever sat at that offset, so a `TileMapLayer` answered the bits of a float (#1290).
 
 Which world is asked depends on the session. A game session uses its root viewport's, where the running scene lives. An editor session uses the edited scene's own, found with `Viewport.find_world_2d`/`find_world_3d` from the viewport the editor parents that scene into, so the bodies in the open scene are what the ray sees. `collider_path` is reported in the same `/root/<edited-scene-root>/Child` form every other editor answer uses, so it can be handed straight to a reader or a writer; a collider the edited scene does not own reports `null`.
 
@@ -1589,7 +1589,7 @@ Every event is constructed and fully configured on the Godot main thread before 
 
 A batch injected while the game is paused is held, not dispatched. A paused tree delivers `_input` only to nodes whose `process_mode` runs while paused, and a node that pauses never sees an event dispatched during the pause: Godot hands it out on the next frame, which processes nothing for that node, and by the frame after that it is gone, so pause, press, step, look reported success at every step and did nothing. The response says so: `outcome: "queued"`, `dispatched_event_count: 0`, `queued_event_count`, `paused: true`, `delivery: "next_unpaused_frame"` and a sentence, and its `input_state` shows that nothing has reached Input yet. The held events are handed to Input the moment the tree resumes, by `runtime_step` or `runtime_set_paused`, so they land in the first frame that processes; both report `released_input_events`. A batch is held whole, so a node that does process while paused receives it on resume as well, not during the pause. Up to 256 events are held; past that the call is refused with `409` and `data.code: "input_queue_full"`.
 
-`paused_delivery: "now"` sends the batch to Input at once instead, and the game stays paused (#1191). A paused tree hands input to the nodes that process while paused, the way it hands them a person's click, so a pause menu with `process_mode` set to `PROCESS_MODE_ALWAYS` or `WHEN_PAUSED` is operated without stepping the game, and a node that pauses never sees the batch. The answer is `outcome: "completed"`, `delivery: "while_paused"` and `paused: true`, so it says which route ran. Measured on 4.5.1, 4.6.2 and 4.7.2: a click on an always-processing button arrived in the same frame with the tree still paused.
+`paused_delivery: "now"` sends the batch to Input at once instead, and the game stays paused unless the events unpause it (#1191). The pause is read again after the batch is flushed, which runs the handlers, so a click on a Retry button that resumes the game answers `paused: false` and says so (#1303). A paused tree hands input to the nodes that process while paused, the way it hands them a person's click, so a pause menu with `process_mode` set to `PROCESS_MODE_ALWAYS` or `WHEN_PAUSED` is operated without stepping the game, and a node that pauses never sees the batch. The answer is `outcome: "completed"`, `delivery: "while_paused"` and `paused: true`, so it says which route ran. Measured on 4.5.1, 4.6.2 and 4.7.2: a click on an always-processing button arrived in the same frame with the tree still paused.
 
 Game sessions only. The standalone policy rejects an editor route and the extension rejects again before the bridge, so the editor UI never receives synthesized input. A mutation: `dry_run` returns the plan without dispatching; no confirmation token, because an event is neither reversible nor destructive.
 
@@ -1641,10 +1641,12 @@ Supported event descriptors are closed objects, and the published schema says so
 
 ```json
 { "type": "key", "keycode": 32, "shift_pressed": true }
-{ "type": "mouse_button", "button_index": 1, "device": 0 }
-{ "type": "joypad_button", "button_index": 0, "device": 0 }
+{ "type": "mouse_button", "button_index": 1 }
+{ "type": "joypad_button", "button_index": 0 }
 { "type": "joypad_motion", "axis": 0, "axis_value": -1.0, "device": 0 }
 ```
+
+An event with no `device` is bound to all devices, `-1`, as the editor's Input Map dialog binds it. The engine's own default is `0` for a joypad, so a second controller never fired the action, and for a key it is `0` on 4.5.1 and `16` on 4.7.2, so one call wrote different files on different lines (#1295). Name a device, as the last line does, only to bind one controller.
 
 The modifiers are `shift_pressed`, `alt_pressed`, `ctrl_pressed` and `meta_pressed`, which is Godot's own name for each and what this tool writes into `project.godot`. `shift`, `alt`, `ctrl` and `meta` are accepted as aliases, and `project_list_input_actions` reports both spellings, so a descriptor read from it can be written straight back. Setting the two names of one modifier to different values is refused.
 
@@ -2075,7 +2077,9 @@ sits under a point, which is only useful once you already have a point.
 
 Each entry carries `node_path`, `class`, `global_rect`, `visible`, `depth`,
 `mouse_filter` with its `mouse_filter_value`, and `text` where the Control has a
-`text` property. In a game it also carries `screen_rect`: the same rectangle in
+`text` property. A Control that is not visible in the tree has `global_rect: null`,
+and `screen_rect: null` in a game: Godot does not lay it out, and the rectangle it
+holds is whatever it had before, not where it would be (#1315). In a game it also carries `screen_rect`: the same rectangle in
 the window's pixels, which is what `runtime_inject_input` takes a mouse
 `position` in and what `viewport_capture_frame` draws. `global_rect` is in the
 viewport's own coordinates, and a project that stretches its viewport to the

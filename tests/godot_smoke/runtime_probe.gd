@@ -55,6 +55,11 @@ func _process(_delta: float) -> void:
 func _input(event: InputEvent) -> void:
 	input_counter += 1
 	input_counter_node.name = "InputCounter_%d" % input_counter
+	# A Retry button on a paused game-over screen: F12 resumes the tree from a
+	# handler that runs while paused, the case runtime_inject_input reported
+	# as still paused (#1303).
+	if event is InputEventKey and event.pressed and event.keycode == KEY_F12:
+		get_tree().paused = false
 	# What Input holds once the event is handled, read the way a game reads
 	# it, as the witness for runtime_inject_input's input_state (#1019): x is
 	# whether ui_accept is pressed, y its strength.

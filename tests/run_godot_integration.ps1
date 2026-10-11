@@ -668,6 +668,13 @@ try {
         (Tool-Request 924 "scene_instantiate_node" @{ node_type = "Control"; parent_path = "/root"; name = "PostInitPanel" }),
         (Tool-Request 925 "scene_instantiate_node" @{ node_type = "Control"; parent_path = "/root/PostInitPanel"; name = "PostInitChild" }),
         (Tool-Request 926 "scene_set_property" @{ target_node = "/root/PostInitPanel/PostInitChild"; property_name = "anchors_preset"; value = 15 }),
+        # The same preset as an initial property, on a Control whose parent is
+        # not one. Set before the node had a parent, Godot discarded it, and
+        # the write one call later landed (#1297). It is set again once the
+        # node is in the tree.
+        (Tool-Request 903 "scene_instantiate_node" @{ node_type = "ColorRect"; parent_path = "/root"; name = "PostInitRect"; properties = @{ anchors_preset = 15 } }),
+        (Tool-Request 904 "scene_get_property" @{ target_node = "/root/PostInitRect"; property_name = "anchors_preset" }),
+        (Tool-Request 905 "scene_remove_node" @{ target_node = "/root/PostInitRect" }),
         # Put the edited scene back as it was found. Later assertions count the
         # children of this root, so a guard that leaves nodes behind fails them.
         (Tool-Request 927 "scene_remove_node" @{ target_node = "/root/PostInitPanel/PostInitChild" }),
@@ -700,6 +707,10 @@ try {
     Assert-True ($discardedWrite.requested_value -eq 15) "scene_set_property did not report the value it was asked for."
     Assert-True ($discardedWrite.value -eq 0) "scene_set_property reported the requested anchors_preset rather than the value the property actually holds."
     Assert-True ($discardedWrite.applied -eq $false) "scene_set_property claimed a discarded write was applied."
+    $initialPreset = Tool-Payload $postInitById[903]
+    Assert-True ($null -eq $initialPreset.properties_not_applied) "scene_instantiate_node discarded an initial anchors_preset its parent allows: $($initialPreset | ConvertTo-Json -Depth 6 -Compress)"
+    Assert-True ((Tool-Payload $postInitById[904]).value -eq 15) "The new ColorRect did not hold the initial anchors_preset: $($postInitById[904].result.content[0].text)"
+    Tool-Payload $postInitById[905] | Out-Null
     Tool-Payload $postInitById[927] | Out-Null
     Tool-Payload $postInitById[928] | Out-Null
     Tool-Payload $postInitById[929] | Out-Null
@@ -957,6 +968,14 @@ try {
             @{ type = "action"; action_name = "ui_cancel"; pressed = $false }) }),
         (Tool-Request 2562 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot"; max_depth = 1 }),
         (Tool-Request 2563 "eval_gdscript" @{ expression = "node.get('process_priority')"; context_node = "/root/RuntimeRoot/Spatial/AnimTarget/PausableProbe" }),
+        # A press whose handler resumes the tree, the way a game-over screen's
+        # Retry button does. The answer reads the pause after the batch ran
+        # (#1303), and the tree is paused again for the requests below.
+        (Tool-Request 2573 "runtime_inject_input" @{ paused_delivery = "now"; events = @(
+            @{ type = "key"; keycode = 4194343; pressed = $true },
+            @{ type = "key"; keycode = 4194343; pressed = $false }) }),
+        (Tool-Request 2574 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot"; max_depth = 0 }),
+        (Tool-Request 2575 "runtime_set_paused" @{ paused = $true }),
         (Tool-Request 367 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot/RuntimeChild/Nested"; max_depth = 1 }),
         (Tool-Request 379 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot/RuntimeChild"; max_depth = 1 }),
         (Tool-Request 307 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot"; max_depth = 17 }),
@@ -1518,6 +1537,10 @@ try {
     Assert-True ($whilePaused.outcome -eq "completed" -and $whilePaused.delivery -eq "while_paused" -and $whilePaused.paused -eq $true -and $whilePaused.dispatched_event_count -eq 2 -and $whilePaused.queued_event_count -eq 0) "A batch sent with paused_delivery now was not reported as delivered while paused: $($whilePaused | ConvertTo-Json -Compress)"
     Assert-True (((Runtime-InputCounter $whilePausedAfter) - (Runtime-InputCounter $whilePausedBefore)) -eq 2 -and (Runtime-FrameCounter $whilePausedAfter) -eq (Runtime-FrameCounter $whilePausedBefore) -and $whilePausedAfter.paused -eq $true) "A batch sent while paused did not reach the node that processes while paused, or a frame ran: $((Runtime-InputCounter $whilePausedBefore))->$((Runtime-InputCounter $whilePausedAfter)) input, $((Runtime-FrameCounter $whilePausedBefore))->$((Runtime-FrameCounter $whilePausedAfter)) frames"
     Assert-True ((Tool-Payload $runtimeById[2563]).value -eq $pausableAfter) "A batch sent while paused reached a node that pauses."
+    $resumed = Tool-Payload $runtimeById[2573]
+    Assert-True ($resumed.delivery -eq "while_paused" -and $resumed.paused -eq $false -and $resumed.message -match "no longer paused") "A press that resumed the game was reported as leaving it paused: $($resumed | ConvertTo-Json -Compress)"
+    Assert-True ((Tool-Payload $runtimeById[2574]).paused -eq $false) "The F12 press did not resume the runtime fixture: $($runtimeById[2574].result.content[0].text)"
+    Assert-True ((Tool-Payload $runtimeById[2575]).paused -eq $true) "The runtime fixture was not paused again after the resume case: $($runtimeById[2575].result.content[0].text)"
     $gameMix = Tool-Payload $runtimeById[2485]
     Assert-True ($gameMix.execution_mode -eq "live" -and $gameMix.session.kind -eq "game" -and @($gameMix.buses).Count -ge 1) "audio_list_buses did not answer for the game's own mix: $($runtimeById[2485].result.content[0].text)"
     $gameMute = Tool-Payload $runtimeById[2486]
@@ -1685,7 +1708,7 @@ try {
         (Tool-Request 12 "scene_remove_node" @{ target_node = "/root/SmokeRoot/Spawned" }),
         (Tool-Request 13 "editor_undo" @{}),
         (Tool-Request 14 "scene_duplicate_node" @{ target_node = "/root/SmokeRoot/Spawned" }),
-        (Tool-Request 15 "scene_reparent_node" @{ target_node = "/root/SmokeRoot/SpawnedCopy"; new_parent_path = "/root/SmokeRoot/Container"; keep_global_transform = $true }),
+        (Tool-Request 15 "scene_reparent_node" @{ target_node = "/root/SmokeRoot/Spawned2"; new_parent_path = "/root/SmokeRoot/Container"; keep_global_transform = $true }),
         (Tool-Request 16 "scene_get_hierarchy" @{ root_path = "/root"; max_depth = 3 }),
         (Tool-Request 17 "editor_undo" @{}),
         (Tool-Request 18 "scene_get_hierarchy" @{ root_path = "/root"; max_depth = 3 }),
@@ -1889,8 +1912,8 @@ try {
         (Tool-Request 37 "scene_remove_node" @{ target_node = "/root" }),
         (Tool-Request 38 "scene_duplicate_node" @{ target_node = "/root" }),
         (Tool-Request 39 "scene_reparent_node" @{ target_node = "/root"; new_parent_path = "/root/SmokeRoot/Container" }),
-        (Tool-Request 40 "scene_reparent_node" @{ target_node = "/root/SmokeRoot/SpawnedCopy"; new_parent_path = "/root/SmokeRoot/Container" }),
-        (Tool-Request 41 "scene_reparent_node" @{ target_node = "/root/SmokeRoot/Container"; new_parent_path = "/root/SmokeRoot/Container/SpawnedCopy" }),
+        (Tool-Request 40 "scene_reparent_node" @{ target_node = "/root/SmokeRoot/Spawned2"; new_parent_path = "/root/SmokeRoot/Container" }),
+        (Tool-Request 41 "scene_reparent_node" @{ target_node = "/root/SmokeRoot/Container"; new_parent_path = "/root/SmokeRoot/Container/Spawned2" }),
         (Tool-Request 42 "scene_reparent_node" @{ target_node = "/root/SmokeRoot/Subject"; new_parent_path = "/root/SmokeRoot/Subject" }),
         (Tool-Request 43 "scene_get_hierarchy" @{ root_path = "/root"; max_depth = 3 }),
         (Tool-Request 44 "project_set_setting" @{ setting = "didi_phase2/nested"; create = $true; value = @{ enabled = $true; count = 3; names = @("alpha", "beta"); nested = @{ ratio = 0.5 } } }),
@@ -2297,12 +2320,12 @@ try {
     Assert-True ($instantiated.node_path -eq "/root/SmokeRoot/Spawned") "Instantiate returned a non-portable node path."
     Assert-True ((Tool-Payload $byId[11]).value -eq 21) "Instantiate ignored initial scalar properties."
     $duplicated = Tool-Payload $byId[14]
-    Assert-True ($duplicated.duplicated_node -eq "/root/SmokeRoot/SpawnedCopy") "Duplicate did not return its deterministic logical path: $($duplicated.duplicated_node)"
+    Assert-True ($duplicated.duplicated_node -eq "/root/SmokeRoot/Spawned2") "Duplicate did not return its deterministic logical path: $($duplicated.duplicated_node)"
     $reparentedHierarchy = Tool-Payload $byId[16]
     $container = @($reparentedHierarchy.scene_tree.children | Where-Object name -eq "Container")[0]
-    Assert-True (@($container.children.name) -contains "SpawnedCopy") "Reparent did not move the duplicate under Container."
+    Assert-True (@($container.children.name) -contains "Spawned2") "Reparent did not move the duplicate under Container."
     $restoredHierarchy = Tool-Payload $byId[18]
-    Assert-True (@($restoredHierarchy.scene_tree.children.name) -contains "SpawnedCopy") "Undo did not restore the duplicate's original parent."
+    Assert-True (@($restoredHierarchy.scene_tree.children.name) -contains "Spawned2") "Undo did not restore the duplicate's original parent."
 
     # A preview is only worth anything if it shows up, and only safe if it
     # leaves nothing behind. Both are read off the frames on either side of it.
@@ -3674,6 +3697,8 @@ try {
     Assert-True ($null -ne $hidden) "ui_list_controls did not return a hidden Control with visible_only false."
     Assert-True ($hidden.visible -eq $false) "ui_list_controls reported a hidden Control as visible."
     Assert-True ($hidden.text -eq "hidden button") "ui_list_controls did not read a hidden Control's text."
+    # Godot does not lay out a hidden Control, so its rectangle means nothing (#1315).
+    Assert-True ($hidden.PSObject.Properties.Name -contains "global_rect" -and $null -eq $hidden.global_rect) "ui_list_controls reported a rectangle for a hidden Control: $($hidden | ConvertTo-Json -Compress)"
 
     Assert-True (@($uiListLabels.controls).Count -eq 1) "ui_list_controls class_filter did not narrow to the Label."
     Assert-True ($uiListLabels.controls[0].class -eq "Label") "ui_list_controls class_filter returned the wrong class."
@@ -4355,12 +4380,12 @@ try {
     Assert-True $byId[37].result.isError "The edited scene root was accepted for removal."
     Assert-True $byId[38].result.isError "The edited scene root was accepted for duplication."
     Assert-True $byId[39].result.isError "The edited scene root was accepted for reparenting."
-    Assert-True (-not $byId[40].result.isError) "Cycle-test setup could not place SpawnedCopy under Container."
+    Assert-True (-not $byId[40].result.isError) "Cycle-test setup could not place Spawned2 under Container."
     Assert-True $byId[41].result.isError "An ancestor node was accepted for reparenting beneath its descendant."
     Assert-True $byId[42].result.isError "A node was accepted as its own new parent."
     $cycleHierarchy = Tool-Payload $byId[43]
     $cycleContainer = @($cycleHierarchy.scene_tree.children | Where-Object name -eq "Container")[0]
-    Assert-True (@($cycleContainer.children.name) -contains "SpawnedCopy") "Rejected cyclic reparenting changed the hierarchy."
+    Assert-True (@($cycleContainer.children.name) -contains "Spawned2") "Rejected cyclic reparenting changed the hierarchy."
     Assert-True (@($cycleHierarchy.scene_tree.children.name) -contains "Subject") "Rejected self-reparenting changed the hierarchy."
 
     $settingWrite = Tool-Payload $byId[44]
@@ -4461,6 +4486,8 @@ try {
     Assert-True (@($inputAction.events).Count -eq 4) "Input action did not persist every supported event shape."
     Assert-True ($inputAction.events[0].type -eq "key" -and $inputAction.events[0].shift -eq $true) "Key event was not normalized correctly."
     Assert-True ($inputAction.events[3].type -eq "joypad_motion" -and $inputAction.events[3].axis_value -eq -0.75) "Joypad motion event was not normalized correctly."
+    # An event that names no device is bound to all of them, as the editor binds it (#1295).
+    Assert-True ($inputAction.events[0].device -eq -1 -and $inputAction.events[1].device -eq 2) "An event with no device was not bound to all devices, or a named device was lost: $($inputAction.events | ConvertTo-Json -Compress)"
     Assert-True ($inputAction.defined_by_project -eq $true) "The project's own action was not marked defined_by_project."
     # A listing with no arguments keeps to the project's own actions, as P4
     # says; the engine's ui_* map comes on request (#1108).
@@ -4548,7 +4575,7 @@ try {
     Assert-True ((Tool-Payload $byId[89]).opened -eq $true) "Packed branch could not be opened."
     $packedHierarchy = Tool-Payload $byId[90]
     Assert-True ($packedHierarchy.scene_tree.name -eq "Container") "Packed branch root was not preserved."
-    Assert-True (@($packedHierarchy.scene_tree.children.name) -contains "SpawnedCopy") "Packed branch lost its owned child."
+    Assert-True (@($packedHierarchy.scene_tree.children.name) -contains "Spawned2") "Packed branch lost its owned child."
     if ($dirtyStateReadable) {
         $verifiedClean = Tool-Payload $byId[114]
         Assert-True ($verifiedClean.closed -eq $true) "Godot $($engineVersion.Raw) can report dirty state, but a clean scene still refused a default close."
@@ -4718,8 +4745,8 @@ try {
     Assert-True (-not $byId[2533].result.isError) "A node whose name starts with a byte-order mark could not be added: $($byId[2533].result.content[0].text)"
     Assert-True (-not $byId[2534].result.isError -and (Tool-Payload $byId[2534]).value -eq 0) "An expression could not use a node whose name starts with a byte-order mark as its context: $($byId[2534].result.content[0].text)"
     $duplicateProbe = Get-Content -LiteralPath (Join-Path $fixtureRoot "duplicate_probe.tscn") -Raw
-    Assert-True ($duplicateProbe -match 'name="DupLeaf" type="Node" parent="DupBranchCopy"') "A duplicated branch reached the saved file without its children: $duplicateProbe"
-    Assert-True ($duplicateProbe -match 'name="DupDeep" type="Node" parent="DupBranchCopy/DupLeaf"') "A duplicated branch reached the saved file without its grandchildren: $duplicateProbe"
+    Assert-True ($duplicateProbe -match 'name="DupLeaf" type="Node" parent="DupBranch2"') "A duplicated branch reached the saved file without its children: $duplicateProbe"
+    Assert-True ($duplicateProbe -match 'name="DupDeep" type="Node" parent="DupBranch2/DupLeaf"') "A duplicated branch reached the saved file without its grandchildren: $duplicateProbe"
     Assert-True ((Tool-Payload $byId[2507]).closed -eq $true) "Duplicate probe scene could not be closed."
     Assert-True ((Tool-Payload $byId[2510]).opened -eq $true) "Material probe scene could not be created: $($byId[2510].result.content[0].text)"
     Assert-True (-not $byId[2511].result.isError) "The probe material could not be written: $($byId[2511].result.content[0].text)"
