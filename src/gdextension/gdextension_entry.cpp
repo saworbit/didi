@@ -106,8 +106,8 @@ static void initialize_didi_module(void *userdata, GDExtensionInitializationLeve
         // The library entry point armed this only if the environment named a
         // directory. Now that the project is known it gets one regardless, so
         // an ordinary session that dies leaves a stack behind rather than a
-        // bare exit code. .didi is already ignored, so nothing lands in a
-        // user's repository.
+        // bare exit code. didi setup adds .didi/ to the project's .gitignore
+        // (#1307), so a report stays out of a repository set up that way.
         if (!project_path.empty() &&
             armCrashCapture(paths::nativePathToUtf8(
                 paths::projectPathFromUtf8(project_path) / ".didi" / "crash"))) {

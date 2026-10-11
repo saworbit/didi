@@ -129,7 +129,14 @@ What `setup` does, in order, and what stops it:
    `[mcp_servers.didi.env]` after `# END didi`, is kept, as the JSON clients
    keep keys added to their entry. The arguments are the ones the
    dock's Connect page writes: `--project <root> --log-level INFO`.
-6. Writes the agent guide between `<!-- BEGIN didi -->` and `<!-- END didi -->`
+6. Appends `.didi/` to the project's `.gitignore`, creating it when there is
+   none, with a leading-slash line for each client file it wrote (#1307). The
+   journal holds the arguments of every change and crash reports hold stacks,
+   and each client file names this machine's paths. A rule already there in
+   another spelling (`/.didi`, `.didi/*`), or negated with `!`, counts as
+   present, and nothing already in the file changes. A file git already tracks
+   stays tracked until `git rm --cached` removes it.
+7. Writes the agent guide between `<!-- BEGIN didi -->` and `<!-- END didi -->`
    into `AGENTS.md`. When Claude Code is named and the project has no
    `CLAUDE.md`, `.claude/CLAUDE.md` or `CLAUDE.local.md` of its own, it also
    creates a `CLAUDE.md` that holds `@AGENTS.md`. Claude Code reads `AGENTS.md`
@@ -141,7 +148,7 @@ What `setup` does, in order, and what stops it:
    A rerun replaces only the block.
    New files are UTF-8 with no byte-order mark; an existing file keeps its own
    mark and line endings.
-7. With `--godot`, starts the editor and waits for it to publish a session,
+8. With `--godot`, starts the editor and waits for it to publish a session,
    accept a handshake and answer one request on its main thread, then lets go
    of the session so the server a client starts next can take it. A file there
    that cannot be run fails the step at once, naming why, on every platform.
@@ -152,13 +159,18 @@ build against the server's, each client file's server against the addon's, and
 each client file's `--project` against this project, and whether each
 configured client's instructions file reaches the agent guide: for Claude Code,
 a project `CLAUDE.md` that holds the block or imports a file that does, and for
-the others `AGENTS.md`. A missing or disabled addon fails; a build mismatch, no
-editor open, or a client that cannot reach the guide is a warning.
+the others `AGENTS.md`. A guide Claude Code reaches only through an import
+outside the project is a warning, because Claude Code asks before loading an
+external import and never loads one that was declined (#1286). It also checks
+that `.gitignore` ignores `.didi/`. A missing or disabled addon fails; a build
+mismatch, no editor open, a client that cannot reach the guide, or `.didi/`
+not ignored is a warning.
 
-The client configuration records absolute paths for one machine. Keep
-`.mcp.json`, `.cursor/mcp.json`, `.vscode/mcp.json` and `.codex/config.toml`
-out of version control unless everyone who clones the project keeps Didi and
-the project at the same paths.
+The client configuration records absolute paths for one machine, which is why
+setup adds each file it writes to `.gitignore`. Keep `.mcp.json`,
+`.cursor/mcp.json`, `.vscode/mcp.json` and `.codex/config.toml` out of version
+control unless everyone who clones the project keeps Didi and the project at the
+same paths.
 
 A launch that prints nothing on stderr and stays running got exactly the
 configuration you wrote.
@@ -237,7 +249,7 @@ processes touching it are the `didi` processes started against that project.
 | Growth | Bounded per board: 4 MiB of state, 10,000 keys, 2,000 tasks. A write that would exceed a bound is refused and nothing is written. |
 | Permissions | Whatever the project directory grants. A board is not a privilege boundary between the agents that can read it. |
 | Cleanup | Nothing expires a board. Entries written with `ttl_seconds` lapse on the next read, listing or write; everything else persists until `blackboard_clear`. |
-| Version control | Ignored by this repository's `.gitignore`. A real project may reasonably want to commit its architectural decisions, so decide deliberately rather than by default. |
+| Version control | Ignored by this repository's `.gitignore`, and by the `.didi/` line `didi setup` adds to a project's. A real project may reasonably want to commit its architectural decisions, so decide deliberately rather than by default: replace that line with `.didi/*` and add `!.didi/blackboard/` below it, because git cannot bring back a file whose folder is ignored. |
 | Stale lock file | The lock is held by an open OS handle, not by the file existing. A leftover `.lock` after a crash blocks nothing. |
 
 The change journal is one more file there, `.didi/journal.json`, beside

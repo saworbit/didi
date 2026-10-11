@@ -292,13 +292,23 @@ void reportAgentGuides(Report& report, const std::filesystem::path& root, const 
         for (const auto& file : claude) {
             const auto holder = agentGuideReachedFrom(file);
             if (!holder) continue;
-            state = "ok";
             through = file;
+            if (!paths::isWithinProject(root, *holder)) {
+                // An import that resolves outside the working directory is
+                // external to Claude Code, which asks before loading it the
+                // first time and never loads it once declined (#1286).
+                state = "warn";
+                detail = relative(file) + " imports " + utf8(*holder) +
+                         ", which holds the didi block and is outside the project. Claude Code loads an "
+                         "external import only after it is approved for this project.";
+                break;
+            }
+            state = "ok";
             detail = *holder == file ? relative(file) + " holds the didi block"
                                     : relative(file) + " imports " + relative(*holder) + ", which holds the didi block";
             break;
         }
-        if (state == "ok") {
+        if (!detail.empty()) {
             // Named above, with the file it was found through.
         } else if (!claude.empty()) {
             std::string names;
@@ -539,6 +549,30 @@ int runSetupCommand(const std::vector<std::string>& arguments) {
         step.data["file"] = utf8(value.file);
     }
 
+    // Didi's state holds argument values and crash stacks, and each client
+    // file names this machine's paths, so none of it belongs in a commit
+    // (#1307). Appended to whatever .gitignore the project has.
+    {
+        std::vector<std::string> rules = {kStateIgnoreRule};
+        for (const auto client : clients) rules.push_back(std::string("/") + clientSpec(client).config_file);
+        auto ignored = writeIgnoreRules(root, rules);
+        if (ignored.isErr()) {
+            report.add("ignore", "Ignore rules", "fail", ignored.error().message);
+        } else if (ignored.value().added.empty()) {
+            auto& step = report.add("ignore", "Ignore rules", "unchanged",
+                                    ".gitignore already keeps Didi's state and the client files out of version control");
+            step.data["file"] = utf8(ignored.value().file);
+        } else {
+            std::string added;
+            for (const auto& rule : ignored.value().added) added += (added.empty() ? "" : ", ") + rule;
+            auto& step = report.add("ignore", "Ignore rules", "done",
+                                    std::string(ignored.value().action == FileAction::Created ? "created" : "added to") +
+                                        " .gitignore: " + added +
+                                        ". A file git already tracks stays tracked until git rm --cached removes it.");
+            step.data["file"] = utf8(ignored.value().file);
+        }
+    }
+
     if (agent_guide) {
         // A project with no CLAUDE.md of its own gets one that imports the
         // AGENTS.md the guide goes into (#1277).
@@ -690,6 +724,13 @@ int runDoctorCommand(const std::vector<std::string>& arguments) {
             }
         }
     }
+
+    report.add("ignore", "Ignore rules", ignoresRule(root, kStateIgnoreRule) ? "ok" : "warn",
+               ignoresRule(root, kStateIgnoreRule)
+                   ? std::string(".gitignore ignores ") + kStateIgnoreRule
+                   : std::string(".gitignore does not ignore ") + kStateIgnoreRule +
+                         ", which holds the arguments of every change and crash stacks. Run didi setup, or "
+                         "add the line yourself.");
 
     report.add("plugin", "Plugin enabled", pluginEnabled(root) ? "ok" : "fail",
                pluginEnabled(root) ? std::string(kPluginConfigPath) + " is in editor_plugins/enabled"

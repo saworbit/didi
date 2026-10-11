@@ -105,6 +105,25 @@ inline constexpr const char* kAgentsImport = "@AGENTS.md";
 Result<FileAction> writeAgentsImport(const std::filesystem::path& file);
 
 Result<FileAction> writeAgentGuide(const std::filesystem::path& file);
+
+// Didi's own state in a project: the change journal, which holds the arguments
+// of every change, file locks, crash reports with stacks, and run records.
+inline constexpr const char* kStateIgnoreRule = ".didi/";
+
+// The lines a project's .gitignore gains so Didi's state and the client files
+// setup wrote, which name this machine's paths, stay out of version control
+// (#1307). Appended once under a comment, never rewriting what is there; a
+// rule already there in another spelling (/.didi, .didi/*), or negated by the
+// person, counts as present.
+struct IgnoreWrite {
+    FileAction action{FileAction::Unchanged};
+    std::filesystem::path file;
+    std::vector<std::string> added;
+};
+Result<IgnoreWrite> writeIgnoreRules(const std::filesystem::path& project_root,
+                                     const std::vector<std::string>& rules);
+// Whether the project's .gitignore has the rule, in any spelling it accepts.
+bool ignoresRule(const std::filesystem::path& project_root, const std::string& rule);
 bool hasAgentGuide(const std::filesystem::path& file);
 
 }  // namespace didi::setup

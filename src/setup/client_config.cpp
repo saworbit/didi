@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <regex>
+#include <set>
 #include <sstream>
 #include <utility>
 
@@ -680,6 +681,64 @@ std::optional<std::filesystem::path> agentsImportFile(const std::filesystem::pat
     if (std::find(clients.begin(), clients.end(), Client::ClaudeCode) == clients.end()) return std::nullopt;
     if (!projectClaudeFiles(project_root).empty()) return std::nullopt;
     return project_root / "CLAUDE.md";
+}
+
+namespace {
+
+// One spelling for a rule: no leading slash, no trailing /, /* or /**, and no
+// leading ! (a person's negation is a decision about the same path).
+std::string ignoreKey(std::string rule) {
+    rule = strings::trim(rule);
+    if (!rule.empty() && rule.front() == '!') rule.erase(0, 1);
+    if (!rule.empty() && rule.front() == '/') rule.erase(0, 1);
+    for (const char* suffix : {"/**", "/*", "/"}) {
+        if (strings::endsWith(rule, suffix)) {
+            rule.resize(rule.size() - std::string(suffix).size());
+            break;
+        }
+    }
+    return rule;
+}
+
+std::set<std::string> ignoreKeys(const std::string& body) {
+    std::set<std::string> keys;
+    for (const auto& line : lines(body)) {
+        const auto trimmed = strings::trim(line);
+        if (trimmed.empty() || trimmed.front() == '#') continue;
+        keys.insert(ignoreKey(trimmed));
+    }
+    return keys;
+}
+
+} // namespace
+
+Result<IgnoreWrite> writeIgnoreRules(const std::filesystem::path& project_root,
+                                     const std::vector<std::string>& rules) {
+    IgnoreWrite write;
+    write.file = project_root / ".gitignore";
+    auto found = readText(write.file);
+    if (found.isErr()) return found.error();
+    auto keys = ignoreKeys(found.value().body);
+    for (const auto& rule : rules) {
+        if (keys.insert(ignoreKey(rule)).second) write.added.push_back(rule);
+    }
+    if (write.added.empty()) return write;
+    std::string body = found.value().body;
+    if (!body.empty() && body.back() != '\n') body += '\n';
+    if (!body.empty()) body += '\n';
+    body += "# Didi's journal, locks, crash reports and run records, and client files that name this "
+            "machine's paths\n";
+    for (const auto& rule : write.added) body += rule + "\n";
+    auto written = writeText(write.file, found.value(), body);
+    if (written.isErr()) return written.error();
+    write.action = found.value().exists ? FileAction::Updated : FileAction::Created;
+    return write;
+}
+
+bool ignoresRule(const std::filesystem::path& project_root, const std::string& rule) {
+    auto found = readText(project_root / ".gitignore");
+    if (found.isErr() || !found.value().exists) return false;
+    return ignoreKeys(found.value().body).count(ignoreKey(rule)) > 0;
 }
 
 Result<FileAction> writeAgentsImport(const std::filesystem::path& file) {

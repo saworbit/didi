@@ -206,6 +206,41 @@ class SetupOffline(SetupFixture):
                              "didi", client)
             self.assertTrue(answers.get(2, {}).get("result", {}).get("tools"), client)
 
+    def test_setup_keeps_didi_state_and_client_files_out_of_git(self):
+        # The journal holds argument values, crash reports hold stacks, and
+        # each client file names this machine's paths, and setup wrote no
+        # ignore rule for any of them (#1307).
+        report = self.setup_json("--client", "claude-code", "--client", "cursor")
+        step = self.steps(report)["ignore"]
+        self.assertEqual(step["state"], "done", step)
+        rules = (self.project / ".gitignore").read_text(encoding="utf-8").splitlines()
+        for rule in (".didi/", "/.mcp.json", "/.cursor/mcp.json"):
+            self.assertIn(rule, rules)
+        self.assertEqual(self.steps(self.doctor_json(expect=0))["ignore"]["state"], "ok")
+
+        # A person's .gitignore is appended to, never rewritten, and a rule
+        # it already has in another spelling is not added twice. CRLF stays.
+        other = self.root / "other"
+        other.mkdir()
+        (other / "project.godot").write_text(BARE_PROJECT, encoding="utf-8", newline="\n")
+        original = b".godot/\r\n/.didi\r\n# keep\r\n*.tmp"
+        (other / ".gitignore").write_bytes(original)
+        result = self.run_didi("setup", "--project", str(other), "--client", "claude-code", "--json")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        step = self.steps(json.loads(result.stdout))["ignore"]
+        self.assertEqual(step["state"], "done", step)
+        written = (other / ".gitignore").read_bytes()
+        self.assertTrue(written.startswith(original + b"\r\n"), written)
+        self.assertIn(b"/.mcp.json\r\n", written)
+        self.assertNotIn(b".didi/", written)
+
+    def test_doctor_warns_when_didi_state_is_not_ignored(self):
+        self.setup_json("--client", "claude-code")
+        (self.project / ".gitignore").write_text(".godot/\n", encoding="utf-8", newline="\n")
+        step = self.steps(self.doctor_json(expect=0))["ignore"]
+        self.assertEqual(step["state"], "warn", step)
+        self.assertIn(".didi/", step["detail"])
+
     def test_a_rerun_changes_nothing(self):
         self.setup_json("--client", "all")
         before = tree_digest(self.project)
@@ -320,6 +355,27 @@ class SetupOffline(SetupFixture):
         self.assertEqual(claude["state"], "warn")
         self.assertIn("CLAUDE.md", claude["detail"])
         self.setup_json("--client", "claude-code")
+        self.assertEqual(self.steps(self.doctor_json(expect=0))["agent-guide:claude-code"]["state"], "ok")
+
+    def test_doctor_warns_about_a_guide_behind_an_external_import(self):
+        # Claude Code asks before loading an import that resolves outside the
+        # working directory, and never loads one that was declined, so a
+        # guide only reached that way is not known to be read (#1286).
+        self.setup_json("--client", "claude-code")
+        self.assertEqual(self.steps(self.doctor_json(expect=0))["agent-guide:claude-code"]["state"], "ok")
+        guide = (self.project / "AGENTS.md").read_text(encoding="utf-8")
+        (self.root / "shared.md").write_text(guide, encoding="utf-8", newline="\n")
+        (self.project / "AGENTS.md").unlink()
+        (self.project / "CLAUDE.md").write_text("@../shared.md\n", encoding="utf-8", newline="\n")
+        claude = self.steps(self.doctor_json(expect=0))["agent-guide:claude-code"]
+        self.assertEqual(claude["state"], "warn", claude)
+        self.assertIn("shared.md", claude["detail"])
+        self.assertIn("outside the project", claude["detail"])
+
+        # The same guide inside the project, imported from CLAUDE.md, is read.
+        (self.project / "docs").mkdir()
+        (self.project / "docs" / "guide.md").write_text(guide, encoding="utf-8", newline="\n")
+        (self.project / "CLAUDE.md").write_text("@docs/guide.md\n", encoding="utf-8", newline="\n")
         self.assertEqual(self.steps(self.doctor_json(expect=0))["agent-guide:claude-code"]["state"], "ok")
 
     def test_a_file_it_cannot_reproduce_is_refused_and_left_alone(self):
