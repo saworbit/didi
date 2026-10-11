@@ -270,17 +270,57 @@ class SetupOffline(SetupFixture):
         self.setup_json("--client", "claude-code", "--client", "cursor")
         self.assertTrue((self.project / "AGENTS.md").exists())
 
-    def test_a_claude_md_above_the_project_sends_the_guide_to_one_here(self):
-        # Claude Code skips AGENTS.md below any CLAUDE.md, and the one above is
-        # not the project's to write (#1144).
+    def test_claude_code_reaches_agents_md_through_an_import(self):
+        # Claude Code reads AGENTS.md on its own only from v2.1.277, not in every
+        # session, and never below a CLAUDE.md above the project, which is not
+        # the project's to write. A CLAUDE.md here that imports it works on all
+        # of them (#1144, #1277).
         (self.root / "CLAUDE.md").write_text("# Above\n", encoding="utf-8", newline="\n")
         report = self.setup_json("--client", "claude-code")
         steps = [step for step in report["steps"] if step["step"] == "agent-guide"]
-        self.assertEqual([Path(step["file"]).name for step in steps], ["CLAUDE.md"])
-        self.assertIn("does not read AGENTS.md below", steps[0]["detail"])
-        self.assertIn("<!-- BEGIN didi -->", (self.project / "CLAUDE.md").read_text(encoding="utf-8"))
-        self.assertFalse((self.project / "AGENTS.md").exists())
+        self.assertEqual([Path(step["file"]).name for step in steps], ["AGENTS.md", "CLAUDE.md"])
+        self.assertIn("v2.1.277", steps[1]["detail"])
+        self.assertIn("never below", steps[1]["detail"])
+        self.assertIn("<!-- BEGIN didi -->", (self.project / "AGENTS.md").read_text(encoding="utf-8"))
+        claude = (self.project / "CLAUDE.md").read_text(encoding="utf-8")
+        self.assertIn("\n@AGENTS.md\n", claude)
+        self.assertNotIn("BEGIN didi", claude)
         self.assertEqual((self.root / "CLAUDE.md").read_text(encoding="utf-8"), "# Above\n")
+        guide = self.steps(self.doctor_json(expect=0))["agent-guide:claude-code"]
+        self.assertEqual(guide["state"], "ok", guide)
+        self.assertIn("imports AGENTS.md", guide["detail"])
+
+        # A rerun leaves both files byte-identical.
+        before = tree_digest(self.project)
+        report = self.setup_json("--client", "claude-code")
+        for step in report["steps"]:
+            self.assertIn(step["state"], ("unchanged", "skipped"), step)
+        self.assertEqual(tree_digest(self.project), before)
+
+    def test_doctor_says_where_each_client_misses_the_guide(self):
+        self.setup_json("--client", "claude-code", "--client", "codex", "--no-agent-guide")
+        steps = self.steps(self.doctor_json(expect=0))
+        self.assertEqual(steps["agent-guide:claude-code"]["state"], "warn")
+        self.assertEqual(steps["agent-guide:agents-md"]["state"], "warn")
+        self.assertIn("Codex", steps["agent-guide:agents-md"]["detail"])
+
+        # A project set up before #1277: the guide in AGENTS.md alone, which an
+        # older Claude Code never reads.
+        self.setup_json("--client", "codex")
+        steps = self.steps(self.doctor_json(expect=0))
+        self.assertEqual(steps["agent-guide:agents-md"]["state"], "ok")
+        claude = steps["agent-guide:claude-code"]
+        self.assertEqual(claude["state"], "warn")
+        self.assertIn("v2.1.277", claude["detail"])
+
+        # A person's CLAUDE.md that neither holds the block nor imports it is
+        # named.
+        (self.project / "CLAUDE.md").write_text("# Ours\n", encoding="utf-8", newline="\n")
+        claude = self.steps(self.doctor_json(expect=0))["agent-guide:claude-code"]
+        self.assertEqual(claude["state"], "warn")
+        self.assertIn("CLAUDE.md", claude["detail"])
+        self.setup_json("--client", "claude-code")
+        self.assertEqual(self.steps(self.doctor_json(expect=0))["agent-guide:claude-code"]["state"], "ok")
 
     def test_a_file_it_cannot_reproduce_is_refused_and_left_alone(self):
         (self.project / ".vscode").mkdir()
@@ -364,6 +404,8 @@ class SetupOffline(SetupFixture):
         self.assertEqual(steps["bridge"]["state"], "warn", "no editor is open, which is a warning")
         for client in CONFIG_FILES:
             self.assertEqual(steps[f"client:{client}"]["state"], "ok", steps[f"client:{client}"])
+        for guide in ("agent-guide:claude-code", "agent-guide:agents-md"):
+            self.assertEqual(steps[guide]["state"], "ok", steps[guide])
 
         older = patch_build_id(self.project / "addons" / "didi" / "bin" / LIBRARY, "2000")
         steps = self.steps(self.doctor_json(expect=0))

@@ -130,11 +130,14 @@ What `setup` does, in order, and what stops it:
    keep keys added to their entry. The arguments are the ones the
    dock's Connect page writes: `--project <root> --log-level INFO`.
 6. Writes the agent guide between `<!-- BEGIN didi -->` and `<!-- END didi -->`
-   into `AGENTS.md`, or into the project's `CLAUDE.md`, `.claude/CLAUDE.md` or
-   `CLAUDE.local.md` when Claude Code is named and one exists, since Claude Code
-   then reads that file and not `AGENTS.md`. One in a directory above the
-   project stops it reading `AGENTS.md` too, so then the guide goes into a new
-   `CLAUDE.md` in the project. Your own `~/.claude/CLAUDE.md` does not count.
+   into `AGENTS.md`. When Claude Code is named and the project has no
+   `CLAUDE.md`, `.claude/CLAUDE.md` or `CLAUDE.local.md` of its own, it also
+   creates a `CLAUDE.md` that holds `@AGENTS.md`. Claude Code reads `AGENTS.md`
+   on its own only from v2.1.277, not in every session, and never below a
+   `CLAUDE.md` in a directory above the project; the import works on every
+   version and is never read twice. When the project has one of those files,
+   the guide goes into it instead, or into `AGENTS.md` when that file already
+   imports it. Your own `~/.claude/CLAUDE.md` does not count.
    A rerun replaces only the block.
    New files are UTF-8 with no byte-order mark; an existing file keeps its own
    mark and line endings.
@@ -146,8 +149,11 @@ What `setup` does, in order, and what stops it:
 `didi doctor` reports what the dock's Diagnostics page reports, under the same
 names, plus what only a command outside the editor can compare: the addon's
 build against the server's, each client file's server against the addon's, and
-each client file's `--project` against this project. A missing or disabled
-addon fails; a build mismatch, or no editor open, is a warning.
+each client file's `--project` against this project, and whether each
+configured client's instructions file reaches the agent guide: for Claude Code,
+a project `CLAUDE.md` that holds the block or imports a file that does, and for
+the others `AGENTS.md`. A missing or disabled addon fails; a build mismatch, no
+editor open, or a client that cannot reach the guide is a warning.
 
 The client configuration records absolute paths for one machine. Keep
 `.mcp.json`, `.cursor/mcp.json`, `.vscode/mcp.json` and `.codex/config.toml`

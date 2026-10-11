@@ -12,6 +12,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #define ASSERT_TRUE(cond) if (!(cond)) throw std::runtime_error("Assertion failed: " #cond);
 #define ASSERT_EQ(a, b) ASSERT_TRUE((a) == (b))
@@ -222,7 +223,7 @@ void puts_the_guide_where_each_client_reads_it() {
     Scratch scratch("targets");
     const auto names = [&scratch](const std::vector<Client>& clients) {
         std::string joined;
-        for (const auto& file : agentGuideFiles(scratch.root(), clients, std::nullopt)) {
+        for (const auto& file : agentGuideFiles(scratch.root(), clients)) {
             joined += std::filesystem::relative(file, scratch.root()).generic_string() + ";";
         }
         return joined;
@@ -234,34 +235,102 @@ void puts_the_guide_where_each_client_reads_it() {
     ASSERT_EQ(names({Client::ClaudeCode, Client::Codex}), std::string(".claude/CLAUDE.md;AGENTS.md;"));
     scratch.write("CLAUDE.md", "# ours\n");
     ASSERT_EQ(names({Client::ClaudeCode}), std::string("CLAUDE.md;"));
+
+    // A CLAUDE.md that imports AGENTS.md sends the guide there, so Claude
+    // Code is not given it twice.
+    scratch.write("CLAUDE.md", "# ours\n\n@AGENTS.md\n");
+    ASSERT_EQ(names({Client::ClaudeCode}), std::string("AGENTS.md;"));
+    ASSERT_EQ(names({Client::ClaudeCode, Client::Codex}), std::string("AGENTS.md;"));
+    // A block it already reaches is the one a rerun rewrites, wherever it is.
+    scratch.write(".claude/CLAUDE.md", "# ours\n\n<!-- BEGIN didi -->\nold\n<!-- END didi -->\n");
+    ASSERT_EQ(names({Client::ClaudeCode}), std::string(".claude/CLAUDE.md;"));
+}
+
+// Claude Code reads AGENTS.md on its own only from v2.1.277, not in every
+// session, and never below a CLAUDE.md in a directory above. A CLAUDE.md that
+// imports it works on all of them (#1277).
+void imports_agents_md_where_claude_code_would_not_read_it() {
+    Scratch scratch("import");
+    const auto project = scratch.root() / "project";
+    std::filesystem::create_directories(project);
+    ASSERT_TRUE(!agentsImportFile(project, {Client::Cursor}).has_value());
+    const auto file = agentsImportFile(project, {Client::Cursor, Client::ClaudeCode});
+    ASSERT_TRUE(file.has_value() && *file == project / "CLAUDE.md");
+    ASSERT_EQ(agentGuideFiles(project, {Client::ClaudeCode}), std::vector<std::filesystem::path>{project / "AGENTS.md"});
+
+    ASSERT_TRUE(writeAgentGuide(project / "AGENTS.md").value() == FileAction::Created);
+    ASSERT_TRUE(writeAgentsImport(*file).value() == FileAction::Created);
+    const auto written = scratch.read("project/CLAUDE.md");
+    ASSERT_TRUE(written.find("\n@AGENTS.md\n") != std::string::npos);
+    const auto reached = agentGuideReachedFrom(*file);
+    ASSERT_TRUE(reached.has_value() && *reached == project / "AGENTS.md");
+
+    // A rerun finds the import, so it writes nothing new and the guide stays in
+    // AGENTS.md.
+    ASSERT_TRUE(!agentsImportFile(project, {Client::ClaudeCode}).has_value());
+    ASSERT_EQ(agentGuideFiles(project, {Client::ClaudeCode}), std::vector<std::filesystem::path>{project / "AGENTS.md"});
+    ASSERT_TRUE(writeAgentsImport(*file).value() == FileAction::Unchanged);
+    ASSERT_EQ(scratch.read("project/CLAUDE.md"), written);
+
+    // A person's own CLAUDE.md is never rewritten into an import.
+    scratch.write("project/CLAUDE.md", "# ours\n");
+    ASSERT_TRUE(writeAgentsImport(*file).isErr());
+    ASSERT_EQ(scratch.read("project/CLAUDE.md"), std::string("# ours\n"));
+}
+
+void reads_claude_imports_the_way_claude_code_does() {
+    Scratch scratch("imports");
+    const auto relative = [&scratch](const std::string& name) {
+        std::string joined;
+        for (const auto& file : claudeImports(scratch.root() / name)) {
+            joined += std::filesystem::relative(file, scratch.root()).generic_string() + ";";
+        }
+        return joined;
+    };
+    scratch.write("CLAUDE.md",
+                  "@AGENTS.md\n"
+                  "See @docs/one.md and mail me@example.com.\n"
+                  "`@skipped.md` and ``a ` @skipped.md`` and @\"quoted.md\"\n"
+                  "```\n@fenced.md\n```\n"
+                  "~~~~\n```\n@fenced.md\n~~~~\n"
+                  "@Design\\ Docs/two.md\n");
+    ASSERT_EQ(relative("CLAUDE.md"), std::string("AGENTS.md;docs/one.md;Design Docs/two.md;"));
+    // Relative to the file that imports, not the project.
+    scratch.write(".claude/CLAUDE.md", "@../AGENTS.md\n@rules.md\n");
+    ASSERT_EQ(relative(".claude/CLAUDE.md"), std::string("AGENTS.md;.claude/rules.md;"));
+    ASSERT_EQ(relative("missing.md"), std::string());
+
+    // Four hops reach the block, and a fifth does not, as in Claude Code.
+    scratch.write("z.md", "@a.md\n");
+    scratch.write("a.md", "@b.md\n");
+    scratch.write("b.md", "@c.md\n");
+    scratch.write("c.md", "@d.md\n");
+    scratch.write("d.md", "@e.md\n");
+    scratch.write("e.md", "<!-- BEGIN didi -->\n<!-- END didi -->\n");
+    const auto four = agentGuideReachedFrom(scratch.root() / "a.md");
+    ASSERT_TRUE(four.has_value() && *four == scratch.root() / "e.md");
+    ASSERT_TRUE(!agentGuideReachedFrom(scratch.root() / "z.md").has_value());
+    // A loop ends at the same limit.
+    scratch.write("loop.md", "@loop.md\n");
+    ASSERT_TRUE(!agentGuideReachedFrom(scratch.root() / "loop.md").has_value());
 }
 
 // A CLAUDE.md in a directory above the project stops Claude Code reading the
 // project's AGENTS.md as surely as one inside it, so a guide written there was
 // never read (#1144). The user's own ~/.claude/CLAUDE.md does not count.
-void puts_the_guide_where_claude_code_reads_it_below_a_claude_md() {
+void finds_a_claude_md_above_the_project() {
     Scratch scratch("above");
     const auto project = scratch.root() / "up" / "project";
     std::filesystem::create_directories(project);
-    const auto names = [&project](const std::vector<Client>& clients,
-                                  const std::optional<std::filesystem::path>& above) {
-        std::string joined;
-        for (const auto& file : agentGuideFiles(project, clients, above)) {
-            joined += std::filesystem::relative(file, project).generic_string() + ";";
-        }
-        return joined;
-    };
     const auto above = scratch.root() / "up" / "CLAUDE.local.md";
-    ASSERT_EQ(names({Client::ClaudeCode}, above), std::string("CLAUDE.md;"));
-    ASSERT_EQ(names({Client::ClaudeCode, Client::Codex}, above), std::string("CLAUDE.md;AGENTS.md;"));
-    ASSERT_EQ(names({Client::Cursor}, above), std::string("AGENTS.md;"));
-    ASSERT_EQ(names({Client::ClaudeCode}, std::nullopt), std::string("AGENTS.md;"));
 
     // The nearest one is found, whichever of the three names it has.
     scratch.write("CLAUDE.md", "# further up\n");
     scratch.write("up/CLAUDE.local.md", "# nearer\n");
     const auto nearest = claudeFileAbove(project);
     ASSERT_TRUE(nearest.has_value() && std::filesystem::equivalent(*nearest, above));
+    // The import is what reaches past it.
+    ASSERT_TRUE(agentsImportFile(project, {Client::ClaudeCode}).has_value());
 
     // Above a project in the user's home, their own .claude/CLAUDE.md is passed
     // over and the search goes on up.
@@ -276,6 +345,8 @@ void puts_the_guide_where_claude_code_reads_it_below_a_claude_md() {
     variable.set(home.string());
     const auto past_home = claudeFileAbove(home / "project");
     ASSERT_TRUE(past_home.has_value() && std::filesystem::equivalent(*past_home, scratch.root() / "CLAUDE.md"));
+    // In a project at the home directory it is not the project's either.
+    ASSERT_TRUE(projectClaudeFiles(home).empty());
 }
 
 void refuses_a_codex_config_that_declares_didi_elsewhere() {
@@ -363,7 +434,9 @@ struct Registrar {
         registerTest("didi_setup.enable_plugin", enables_the_plugin_and_refuses_a_list_it_cannot_extend);
         registerTest("didi_setup.agent_guide_block", replaces_only_the_agent_guide_block);
         registerTest("didi_setup.agent_guide_files", puts_the_guide_where_each_client_reads_it);
-        registerTest("didi_setup.agent_guide_below_a_claude_md", puts_the_guide_where_claude_code_reads_it_below_a_claude_md);
+        registerTest("didi_setup.claude_md_above", finds_a_claude_md_above_the_project);
+        registerTest("didi_setup.agents_md_import", imports_agents_md_where_claude_code_would_not_read_it);
+        registerTest("didi_setup.claude_imports", reads_claude_imports_the_way_claude_code_does);
         registerTest("didi_setup.codex_foreign_declaration", refuses_a_codex_config_that_declares_didi_elsewhere);
         registerTest("didi_setup.codex_keeps_a_persons_tables", keeps_the_tables_a_person_adds_under_codex_didi);
         registerTest("didi_setup.json_merge", merges_json_configs_without_reformatting_them);
