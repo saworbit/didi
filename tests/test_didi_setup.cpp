@@ -403,6 +403,38 @@ void keeps_the_tables_a_person_adds_under_codex_didi() {
     ASSERT_EQ(readClientConfig(scratch.root(), Client::Codex).command, std::string("D:/new/didi.exe"));
 }
 
+// Didi's state and the client files setup wrote stay out of a commit, and a
+// person's .gitignore is only ever appended to (#1307).
+void appends_ignore_rules_once() {
+    Scratch scratch("ignore");
+    auto created = writeIgnoreRules(scratch.root(), {kStateIgnoreRule, "/.mcp.json"});
+    ASSERT_TRUE(created.isOk());
+    ASSERT_TRUE(created.value().action == FileAction::Created);
+    ASSERT_EQ(created.value().added.size(), 2u);
+    const auto first = scratch.read(".gitignore");
+    ASSERT_TRUE(first.find(".didi/\n/.mcp.json\n") != std::string::npos);
+    ASSERT_TRUE(ignoresRule(scratch.root(), ".didi/"));
+
+    // Again: nothing to add, nothing written.
+    auto again = writeIgnoreRules(scratch.root(), {kStateIgnoreRule, "/.mcp.json"});
+    ASSERT_TRUE(again.isOk() && again.value().action == FileAction::Unchanged);
+    ASSERT_EQ(scratch.read(".gitignore"), first);
+
+    // Another spelling counts, and so does a person's negation; CRLF and the
+    // last line without a newline are kept as they were.
+    Scratch other("ignore-spellings");
+    other.write(".gitignore", "/.didi/*\r\n!/.mcp.json\r\n*.tmp");
+    auto none = writeIgnoreRules(other.root(), {kStateIgnoreRule, "/.mcp.json"});
+    ASSERT_TRUE(none.isOk() && none.value().action == FileAction::Unchanged);
+    auto one = writeIgnoreRules(other.root(), {kStateIgnoreRule, "/.cursor/mcp.json"});
+    ASSERT_TRUE(one.isOk() && one.value().action == FileAction::Updated);
+    ASSERT_EQ(one.value().added, std::vector<std::string>{"/.cursor/mcp.json"});
+    const auto text = other.read(".gitignore");
+    ASSERT_EQ(text.rfind("/.didi/*\r\n!/.mcp.json\r\n*.tmp\r\n\r\n# ", 0), 0u);
+    ASSERT_TRUE(text.find("/.cursor/mcp.json\r\n") != std::string::npos);
+    ASSERT_TRUE(!ignoresRule(Scratch("ignore-none").root(), ".didi/"));
+}
+
 void merges_json_configs_without_reformatting_them() {
     Scratch scratch("json");
     scratch.write(".cursor/mcp.json", "{\n\t\"mcpServers\": {\n\t\t\"z\": {\"command\": \"z\"}\n\t}\n}\n");
@@ -440,6 +472,7 @@ struct Registrar {
         registerTest("didi_setup.codex_foreign_declaration", refuses_a_codex_config_that_declares_didi_elsewhere);
         registerTest("didi_setup.codex_keeps_a_persons_tables", keeps_the_tables_a_person_adds_under_codex_didi);
         registerTest("didi_setup.json_merge", merges_json_configs_without_reformatting_them);
+        registerTest("didi_setup.ignore_rules", appends_ignore_rules_once);
     }
 } registrar;
 
