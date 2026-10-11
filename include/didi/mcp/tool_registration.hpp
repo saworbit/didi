@@ -29,16 +29,55 @@
 #include "didi/offline/speculative_verify.hpp"
 #include "didi/tools/editor_copy_refresh.hpp"
 
+#include <algorithm>
+#include <cctype>
+#include <filesystem>
+#include <fstream>
 #include <functional>
+#include <iomanip>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <string>
+#include <string_view>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <vector>
 
 namespace didi {
 namespace mcp {
 
 // Every JSON type, for an argument that takes any value (#1000).
 json anyJsonType();
+
+// Output schemas for tools whose real result shape has been observed.
+//
+// A declared outputSchema is a promise about structuredContent, so a schema is
+// added only after the tool's actual output has been seen. Tools that cannot be
+// exercised here, and every unimplemented name, declare nothing rather than
+// asserting a shape nobody has verified.
+//
+// `required` lists only fields guaranteed in every execution mode. Live results
+// carry extra members that offline results do not -- capture identifiers,
+// omitted-field lists, session envelopes -- and additional properties are
+// permitted so those never invalidate a result.
+namespace output_schema {
+
+inline const json string_type = {{"type", "string"}};
+inline const json integer_type = {{"type", "integer"}};
+inline const json boolean_type = {{"type", "boolean"}};
+
+inline json object_schema(json properties, std::vector<std::string> required) {
+    return json{{"type", "object"},
+                {"properties", std::move(properties)},
+                {"required", std::move(required)}};
+}
+inline json array_of(json items) {
+    return json{{"type", "array"}, {"items", std::move(items)}};
+}
+
+}  // namespace output_schema
 
 // The handlers, each defined in the src/tools file that registers it.
 CallToolResult handleCaptureViewport(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);

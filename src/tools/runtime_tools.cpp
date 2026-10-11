@@ -652,6 +652,38 @@ CallToolResult handleRuntimeExploreScene(const ResolvedToolBinding& binding, con
     return sendPhase7LiveRequest(binding, args, ipc);
 }
 
+namespace {
+
+using namespace output_schema;
+
+json runtimeListSessionsOutputSchema() {
+    return object_schema({{"execution_mode", string_type},
+                          {"sessions", {{"type", "array"}}},
+                          {"diagnostics", {{"type", "array"}}}},
+                         {"execution_mode", "sessions"});
+}
+
+// runtime_detach_session answers with no session attached, because detach
+// is a cleanup and a cleanup reports the state rather than failing on it
+// (#537). That makes its success payload producible offline, which is what
+// the rule asks for before a schema is published: an unchecked schema is
+// the defect #510 was about.
+json runtimeDetachSessionOutputSchema() {
+    return object_schema({{"detached", {{"type", "boolean"}}},
+                          {"connected", {{"type", "boolean"}}},
+                          // Only when this call is the one that released
+                          // something, which is the point of the field.
+                          {"detached_session", {{"type", "object"}}},
+                          {"handshake", {{"type", "object"}}},
+                          {"server_build_id", string_type},
+                          {"bridge_build_matches", {{"type", "boolean"}}},
+                          {"bridge_build_note", string_type},
+                          {"execution_mode", string_type}},
+                         {"execution_mode", "detached", "connected"});
+}
+
+}  // namespace
+
 // The tools whose handlers this file holds. registerAllDefaultTools calls
 // each domain's in turn (#1256).
 void ToolRegistry::registerRuntimeTools() {
@@ -705,6 +737,7 @@ void ToolRegistry::registerRuntimeTools() {
             {"project_path", {{"type", "string"}}}
         }}};
         t.handler = [this](const json& args) { return handleRuntimeListSessions(args, m_runtimeSessionClient); };
+        t.outputSchema = runtimeListSessionsOutputSchema();
         registerTool(std::move(t));
     }
     {
@@ -727,11 +760,16 @@ void ToolRegistry::registerRuntimeTools() {
         t.description = "Detaches from the active Godot runtime session.";
         t.inputSchema = {{"type", "object"}};
         t.handler = [this](const json& args) { return handleRuntimeDetachSession(args, m_runtimeSessionClient); };
+        t.outputSchema = runtimeDetachSessionOutputSchema();
         registerTool(std::move(t));
     }
     {
         ToolDefinition t;
         t.name = "runtime_get_session";
+        // runtime_get_session deliberately publishes no outputSchema. It needs an
+        // attached session to produce a success payload at all, so nothing driving
+        // the real binary offline can check one. runtime_list_sessions does publish
+        // one: it scans descriptors and answers with no attachment.
         t.description = "Performs a fresh authenticated handshake and returns token-free authoritative session identity metadata.";
         t.inputSchema = {{"type", "object"}};
         // Derived from the registry, never listed. A written list would satisfy

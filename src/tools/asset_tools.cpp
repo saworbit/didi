@@ -2839,6 +2839,41 @@ CallToolResult handleAssetConfigureImport(const json& args, std::shared_ptr<ipc:
     return CallToolResult::successJson(std::move(payload));
 }
 
+namespace {
+
+using namespace output_schema;
+
+json projectListResourcesOutputSchema() {
+    return object_schema(
+        {{"execution_mode", string_type},
+         {"resources", array_of(object_schema({{"path", string_type},
+                                               {"filename", string_type},
+                                               {"type", string_type},
+                                               {"uid", string_type},
+                                               {"file_size", integer_type},
+                                               {"dependencies", {{"type", "array"}}}},
+                                              {"path"}))},
+         {"total_found", integer_type},
+         {"truncated", boolean_type}},
+        {"execution_mode", "resources"});
+}
+
+json resourceInspectOutputSchema() {
+    return object_schema({{"path", string_type},
+                          {"filename", string_type},
+                          {"type", string_type},
+                          {"uid", string_type},
+                          {"file_size", integer_type},
+                          {"dependencies", {{"type", "array"}}},
+                          // The import sidecar's options (#958), or why a
+                          // sidecar that is there could not be read.
+                          {"import", {{"type", "object"}}},
+                          {"import_error", string_type}},
+                         {"execution_mode", "path"});
+}
+
+}  // namespace
+
 // The tools whose handlers this file holds. registerAllDefaultTools calls
 // each domain's in turn (#1256).
 void ToolRegistry::registerAssetTools() {
@@ -3067,6 +3102,7 @@ void ToolRegistry::registerAssetTools() {
             {"required", {"resource_path"}}
         };
         t.handler = [this](const json& args) { return handleResourceInspect(args, m_ipcClient); };
+        t.outputSchema = resourceInspectOutputSchema();
         registerTool(std::move(t));
     }
     {
@@ -3083,6 +3119,7 @@ void ToolRegistry::registerAssetTools() {
             }}
         };
         t.handler = [this](const json& args) { return handleQueryProjectResources(args, m_ipcClient); };
+        t.outputSchema = projectListResourcesOutputSchema();
         registerTool(t);
 
         // Alias

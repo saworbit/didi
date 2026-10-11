@@ -346,6 +346,67 @@ CallToolResult handleBlackboardTaskList(const json& args, std::shared_ptr<ipc::I
     return finish(offline::blackboardTaskList(request));
 }
 
+namespace {
+
+using namespace output_schema;
+
+json blackboardListKeysOutputSchema() {
+    return object_schema({{"board", string_type},
+                          {"prefix", string_type},
+                          {"keys", array_of(string_type)},
+                          {"total", integer_type},
+                          {"returned", integer_type},
+                          {"truncated", boolean_type}},
+                         {"execution_mode", "keys"});
+}
+
+json blackboardReadOutputSchema() {
+    return object_schema({{"board", string_type},
+                          {"path", string_type},
+                          {"deep", boolean_type},
+                          {"truncated", boolean_type},
+                          // A path with nothing at it is `found: false`
+                          // rather than an error, so the flag is the
+                          // answer and `value` may be anything or absent.
+                          {"found", boolean_type},
+                          {"value", json::object()},
+                          // Which kind of nothing, when there is nothing.
+                          // "expired" means a ttl lapsed and the board
+                          // still remembers it; "no_record" means the
+                          // board has nothing to say, which covers never
+                          // written, cleared, and lapsed longer ago than
+                          // it remembers. The two used to answer
+                          // identically, and they lead opposite ways
+                          // (#680).
+                          {"reason", {{"type", "string"},
+                                      {"enum", json::array({"expired", "no_record"})}}},
+                          {"expired_at_ms", integer_type},
+                          {"expired_author", string_type},
+                          {"expired_reason", string_type},
+                          {"cleared_at_ms", integer_type},
+                          {"cleared_by", string_type},
+                          {"cleared_reason", string_type},
+                          {"last_board_clear", {{"type", "object"}}},
+                          // What a writer pins a change to: the board's
+                          // revision for blackboard_patch, this path's
+                          // write time for blackboard_write. 0 means
+                          // nothing is there (#682).
+                          {"revision", integer_type},
+                          {"updated_at_ms", integer_type}},
+                         {"execution_mode", "found"});
+}
+
+json blackboardTaskListOutputSchema() {
+    return object_schema({{"board", string_type},
+                          {"tasks", {{"type", "array"}}},
+                          {"total", integer_type},
+                          {"returned", integer_type},
+                          {"truncated", boolean_type}},
+                         {"execution_mode", "tasks"});
+}
+
+}  // namespace
+
 // The tools whose handlers this file holds. registerAllDefaultTools calls
 // each domain's in turn (#1256).
 void ToolRegistry::registerBlackboardTools() {
@@ -396,6 +457,7 @@ void ToolRegistry::registerBlackboardTools() {
             {"additionalProperties", false}
         };
         t.handler = [this](const json& args) { return handleBlackboardRead(args, m_ipcClient); };
+        t.outputSchema = blackboardReadOutputSchema();
         registerTool(std::move(t));
     }
     {
@@ -439,6 +501,7 @@ void ToolRegistry::registerBlackboardTools() {
             {"additionalProperties", false}
         };
         t.handler = [this](const json& args) { return handleBlackboardListKeys(args, m_ipcClient); };
+        t.outputSchema = blackboardListKeysOutputSchema();
         registerTool(std::move(t));
     }
     {
@@ -575,6 +638,7 @@ void ToolRegistry::registerBlackboardTools() {
             {"additionalProperties", false}
         };
         t.handler = [this](const json& args) { return handleBlackboardTaskList(args, m_ipcClient); };
+        t.outputSchema = blackboardTaskListOutputSchema();
         registerTool(std::move(t));
     }
 }

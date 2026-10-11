@@ -543,6 +543,49 @@ CallToolResult handleProjectSearchSymbols(const json& args, std::shared_ptr<ipc:
     return CallToolResult::successJson(result.value().toJson());
 }
 
+namespace {
+
+using namespace output_schema;
+
+json projectSearchOutputSchema(const std::string& name) {
+    // The two positions carry prose because the guess is load-bearing:
+    // column was a byte offset and nothing said so, which is wrong for
+    // the one use a column has on any line with a non-ASCII character
+    // before the match (#556).
+    json match_properties = {
+        {"path", string_type},
+        {"line", {{"type", "integer"}, {"description", "1-based line of the match."}}},
+        {"column", {{"type", "integer"},
+                    {"description", "1-based column of the match in Unicode code points, "
+                                    "the way an editor's goto line:col counts. Not a byte "
+                                    "offset."}}},
+        {"preview", string_type}};
+    if (name == "project_search_symbols") {
+        match_properties["name"] = string_type;
+        match_properties["kind"] = string_type;
+        match_properties["language"] = string_type;
+    }
+    return object_schema(
+        {{"execution_mode", string_type},
+         {"matches", array_of(object_schema(std::move(match_properties), {"path"}))},
+         {"truncated", boolean_type},
+         {"lexical", boolean_type},
+         {"search_kind", string_type},
+         {"project_root", string_type},
+         {"scanned_files", integer_type},
+         {"scanned_bytes", integer_type},
+         {"skipped_files", integer_type},
+         // Returned on every call and declared on none, which is the same
+         // defect as #510 one tool over: a caller cannot see from the
+         // contract that the search told it what it could not read.
+         {"unsearchable_files", integer_type},
+         {"unsearchable_extensions", array_of(string_type)},
+         {"diagnostics", {{"type", "array"}}}},
+        {"execution_mode", "matches"});
+}
+
+}  // namespace
+
 // The tools whose handlers this file holds. registerAllDefaultTools calls
 // each domain's in turn (#1256).
 void ToolRegistry::registerProjectTools() {
@@ -563,6 +606,7 @@ void ToolRegistry::registerProjectTools() {
             {"max_results", {{"type", "integer"}, {"default", 100}, {"minimum", 1}, {"maximum", 500}}}
         }}, {"required", {"query"}}};
         t.handler = [this](const json& args) { return handleProjectSearchText(args, m_ipcClient); };
+        t.outputSchema = projectSearchOutputSchema("project_search_text");
         registerTool(std::move(t));
     }
     {
@@ -581,6 +625,7 @@ void ToolRegistry::registerProjectTools() {
                        {"items", {{"type", "string"}, {"enum", {"class", "function", "signal", "variable", "constant", "enum"}}}}}}
         }}, {"required", {"query"}}};
         t.handler = [this](const json& args) { return handleProjectSearchSymbols(args, m_ipcClient); };
+        t.outputSchema = projectSearchOutputSchema("project_search_symbols");
         registerTool(std::move(t));
     }
 

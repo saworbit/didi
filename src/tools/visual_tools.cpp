@@ -461,6 +461,29 @@ CallToolResult handleViewportToggleDebugDraw(const ResolvedToolBinding& binding,
     return sendPhase7LiveRequest(binding, args, ipc);
 }
 
+namespace {
+
+using namespace output_schema;
+
+json viewportCaptureFrameOutputSchema() {
+    return object_schema(
+        {{"execution_mode", string_type},
+         // Why this is the offline answer, when something is known. See
+         // scene_get_hierarchy for the full note (#536).
+         {"offline_reason", {{"type", "object"}}},
+         {"is_live_frame", boolean_type},
+         {"camera_identifier", string_type},
+         {"source", string_type},
+         {"status", string_type},
+         {"message", string_type},
+         {"capture_id", string_type},
+         {"resolution", object_schema({{"width", integer_type}, {"height", integer_type}},
+                                      {"width", "height"})}},
+        {"execution_mode", "is_live_frame"});
+}
+
+}  // namespace
+
 // The tools whose handlers this file holds. registerAllDefaultTools calls
 // each domain's in turn (#1256).
 void ToolRegistry::registerVisualTools() {
@@ -481,6 +504,7 @@ void ToolRegistry::registerVisualTools() {
             }}
         };
         t.handler = [this](const json& args) { return handleCaptureViewport(args, m_ipcClient); };
+        t.outputSchema = viewportCaptureFrameOutputSchema();
         registerTool(t);
 
         // Alias

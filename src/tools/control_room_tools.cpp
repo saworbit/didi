@@ -209,6 +209,36 @@ CallToolResult handleControlRoom(const json& args, const std::shared_ptr<ipc::II
     return CallToolResult::successJson(model);
 }
 
+namespace {
+
+using namespace output_schema;
+
+json didiControlRoomOutputSchema() {
+    return object_schema({{"captured_at", string_type},
+                          {"server", {{"type", "object"}}},
+                          {"project", {{"type", "object"}}},
+                          {"surface", {{"type", "object"}}},
+                          {"lights", {{"type", "array"}}},
+                          {"facts", {{"type", "array"}}},
+                          {"tools", {{"type", "array"}}},
+                          {"sessions", {{"type", "array"}}},
+                          // Only when a route is selected, which is the
+                          // point of the field.
+                          {"selected_session", string_type},
+                          {"session_note", string_type},
+                          {"log", {{"type", "array"}}},
+                          // A count of what the ring holds, not a flag.
+                          {"log_available", integer_type},
+                          {"log_note", string_type},
+                          {"log_returned", integer_type},
+                          {"log_truncated", boolean_type},
+                          {"journal", {{"type", "object"}}},
+                          {"truncated", boolean_type}},
+                         {"execution_mode", "lights"});
+}
+
+}  // namespace
+
 // The tools whose handlers this file holds. registerAllDefaultTools calls
 // each domain's in turn (#1256).
 void ToolRegistry::registerControlRoomTools() {
@@ -239,6 +269,7 @@ void ToolRegistry::registerControlRoomTools() {
             return handleControlRoom(args, m_sourceIpcClient, m_runtimeSessionClient,
                                      m_skipConfirmations, m_recovery != nullptr);
         };
+        t.outputSchema = didiControlRoomOutputSchema();
         registerTool(std::move(t));
     }
 }

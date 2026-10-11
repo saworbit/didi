@@ -704,6 +704,55 @@ CallToolResult handleScenePackBranch(const json& args, std::shared_ptr<ipc::IIpc
     return CallToolResult::successJson(payload);
 }
 
+namespace {
+
+using namespace output_schema;
+
+json sceneGetHierarchyOutputSchema() {
+    // The union of what the two paths return, not the shape of one of them.
+    // This declared `file_path` and three others and stayed silent about
+    // everything else, including `node_count` and `omitted_fields`, which
+    // are the two fields a caller has to read to know whether the tree it
+    // got back is complete (#510).
+    //
+    // `file_path` is not a stale rename: the offline path parses a .tscn and
+    // names the file it read, while a live answer carries `scene_file_path`
+    // from the edited scene's own identity. Both are real and which one
+    // arrives depends on `source`, so both are declared and neither is
+    // required.
+    return object_schema({{"execution_mode", string_type},
+                          // Why this answer is the offline one, when
+                          // something is known: the engine crashed, or
+                          // another MCP client holds the bridge. Absent
+                          // when the answer is live and when nothing was
+                          // ever attached, because an absent fact is
+                          // reported by being absent (#536).
+                          {"offline_reason", {{"type", "object"}}},
+                          {"source", string_type},
+                          {"scene_tree", {{"type", "object"}}},
+                          {"node_count", integer_type},
+                          // Offline: the .tscn that was parsed, and what was
+                          // asked for when the main scene stood in for it.
+                          {"file_path", string_type},
+                          {"requested_root_path", string_type},
+                          {"substituted_main_scene", boolean_type},
+                          // Live: the edited scene's identity, the traversal
+                          // budget, and what the walk did not read.
+                          {"root_path", string_type},
+                          {"scene_file_path", {{"type", {"string", "null"}}}},
+                          {"scene_is_unsaved", boolean_type},
+                          // Both: the scene this one inherits, when it does.
+                          {"inherits", string_type},
+                          {"omitted_fields", array_of(string_type)},
+                          {"max_nodes", integer_type},
+                          {"max_response_bytes", integer_type},
+                          {"truncated", boolean_type},
+                          {"message", string_type}},
+                         {"execution_mode", "scene_tree"});
+}
+
+}  // namespace
+
 // The tools whose handlers this file holds. registerAllDefaultTools calls
 // each domain's in turn (#1256).
 void ToolRegistry::registerSceneTools() {
@@ -728,6 +777,7 @@ void ToolRegistry::registerSceneTools() {
             }}
         };
         t.handler = [this](const json& args) { return handleGetSceneHierarchy(args, m_ipcClient); };
+        t.outputSchema = sceneGetHierarchyOutputSchema();
         registerTool(t);
 
         // Alias

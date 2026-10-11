@@ -542,7 +542,13 @@ A new name needs an accepted entry in [Surface Amendments](SURFACE_AMENDMENTS.md
 
 To add a new tool (e.g. `export_mesh_glb`):
 
-### 1. Register Tool Schema in `src/mcp/tool_registry.cpp`
+### 1. Register the tool beside its handler
+
+Each file under `src/tools` registers the tools whose handlers it defines, in its
+own `ToolRegistry::register...Tools()` function, which `registerAllDefaultTools`
+calls. Declare the handler in `include/didi/mcp/tool_registration.hpp`, and add
+the registration to the function in the handler's file:
+
 ```cpp
 ToolDefinition export_tool;
 export_tool.name = "export_mesh_glb";
@@ -560,6 +566,10 @@ export_tool.handler = [this](const json& args) {
 };
 registerTool(std::move(export_tool));
 ```
+
+Once the tool's real answer has been seen, its `outputSchema` goes in the same
+place, written with the `output_schema` helpers in that header. An alias is
+registered from a copy of its tool, so it promises the same shape.
 
 `tools/call` checks arguments against this schema before it dispatches, so what
 you declare here is enforced, not documentation. Declare `required` for every

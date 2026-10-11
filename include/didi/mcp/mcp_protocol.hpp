@@ -390,13 +390,14 @@ struct ToolDefinition {
     ExecutionCapability capability;
     // Set by ToolRegistry::registerTool from kLegacyToolNames. Never set by hand.
     bool legacy{false};
-    // The name this one resolves to. The same as `name` for the 116 canonical
-    // registrations. Set by ToolRegistry::registerTool. Never set by hand.
+    // The name this one resolves to. The same as `name` for every canonical
+    // registration. Set by ToolRegistry::registerTool. Never set by hand.
     std::string canonical_name;
     // Set by ToolRegistry::registerTool from MutationSafety. Never set by hand.
     ToolAnnotations annotations;
-    // Optional. Declared only for tools whose real result shape is known; see
-    // outputSchemaForTool. Absent means no promise is made about the payload.
+    // Optional. Declared beside the tool's registration in src/tools, and only
+    // for tools whose real result shape is known. Absent means no promise is
+    // made about the payload.
     json outputSchema;
     // Optional. The top-level answer keys a caller may choose between with a
     // `fields` argument, which ToolRegistry::registerTool publishes (Q5). Only

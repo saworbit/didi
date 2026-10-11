@@ -1379,6 +1379,47 @@ CallToolResult handleSceneGetSelection(const json& args, std::shared_ptr<ipc::II
     return CallToolResult::successJson(response.value());
 }
 
+namespace {
+
+using namespace output_schema;
+
+json projectAddExportPresetOutputSchema() {
+    return object_schema({{"status", string_type},
+                          {"preset", {{"type", "object"}}},
+                          {"written_to", string_type},
+                          {"file_created", boolean_type},
+                          {"section_written", string_type},
+                          {"preset_count", integer_type},
+                          {"next_step", string_type},
+                          // The restart an unattached editor needs (Q6).
+                          {"follow_up", {{"type", "array"}}},
+                          // Whether the folder export_path names is there,
+                          // since Godot will not create it (#932).
+                          {"export_path_folder_exists", boolean_type},
+                          {"export_path_note", string_type},
+                          // Whether an attached editor was made to read
+                          // the file again, and why not when it was not.
+                          {"editor_reloaded", boolean_type},
+                          {"editor_reload_error", {{"type", "object"}}},
+                          {"is_live_engine", boolean_type},
+                          {"limitation", string_type}},
+                         {"execution_mode", "status", "preset", "editor_reloaded"});
+}
+
+json projectListExportPresetsOutputSchema() {
+    return object_schema({{"presets", {{"type", "array"}}},
+                          {"preset_count", integer_type},
+                          // How many of them Godot will detect (#921).
+                          {"detected_count", integer_type},
+                          {"presets_file_exists", boolean_type},
+                          // Named rather than silently dropped: a caller
+                          // has to know the answer is not the whole file.
+                          {"sensitive_options_omitted", boolean_type}},
+                         {"execution_mode", "presets"});
+}
+
+}  // namespace
+
 // The tools whose handlers this file holds. registerAllDefaultTools calls
 // each domain's in turn (#1256).
 void ToolRegistry::registerDeepDomainTools() {
@@ -1513,6 +1554,7 @@ void ToolRegistry::registerDeepDomainTools() {
         t.description = "Lists non-sensitive fields from the project's export presets.";
         t.inputSchema = {{"type", "object"}, {"properties", json::object()}};
         t.handler = [this](const json& args) { return handleProjectListExportPresets(args, m_ipcClient); };
+        t.outputSchema = projectListExportPresetsOutputSchema();
         registerTool(std::move(t));
     }
     {
@@ -1546,6 +1588,7 @@ void ToolRegistry::registerDeepDomainTools() {
             {"export_path", {{"type", "string"}, {"maxLength", 1024}}}
         }}, {"required", {"name", "platform"}}};
         t.handler = [this](const json& args) { return handleProjectAddExportPreset(args, m_ipcClient); };
+        t.outputSchema = projectAddExportPresetOutputSchema();
         registerTool(std::move(t));
     }
     {
