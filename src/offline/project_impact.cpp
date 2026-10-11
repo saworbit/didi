@@ -5,6 +5,7 @@
 #include "didi/offline/project_text_scan.hpp"
 #include "didi/offline/project_search.hpp"
 #include "didi/common/atomic_write.hpp"
+#include "didi/offline/class_reference.hpp"
 #include <string_view>
 #include <vector>
 
@@ -707,6 +708,23 @@ std::vector<Impact> declarationsOf(const ProjectTextScan& scan, const std::strin
     return declarations;
 }
 
+// Whether anything could declare a signal by this name: a GDScript `signal`
+// line, a C# [Signal] delegate (whose signal is the name before EventHandler),
+// or an engine class.
+bool signalDeclaredAnywhere(const ProjectTextScan& scan, const std::string& name) {
+    for (const auto& declaration : declarationsOf(scan, name)) {
+        if (declaration.kind == "signal") return true;
+    }
+    const std::regex csharp(R"re(delegate\s+void\s+)re" + name + "EventHandler(?!" +
+                            kIdentifierByteClass + ")");
+    for (const auto& source : scan.sources) {
+        if (!strings::endsWith(source.path, ".cs")) continue;
+        if (source.contents.find(name + "EventHandler") == std::string::npos) continue;
+        if (std::regex_search(source.contents, csharp)) return true;
+    }
+    return ClassReference::instance().anyClassHasSignal(name);
+}
+
 json impactsToJson(const std::vector<Impact>& impacts, size_t limit, bool& truncated) {
     json array = json::array();
     for (const auto& impact : impacts) {
@@ -871,11 +889,18 @@ Result<RenamePlan> planRename(const std::string& root_dir, const ProjectRenameOp
 
     const auto forms = serializedNameForms(target);
     std::vector<RenamedFile> planned;
+    // The scenes in which a [connection] will name new_name as its signal.
+    std::vector<std::string> signal_scenes;
     for (const auto& source : scan.sources) {
         if (source.contents.find(target) == std::string::npos) continue;
         auto parts = splitKeepingBytes(source.contents);
         size_t changed = 0;
+        bool renames_signal = false;
         for (auto& part : parts) {
+            if (part.find(target) != std::string::npos &&
+                std::regex_search(part, forms.connection_signal)) {
+                renames_signal = true;
+            }
             auto updated = renameLine(part, forms, new_name);
             if (updated != part) {
                 part = std::move(updated);
@@ -883,6 +908,7 @@ Result<RenamePlan> planRename(const std::string& root_dir, const ProjectRenameOp
             }
         }
         if (changed == 0) continue;
+        if (renames_signal) signal_scenes.push_back(source.path);
         planned.push_back({source.path, joinKeepingBytes(parts), changed});
     }
 
@@ -948,6 +974,33 @@ Result<RenamePlan> planRename(const std::string& root_dir, const ProjectRenameOp
         })}
     };
 
+    // A connection names a signal the engine looks up when it builds the scene,
+    // and Godot drops one whose emitter declares no such signal, so an editor
+    // that saves the scene afterwards deletes it from the file (#1288). Said
+    // only when nothing could declare it: no script and no engine class has a
+    // signal by that name, so no emitter does. A signal declared somewhere is
+    // left alone, because which emitter declares it is the engine's to say.
+    if (!signal_scenes.empty() && !signalDeclaredAnywhere(scan, new_name)) {
+        json declared_as = json::array();
+        for (const auto& declaration : declarationsOf(scan, target)) {
+            if (declaration.kind != "signal") continue;
+            declared_as.push_back({{"path", declaration.path},
+                                   {"line", declaration.line},
+                                   {"detail", declaration.detail}});
+        }
+        std::string scenes;
+        for (const auto& scene : signal_scenes) scenes += (scenes.empty() ? "" : ", ") + scene;
+        result["undeclared_signal"] = {{"signal", new_name},
+                                       {"scenes", signal_scenes},
+                                       {"declared_as", std::move(declared_as)}};
+        result["limitations"].push_back(
+            "No script declares signal " + new_name + " yet, and no engine class has one by that "
+            "name, so the renamed connections in " + scenes + " connect to nothing until a script "
+            "declares it. An editor that opens one of those scenes before then drops the "
+            "connection, and its next save deletes it from the file. Declare it first: "
+            "script_patch_method with create_if_missing adds it beside the old one.");
+    }
+
     // Said only when there is one to say it about. The general line above names
     // the kind; this one says what the caller has to go and do, and a sentence
     // about autoloads on every rename in a project that has none is the
@@ -991,7 +1044,7 @@ Result<json> renameReferences(const std::string& root_dir, const ProjectRenameOp
         std::vector<std::string> rewritten;
         rewritten.reserve(planned.size());
         for (const auto& file : planned) rewritten.push_back(file.path);
-        if (auto refused = options.before_write(rewritten)) return *refused;
+        if (auto refused = options.before_write(rewritten, result)) return *refused;
     }
 
     // Everything that can fail on the way to disk fails here, before any

@@ -85,6 +85,68 @@ function Invoke-SceneTabReloadBlock {
     Assert-True (-not $tabById[2757].result.isError) "main.tscn did not reopen after the tab reload block: $($tabById[2757].result.content[0].text)"
 }
 
+# A signal renamed onto a name no script declares yet, with the scene open in
+# a tab (#1288). Godot drops a connection whose emitter has no such signal
+# when it builds the scene, so rebuilding the tab from the renamed file lost
+# it, and the next save deleted it from the file. The rename now stops before
+# writing and names the declaration to add. With the signal declared first,
+# the rebuilt tab holds the connection and a save keeps it. The engine-output
+# gate reads "Attempt to connect nonexistent signal" if the first rename
+# rebuilds the tab.
+function Invoke-SignalRenameTabBlock {
+    param(
+        [Parameter(Mandatory = $true)] [object]$EditorSession,
+        [Parameter(Mandatory = $true)] [string]$FixtureRoot
+    )
+    $scene = "res://signal_rename.tscn"
+    $renameScript = "res://signal_rename.gd"
+    $root = "/root/SignalRename"
+    $rename = @{ target = "probe_changed"; new_name = "probe_updated"; discard_unsaved = $true }
+    $requests = @(
+        (@{ jsonrpc = "2.0"; id = 2830; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
+        (Tool-Request 2831 "runtime_attach_session" @{ session_id = $EditorSession.session_id }),
+        (Tool-Request 2832 "script_create" @{ script_path = $renameScript; overwrite = $true; source_text = "extends Node2D`n`nsignal probe_changed(amount: int)`n`nfunc _on_probe_changed(amount: int):`n`tpass`n" }),
+        (Tool-Request 2833 "scene_create" @{ scene_path = $scene; root_type = "Node2D"; root_name = "SignalRename"; overwrite = $true }),
+        (Tool-Request 2834 "script_attach_to_node" @{ target_node = $root; script_path = $renameScript }),
+        (Tool-Request 2835 "signal_connect" @{ emitter_node = $root; signal_name = "probe_changed"; target_node = $root; target_method = "_on_probe_changed" }),
+        (Tool-Request 2836 "editor_save_scene" @{}),
+        (Tool-Request 2837 "project_rename_references" $rename),
+        (Tool-Request 2838 "script_patch_method" @{ file_path = $renameScript; method_name = "probe_updated"; symbol_type = "signal"; new_definition = "signal probe_updated(amount: int)"; create_if_missing = $true }),
+        (Tool-Request 2839 "project_rename_references" $rename),
+        (Tool-Request 2840 "signal_list_connections" @{ target_node = $root }),
+        (Tool-Request 2841 "editor_save_scene" @{}),
+        (Tool-Request 2842 "scene_close" @{ discard_unsaved = $true }),
+        (Tool-Request 2843 "scene_open" @{ scene_path = "res://main.tscn" })
+    )
+    $raw = Invoke-Didi -Requests $requests -Arguments @("--project", $FixtureRoot, "--yolo")
+    $byId = @{}
+    foreach ($response in @($raw | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.PSObject.Properties.Name -contains "id" })) { $byId[[int]$response.id] = $response }
+    foreach ($id in 2832, 2833, 2834, 2835) { [void](Tool-Payload $byId[$id]) }
+    foreach ($id in 2836, 2841) {
+        Assert-True ((Tool-Payload $byId[$id]).status -eq "saved") "The signal rename scene was not saved by request ${id}: $($byId[$id].result.content[0].text)"
+    }
+
+    $refusedText = $byId[2837].result.content[0].text
+    Assert-True $byId[2837].result.isError "A rename onto an undeclared signal rebuilt the open tab: $refusedText"
+    $refused = ($refusedText | ConvertFrom-Json).error
+    Assert-True ($refused.code -eq 409 -and $refused.data.code -eq "signal_not_declared" -and @($refused.data.open_scenes) -contains $scene) "A rename onto an undeclared signal did not refuse as signal_not_declared naming the scene: $refusedText"
+    Assert-True ($refused.data.next_call.tool -eq "script_patch_method" -and $refused.data.next_call.arguments.file_path -eq $renameScript -and $refused.data.next_call.arguments.new_definition -eq "signal probe_updated(amount: int)" -and $refused.data.next_call.arguments.create_if_missing -eq $true) "The refusal did not name the declaration to add: $refusedText"
+
+    $declared = Tool-Payload $byId[2838]
+    Assert-True ($declared.created -eq $true -and $declared.editor_copy_reloaded -eq $true) "Declaring the new signal did not reach the editor's copy of the script: $($declared | ConvertTo-Json -Depth 6 -Compress)"
+    $renamed = Tool-Payload $byId[2839]
+    Assert-True (@($renamed.editor_scenes_reloaded) -contains $scene -and $null -eq $renamed.editor_copy_errors -and $null -eq $renamed.undeclared_signal) "With the signal declared, the rename did not rebuild the open tab cleanly: $($renamed | ConvertTo-Json -Depth 6 -Compress)"
+    # Assertions run after the batch, so the file on disk is the second
+    # rename's. That one still found the old name to rewrite, which it could
+    # not have if the refused call had written the scene.
+    Assert-True (@($renamed.updated_files | Where-Object { $_.path -eq $scene -and $_.changed_lines -eq 1 }).Count -eq 1) "The rename after the refusal did not find the connection still to rename: $($renamed | ConvertTo-Json -Depth 6 -Compress)"
+    $updated = @((Tool-Payload $byId[2840]).signals | Where-Object { $_.name -eq "probe_updated" })
+    Assert-True ($updated.Count -eq 1 -and @($updated[0].connections | Where-Object { $_.target_method -eq "_on_probe_changed" }).Count -eq 1) "The rebuilt tab does not hold the renamed connection: $($byId[2840].result.content[0].text)"
+    $savedText = Get-Content -LiteralPath (Join-Path $FixtureRoot "signal_rename.tscn") -Raw
+    Assert-True ($savedText.Contains("[connection signal=`"probe_updated`"") -and -not $savedText.Contains("signal=`"probe_changed`"")) "A save after the rename did not keep the renamed connection: $savedText"
+    Assert-True (-not $byId[2843].result.isError) "main.tscn did not reopen after the signal rename block: $($byId[2843].result.content[0].text)"
+}
+
 # scene_pack_branch over a scene open in another tab (#1072). The pack saves
 # inside the editor, not through the file writers above, and the tab kept the
 # tree it had, so saving it put the old scene back over the pack.

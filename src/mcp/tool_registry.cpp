@@ -2334,6 +2334,7 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
                     discard != call_arguments.end() && discard->is_boolean() && discard->get<bool>())) {
                 return refused;
             }
+            if (auto refused = refuseDroppedConnections(client, plan.value())) return refused;
             subject = {{"target", options.target}, {"new_name", options.new_name}};
             before = {{"updated_files", plan.value()["updated_files"]},
                       {"updated_file_count", plan.value()["updated_file_count"]},

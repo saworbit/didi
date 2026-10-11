@@ -358,6 +358,20 @@ const std::map<std::string, Rule>& rules() {
             return nextCall("editor_save_scene", json::object(),
                             "Save the scene, or close with discard_unsaved: true to lose the edits.");
         }},
+        {"signal_not_declared", [](const Refusal& r) {
+            const auto file = text(r.data, "declare_in");
+            const auto declaration = text(r.data, "declaration");
+            json arguments = json::object();
+            if (!file.empty() && !declaration.empty()) {
+                arguments = {{"file_path", file},
+                             {"method_name", text(r.data, "signal")},
+                             {"symbol_type", "signal"},
+                             {"new_definition", declaration},
+                             {"create_if_missing", true}};
+            }
+            return nextCall("script_patch_method", arguments,
+                            "Declare the signal the connection will name, then rename again.");
+        }},
         {"dirty_state_unavailable", [](const Refusal&) {
             return nextCall("editor_save_scene", json::object(),
                             "This engine cannot say whether the scene is saved; save it first.");

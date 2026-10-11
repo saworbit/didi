@@ -265,6 +265,59 @@ std::optional<Error> refuseUnsavedOpenScenes(const std::shared_ptr<ipc::IIpcClie
                   {"unsaved_scenes", unsaved}});
 }
 
+std::optional<Error> refuseDroppedConnections(const std::shared_ptr<ipc::IIpcClient>& ipc,
+                                              const json& plan) {
+    const auto undeclared = plan.find("undeclared_signal");
+    if (undeclared == plan.end() || !undeclared->is_object() || !ipc || !ipc->isConnected()) {
+        return std::nullopt;
+    }
+    auto answer = ipc->sendRequest("editor.openScenes", json::object(), kRefreshTimeoutMs);
+    if (answer.isErr() || !answer.value().is_object() || !answer.value().contains("open_scenes") ||
+        !answer.value()["open_scenes"].is_array()) {
+        return std::nullopt;
+    }
+    std::set<std::string> open;
+    for (const auto& scene : answer.value()["open_scenes"]) {
+        if (scene.is_string()) open.insert(scene.get<std::string>());
+    }
+    std::vector<std::string> affected;
+    for (const auto& scene : undeclared->value("scenes", json::array())) {
+        if (scene.is_string() && open.count(scene.get<std::string>())) {
+            affected.push_back(scene.get<std::string>());
+        }
+    }
+    if (affected.empty()) return std::nullopt;
+
+    const std::string signal = text(*undeclared, "signal");
+    json data = {{"code", "signal_not_declared"}, {"signal", signal}, {"open_scenes", affected}};
+    // The old declaration with the new name, where there is exactly one to
+    // copy, so the fix is a call the caller can make as it stands.
+    const auto declared = undeclared->value("declared_as", json::array());
+    const std::string target = text(plan, "target");
+    if (declared.size() == 1 && declared[0].is_object() && !target.empty()) {
+        const std::string path = text(declared[0], "path");
+        std::string declaration = text(declared[0], "detail");
+        const auto keyword = declaration.find("signal ");
+        const auto name = keyword == std::string::npos
+                              ? std::string::npos
+                              : declaration.find(target, keyword + 7);
+        if (strings::endsWith(path, ".gd") && name != std::string::npos &&
+            !strings::endsWith(declaration, "...")) {
+            declaration.replace(name, target.size(), signal);
+            data["declare_in"] = path;
+            data["declaration"] = declaration;
+        }
+    }
+    return Error(409,
+                 "Nothing was written. " + sceneList(affected) +
+                     " is open in the editor, and no script declares signal " + signal +
+                     " yet. Rebuilding the tab from the renamed file would drop that connection, "
+                     "and the editor's next save would delete it from the file. Declare the signal "
+                     "first, then rename: script_patch_method with create_if_missing adds it "
+                     "beside the old one.",
+                 std::move(data));
+}
+
 void reportEditorCopy(json& payload, const EditorCopyRefresh& refresh) {
     if (!refresh.answered) return;
     payload["editor_copy_reloaded"] = !refresh.reloaded.empty();

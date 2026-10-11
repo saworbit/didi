@@ -3491,6 +3491,7 @@ try {
     Assert-True (-not $copyById[2735].result.isError) "main.tscn did not reopen after the editor copy block: $($copyById[2735].result.content[0].text)"
 
     Invoke-SceneTabReloadBlock -EditorSession $editorSession -FixtureRoot $fixtureRoot -DirtyStateReadable $dirtyStateReadable
+    Invoke-SignalRenameTabBlock -EditorSession $editorSession -FixtureRoot $fixtureRoot
     Invoke-PackBranchTabBlock -EditorSession $editorSession -FixtureRoot $fixtureRoot -DirtyStateReadable $dirtyStateReadable
     Invoke-CreateOverOpenTabBlock -EditorSession $editorSession -FixtureRoot $fixtureRoot -DirtyStateReadable $dirtyStateReadable
 
