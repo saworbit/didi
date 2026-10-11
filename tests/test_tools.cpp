@@ -719,6 +719,18 @@ static void writeImpactFixture() {
         "var text = \"new NodePath(\\\"Player/Sprite\\\")\";\n");
 }
 
+// The order that keeps a renamed signal connection through a tab rebuild:
+// the script declares the new name before the scene is renamed (#1288).
+static void declareVitality() {
+    writeAuditFile("scripts/player.gd",
+        "extends Node\n"
+        "signal character_health(amount)\n"
+        "signal vitality(amount)\n"
+        "var max_character_health := 100\n"
+        "func _ready():\n"
+        "    character_health.emit(10)\n");
+}
+
 static void test_audio_configure_bus_is_gated_and_offline_honest() {
     // Live only, and the refusal has to say why rather than reading as a
     // missing feature. Writing the layout file would change what the project
@@ -4775,6 +4787,7 @@ static void test_a_rename_reloads_the_scenes_open_in_clean_tabs() {
     // so the second is asked about again.
     ScopedToolProject project("rename-open-tabs");
     writeImpactFixture();
+    declareVitality();
     auto editor = std::make_shared<EditorCopyClient>();
     editor->open = {"res://scenes/hud.tscn", "res://scenes/player.tscn"};
     const auto renamed = didi::mcp::handleProjectRenameReferences(
@@ -4792,6 +4805,101 @@ static void test_a_rename_reloads_the_scenes_open_in_clean_tabs() {
     // Without discard_unsaved, which the bridge then applies itself.
     ASSERT_TRUE(!editor->refresh_params[0].contains("discard_unsaved"));
     ASSERT_TRUE(readToolTestFile("scenes/hud.tscn").find("signal=\"vitality\"") != std::string::npos);
+}
+
+static void test_a_rename_refuses_a_tab_that_would_drop_its_connection() {
+    // Godot drops a connection whose emitter declares no such signal when it
+    // builds a scene, and the next save deletes it from the file. A rename
+    // onto a signal name no script declares would rebuild an open tab into
+    // exactly that, so it stops before writing and names the declaration to
+    // add first (#1288).
+    ScopedToolProject project("rename-drops-connection");
+    writeImpactFixture();
+    const auto before = readToolTestFile("scenes/hud.tscn");
+    auto editor = std::make_shared<EditorCopyClient>();
+    editor->open = {"res://scenes/hud.tscn"};
+    const didi::json args = {{"target", "character_health"}, {"new_name", "vitality"}};
+    const auto refused = didi::mcp::handleProjectRenameReferences(args, editor);
+    ASSERT_TRUE(refused.isError);
+    const auto envelope = didi::json::parse(refused.content[0].text);
+    ASSERT_EQ(envelope["error"]["code"], 409);
+    const auto& data = envelope["error"]["data"];
+    ASSERT_EQ(data["code"], "signal_not_declared");
+    ASSERT_EQ(data["signal"], "vitality");
+    ASSERT_EQ(data["open_scenes"], didi::json::array({"res://scenes/hud.tscn"}));
+    ASSERT_EQ(data["declare_in"], "res://scripts/player.gd");
+    ASSERT_EQ(data["declaration"], "signal vitality(amount)");
+    // The table turns that into a call the caller can make as it stands.
+    const auto remedy = didi::mcp::remedyForRefusal(
+        "signal_not_declared", 409, envelope["error"]["message"].get<std::string>(),
+        "project_rename_references", data);
+    ASSERT_EQ(remedy["next_call"]["tool"], "script_patch_method");
+    ASSERT_EQ(remedy["next_call"]["arguments"]["file_path"], "res://scripts/player.gd");
+    ASSERT_EQ(remedy["next_call"]["arguments"]["method_name"], "vitality");
+    ASSERT_EQ(remedy["next_call"]["arguments"]["symbol_type"], "signal");
+    ASSERT_EQ(remedy["next_call"]["arguments"]["new_definition"], "signal vitality(amount)");
+    ASSERT_EQ(remedy["next_call"]["arguments"]["create_if_missing"], true);
+    ASSERT_EQ(readToolTestFile("scenes/hud.tscn"), before);
+    ASSERT_EQ(editor->requests, 0);
+
+    // discard_unsaved is about a tab's edits, not this; it still refuses.
+    auto discarding = args;
+    discarding["discard_unsaved"] = true;
+    ASSERT_TRUE(didi::mcp::handleProjectRenameReferences(discarding, editor).isError);
+    ASSERT_EQ(readToolTestFile("scenes/hud.tscn"), before);
+
+    // No tab holds the scene: the rename goes ahead and says what is left.
+    auto closed = std::make_shared<EditorCopyClient>();
+    const auto written = didi::mcp::handleProjectRenameReferences(args, closed);
+    ASSERT_TRUE(!written.isError);
+    const auto report = didi::json::parse(written.content[0].text);
+    ASSERT_EQ(report["undeclared_signal"]["signal"], "vitality");
+    ASSERT_TRUE(std::find(report["undeclared_signal"]["scenes"].begin(),
+                          report["undeclared_signal"]["scenes"].end(),
+                          didi::json("res://scenes/hud.tscn")) !=
+                report["undeclared_signal"]["scenes"].end());
+    bool limitation = false;
+    for (const auto& line : report["limitations"]) {
+        if (line.get<std::string>().find("No script declares signal vitality") != std::string::npos) {
+            limitation = true;
+        }
+    }
+    ASSERT_TRUE(limitation);
+}
+
+static void test_a_signal_declared_anywhere_is_left_to_the_engine() {
+    // Declared by a script, by a C# delegate, or by an engine class: some
+    // emitter can carry it, which one is the engine's to say, and the rename
+    // rebuilds the tab as before.
+    const auto renamed = [](const char* new_name) {
+        auto editor = std::make_shared<EditorCopyClient>();
+        editor->open = {"res://scenes/hud.tscn"};
+        const auto result = didi::mcp::handleProjectRenameReferences(
+            {{"target", "character_health"}, {"new_name", new_name}}, editor);
+        ASSERT_TRUE(!result.isError);
+        const auto report = didi::json::parse(result.content[0].text);
+        ASSERT_TRUE(!report.contains("undeclared_signal"));
+        ASSERT_TRUE(!report["editor_scenes_reloaded"].empty());
+    };
+    {
+        ScopedToolProject project("rename-declared-gd");
+        writeImpactFixture();
+        declareVitality();
+        renamed("vitality");
+    }
+    {
+        ScopedToolProject project("rename-declared-cs");
+        writeImpactFixture();
+        writeAuditFile("scripts/Player.cs",
+                       "public partial class Player : Node {\n"
+                       "    [Signal] public delegate void VitalityEventHandler(int amount);\n}\n");
+        renamed("Vitality");
+    }
+    if (didi::offline::ClassReference::instance().loaded()) {
+        ScopedToolProject project("rename-declared-engine");
+        writeImpactFixture();
+        renamed("visibility_changed");
+    }
 }
 
 static void test_a_rename_refuses_a_scene_open_with_unsaved_changes() {
@@ -4828,7 +4936,9 @@ static void test_a_rename_refuses_a_scene_open_with_unsaved_changes() {
     ASSERT_EQ(readToolTestFile("scenes/hud.tscn"), before);
 
     // discard_unsaved is the caller accepting the loss: the file is written
-    // and the tab rebuilt from it whatever it held.
+    // and the tab rebuilt from it whatever it held. The signal the connection
+    // will name is declared first, or the rebuild would drop it (#1288).
+    declareVitality();
     auto discarding = args;
     discarding["discard_unsaved"] = true;
     const auto written = didi::mcp::handleProjectRenameReferences(discarding, editor);
@@ -10160,6 +10270,10 @@ struct RegisterToolTests {
                      test_a_rename_reloads_the_scenes_open_in_clean_tabs);
         registerTest("Tools.RenameRefusesASceneOpenWithUnsavedChanges",
                      test_a_rename_refuses_a_scene_open_with_unsaved_changes);
+        registerTest("Tools.RenameRefusesATabThatWouldDropItsConnection",
+                     test_a_rename_refuses_a_tab_that_would_drop_its_connection);
+        registerTest("Tools.ASignalDeclaredAnywhereIsLeftToTheEngine",
+                     test_a_signal_declared_anywhere_is_left_to_the_engine);
         registerTest("Tools.TabNotRebuiltAfterAWriteIsNamed",
                      test_a_tab_that_cannot_be_rebuilt_after_a_write_is_named);
         registerTest("Tools.RebuildThatMovesTheEditedSceneIsSwitchedBack",

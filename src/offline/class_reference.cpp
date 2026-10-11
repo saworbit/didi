@@ -148,4 +148,16 @@ const json* ClassReference::find(const std::string& class_name) const {
     return found == m_classes.end() ? nullptr : &found.value();
 }
 
+bool ClassReference::anyClassHasSignal(const std::string& signal) const {
+    if (!m_loaded || !m_classes.is_object()) return false;
+    for (const auto& entry : m_classes.items()) {
+        const auto signals = entry.value().find("signals");
+        if (signals == entry.value().end() || !signals->is_array()) continue;
+        for (const auto& name : *signals) {
+            if (name.is_string() && name.get<std::string>() == signal) return true;
+        }
+    }
+    return false;
+}
+
 } // namespace didi::offline

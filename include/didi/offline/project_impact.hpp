@@ -69,11 +69,14 @@ struct ProjectRenameOptions {
     std::string target;    // the identifier to rename
     std::string new_name;  // what to call it
     size_t max_impacts{500};
-    // Asked with the res:// path of every file about to be rewritten, after
-    // the plan and before anything is staged. An error it returns is the
-    // call's answer, and nothing is written. The live handler refuses a scene
-    // open in the editor that may hold unsaved changes here (#1068).
-    std::function<std::optional<Error>(const std::vector<std::string>&)> before_write;
+    // Asked with the res:// path of every file about to be rewritten and the
+    // plan's report, after the plan and before anything is staged. An error it
+    // returns is the call's answer, and nothing is written. The live handler
+    // refuses a scene open in the editor that may hold unsaved changes here
+    // (#1068), and one whose rebuilt tab would drop a renamed connection
+    // (#1288).
+    std::function<std::optional<Error>(const std::vector<std::string>&, const json&)>
+        before_write;
 };
 
 // What renameReferences would do, without doing any of it: which files change,

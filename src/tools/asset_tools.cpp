@@ -1867,9 +1867,14 @@ CallToolResult handleProjectRenameReferences(const json& args, std::shared_ptr<i
     // A scene open in the editor is reloaded from the rewritten file after
     // the write, or the next save puts the old tree back over it. A tab that
     // may hold unsaved changes stops the call here instead, before anything
-    // is written, unless the caller said to discard them (#1068).
-    options.before_write = [&](const std::vector<std::string>& rewritten) {
-        return refuseUnsavedOpenScenes(ipc, rewritten, discard_unsaved);
+    // is written, unless the caller said to discard them (#1068). So does one
+    // whose rebuild would drop a renamed connection, because no script
+    // declares the signal it now names (#1288).
+    options.before_write = [&](const std::vector<std::string>& rewritten, const json& plan) {
+        if (auto refused = refuseUnsavedOpenScenes(ipc, rewritten, discard_unsaved)) {
+            return refused;
+        }
+        return refuseDroppedConnections(ipc, plan);
     };
 
     auto report = offline::renameReferences(".", options);

@@ -134,6 +134,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Fixed
 
+- `2026-10-12` A signal rename no longer rebuilds an open tab into a scene whose next save deletes the connection: it asks for the new signal to be declared first. [#1288](https://github.com/saworbit/didi/issues/1288)
 - `2026-10-12` A preset `project_add_export_preset` writes leaves `addons/didi` out of its builds, so a shipped game no longer carries Didi's extension and session host. [#1291](https://github.com/saworbit/didi/issues/1291) · [PR #1326](https://github.com/saworbit/didi/pull/1326)
 - `2026-10-11` The docs say a scenario asserts on a paused game, where a sound reads as stopped, and the quick start says to ignore `.didi/`. [#1306](https://github.com/saworbit/didi/issues/1306) · [#1307](https://github.com/saworbit/didi/issues/1307) · [#1301](https://github.com/saworbit/didi/issues/1301)
 - `2026-10-11` `eval_gdscript` finds a context node whose name starts with a byte-order mark: the sandbox shares the bridge's value constructors now. [#1255](https://github.com/saworbit/didi/issues/1255) · [PR #1285](https://github.com/saworbit/didi/pull/1285)

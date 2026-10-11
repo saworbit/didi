@@ -43,6 +43,8 @@ public:
     // The trimmed record for one class, or nullptr when the reference is
     // unavailable or does not name it.
     const json* find(const std::string& class_name) const;
+    // Whether any class in the reference declares a signal with this name.
+    bool anyClassHasSignal(const std::string& signal) const;
 
 private:
     ClassReference();

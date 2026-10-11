@@ -60,6 +60,15 @@ std::optional<Error> refuseUnsavedOpenScenes(const std::shared_ptr<ipc::IIpcClie
                                              const std::vector<std::string>& res_paths,
                                              bool discard_unsaved);
 
+// Asked before project_rename_references writes. Refuses, with nothing
+// written, when the plan's report carries undeclared_signal and one of its
+// scenes is open in the attached editor: rebuilding that tab from the renamed
+// file drops the connection, because its emitter declares no such signal, and
+// the editor's next save deletes it from the file (#1288). Says nothing when
+// no editor answers.
+std::optional<Error> refuseDroppedConnections(const std::shared_ptr<ipc::IIpcClient>& ipc,
+                                              const json& plan);
+
 // A writer of one file: editor_copy_reloaded, editor_scene_reloaded when a tab
 // held it and was rebuilt, editor_copy_error when the editor held the file
 // and could not reload it, and editor_index_pending when it does not list it.
