@@ -146,6 +146,8 @@ Beside the sentence, `data` carries `blocked_on: "no_live_session"`,
 `retryable` stays `true`, because the same call succeeds once an engine is
 there; `blocked_on` is what says that a human has to put one there. A tool whose own argument rules need no engine, such as `audio_add_bus`, checks them first, so a bad argument is refused in the same words whether or not an engine is attached, and the `503` is only for a call that would otherwise have gone ahead.
 
+When exactly one live session for this project is there to attach, any `503` that names no other fix carries `next_call: runtime_attach_session` with that `session_id`. A route that died is quarantined, and auto-selection stays off after that, so after an editor restart or a stopped game the project's one editor used to be found again only through `runtime_list_sessions` (#1296). With two or more, the caller chooses.
+
 A string argument to a tool with a live route that holds a NUL character
 (U+0000) is refused `400` with `invalid_arguments` before any route is chosen,
 so the answer is the same with or without an editor. The message names where

@@ -12,6 +12,7 @@
 #include "didi/common/logger.hpp"
 #include "didi/runtime/audio_requests.hpp"
 #include "didi/runtime/session_kind_policy.hpp"
+#include "didi/tools/game_launch.hpp"
 #include "didi/runtime/undo_capture.hpp"
 #include "didi/common/project_path.hpp"
 #include "didi/common/scene_node_path.hpp"
@@ -1905,10 +1906,57 @@ static bool takesEmitterAsTargetNode(std::string_view canonical_name) {
     return canonical_name == "signal_list_connections" || canonical_name == "signal_emit";
 }
 
+// A live call refused for want of a route, when exactly one live session for
+// this project is there to take it, names that session. After an editor
+// restart, or a game the server was attached to stopping, the editor was the
+// only session left and every call answered runtime_list_sessions, so each
+// launch, test and stop cost a list and an attach to find it again (#1296).
+// Before the floor, which otherwise fills in the generic next step.
+static CallToolResult withOnlyLiveSessionNamed(
+    CallToolResult result, const std::shared_ptr<runtime::IRuntimeSessionClient>& sessions) {
+    if (!sessions) return result;
+    for (auto& item : result.content) {
+        if (item.type != "text") continue;
+        auto payload = json::parse(item.text, nullptr, false);
+        if (payload.is_discarded() || !payload.is_object()) continue;
+        const auto error = payload.find("error");
+        if (error == payload.end() || !error->is_object() || error->value("code", 0) != 503) continue;
+        auto& data = (*error)["data"];
+        if (!data.is_object()) data = json::object();
+        if (data.contains("next_call") || data.contains("retry_with")) continue;
+        const auto project = launchedProjectPath();
+        auto listed = sessions->listSessions(project);
+        if (listed.isErr() || !listed.value().is_object() || !listed.value()["sessions"].is_array()) {
+            continue;
+        }
+        json only;
+        size_t live = 0;
+        for (const auto& entry : listed.value()["sessions"]) {
+            if (!entry.is_object() || !entry.value("alive", true)) continue;
+            if (entry.value("project_path", std::string()) != project) continue;
+            if (entry.value("session_id", std::string()).empty()) continue;
+            ++live;
+            only = entry;
+        }
+        if (live != 1) continue;
+        data["next_call"] = {
+            {"tool", "runtime_attach_session"},
+            {"arguments", {{"session_id", only["session_id"]}}},
+            {"reason", "The only live session for this project is " +
+                           only.value("kind", std::string("a session")) + " pid " +
+                           std::to_string(only.value("pid", uint64_t{0})) + "; attach it."}};
+        item.text = payload.dump();
+        if (result.structuredContent.has_value()) result.structuredContent = payload;
+    }
+    return result;
+}
+
 CallToolResult ToolRegistry::callTool(const std::string& name, const json& arguments,
                                       const RequestScope& scope) {
     const auto binding = resolveAliasBinding(name, arguments);
-    return withFollowUps(withErrorDataFloor(dispatchTool(name, arguments, scope), binding));
+    return withFollowUps(withErrorDataFloor(
+        withOnlyLiveSessionNamed(dispatchTool(name, arguments, scope), m_runtimeSessionClient),
+        binding));
 }
 
 // The change journal's record of a finished mutating call (Q15). Only a
