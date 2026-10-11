@@ -378,6 +378,9 @@ CallToolResult handleRuntimeRunScenario(const json& args, std::shared_ptr<ipc::I
     std::error_code error;
     const auto root = fs::weakly_canonical(fs::current_path(error), error);
     if (error) return CallToolResult::errorJson(500, "The project directory cannot be read.");
+    if (auto taken = runtime::refuseRecordOfOtherKind(root, spec.value().name, "scenario")) {
+        return CallToolResult::fromError(*taken);
+    }
 
     const auto started_at_ms = wallClockMs();
     const auto ran_against = runtime::collectScenarioFiles(root, spec.value().scene_path);
