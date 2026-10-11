@@ -328,8 +328,8 @@ function Get-ObservedPostStateCases([string]$GameSessionId = "", [string]$Launch
         # The copy just made, moved and then removed, each answer read after
         # its commit (#1019).
         @{ Tool = "scene_reparent_node"; Session = "editor"; Steps = @(
-            (Step "call" "scene_reparent_node" @{ target_node = "$observedRoot/SpawnedCopy"; new_parent_path = "$observedRoot/Subject" }),
-            (Witness "witness" "node_info" @("Subject/SpawnedCopy")))
+            (Step "call" "scene_reparent_node" @{ target_node = "$observedRoot/Spawned3"; new_parent_path = "$observedRoot/Subject" }),
+            (Witness "witness" "node_info" @("Subject/Spawned3")))
            Agree = { param($s) Agree "node_path" $s.call.node_path $s.witness.returned.path } },
         # Into a parent that already has a child of the same name, so the
         # engine renames the node it moves. The name it picks is a readable
@@ -351,8 +351,8 @@ function Get-ObservedPostStateCases([string]$GameSessionId = "", [string]$Launch
         # A removal that succeeded cannot leave the node, and one that cannot
         # is refused, so no input makes exists differ from false.
         @{ Tool = "scene_remove_node"; Session = "editor"; Steps = @(
-            (Step "call" "scene_remove_node" @{ target_node = "$observedRoot/Subject/SpawnedCopy" }),
-            (Witness "witness" "node_info" @("Subject/SpawnedCopy")))
+            (Step "call" "scene_remove_node" @{ target_node = "$observedRoot/Subject/Spawned3" }),
+            (Witness "witness" "node_info" @("Subject/Spawned3")))
            Agree = { param($s) Agree "exists" $s.call.exists $s.witness.returned.exists } },
         # script_path has to be a normalized res:// path ending in .gd or .cs,
         # so a uid or a loose spelling is refused before the engine sees it.

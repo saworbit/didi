@@ -1665,11 +1665,18 @@ Result<VariantValue> makeInputEvent(const json& descriptor) {
         return result.isOk() ? Result<void>::ok() : Result<void>(result.error());
     };
 
-    if (descriptor.contains("device")) {
-        if (!descriptor["device"].is_number_integer() || descriptor["device"].get<int64_t>() < -1) {
-            return fail(Error::invalidArgument("Input event device must be an integer >= -1"));
-        }
-        auto set = set_int("InputEvent", "set_device", 1286410249LL, descriptor["device"].get<int64_t>());
+    // An event with no device is bound to all of them (-1), as the editor's
+    // Input Map dialog binds it. The engine's construction default is 0 for a
+    // joypad, so a second controller never fired the action, and for a key it
+    // is 0 on 4.5.1 and 16 on 4.7.2, so one call wrote different files on
+    // different lines (#1295).
+    if (descriptor.contains("device") &&
+        (!descriptor["device"].is_number_integer() || descriptor["device"].get<int64_t>() < -1)) {
+        return fail(Error::invalidArgument("Input event device must be an integer >= -1"));
+    }
+    {
+        const int64_t device = descriptor.contains("device") ? descriptor["device"].get<int64_t>() : -1;
+        auto set = set_int("InputEvent", "set_device", 1286410249LL, device);
         if (set.isErr()) return fail(set.error());
     }
     if (type == "key") {
@@ -7464,6 +7471,18 @@ json injectInput(const json& params, const std::string& session_kind) {
         answer["limitation"] = "The events were sent, but what Input holds afterwards could not be "
                                "read: " + state.error().message;
     }
+    // The flush runs the handlers, and a Retry button that processes while
+    // paused unpauses the tree in its own. The pause read before sending was
+    // reported, so a click that resumed the game said it stayed paused (#1303).
+    if (deliver_while_paused) {
+        auto after = liveSceneTreeIsPaused();
+        if (after.isOk() && !after.value()) {
+            answer["paused"] = false;
+            answer["message"] = "The game is no longer paused: something these events reached "
+                                "unpaused it. Nodes that process while paused received them while "
+                                "the tree was paused, and no frame was stepped.";
+        }
+    }
     return liveResult(answer);
 }
 
@@ -7802,6 +7821,25 @@ Result<RaycastSpace> openRaycastSpace(int dimension, const std::string& session_
 // One ray against an already-open space. The record is the same one
 // physics_raycast_query returns, so a batch entry and a single call cannot
 // describe the same hit differently.
+// The collider's collision_layer, or null when it is not a CollisionObject.
+// A TileMapLayer, a GridMap and a CSG shape collide without being one, and
+// calling CollisionObject's getter on them read whatever sat at that offset:
+// a TileMapLayer answered the bits of a float (#1290).
+json colliderCollisionLayer(GDExtensionObjectPtr collider, int dimension) {
+    const char* collision_class = dimension == 2 ? "CollisionObject2D" : "CollisionObject3D";
+    auto class_name = makeString(collision_class);
+    if (class_name.isErr()) return nullptr;
+    auto is_collision = callObject(collider, "Object", "is_class", 3927539163LL, {&class_name.value()});
+    if (is_collision.isErr()) return nullptr;
+    auto flag = scalarFromVariant<GDExtensionBool>(is_collision.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+    if (flag.isErr() || !flag.value()) return nullptr;
+    auto layer = callObject(collider, collision_class, "get_collision_layer", 3905245786LL);
+    if (layer.isErr()) return nullptr;
+    auto layer_value = scalarFromVariant<int64_t>(layer.value(), GDEXTENSION_VARIANT_TYPE_INT);
+    if (layer_value.isErr()) return nullptr;
+    return layer_value.value();
+}
+
 Result<json> castOneRay(const RaycastSpace& space, const runtime::RaycastRequest& request,
                         const std::string& session_kind) {
     const int dimension = space.dimension;
@@ -7902,13 +7940,7 @@ Result<json> castOneRay(const RaycastSpace& space, const runtime::RaycastRequest
                 }
             }
         }
-        auto layer = callObject(collider_object.value(),
-                                dimension == 2 ? "CollisionObject2D" : "CollisionObject3D",
-                                "get_collision_layer", 3905245786LL);
-        if (layer.isOk()) {
-            auto layer_value = scalarFromVariant<int64_t>(layer.value(), GDEXTENSION_VARIANT_TYPE_INT);
-            if (layer_value.isOk()) result["collision_layer"] = layer_value.value();
-        }
+        result["collision_layer"] = colliderCollisionLayer(collider_object.value(), dimension);
     }
     return result;
 }
@@ -8969,13 +9001,7 @@ json physicsRaycast(const json& params, const std::string& session_kind) {
                 }
             }
         }
-        auto layer = callObject(collider_object.value(),
-                                dimension == 2 ? "CollisionObject2D" : "CollisionObject3D",
-                                "get_collision_layer", 3905245786LL);
-        if (layer.isOk()) {
-            auto layer_value = scalarFromVariant<int64_t>(layer.value(), GDEXTENSION_VARIANT_TYPE_INT);
-            if (layer_value.isOk()) result["collision_layer"] = layer_value.value();
-        }
+        result["collision_layer"] = colliderCollisionLayer(collider_object.value(), dimension);
     }
     return liveResult(result);
 }
@@ -9328,15 +9354,22 @@ json uiListControls(const json& params, const std::string& session_kind) {
                                                   : mouse_filter.value() == 1 ? "pass"
                                                                               : "ignore";
 
+                        // A Control hidden in the tree is not laid out, and
+                        // its rectangle is whatever it held before: four
+                        // hidden labels sat on one point at their minimum
+                        // sizes. Reported as null so nothing hit-tests or
+                        // clicks a rectangle that means nothing (#1315).
                         json entry = {{"node_path", boundUtf8(path.value(), 1024).value},
                                       {"class", bounded_class},
-                                      {"global_rect", rect_json.value()},
+                                      {"global_rect", visible ? rect_json.value() : json(nullptr)},
                                       {"visible", visible},
                                       {"depth", depth},
                                       {"mouse_filter", filter_name},
                                       {"mouse_filter_value", mouse_filter.value()}};
                         // In a game, where runtime_inject_input can click it.
-                        if (!editor) {
+                        if (!editor && !visible) {
+                            entry["screen_rect"] = nullptr;
+                        } else if (!editor) {
                             auto screen_rect = screenRectOf(node, rect_json.value());
                             if (screen_rect.isErr()) return screen_rect.error();
                             entry["screen_rect"] = std::move(screen_rect.value());
@@ -16358,6 +16391,8 @@ json GodotBridge::bridgeSceneInstantiateNode(const std::string& /*method*/, cons
         json before;
         int hint{0};
         std::string hint_string;
+        // The engine's value, kept to set again once the node is parented.
+        std::optional<VariantValue> value;
     };
     std::vector<InitialProperty> initial_written;
     for (auto it = initial_properties.begin(); it != initial_properties.end(); ++it) {
@@ -16426,6 +16461,7 @@ json GodotBridge::bridgeSceneInstantiateNode(const std::string& /*method*/, cons
             record.hint = declared.value()->hint;
             record.hint_string = declared.value()->hint_string;
         }
+        record.value = std::move(property_value.value());
         initial_written.push_back(std::move(record));
     }
     auto manager = undoManager(editor);
@@ -16486,7 +16522,7 @@ json GodotBridge::bridgeSceneInstantiateNode(const std::string& /*method*/, cons
     // Only a property that did not land is reported, in scene_set_property's
     // words, so a call where every one landed costs nothing extra.
     json not_applied = json::array();
-    for (const auto& record : initial_written) {
+    for (auto& record : initial_written) {
         auto name = makeStringName(record.name);
         if (name.isErr()) continue;
         auto observed = callObject(node, "Object", "get", 2760726917LL, {&name.value()});
@@ -16494,6 +16530,20 @@ json GodotBridge::bridgeSceneInstantiateNode(const std::string& /*method*/, cons
         auto observed_json = variantToJson(observed.value());
         if (observed_json.isErr() || jsonValuesEquivalent(observed_json.value(), record.written)) {
             continue;
+        }
+        // A property whose effect depends on the parent, such as a Control's
+        // anchors_preset, is discarded while the node has none: the same write
+        // one call later landed (#1297). Set again now that it is in the tree.
+        // Undo removes the node and redo adds this same object back, so the
+        // value needs no step of its own in the history.
+        if (record.value) {
+            auto again = callObject(node, "Object", "set", 3776071444LL, {&name.value(), &*record.value});
+            if (again.isOk()) {
+                auto reread = callObject(node, "Object", "get", 2760726917LL, {&name.value()});
+                auto reread_json = reread.isOk() ? variantToJson(reread.value()) : Result<json>(reread.error());
+                if (reread_json.isOk() && jsonValuesEquivalent(reread_json.value(), record.written)) continue;
+                if (reread_json.isOk()) observed_json = std::move(reread_json);
+            }
         }
         json entry = notAppliedReport(observed_json.value(), record.before, record.hint,
                                       record.hint_string);
@@ -16720,21 +16770,10 @@ json GodotBridge::bridgeSceneNodeEdits(const std::string& method, const json& pa
     if (duplicated.isErr()) return errorJson(duplicated.error());
     auto duplicate_node = objectFromVariant(duplicated.value());
     if (duplicate_node.isErr() || !duplicate_node.value()) return errorJson(500, "Godot failed to duplicate node");
-    auto source_name = nodeString(node.value(), "get_name", 2002593661LL);
-    if (source_name.isErr()) {
-        GodotApi::instance().object_destroy(duplicate_node.value());
-        return errorJson(source_name.error());
-    }
-    auto copy_name = makeStringName(source_name.value() + "Copy");
-    if (copy_name.isErr()) {
-        GodotApi::instance().object_destroy(duplicate_node.value());
-        return errorJson(copy_name.error());
-    }
-    auto named = callObject(duplicate_node.value(), "Node", "set_name", 3304788590LL, {&copy_name.value()});
-    if (named.isErr()) {
-        GodotApi::instance().object_destroy(duplicate_node.value());
-        return errorJson(named.error());
-    }
+    // The copy keeps the source's name, and add_child below asks Godot for a
+    // readable unique one, as the editor's Duplicate does: NE becomes NE2,
+    // following the project's editor/naming settings. A fixed Copy suffix gave
+    // NECopy, a name a person never gets from the editor (#1319).
     auto duplicate_name = nodeString(duplicate_node.value(), "get_name", 2002593661LL);
     if (duplicate_name.isErr()) {
         GodotApi::instance().object_destroy(duplicate_node.value());

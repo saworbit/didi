@@ -134,6 +134,12 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Fixed
 
+- `2026-10-12` A ray that hits a `TileMapLayer`, `GridMap` or CSG shape reports `collision_layer: null` rather than reading a getter of a class it is not. [#1290](https://github.com/saworbit/didi/issues/1290) · [PR #1329](https://github.com/saworbit/didi/pull/1329)
+- `2026-10-12` `project_set_input_action` binds an event with no `device` to all devices, as the editor does, so a second controller fires the action. [#1295](https://github.com/saworbit/didi/issues/1295) · [PR #1329](https://github.com/saworbit/didi/pull/1329)
+- `2026-10-12` `scene_instantiate_node` sets an initial property again once the node has a parent, so a Control's `anchors_preset` lands. [#1297](https://github.com/saworbit/didi/issues/1297) · [PR #1329](https://github.com/saworbit/didi/pull/1329)
+- `2026-10-12` `runtime_inject_input` reads the pause after the batch runs, so a click that resumed the game no longer says it stayed paused. [#1303](https://github.com/saworbit/didi/issues/1303) · [PR #1329](https://github.com/saworbit/didi/pull/1329)
+- `2026-10-12` `ui_list_controls` reports no rectangle for a Control hidden in the tree, which Godot never laid out. [#1315](https://github.com/saworbit/didi/issues/1315) · [PR #1329](https://github.com/saworbit/didi/pull/1329)
+- `2026-10-12` `scene_duplicate_node` names the copy as the editor does, `NE2` for `NE`, not `NECopy`. [#1319](https://github.com/saworbit/didi/issues/1319) · [PR #1329](https://github.com/saworbit/didi/pull/1329)
 - `2026-10-12` `didi setup` adds `.didi/` and each client file it wrote to the project's `.gitignore`, and `didi doctor` warns when `.didi/` is not ignored. [#1307](https://github.com/saworbit/didi/issues/1307) · [PR #1328](https://github.com/saworbit/didi/pull/1328)
 - `2026-10-12` `didi doctor` warns about a guide Claude Code reaches only through an import outside the project, which it asks about before loading. [#1286](https://github.com/saworbit/didi/issues/1286) · [PR #1328](https://github.com/saworbit/didi/pull/1328)
 - `2026-10-12` A signal rename no longer rebuilds an open tab into a scene whose next save deletes the connection: it asks for the new signal to be declared first. [#1288](https://github.com/saworbit/didi/issues/1288) · [PR #1327](https://github.com/saworbit/didi/pull/1327)

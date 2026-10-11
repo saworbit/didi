@@ -80,13 +80,13 @@ function Invoke-TypedObjectLayerBlock {
         # After the save, so nothing below reaches the file; the close discards
         # it. A duplicate shares its StyleBox with the original (#1134).
         (Tool-Request 7130 "scene_duplicate_node" @{ target_node = "$root/Embedded" }),
-        (Tool-Request 7131 "scene_get_property" @{ target_node = "$root/EmbeddedCopy"; property_name = $box }),
-        (Tool-Request 7132 "scene_set_property" @{ target_node = "$root/EmbeddedCopy"; property_name = $box; value = "#0000ff" }),
+        (Tool-Request 7131 "scene_get_property" @{ target_node = "$root/Embedded2"; property_name = $box }),
+        (Tool-Request 7132 "scene_set_property" @{ target_node = "$root/Embedded2"; property_name = $box; value = "#0000ff" }),
         (Tool-Request 7133 "scene_get_property" @{ target_node = "$root/Embedded"; property_name = $box }),
-        (Tool-Request 7134 "scene_set_property" @{ target_node = "$root/EmbeddedCopy"; property_name = $box; value = "#ffff00"; make_unique = $true }),
-        (Tool-Request 7135 "scene_get_property" @{ reads = @(@{ target_node = "$root/Embedded"; property_name = $box }, @{ target_node = "$root/EmbeddedCopy"; property_name = $box }) }),
+        (Tool-Request 7134 "scene_set_property" @{ target_node = "$root/Embedded2"; property_name = $box; value = "#ffff00"; make_unique = $true }),
+        (Tool-Request 7135 "scene_get_property" @{ reads = @(@{ target_node = "$root/Embedded"; property_name = $box }, @{ target_node = "$root/Embedded2"; property_name = $box }) }),
         (Tool-Request 7136 "editor_undo" @{}),
-        (Tool-Request 7137 "scene_get_property" @{ reads = @(@{ target_node = "$root/Embedded"; property_name = $box }, @{ target_node = "$root/EmbeddedCopy"; property_name = $box }) }),
+        (Tool-Request 7137 "scene_get_property" @{ reads = @(@{ target_node = "$root/Embedded"; property_name = $box }, @{ target_node = "$root/Embedded2"; property_name = $box }) }),
         # Wider values (Q7 part 2), after the save so the close discards them.
         # A transform reads, and the near misses each value can be are refused
         # with what to send.
@@ -216,7 +216,7 @@ function Invoke-TypedObjectLayerBlock {
 
     # A duplicate shares the original's StyleBox, so a path write into the
     # copy changes both, and the read and the write name the original (#1134).
-    Assert-True ((Tool-Payload $typedById[7130]).duplicated_node -eq "$root/EmbeddedCopy") "The Embedded panel was not duplicated where the sharing case expects: $(& $text 7130)"
+    Assert-True ((Tool-Payload $typedById[7130]).duplicated_node -eq "$root/Embedded2") "The Embedded panel was not duplicated where the sharing case expects: $(& $text 7130)"
     Assert-True (@((Tool-Payload $typedById[7131]).shared_with) -contains "$root/Embedded") "A read into a StyleBox a duplicate shares did not name the node it shares it with: $(& $text 7131)"
     $sharedWrite = Tool-Payload $typedById[7132]
     $original = Tool-Payload $typedById[7133]
