@@ -372,6 +372,12 @@ const std::map<std::string, Rule>& rules() {
             return nextCall("script_patch_method", arguments,
                             "Declare the signal the connection will name, then rename again.");
         }},
+        {"shader_not_compiled", [](const Refusal& r) {
+            const auto path = text(r.data, "shader_path");
+            return nextCall("shader_check_compile",
+                            path.empty() ? json::object() : json{{"shader_path", path}},
+                            "Compile the shader to see the line that fails.");
+        }},
         {"dirty_state_unavailable", [](const Refusal&) {
             return nextCall("editor_save_scene", json::object(),
                             "This engine cannot say whether the scene is saved; save it first.");

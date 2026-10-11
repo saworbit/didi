@@ -134,6 +134,8 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Fixed
 
+- `2026-10-12` `shader_check_compile` checks a Shader kept in a `.tres` or `.res`, the form `resource_create` writes, and `resource_create` says the code was not compiled. [#1299](https://github.com/saworbit/didi/issues/1299) · [PR #1332](https://github.com/saworbit/didi/pull/1332)
+- `2026-10-12` `shader_list_uniforms` refuses a shader that declares uniforms and lists none, which did not compile, rather than reporting no uniforms. [#1300](https://github.com/saworbit/didi/issues/1300) · [PR #1332](https://github.com/saworbit/didi/pull/1332)
 - `2026-10-12` `script_patch_method` with `create_if_missing` adds a member beside the others of its kind, and never above the class doc comment. [#1305](https://github.com/saworbit/didi/issues/1305) · [PR #1331](https://github.com/saworbit/didi/pull/1331)
 - `2026-10-12` `project_rename_references` says how to rename a declaration, which `script_patch_method` cannot do. [#1310](https://github.com/saworbit/didi/issues/1310) · [PR #1331](https://github.com/saworbit/didi/pull/1331)
 - `2026-10-12` `resource_create` writes an `[ext_resource]` with the type the referenced file's header declares, not `Resource`. [#1316](https://github.com/saworbit/didi/issues/1316) · [PR #1331](https://github.com/saworbit/didi/pull/1331)

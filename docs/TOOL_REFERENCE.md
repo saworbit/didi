@@ -1929,6 +1929,8 @@ Reads the shader uniforms of a `ShaderMaterial` held by a node in the edited sce
 - `target_node` (`string`, required).
 - `property_name` (`string`, required): the property the material sits in, such as `material_override` on a MeshInstance3D or `material` on a CanvasItem. Named rather than guessed, because the right property differs by node type and `scene_get_property` will say which a node has.
 
+A shader that failed to compile lists no uniforms, and an empty list read as "this shader has none" (#1300). When the engine lists none and the code declares a plain `uniform` (not a `global` or `instance` one, and not a sampler hinted as the screen, depth or normal-roughness texture, which are never listed), the call is refused `422 shader_not_compiled` with `shader_path`, and `next_call` is `shader_check_compile`. The compiler's own message is in `engine_diagnostics`.
+
 Each uniform carries its declared Godot type, its declared `hint`, its effective value, and `settable`. The value is the material's override where it has one and the shader's own declared default otherwise. Reaching the default takes two calls: `get_shader_parameter` answers nil for a uniform the material does not set, so the default is read from the rendering server, where the shader keeps it. The two are still not distinguished, because that same call answers with the default rather than nil in a 4.7.2 editor, so it cannot be used to tell an override from a default in every session. `settable` says whether the property contract has a JSON spelling for that type at all, and comes from the same decision `scene_set_property` makes, so the two cannot disagree.
 
 `hint` is the hint the shader author wrote, read from the same `PropertyInfo` the name and type come from. A `hint_range` is reported as `{"kind": "range", "minimum", "maximum", "step", "or_greater", "or_less", "hint_string"}`, an enum-hinted int as `{"kind": "enum", "options", "hint_string"}`, and any other hint by its number under `{"kind": "other"}`. A uniform with no hint carries `null` rather than leaving the key out, so a caller can branch on one shape. `shader_set_uniform` refuses a value outside a declared `hint_range`, so this is the call that says what it will accept.
@@ -1967,7 +1969,7 @@ It runs the project's own test code, which can do anything project code can, so 
 
 ### `shader_check_compile` — Offline
 
-Requires a normalized existing `shader_path` ending in `.gdshader`; `timeout_seconds` defaults to `30` and is limited to `1..300`. A temporary headless Godot script loads the shader with the project's renderer, and the tool returns structured engine diagnostics with the requested resource path filled in when Godot reports only a temporary/internal location.
+Requires a normalized existing `shader_path` naming a `.gdshader`, or a `.tres` or `.res` holding a `Shader` or `VisualShader`, which is how a shader written through the surface is stored, since no tool writes a `.gdshader` (#1299). A `.tres` whose header names another type is refused before Godot starts; a binary `.res` is checked by the helper. `resource_create` of a Shader says in its `limitation` that the code was not compiled and names this tool. `timeout_seconds` defaults to `30` and is limited to `1..300`. A temporary headless Godot script loads the shader with the project's renderer, and the tool returns structured engine diagnostics with the requested resource path filled in when Godot reports only a temporary/internal location.
 
 ### `project_list_export_presets` — Offline
 

@@ -2771,6 +2771,12 @@ try {
         (Tool-Request 502 "project_list_export_presets" @{}),
         (Tool-Request 503 "shader_check_compile" @{ shader_path = "res://phase5_valid.gdshader"; timeout_seconds = 30 }),
         (Tool-Request 504 "shader_check_compile" @{ shader_path = "res://phase5_invalid.gdshader"; timeout_seconds = 30 }),
+        # A shader written through the surface is a Shader resource in a .tres,
+        # and the check refused it (#1299). A .tres holding something else is
+        # refused before Godot starts.
+        (Tool-Request 525 "shader_check_compile" @{ shader_path = "res://phase5_valid_shader.tres"; timeout_seconds = 30 }),
+        (Tool-Request 526 "shader_check_compile" @{ shader_path = "res://phase5_invalid_shader.tres"; timeout_seconds = 30 }),
+        (Tool-Request 527 "shader_check_compile" @{ shader_path = "res://probe_tileset.tres"; timeout_seconds = 30 }),
         # Both checks spawn a Godot to answer "will the engine accept this?",
         # and the one they spawn is whichever resolveGodotExecutable finds
         # newest-first, not the one this session is attached to. Neither said
@@ -3658,6 +3664,11 @@ try {
     Assert-True ($validShader.success -eq $true -and $validShader.has_errors -eq $false) "Valid shader did not compile cleanly."
     $invalidShader = Tool-Payload $phase5ById[504]
     Assert-True ($invalidShader.success -eq $false -and $invalidShader.has_errors -eq $true -and @($invalidShader.diagnostics).Count -ge 1) "Invalid shader did not return structured diagnostics."
+    $validTres = Tool-Payload $phase5ById[525]
+    Assert-True ($validTres.success -eq $true -and $validTres.has_errors -eq $false) "A Shader in a .tres did not compile cleanly: $($phase5ById[525].result.content[0].text)"
+    $invalidTres = Tool-Payload $phase5ById[526]
+    Assert-True ($invalidTres.success -eq $false -and $invalidTres.has_errors -eq $true -and @($invalidTres.diagnostics).Count -ge 1) "A broken Shader in a .tres did not return diagnostics: $($phase5ById[526].result.content[0].text)"
+    Assert-True ($phase5ById[527].result.isError -and $phase5ById[527].result.content[0].text -match "not a Shader") "A .tres holding a TileSet was not refused as not a Shader: $($phase5ById[527].result.content[0].text)"
     $phase5Export = Tool-Payload $phase5ById[505]
     Assert-True ($phase5Export.success -eq $true -and $phase5Export.size_bytes -gt 0) "Phase 5 pack export did not create a non-empty artifact."
     $meshLibrary = Tool-Payload $phase5ById[506]

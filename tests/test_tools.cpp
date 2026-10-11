@@ -7067,6 +7067,23 @@ static void test_a_write_that_did_not_land_says_which_of_the_two_it_was() {
     ASSERT_EQ(rounded.at("outcome").get<std::string>(), std::string("unchanged"));
 }
 
+static void test_a_shader_that_declares_uniforms_and_lists_none_did_not_compile() {
+    // shader_list_uniforms answered an empty list for a shader that failed to
+    // compile, which reads as "no uniforms" (#1300). The code decides whether
+    // an empty list can be true.
+    using didi::godot::shaderDeclaresListedUniform;
+    ASSERT_TRUE(shaderDeclaresListedUniform("shader_type canvas_item;\nuniform float glow = 1.0\nvoid fragment() {}\n"));
+    ASSERT_TRUE(shaderDeclaresListedUniform("shader_type spatial;\n\tuniform vec4 tint : source_color;\n"));
+    ASSERT_TRUE(!shaderDeclaresListedUniform("shader_type canvas_item;\nvoid fragment() { COLOR = vec4(1.0); }\n"));
+    // Never listed, so never evidence.
+    ASSERT_TRUE(!shaderDeclaresListedUniform("shader_type spatial;\nglobal uniform vec4 wind;\ninstance uniform float seed;\n"));
+    ASSERT_TRUE(!shaderDeclaresListedUniform("shader_type canvas_item;\nuniform sampler2D screen : hint_screen_texture;\n"));
+    ASSERT_TRUE(!shaderDeclaresListedUniform("shader_type spatial;\nuniform sampler2D depth : hint_depth_texture, filter_nearest;\n"));
+    // Comments are not code.
+    ASSERT_TRUE(!shaderDeclaresListedUniform("shader_type canvas_item;\n// uniform float a;\n/* uniform float b;\nuniform float c; */\n"));
+    ASSERT_TRUE(shaderDeclaresListedUniform("shader_type canvas_item;\n/* note */ \nuniform float d; // trailing\n"));
+}
+
 static void test_a_declared_hint_range_is_read_as_the_engine_spells_it() {
     // Break caught: a shader author's hint_range is not reported and not
     // honoured, so a caller cannot learn a bound without reading the shader
@@ -10391,6 +10408,8 @@ struct RegisterToolTests {
                      test_a_write_that_did_not_land_says_which_of_the_two_it_was);
         registerTest("Tools.ShaderHintRangeIsReadAsTheEngineSpellsIt",
                      test_a_declared_hint_range_is_read_as_the_engine_spells_it);
+        registerTest("Tools.AShaderThatListsNoUniformsDidNotCompile",
+                     test_a_shader_that_declares_uniforms_and_lists_none_did_not_compile);
         registerTest("Tools.ResourceTypeHintIsAListOfClasses",
                      test_a_declared_resource_type_is_a_list_and_not_one_class_name);
         registerTest("Tools.ScriptToolsRefuseAFileTheEngineCannotRead",

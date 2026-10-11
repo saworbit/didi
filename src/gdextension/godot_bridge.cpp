@@ -3948,6 +3948,38 @@ json notAppliedReport(const json& observed, const json& old_value, int hint,
     return report;
 }
 
+bool shaderDeclaresListedUniform(const std::string& code) {
+    std::string text;
+    text.reserve(code.size());
+    // Comments out, line breaks kept.
+    for (size_t at = 0; at < code.size(); ++at) {
+        if (code.compare(at, 2, "//") == 0) {
+            while (at < code.size() && code[at] != '\n') ++at;
+            if (at < code.size()) text += '\n';
+        } else if (code.compare(at, 2, "/*") == 0) {
+            const auto end = code.find("*/", at + 2);
+            for (size_t inner = at; inner < (end == std::string::npos ? code.size() : end); ++inner) {
+                if (code[inner] == '\n') text += '\n';
+            }
+            if (end == std::string::npos) break;
+            at = end + 1;
+        } else {
+            text += code[at];
+        }
+    }
+    for (const auto& line : strings::split(text, '\n')) {
+        const auto trimmed = strings::trim(line);
+        if (!strings::startsWith(trimmed, "uniform ") && !strings::startsWith(trimmed, "uniform\t")) continue;
+        if (trimmed.find("hint_screen_texture") != std::string::npos ||
+            trimmed.find("hint_depth_texture") != std::string::npos ||
+            trimmed.find("hint_normal_roughness_texture") != std::string::npos) {
+            continue;
+        }
+        return true;
+    }
+    return false;
+}
+
 std::optional<ShaderHintRange> parseShaderHintRange(const std::string& hint_string) {
     return parseShaderHintRangeImpl(hint_string);
 }
@@ -16021,6 +16053,24 @@ json GodotBridge::bridgeShaders(const std::string& method, const json& params, c
     if (size_value.isErr()) return errorJson(500, size_value.error().message);
     auto count = scalarFromVariant<int64_t>(size_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
     if (count.isErr()) return errorJson(500, count.error().message);
+    // A shader that failed to compile lists no uniforms, and an empty list
+    // read as "this shader has none" (#1300). Its code says otherwise.
+    if (count.value() == 0) {
+        auto code_value = callObject(shader.value(), "Shader", "get_code", 201670096LL);
+        auto code = code_value.isOk() ? stringFromVariant(code_value.value(), GDEXTENSION_VARIANT_TYPE_STRING)
+                                      : Result<std::string>(code_value.error());
+        if (code.isOk() && shaderDeclaresListedUniform(code.value())) {
+            return errorJson(422,
+                             "The shader declares uniforms and the engine lists none, so it did not "
+                             "compile. engine_diagnostics carries the compiler's message; "
+                             "shader_check_compile names the line.",
+                             {{"code", "shader_not_compiled"},
+                              {"target_node", target_path},
+                              {"property_name", property},
+                              {"shader_path", result.value("shader_path", json(nullptr))},
+                              {"retryable", false}});
+        }
+    }
 
     if (setting) {
         const auto requested_name = params["uniform_name"].get<std::string>();

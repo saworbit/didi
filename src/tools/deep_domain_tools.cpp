@@ -604,8 +604,29 @@ CallToolResult handleShaderCheckCompile(const json& args, std::shared_ptr<ipc::I
     const std::string requested = args["shader_path"].get<std::string>();
     auto shader = paths::resolveProjectFile(requested);
     if (shader.isErr()) return CallToolResult::fromError(shader.error());
-    if (lower(shader.value().extension().string()) != ".gdshader") {
-        return CallToolResult::errorJson(400, "shader_path must name a .gdshader file");
+    // A shader written through the surface is a Shader resource in a .tres,
+    // because no tool writes a .gdshader, and the check refused it (#1299).
+    // A .tres says what it holds in its header; a binary .res is left to the
+    // helper, which refuses anything that is not a Shader.
+    const auto extension = lower(shader.value().extension().string());
+    if (extension != ".gdshader" && extension != ".tres" && extension != ".res") {
+        return CallToolResult::errorJson(400, "shader_path must name a .gdshader, or a .tres or .res holding a Shader");
+    }
+    if (extension == ".tres") {
+        std::ifstream header_file(shader.value(), std::ios::binary);
+        char buffer[512] = {};
+        header_file.read(buffer, sizeof(buffer));
+        std::string header(buffer, static_cast<size_t>(header_file.gcount()));
+        static const std::regex type_regex(R"re(^\[gd_resource[^\]]*type="([^"]+)")re");
+        std::smatch match;
+        const std::string declared =
+            std::regex_search(header, match, type_regex) ? match[1].str() : std::string();
+        if (declared != "Shader" && declared != "VisualShader") {
+            return CallToolResult::errorJson(
+                400, requested + " holds " + (declared.empty() ? std::string("no resource Godot can name") : "a " + declared) +
+                         ", not a Shader or VisualShader",
+                {{"code", "invalid_arguments"}, {"field", "shader_path"}});
+        }
     }
     auto timeout = timeoutSeconds(args, 30, 300);
     if (timeout.isErr()) return CallToolResult::fromError(timeout.error());
