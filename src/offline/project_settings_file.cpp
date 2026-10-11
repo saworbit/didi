@@ -6,6 +6,7 @@
 #include "didi/offline/project_file_lock.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <fstream>
 #include <limits>
@@ -227,11 +228,161 @@ Result<ProjectSettingWrite> writeSettingLine(const std::filesystem::path& projec
                                              const std::optional<std::string>& literal);
 }  // namespace
 
+namespace {
+
+// A real the way Godot's text writer shows one: always with a point.
+std::string realLiteral(double number) {
+    auto text = json(number).dump();
+    if (text.find_first_of(".eE") == std::string::npos) text += ".0";
+    return text;
+}
+
+// The constructor a literal starts with, such as Color or PackedStringArray.
+std::string literalConstructor(const std::string& literal) {
+    const auto trimmed = strings::trim(literal);
+    const auto paren = trimmed.find('(');
+    if (paren == std::string::npos || paren == 0) return {};
+    const auto name = trimmed.substr(0, paren);
+    for (const char c : name) {
+        if (!std::isalnum(static_cast<unsigned char>(c))) return {};
+    }
+    return name;
+}
+
+bool numberMembers(const json& value, std::initializer_list<const char*> keys, bool alpha_optional) {
+    if (!value.is_object()) return false;
+    const size_t required = keys.size() - (alpha_optional ? 1 : 0);
+    if (value.size() != keys.size() && !(alpha_optional && value.size() == required)) return false;
+    size_t index = 0;
+    for (const auto* key : keys) {
+        const bool optional = alpha_optional && index == keys.size() - 1;
+        ++index;
+        if (!value.contains(key)) {
+            if (optional) continue;
+            return false;
+        }
+        if (!value[key].is_number()) return false;
+    }
+    return true;
+}
+
+std::optional<std::string> colorFromHex(const std::string& text) {
+    if (text.size() != 7 && text.size() != 9) return std::nullopt;
+    if (text.front() != '#') return std::nullopt;
+    std::vector<double> parts;
+    for (size_t at = 1; at < text.size(); at += 2) {
+        const auto pair = text.substr(at, 2);
+        if (!std::isxdigit(static_cast<unsigned char>(pair[0])) ||
+            !std::isxdigit(static_cast<unsigned char>(pair[1]))) {
+            return std::nullopt;
+        }
+        parts.push_back(std::stoi(pair, nullptr, 16) / 255.0);
+    }
+    if (parts.size() == 3) parts.push_back(1.0);
+    return "Color(" + realLiteral(parts[0]) + ", " + realLiteral(parts[1]) + ", " +
+           realLiteral(parts[2]) + ", " + realLiteral(parts[3]) + ")";
+}
+
+// The JSON as a literal of the type the setting already holds, or nothing
+// for a type this does not convert. A setting written as plain JSON became
+// a Dictionary where the engine holds a Color or a Vector2, and Godot read
+// back a value of the wrong type (#1293).
+std::optional<Result<std::string>> typedSettingLiteral(const json& value,
+                                                       const std::string& constructor) {
+    const auto mismatch = [&](const std::string& shape) -> std::optional<Result<std::string>> {
+        return Result<std::string>(Error(
+            409, "The setting holds a " + constructor + ", and the value given is not " + shape + ".",
+            {{"code", "setting_type_mismatch"}, {"expected_type", constructor}, {"retryable", false}}));
+    };
+    if (constructor == "Color") {
+        if (value.is_string()) {
+            if (auto hex = colorFromHex(value.get<std::string>())) return Result<std::string>(*hex);
+            return mismatch("{r, g, b, a} or \"#rrggbb\"");
+        }
+        if (!numberMembers(value, {"r", "g", "b", "a"}, true)) return mismatch("{r, g, b, a} or \"#rrggbb\"");
+        return Result<std::string>("Color(" + realLiteral(value["r"].get<double>()) + ", " +
+                                   realLiteral(value["g"].get<double>()) + ", " +
+                                   realLiteral(value["b"].get<double>()) + ", " +
+                                   realLiteral(value.value("a", 1.0)) + ")");
+    }
+    const bool integer = constructor == "Vector2i" || constructor == "Vector3i";
+    if (constructor == "Vector2" || constructor == "Vector2i" || constructor == "Vector3" ||
+        constructor == "Vector3i") {
+        const bool three = constructor[6] == '3';
+        const bool shaped = three ? numberMembers(value, {"x", "y", "z"}, false)
+                                  : numberMembers(value, {"x", "y"}, false);
+        if (!shaped) return mismatch(three ? "{x, y, z}" : "{x, y}");
+        std::string out = constructor + "(";
+        bool first = true;
+        for (const auto* key : {"x", "y", "z"}) {
+            if (!three && std::string(key) == "z") break;
+            const double number = value[key].get<double>();
+            if (integer && number != std::floor(number)) return mismatch("whole numbers");
+            out += (first ? "" : ", ") + (integer ? std::to_string(static_cast<int64_t>(number))
+                                                  : realLiteral(number));
+            first = false;
+        }
+        return Result<std::string>(out + ")");
+    }
+    const bool strings_array = constructor == "PackedStringArray";
+    const bool ints_array = constructor == "PackedInt32Array" || constructor == "PackedInt64Array";
+    const bool reals_array = constructor == "PackedFloat32Array" || constructor == "PackedFloat64Array";
+    if (strings_array || ints_array || reals_array) {
+        if (!value.is_array()) return mismatch("an array");
+        std::string out = constructor + "(";
+        bool first = true;
+        for (const auto& item : value) {
+            std::string rendered;
+            if (strings_array && item.is_string()) {
+                rendered = "\"" + escapeSettingString(item.get<std::string>()) + "\"";
+            } else if (ints_array && item.is_number_integer()) {
+                rendered = std::to_string(item.get<int64_t>());
+            } else if (reals_array && item.is_number()) {
+                rendered = realLiteral(item.get<double>());
+            } else {
+                return mismatch(strings_array ? "an array of strings" : "an array of numbers");
+            }
+            out += (first ? "" : ", ") + rendered;
+            first = false;
+        }
+        return Result<std::string>(out + ")");
+    }
+    return std::nullopt;
+}
+
+// With no line to take a type from, an object shaped exactly like a Color or
+// a vector is written as one: a Dictionary setting with those keys alone is
+// not something a project has.
+std::string inferredConstructor(const json& value) {
+    if (numberMembers(value, {"r", "g", "b", "a"}, true)) return "Color";
+    if (numberMembers(value, {"x", "y", "z"}, false)) return "Vector3";
+    if (numberMembers(value, {"x", "y"}, false)) return "Vector2";
+    return {};
+}
+
+}  // namespace
+
 Result<ProjectSettingWrite> writeProjectSetting(const std::filesystem::path& project_root,
                                                 const std::string& setting,
                                                 const json& value,
                                                 bool remove) {
     if (remove) return writeSettingLine(project_root, setting, std::nullopt);
+    std::string constructor;
+    if (auto current = readProjectSetting(project_root, setting); current.isOk() && current.value().existed) {
+        constructor = literalConstructor(current.value().literal);
+    } else {
+        constructor = inferredConstructor(value);
+    }
+    if (!constructor.empty()) {
+        if (auto typed = typedSettingLiteral(value, constructor)) {
+            if (typed->isErr()) {
+                auto error = typed->error();
+                error.data["setting"] = setting;
+                return error;
+            }
+            return writeSettingLine(project_root, setting, typed->value());
+        }
+    }
     auto literal = settingLiteral(value);
     if (literal.isErr()) return literal.error();
     return writeSettingLine(project_root, setting, literal.value());

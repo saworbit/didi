@@ -29,7 +29,7 @@
     "project_rename_references": {"none": "It reloads an attached editor's copy of each file it wrote, and editor_copies_reloaded names the ones reloaded."},
     "project_set_autoload": {"leaves": ["restart"], "fact": "requires_editor_restart: true"},
     "project_set_input_action": {"none": "The editor applies the change and saves project.godot itself; a game already running keeps the map it started with, as it keeps every project change."},
-    "project_set_setting": {"leaves": ["restart"], "fact": "written_to res://project.godot with no editor attached, or requires_editor_restart: true for a moved bus layout"},
+    "project_set_setting": {"leaves": ["restart"], "fact": "written_to res://project.godot with no editor attached, or requires_editor_restart: true for a moved bus layout or a changed plugin list"},
     "resource_create": {"none": "It reloads an attached editor's copy of the file it wrote, and editor_copy_reloaded says whether that happened."},
     "runtime_checkpoint": {"none": "It records the saved project files, and holds nothing anywhere unsaved."},
     "runtime_explore_scene": {"none": "It drives a running game, whose state nothing saves by design."},

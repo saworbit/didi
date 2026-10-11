@@ -54,6 +54,49 @@ private:
 
 const char* const kBare = "config_version=5\n\n[application]\n\nconfig/name=\"Bare\"\n";
 
+// A setting the file already holds as a Color, a vector or a packed array is
+// written as that type, and with no line an object shaped exactly like a Color
+// or a vector is one. Written as plain JSON each was a Dictionary or an
+// Array, a value of another type than the engine reads back (#1293, #1304).
+void writes_the_type_the_setting_holds() {
+    ProjectFixture project("typed",
+                           "config_version=5\n\n[application]\n\nconfig/name=\"Typed\"\n\n"
+                           "[rendering]\n\nenvironment/defaults/default_clear_color=Color(0.3, 0.3, 0.3, 1)\n\n"
+                           "[editor_plugins]\n\nenabled=PackedStringArray(\"res://addons/didi/plugin.cfg\")\n");
+    const auto write = [&](const char* setting, const didi::json& value) {
+        auto written = writeProjectSetting(project.root(), setting, value, false);
+        ASSERT_TRUE(written.isOk());
+        return written.value().literal;
+    };
+    ASSERT_EQ(write("rendering/environment/defaults/default_clear_color",
+                    didi::json{{"r", 0.5}, {"g", 0.25}, {"b", 0}}),
+              std::string("Color(0.5, 0.25, 0.0, 1.0)"));
+    ASSERT_EQ(write("rendering/environment/defaults/default_clear_color", "#ff000080"),
+              std::string("Color(1.0, 0.0, 0.0, 0.5019607843137255)"));
+    ASSERT_EQ(write("editor_plugins/enabled",
+                    didi::json::array({"res://addons/didi/plugin.cfg", "res://addons/gut/plugin.cfg"})),
+              std::string("PackedStringArray(\"res://addons/didi/plugin.cfg\", \"res://addons/gut/plugin.cfg\")"));
+    // No line yet: the shape decides.
+    ASSERT_EQ(write("physics/2d/default_gravity_vector", didi::json{{"x", 0}, {"y", 1}}),
+              std::string("Vector2(0.0, 1.0)"));
+    ASSERT_EQ(write("application/config/custom_color", didi::json{{"r", 1}, {"g", 1}, {"b", 1}, {"a", 0.5}}),
+              std::string("Color(1.0, 1.0, 1.0, 0.5)"));
+    // A Dictionary that is not one of those shapes stays a Dictionary.
+    ASSERT_EQ(write("application/config/custom_map", didi::json{{"x", 1}, {"label", "a"}}),
+              std::string("{\"label\": \"a\", \"x\": 1}"));
+
+    // A value that is not the held type is refused, naming the type, and the
+    // file keeps its line.
+    const auto before = project.read();
+    auto refused = writeProjectSetting(project.root(), "rendering/environment/defaults/default_clear_color",
+                                       didi::json{{"x", 1}}, false);
+    ASSERT_TRUE(refused.isErr());
+    ASSERT_EQ(refused.error().code, 409);
+    ASSERT_EQ(refused.error().data["code"], "setting_type_mismatch");
+    ASSERT_EQ(refused.error().data["expected_type"], "Color");
+    ASSERT_EQ(project.read(), before);
+}
+
 // The bootstrap #382 reported as impossible: a project with no [editor_plugins]
 // section at all gains one, and the value is the Array the live path builds
 // from the same JSON rather than a string that looks like one.
@@ -543,6 +586,7 @@ struct Register {
         registerTest("project_settings_file.reserved_namespaces", refuses_the_namespaces_the_typed_tools_own);
         registerTest("project_settings_file.line_endings", keeps_the_line_endings_the_file_arrived_with);
         registerTest("project_settings_file.literals", writes_the_literals_the_live_converter_builds);
+        registerTest("project_settings_file.typed_literals", writes_the_type_the_setting_holds);
         registerTest("project_settings_file.spaced_key",
                      reads_and_rewrites_a_key_whose_spelling_carries_spaces);
         registerTest("project_settings_file.key_a_note_swallowed",

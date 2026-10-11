@@ -10986,6 +10986,22 @@ const char* variantTypeName(GDExtensionVariantType type) {
 // an int setting, a string into a StringName or a NodePath, a list into any of
 // the packed arrays. Everything else is a different setting wearing the same
 // name, which is what made the project name an integer (#490).
+// The settings whose value JSON has no type of its own for: a Color, a
+// vector, a compound such as Rect2, or a packed array.
+bool settingTakesTypedValue(GDExtensionVariantType held) {
+    switch (held) {
+        case GDEXTENSION_VARIANT_TYPE_VECTOR2:
+        case GDEXTENSION_VARIANT_TYPE_VECTOR2I:
+        case GDEXTENSION_VARIANT_TYPE_VECTOR3:
+        case GDEXTENSION_VARIANT_TYPE_VECTOR3I:
+        case GDEXTENSION_VARIANT_TYPE_COLOR:
+            return true;
+        default:
+            return compoundMembers(held) != nullptr ||
+                   packedElementType(held) != GDEXTENSION_VARIANT_TYPE_NIL;
+    }
+}
+
 bool incomingTypeFitsSetting(GDExtensionVariantType current, GDExtensionVariantType incoming,
                              bool incoming_is_whole_number) {
     if (current == incoming) return true;
@@ -13841,8 +13857,40 @@ json GodotBridge::bridgeProjectSettings(const std::string& method, const json& p
                      {&name.value(), &default_value})
         : Result<VariantValue>(VariantValue{});
     if (previous.isErr()) return errorJson(previous.error());
-    auto replacement = remove ? Result<VariantValue>(VariantValue{}) : makeJsonVariant(params["value"]);
+    // A setting the engine holds as a Color, a vector or a packed array is
+    // built as that type, the way scene_set_property builds a property, so
+    // the {r, g, b} project_get_setting answers can be written back. Built as
+    // plain JSON it was a Dictionary, refused as a type mismatch whatever the
+    // spelling (#1293), and a plugin list landed as an Array (#1304).
+    const auto held_type = exists.value() ? GodotApi::instance().variant_get_type(previous.value().ptr())
+                                          : GDEXTENSION_VARIANT_TYPE_NIL;
+    const bool typed = !remove && settingTakesTypedValue(held_type);
+    if (typed) {
+        auto valid = validateJsonForPropertyType(setting, params["value"], held_type);
+        if (valid.isErr()) {
+            return errorJson(409, valid.error().message,
+                             {{"code", "setting_type_mismatch"},
+                              {"setting", setting},
+                              {"expected_type", variantTypeName(held_type)},
+                              {"retryable", false}});
+        }
+    }
+    auto replacement = remove ? Result<VariantValue>(VariantValue{})
+                       : typed ? makeJsonVariantForProperty(params["value"], held_type)
+                               : makeJsonVariant(params["value"]);
     if (replacement.isErr()) return errorJson(replacement.error());
+    // Removing a setting the engine defines puts its default back. Null
+    // erases it from ProjectSettings, and the engine then warned "Property
+    // not found" every frame for rendering/environment/defaults/default_clear_color.
+    if (remove && exists.value()) {
+        auto can_revert = callObject(project_settings.value(), "Object", "property_can_revert", 2619796661LL, {&name.value()});
+        auto flag = can_revert.isOk() ? scalarFromVariant<GDExtensionBool>(can_revert.value(), GDEXTENSION_VARIANT_TYPE_BOOL)
+                                      : Result<GDExtensionBool>(can_revert.error());
+        if (flag.isOk() && flag.value()) {
+            replacement = callObject(project_settings.value(), "Object", "property_get_revert", 2760726917LL, {&name.value()});
+            if (replacement.isErr()) return errorJson(replacement.error());
+        }
+    }
 
     // Having established that the engine defines this setting, the tool
     // used to write whatever it was handed. The lookup that answered
@@ -13939,6 +13987,17 @@ json GodotBridge::bridgeProjectSettings(const std::string& method, const json& p
     // the editor after a restart. Measured on 4.7.2 in vibe session
     // nineteen; editor_reload_project is a filesystem scan and does not
     // change it.
+    // The editor loads its plugins when it starts, so a plugin this list
+    // enables is not loaded, and one it drops keeps running, until the next
+    // start. project_set_autoload says the same about its own change (#1304).
+    const bool plugins_changed = !(literal_before.isOk() && stored.isOk() &&
+                                   literal_before.value() == stored.value());
+    if (setting == "editor_plugins/enabled" && !remove && plugins_changed) {
+        result["requires_editor_restart"] = true;
+        result["limitation"] =
+            "The attached editor loaded its plugins when it started. A plugin this list now "
+            "enables loads, and one it no longer names stops, when the editor next starts.";
+    }
     if (setting == "audio/buses/default_bus_layout") {
         const auto editor_path = startupBusLayoutPath();
         const auto project_path = busLayoutPathFrom(projectSettingString(setting));
