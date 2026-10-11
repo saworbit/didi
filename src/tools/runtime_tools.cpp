@@ -489,6 +489,7 @@ CallToolResult handleExecuteTestSession(const json& args, std::shared_ptr<ipc::I
     const int64_t launched_at_ms =
         std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count();
+    const auto call_started = std::chrono::steady_clock::now();
     offline::TestRunner runner;
     auto session_res =
         runner.runSession(scene_path, timeout_sec, headless, break_on_error, extra_args, detach);
@@ -575,6 +576,11 @@ CallToolResult handleExecuteTestSession(const json& args, std::shared_ptr<ipc::I
         result["session_published"] = !published.is_null();
         result["game_session"] = published.is_null() ? json(nullptr) : published;
         result["success"] = !published.is_null() && attach_error.empty();
+        // The whole call: the spawn took milliseconds, and the wait for the
+        // game to publish its session is most of what a caller waits for and
+        // budgets (#1313).
+        result["duration_seconds"] =
+            std::chrono::duration<double>(std::chrono::steady_clock::now() - call_started).count();
         if (!attach_error.empty()) result["attach_error"] = attach_error;
         result["limitation"] =
             "This game is running and this call is not watching it. Nothing was captured, so "

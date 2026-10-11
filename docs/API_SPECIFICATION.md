@@ -510,7 +510,8 @@ as a job and waits up to about ten seconds for it:
   (`job_id`, `request_id`, `state`, `started_at`).
 - Still running, the answer is a success, `{"status": "working", "job": {...},
   "follow_up": [{"work": "poll", ...}]}`, with `elapsed_ms` and
-  `poll_interval_ms` in `job`.
+  `poll_interval_ms` in `job`. `elapsed_ms` is how long the job has run since
+  it started, not the time to its last progress update (#1312).
 - The same call again with the same `request_id` reads the job and never runs
   the work a second time: the working answer while it runs, the stored answer
   once it finishes. The `request_id` alone, with no other arguments, reads it

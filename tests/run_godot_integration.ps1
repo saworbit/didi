@@ -4964,6 +4964,9 @@ try {
     Assert-True ($detached.detached -eq $true) "runtime_launch did not report the launch as detached."
     Assert-True ($detached.session_published -eq $true) "A detached launch published no session: $($detached.summary)"
     Assert-True ($detached.success -eq $true) "A detached launch that published a session reported failure."
+    # The whole call, spawn to session selected, not the spawn alone, which
+    # took milliseconds (#1313).
+    Assert-True ($detached.duration_seconds -gt 0.1) "A detached launch reported duration_seconds for the spawn alone: $($detached.duration_seconds)"
     # Not a timeout and not an exit code, because nothing waited for either.
     Assert-True ($detached.timed_out -eq $false) "A detached launch reported a timeout it never waited for."
     Assert-True ($null -eq $detached.exit_code) "A detached launch reported an exit code for a game that is still running."

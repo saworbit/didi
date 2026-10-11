@@ -117,6 +117,9 @@ public:
 
     size_t workingCount() const;
     const Limits& limits() const { return m_limits; }
+    // The store's clock, in milliseconds, so an answer can say how long a
+    // job has been running rather than when it last changed (#1312).
+    int64_t now() const;
 
     // Cancels every running job, joins its thread, and refuses new ones. The
     // destructor does the same; this is for a server about to leave by a way
@@ -132,7 +135,6 @@ private:
 
     void expireLocked(int64_t now);
     void evictLocked();
-    int64_t now() const;
 
     Limits m_limits;
     Clock m_clock;
