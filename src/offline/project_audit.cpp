@@ -605,12 +605,21 @@ json auditProject(const std::string& root_dir, const ProjectAuditOptions& option
     }
 
     json dead_signals = json::array();
+    size_t excluded_addon_dead_signals = 0;
     if (options.include_dead_signals) {
         const auto used = usedSignalNames(sources);
         for (const auto& [source_path, text] : sources) {
             if (!strings::endsWith(source_path, ".gd")) continue;
+            // Third-party code, for the reason addon files are not orphans:
+            // GUT's one dead signal was the only finding in a project (#1318).
+            const bool addon = !options.include_addon_orphans &&
+                               strings::startsWith(source_path, "res://addons/");
             for (const auto& declaration : signalsDeclaredIn(source_path, text)) {
                 if (used.count(declaration.name) != 0) continue;
+                if (addon) {
+                    ++excluded_addon_dead_signals;
+                    continue;
+                }
                 if (dead_signals.size() >= options.max_findings) break;
                 dead_signals.push_back({{"script", declaration.script},
                                         {"signal", declaration.name},
@@ -654,6 +663,7 @@ json auditProject(const std::string& root_dir, const ProjectAuditOptions& option
         {"addon_orphans_included", options.include_addon_orphans},
         {"broken_references", broken},
         {"dead_signals", dead_signals},
+        {"excluded_addon_dead_signals", excluded_addon_dead_signals},
         {"broken_connections", broken_connections},
         {"max_findings", options.max_findings},
         {"scanned_import_metadata", import_health["scanned_import_metadata"]},
@@ -695,8 +705,9 @@ json auditProject(const std::string& root_dir, const ProjectAuditOptions& option
         "A path a script builds at runtime cannot be followed, so an asset in "
         "use may still be listed as an orphan.",
         "Files under res://addons/ are third-party and are not counted as "
-        "orphans by default. excluded_addon_orphans says how many were left "
-        "out; pass include_addon_orphans to see them.",
+        "orphans by default, nor their signals as dead. excluded_addon_orphans "
+        "and excluded_addon_dead_signals say how many were left out; pass "
+        "include_addon_orphans to see them.",
         "A signal is reported as dead only when no file emits it, connects to "
         "it, or wires it in a scene. A connection made through a variable name "
         "cannot be seen, and neither can a member call written with the name "

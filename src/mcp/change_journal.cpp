@@ -298,7 +298,10 @@ json entryFor(const Call& call) {
                 ? "The call registered no step in the editor's undo history."
                 : "Written without an editor, so no undo history holds it.";
     }
-    if (!entry.contains("scene") && answer.is_object() && !sceneWritten(answer) &&
+    // A save writes the scene it names, so it is that entry's scene as much as
+    // an edit's; the save, the one entry that touches disk, carried none (#1317).
+    if (!entry.contains("scene") && answer.is_object() &&
+        (!sceneWritten(answer) || call.tool == "editor_save_scene") &&
         answer.value("scene_path", json()).is_string()) {
         entry["scene"] = answer["scene_path"];
     }

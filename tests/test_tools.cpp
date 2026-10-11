@@ -2102,6 +2102,30 @@ static void test_audit_does_not_call_third_party_addon_files_orphans() {
     // excluded, or the headline number stays wrong.
     ASSERT_TRUE(report["orphan_bytes"].get<uint64_t>() <
                 with_addons["orphan_bytes"].get<uint64_t>());
+
+    // A signal nothing uses in an addon's script follows the same default, for
+    // the same reason: GUT's was the only dead signal in a project (#1318).
+    writeAuditFile("addons/gut/update_required.gd", "extends Node\nsignal closed\n");
+    writeAuditFile("player.gd", "extends Node\nsignal died\n");
+    didi::offline::ResourceIndexer::invalidateSharedIndex();
+    const auto signals = didi::json::parse(
+        registry.callTool("project_audit_assets",
+                          didi::json{{"include_orphans", false},
+                                     {"include_broken_references", false},
+                                     {"include_import_health", false}})
+            .content[0].text);
+    ASSERT_EQ(signals["dead_signals"].size(), 1u);
+    ASSERT_EQ(signals["dead_signals"][0]["script"], "res://player.gd");
+    ASSERT_EQ(signals["excluded_addon_dead_signals"], 1);
+    const auto all_signals = didi::json::parse(
+        registry.callTool("project_audit_assets",
+                          didi::json{{"include_orphans", false},
+                                     {"include_broken_references", false},
+                                     {"include_import_health", false},
+                                     {"include_addon_orphans", true}})
+            .content[0].text);
+    ASSERT_EQ(all_signals["dead_signals"].size(), 2u);
+    ASSERT_EQ(all_signals["excluded_addon_dead_signals"], 0);
 }
 
 static void test_audit_follows_the_resources_project_godot_names() {
