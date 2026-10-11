@@ -134,10 +134,10 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Fixed
 
-- `2026-10-12` `script_patch_method` with `create_if_missing` adds a member beside the others of its kind, and never above the class doc comment. [#1305](https://github.com/saworbit/didi/issues/1305)
-- `2026-10-12` `project_rename_references` says how to rename a declaration, which `script_patch_method` cannot do. [#1310](https://github.com/saworbit/didi/issues/1310)
-- `2026-10-12` `resource_create` writes an `[ext_resource]` with the type the referenced file's header declares, not `Resource`. [#1316](https://github.com/saworbit/didi/issues/1316)
-- `2026-10-12` `scene_create`'s description says the root can be any Node class, as `root_type` does. [#1311](https://github.com/saworbit/didi/issues/1311)
+- `2026-10-12` `script_patch_method` with `create_if_missing` adds a member beside the others of its kind, and never above the class doc comment. [#1305](https://github.com/saworbit/didi/issues/1305) · [PR #1331](https://github.com/saworbit/didi/pull/1331)
+- `2026-10-12` `project_rename_references` says how to rename a declaration, which `script_patch_method` cannot do. [#1310](https://github.com/saworbit/didi/issues/1310) · [PR #1331](https://github.com/saworbit/didi/pull/1331)
+- `2026-10-12` `resource_create` writes an `[ext_resource]` with the type the referenced file's header declares, not `Resource`. [#1316](https://github.com/saworbit/didi/issues/1316) · [PR #1331](https://github.com/saworbit/didi/pull/1331)
+- `2026-10-12` `scene_create`'s description says the root can be any Node class, as `root_type` does. [#1311](https://github.com/saworbit/didi/issues/1311) · [PR #1331](https://github.com/saworbit/didi/pull/1331)
 - `2026-10-12` `project_set_setting` with `remove: true` puts an engine setting's default back rather than erasing it, which left the editor warning every frame. [#1293](https://github.com/saworbit/didi/issues/1293) · [PR #1330](https://github.com/saworbit/didi/pull/1330)
 - `2026-10-12` `project_set_setting` writes a Color, vector or packed-array setting as that type, so the value `project_get_setting` returns can be written back. [#1293](https://github.com/saworbit/didi/issues/1293) · [PR #1330](https://github.com/saworbit/didi/pull/1330)
 - `2026-10-12` A live change to `editor_plugins/enabled` answers with a restart step, since the editor loads plugins only when it starts. [#1304](https://github.com/saworbit/didi/issues/1304) · [PR #1330](https://github.com/saworbit/didi/pull/1330)
