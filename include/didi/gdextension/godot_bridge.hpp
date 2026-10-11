@@ -1,6 +1,7 @@
 #pragma once
 
 #include "didi/common/json.hpp"
+#include "didi/gdextension/gdextension_interface.h"
 #include "didi/common/types.hpp"
 #include "didi/gdextension/undo_ledger.hpp"
 #include "didi/runtime/performance_verdict.hpp"
@@ -10,6 +11,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace didi {
@@ -313,6 +315,8 @@ public:
 
     json execute(const std::string& method, const json& params,
                  const std::string& session_kind = "editor");
+    // Every method execute() serves, sorted. The editor hook routes only these.
+    static std::vector<std::string> methodNames();
     Result<ViewportPixels> captureEditorViewport(const std::string& camera_identifier);
     // A game has one root viewport and no camera selection to make. Both paths
     // share one capture body, so the size check, the RGBA8 conversion and the
@@ -532,6 +536,63 @@ public:
 
 private:
     GodotBridge() = default;
+
+    // What execute() dispatches through, one entry per method (#1255).
+    struct BridgeMethod {
+        json (GodotBridge::*before_editor)(const std::string&, const json&, const std::string&);
+        json (GodotBridge::*with_editor)(const std::string&, const json&, const std::string&,
+                                         GDExtensionObjectPtr);
+    };
+    static const std::unordered_map<std::string_view, BridgeMethod>& methodTable();
+    // One per entry, or per group of methods that share a body.
+    json bridgeRuntimeEvalGdscript(const std::string& method, const json& params, const std::string& session_kind);
+    json bridgeRuntimeTreeAndPause(const std::string& method, const json& params, const std::string& session_kind);
+    json bridgeRuntimeInjectInput(const std::string& method, const json& params, const std::string& session_kind);
+    json bridgeRuntimeMissingInputActions(const std::string& method, const json& params, const std::string& session_kind);
+    json bridgePhysicsRaycast(const std::string& method, const json& params, const std::string& session_kind);
+    json bridgePhysicsRaycastBatch(const std::string& method, const json& params, const std::string& session_kind);
+    json bridgePhysicsClearance(const std::string& method, const json& params, const std::string& session_kind);
+    json bridgeVisionFrustumQuery(const std::string& method, const json& params, const std::string& session_kind);
+    json bridgePreviewRenderGhost(const std::string& method, const json& params, const std::string& session_kind);
+    json bridgePreviewClearGhosts(const std::string& method, const json& params, const std::string& session_kind);
+    json bridgeNavQueryPath(const std::string& method, const json& params, const std::string& session_kind);
+    json bridgeUiListControls(const std::string& method, const json& params, const std::string& session_kind);
+    json bridgeUiHitTest(const std::string& method, const json& params, const std::string& session_kind);
+    json bridgeAnimListTracks(const std::string& method, const json& params, const std::string& session_kind);
+    json bridgeAnimPlayTrack(const std::string& method, const json& params, const std::string& session_kind);
+    json bridgeAnimAddLibrary(const std::string& method, const json& params, const std::string& session_kind);
+    json bridgeExportReloadPresets(const std::string& method, const json& params, const std::string& session_kind);
+    json bridgeEditorGetProtocolServers(const std::string& method, const json& params, const std::string& session_kind);
+    json bridgeEditorOpenScenes(const std::string& method, const json& params, const std::string& session_kind);
+    json bridgeResourceRefreshCached(const std::string& method, const json& params, const std::string& session_kind);
+    json bridgeAssetReadImportedStream(const std::string& method, const json& params, const std::string& session_kind);
+    json bridgeAudioListBuses(const std::string& method, const json& params, const std::string& session_kind);
+    json bridgeAudioConfigureBus(const std::string& method, const json& params, const std::string& session_kind);
+    json bridgeEditorGetRecoveryState(const std::string& method, const json& params, const std::string& session_kind, GDExtensionObjectPtr editor);
+    json bridgeTilemapGetUsedRect(const std::string& method, const json& params, const std::string& session_kind, GDExtensionObjectPtr editor);
+    json bridgeTilemapSetCells(const std::string& method, const json& params, const std::string& session_kind, GDExtensionObjectPtr editor);
+    json bridgeGridmapSetCells(const std::string& method, const json& params, const std::string& session_kind, GDExtensionObjectPtr editor);
+    json bridgeVisionSetCameraTransform(const std::string& method, const json& params, const std::string& session_kind, GDExtensionObjectPtr editor);
+    json bridgeVisionToggleDebugDraw(const std::string& method, const json& params, const std::string& session_kind, GDExtensionObjectPtr editor);
+    json bridgeSignals(const std::string& method, const json& params, const std::string& session_kind, GDExtensionObjectPtr editor);
+    json bridgeProjectResolveUids(const std::string& method, const json& params, const std::string& session_kind, GDExtensionObjectPtr editor);
+    json bridgeProjectSettings(const std::string& method, const json& params, const std::string& session_kind, GDExtensionObjectPtr editor);
+    json bridgeProjectAutoloads(const std::string& method, const json& params, const std::string& session_kind, GDExtensionObjectPtr editor);
+    json bridgeProjectInputActions(const std::string& method, const json& params, const std::string& session_kind, GDExtensionObjectPtr editor);
+    json bridgeScriptAttachment(const std::string& method, const json& params, const std::string& session_kind, GDExtensionObjectPtr editor);
+    json bridgeAudioAddBus(const std::string& method, const json& params, const std::string& session_kind, GDExtensionObjectPtr editor);
+    json bridgeEngineClassExists(const std::string& method, const json& params, const std::string& session_kind, GDExtensionObjectPtr editor);
+    json bridgeSceneGroups(const std::string& method, const json& params, const std::string& session_kind, GDExtensionObjectPtr editor);
+    json bridgeSceneFiles(const std::string& method, const json& params, const std::string& session_kind, GDExtensionObjectPtr editor);
+    json bridgeEditorGetSelection(const std::string& method, const json& params, const std::string& session_kind, GDExtensionObjectPtr editor);
+    json bridgeEditorState(const std::string& method, const json& params, const std::string& session_kind, GDExtensionObjectPtr editor);
+    json bridgeShaders(const std::string& method, const json& params, const std::string& session_kind, GDExtensionObjectPtr editor);
+    json bridgeSceneProperties(const std::string& method, const json& params, const std::string& session_kind, GDExtensionObjectPtr editor);
+    json bridgeSceneInstantiateNode(const std::string& method, const json& params, const std::string& session_kind, GDExtensionObjectPtr editor);
+    json bridgeSceneNodeEdits(const std::string& method, const json& params, const std::string& session_kind, GDExtensionObjectPtr editor);
+    json bridgeEditorUndoStatus(const std::string& method, const json& params, const std::string& session_kind, GDExtensionObjectPtr editor);
+    json bridgeEditorUndoRedo(const std::string& method, const json& params, const std::string& session_kind, GDExtensionObjectPtr editor);
+    json bridgeEditorSaveScene(const std::string& method, const json& params, const std::string& session_kind, GDExtensionObjectPtr editor);
     bool m_startupBusLayoutRemembered = false;
     std::optional<std::string> m_startupBusLayoutSetting;
 };

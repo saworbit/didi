@@ -611,6 +611,8 @@ CallToolResult handleExportMesh(const json& args, std::shared_ptr<ipc::IIpcClien
 
 Route the method from `EditorHook::executeOnMainThread` into a bounded implementation that performs real Godot calls on the main thread. Return a structured error whenever a required object, method bind, or engine operation is unavailable. Never return success metadata before the operation completes.
 
+A method the hook hands to `GodotBridge::execute` is named twice: in `EditorHook::liveBridgeMethods()`, and in the bridge's `methodTable()` with the function that serves it, as one that runs before the editor is looked up or after. `tests/test_bridge_methods.cpp` fails when the two differ.
+
 A tool that reads or writes a property of a node, or of a resource the node holds, goes through the typed object layer in `godot_bridge.cpp` rather than calling `Object.set` itself (Q7): `resolvePropertyPath` checks every step of a path against the property list, `prepareWrite` makes every check a write makes, the same ones a dry run makes, and `recordWrite` records it in the edited scene's UndoRedo history. What can be decided from strings, the path grammar, which file keeps a resource, the excluded writes and when two writes overlap, is in `src/gdextension/property_paths.cpp` and tested without an engine in `tests/test_property_paths.cpp`.
 
 ### 5. Test and document

@@ -13,6 +13,7 @@
 #include <mutex>
 #include <future>
 #include <string>
+#include <unordered_set>
 #include <atomic>
 #include <chrono>
 
@@ -203,6 +204,8 @@ private:
 class EditorHook {
 public:
     static EditorHook& instance();
+    // The methods this hook hands to GodotBridge::execute (#1255).
+    static const std::unordered_set<std::string>& liveBridgeMethods();
 
     CommandTicket postCommand(const std::string& method, const json& params = json::object());
     void setSessionKind(const std::string& session_kind);

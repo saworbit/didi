@@ -11309,6 +11309,94 @@ Result<bool> resourcePathExistsOnDisk(const std::string& resource_path) {
 
 } // namespace
 
+// Every method execute() serves, and whether it runs before the editor is
+// looked up: a game has no EditorInterface, so the methods a game can serve,
+// and the ones that look the editor up themselves, run before that (#1255).
+const std::unordered_map<std::string_view, GodotBridge::BridgeMethod>& GodotBridge::methodTable() {
+    static const std::unordered_map<std::string_view, BridgeMethod> table = {
+        {"runtime.evalGdscript", {&GodotBridge::bridgeRuntimeEvalGdscript, nullptr}},
+        {"runtime.getTree", {&GodotBridge::bridgeRuntimeTreeAndPause, nullptr}},
+        {"runtime.setPaused", {&GodotBridge::bridgeRuntimeTreeAndPause, nullptr}},
+        {"runtime.stop", {&GodotBridge::bridgeRuntimeTreeAndPause, nullptr}},
+        {"runtime.injectInput", {&GodotBridge::bridgeRuntimeInjectInput, nullptr}},
+        {"runtime.missingInputActions", {&GodotBridge::bridgeRuntimeMissingInputActions, nullptr}},
+        {"physics.raycast", {&GodotBridge::bridgePhysicsRaycast, nullptr}},
+        {"physics.raycastBatch", {&GodotBridge::bridgePhysicsRaycastBatch, nullptr}},
+        {"physics.clearance", {&GodotBridge::bridgePhysicsClearance, nullptr}},
+        {"vision.frustumQuery", {&GodotBridge::bridgeVisionFrustumQuery, nullptr}},
+        {"preview.renderGhost", {&GodotBridge::bridgePreviewRenderGhost, nullptr}},
+        {"preview.clearGhosts", {&GodotBridge::bridgePreviewClearGhosts, nullptr}},
+        {"nav.queryPath", {&GodotBridge::bridgeNavQueryPath, nullptr}},
+        {"ui.listControls", {&GodotBridge::bridgeUiListControls, nullptr}},
+        {"ui.hitTest", {&GodotBridge::bridgeUiHitTest, nullptr}},
+        {"anim.listTracks", {&GodotBridge::bridgeAnimListTracks, nullptr}},
+        {"anim.playTrack", {&GodotBridge::bridgeAnimPlayTrack, nullptr}},
+        {"anim.addLibrary", {&GodotBridge::bridgeAnimAddLibrary, nullptr}},
+        {"export.reloadPresets", {&GodotBridge::bridgeExportReloadPresets, nullptr}},
+        {"editor.getProtocolServers", {&GodotBridge::bridgeEditorGetProtocolServers, nullptr}},
+        {"editor.openScenes", {&GodotBridge::bridgeEditorOpenScenes, nullptr}},
+        {"resource.refreshCached", {&GodotBridge::bridgeResourceRefreshCached, nullptr}},
+        {"asset.readImportedStream", {&GodotBridge::bridgeAssetReadImportedStream, nullptr}},
+        {"audio.listBuses", {&GodotBridge::bridgeAudioListBuses, nullptr}},
+        {"audio.configureBus", {&GodotBridge::bridgeAudioConfigureBus, nullptr}},
+        {"editor.getRecoveryState", {nullptr, &GodotBridge::bridgeEditorGetRecoveryState}},
+        {"tilemap.getUsedRect", {nullptr, &GodotBridge::bridgeTilemapGetUsedRect}},
+        {"tilemap.setCells", {nullptr, &GodotBridge::bridgeTilemapSetCells}},
+        {"gridmap.setCells", {nullptr, &GodotBridge::bridgeGridmapSetCells}},
+        {"vision.setCameraTransform", {nullptr, &GodotBridge::bridgeVisionSetCameraTransform}},
+        {"vision.toggleDebugDraw", {nullptr, &GodotBridge::bridgeVisionToggleDebugDraw}},
+        {"signal.listConnections", {nullptr, &GodotBridge::bridgeSignals}},
+        {"signal.connect", {nullptr, &GodotBridge::bridgeSignals}},
+        {"signal.disconnect", {nullptr, &GodotBridge::bridgeSignals}},
+        {"signal.emit", {nullptr, &GodotBridge::bridgeSignals}},
+        {"project.resolveUids", {nullptr, &GodotBridge::bridgeProjectResolveUids}},
+        {"project.getSetting", {nullptr, &GodotBridge::bridgeProjectSettings}},
+        {"project.setSetting", {nullptr, &GodotBridge::bridgeProjectSettings}},
+        {"project.listAutoloads", {nullptr, &GodotBridge::bridgeProjectAutoloads}},
+        {"project.setAutoload", {nullptr, &GodotBridge::bridgeProjectAutoloads}},
+        {"project.removeAutoload", {nullptr, &GodotBridge::bridgeProjectAutoloads}},
+        {"project.listInputActions", {nullptr, &GodotBridge::bridgeProjectInputActions}},
+        {"project.setInputAction", {nullptr, &GodotBridge::bridgeProjectInputActions}},
+        {"project.removeInputAction", {nullptr, &GodotBridge::bridgeProjectInputActions}},
+        {"script.attachToNode", {nullptr, &GodotBridge::bridgeScriptAttachment}},
+        {"script.detachFromNode", {nullptr, &GodotBridge::bridgeScriptAttachment}},
+        {"audio.addBus", {nullptr, &GodotBridge::bridgeAudioAddBus}},
+        {"engine.classExists", {nullptr, &GodotBridge::bridgeEngineClassExists}},
+        {"scene.listGroups", {nullptr, &GodotBridge::bridgeSceneGroups}},
+        {"scene.addToGroup", {nullptr, &GodotBridge::bridgeSceneGroups}},
+        {"scene.removeFromGroup", {nullptr, &GodotBridge::bridgeSceneGroups}},
+        {"scene.getGroupMembers", {nullptr, &GodotBridge::bridgeSceneGroups}},
+        {"scene.create", {nullptr, &GodotBridge::bridgeSceneFiles}},
+        {"scene.open", {nullptr, &GodotBridge::bridgeSceneFiles}},
+        {"scene.close", {nullptr, &GodotBridge::bridgeSceneFiles}},
+        {"scene.packBranch", {nullptr, &GodotBridge::bridgeSceneFiles}},
+        {"editor.getSelection", {nullptr, &GodotBridge::bridgeEditorGetSelection}},
+        {"editor.getState", {nullptr, &GodotBridge::bridgeEditorState}},
+        {"scene.getHierarchy", {nullptr, &GodotBridge::bridgeEditorState}},
+        {"shader.listUniforms", {nullptr, &GodotBridge::bridgeShaders}},
+        {"shader.setUniform", {nullptr, &GodotBridge::bridgeShaders}},
+        {"shader.getVisualGraph", {nullptr, &GodotBridge::bridgeShaders}},
+        {"scene.getProperty", {nullptr, &GodotBridge::bridgeSceneProperties}},
+        {"scene.setProperty", {nullptr, &GodotBridge::bridgeSceneProperties}},
+        {"scene.instantiateNode", {nullptr, &GodotBridge::bridgeSceneInstantiateNode}},
+        {"scene.removeNode", {nullptr, &GodotBridge::bridgeSceneNodeEdits}},
+        {"scene.duplicateNode", {nullptr, &GodotBridge::bridgeSceneNodeEdits}},
+        {"scene.reparentNode", {nullptr, &GodotBridge::bridgeSceneNodeEdits}},
+        {"editor.undoStatus", {nullptr, &GodotBridge::bridgeEditorUndoStatus}},
+        {"editor.undo", {nullptr, &GodotBridge::bridgeEditorUndoRedo}},
+        {"editor.redo", {nullptr, &GodotBridge::bridgeEditorUndoRedo}},
+        {"editor.saveScene", {nullptr, &GodotBridge::bridgeEditorSaveScene}},
+    };
+    return table;
+}
+
+std::vector<std::string> GodotBridge::methodNames() {
+    std::vector<std::string> names;
+    for (const auto& entry : methodTable()) names.emplace_back(entry.first);
+    std::sort(names.begin(), names.end());
+    return names;
+}
+
 json GodotBridge::execute(const std::string& method, const json& params,
                           const std::string& session_kind) {
 #if defined(DIDI_PHASE7_SIGNAL_TEST_SEAMS)
@@ -11327,4454 +11415,4525 @@ json GodotBridge::execute(const std::string& method, const json& params,
         return liveResult({{"status", "configured"}});
     }
 #endif
-    if (method == "runtime.evalGdscript") {
-        return executeExpression(params, session_kind);
+    const auto& table = methodTable();
+    const auto found = table.find(method);
+    if (found != table.end() && found->second.before_editor) {
+        return (this->*found->second.before_editor)(method, params, session_kind);
     }
-    if (method == "runtime.getTree" || method == "runtime.setPaused" ||
-        method == "runtime.stop") {
-        return executeRuntimeBridge(method, params, session_kind);
-    }
-    // A game has no EditorInterface, so this runs before the editor lookup
-    // the editor-only methods below depend on.
-    if (method == "runtime.injectInput") {
-        return injectInput(params, session_kind);
-    }
-    if (method == "runtime.missingInputActions") {
-        return inputMapMissingActions(params, session_kind);
-    }
-    if (method == "physics.raycast") return physicsRaycast(params, session_kind);
-    if (method == "physics.raycastBatch") return physicsRaycastBatch(params, session_kind);
-    if (method == "physics.clearance") return physicsClearance(params, session_kind);
-    if (method == "vision.frustumQuery") return visionFrustumQuery(params, session_kind);
-    if (method == "preview.renderGhost") return ghostPreviewRender(params);
-    if (method == "preview.clearGhosts") return ghostPreviewClear(params);
-    if (method == "nav.queryPath") return navQueryPath(params, session_kind);
-    if (method == "ui.listControls") return uiListControls(params, session_kind);
-    if (method == "ui.hitTest") return uiHitTest(params, session_kind);
-    if (method == "anim.listTracks") return animListTracks(params, session_kind);
-    if (method == "anim.playTrack") return animPlayTrack(params, session_kind);
-    if (method == "anim.addLibrary") return animAddLibrary(params, session_kind);
-    if (method == "export.reloadPresets") {
-        // project_add_export_preset asks this after it has written
-        // export_presets.cfg. The editor reads that file once, when it starts,
-        // and writes its own list back over it 0.8 s after any preset changes,
-        // so a preset written underneath it is lost with no error anywhere.
-        // Registering or removing an export platform is the one public event
-        // that makes it read the file again: EditorExport marks its presets
-        // for reload and reloads them on its next process frame. A bare
-        // EditorExportPlatformExtension, added and removed in one frame through
-        // an EditorPlugin that is never in the tree, does that and prints
-        // nothing. Measured on 4.5.1, 4.6.2 and 4.7.2 with
-        // tools/vibe/probes/export_preset_engine.py; both binds are 3431312373
-        // on all three.
-        //
-        // "request" does it. "confirm" does nothing: the server sends it only
-        // once "request" has been answered, and this bridge serves requests
-        // from its frame callback, so it is answered on a later frame, after
-        // the editor has processed and read the file.
-        if (session_kind != "editor") return bridgeError(409, "session_kind_rejected");
-        const std::string step = params.value("step", "");
-        if (step == "confirm") return liveResult({{"frame_passed", true}});
-        if (step != "request") return errorJson(400, "step must be request or confirm");
-        for (const char* bind : {"add_export_platform", "remove_export_platform"}) {
-            if (requireMethodBind("EditorPlugin", bind, 3431312373LL).isErr()) {
-                return bridgeError(501, "required_bind_unavailable");
-            }
-        }
-        NativeName platform_class("EditorExportPlatformExtension");
-        auto platform = constructObject(platform_class.ptr());
-        if (!platform) return bridgeError(501, "export_platform_unavailable");
-        // The Variant holds the platform's only reference, so it is freed when
-        // this returns, after the editor has let go of it.
-        auto platform_value = makeObject(platform);
-        if (platform_value.isErr()) return errorJson(500, platform_value.error().message);
-        NativeName plugin_class("EditorPlugin");
-        auto plugin = constructObject(plugin_class.ptr());
-        if (!plugin) return errorJson(500, "Godot ClassDB could not construct an EditorPlugin");
-        auto added = callObject(plugin, "EditorPlugin", "add_export_platform", 3431312373LL,
-                                {&platform_value.value()});
-        auto removed = added.isOk()
-                           ? callObject(plugin, "EditorPlugin", "remove_export_platform",
-                                        3431312373LL, {&platform_value.value()})
-                           : Result<VariantValue>(added.error());
-        GodotApi::instance().object_destroy(plugin);
-        if (added.isErr()) return errorJson(500, added.error().message);
-        if (removed.isErr()) {
-            // Added and not removed would leave a platform with no name in the
-            // editor's list, so this is reported rather than passed over.
-            return errorJson(500, "The export platform was registered and could not be removed: " +
-                                      removed.error().message);
-        }
-        return liveResult({{"reload_requested", true}});
-    }
-    if (method == "editor.getProtocolServers") {
-        // Where this editor's GDScript language server and Debug Adapter
-        // Protocol server listen, so the server can reach them (Q11). The
-        // settings name a port; an editor started with --lsp-port or
-        // --dap-port listens on that instead, and only the process's own
-        // command line still says so. A server this engine was built without
-        // has no setting and is answered null.
-        if (session_kind != "editor") return bridgeError(409, "session_kind_rejected");
-        if (!hasOnlyKeys(params, {})) {
-            return errorJson(400, "editor.getProtocolServers takes no parameters");
-        }
-        auto editor = editorInterface();
-        if (editor.isErr()) return errorJson(editor.error());
-        // EditorInterface.get_editor_settings is 4086932459, and
-        // EditorSettings.has_setting 3927539163 and get_setting 1868160156, on
-        // 4.5.1, 4.6.2 and 4.7.2.
-        auto settings_value =
-            callObject(editor.value(), "EditorInterface", "get_editor_settings", 4086932459LL);
-        if (settings_value.isErr()) {
-            return errorJson(settings_value.error());
-        }
-        auto settings = objectFromVariant(settings_value.value());
-        if (settings.isErr() || !settings.value()) {
-            return errorJson(500, "The editor has no EditorSettings to read its servers' ports from");
-        }
-        const auto setting = [&](const std::string& name) -> std::optional<VariantValue> {
-            auto setting_name = makeString(name);
-            if (setting_name.isErr()) return std::nullopt;
-            auto present = callObject(settings.value(), "EditorSettings", "has_setting", 3927539163LL,
-                                      {&setting_name.value()});
-            if (present.isErr()) return std::nullopt;
-            auto has = scalarFromVariant<GDExtensionBool>(present.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
-            if (has.isErr() || !has.value()) return std::nullopt;
-            auto value = callObject(settings.value(), "EditorSettings", "get_setting", 1868160156LL,
-                                    {&setting_name.value()});
-            if (value.isErr()) return std::nullopt;
-            return std::move(value.value());
-        };
-        const auto setting_port = [&](const std::string& name) -> std::optional<int64_t> {
-            auto value = setting(name);
-            if (!value) return std::nullopt;
-            const auto type = GodotApi::instance().variant_get_type(value->ptr());
-            if (type != GDEXTENSION_VARIANT_TYPE_INT) return std::nullopt;
-            auto port = scalarFromVariant<int64_t>(*value, type);
-            if (port.isErr()) return std::nullopt;
-            return port.value();
-        };
-        const auto overrides = runtime::protocolPortOverrides(runtime::processArguments());
-        const auto describe = [&](const std::string& port_setting, const std::optional<int>& override,
-                                  const std::string& host) -> json {
-            const auto configured = setting_port(port_setting);
-            if (!configured.has_value()) return nullptr;
-            json server = {{"host", host},
-                           {"port", override.has_value() ? int64_t{*override} : *configured},
-                           {"port_source", override.has_value() ? "command_line" : "editor_settings"}};
-            if (override.has_value()) server["settings_port"] = *configured;
-            return server;
-        };
-        std::string language_server_host = "127.0.0.1";
-        if (auto host = setting("network/language_server/remote_host")) {
-            const auto type = GodotApi::instance().variant_get_type(host->ptr());
-            if (type == GDEXTENSION_VARIANT_TYPE_STRING) {
-                auto text = stringFromVariant(*host, type);
-                if (text.isOk()) language_server_host = text.value();
-            }
-        }
-        // The debug adapter always binds 127.0.0.1; it has no host setting.
-        return liveResult({{"language_server",
-                            describe("network/language_server/remote_port",
-                                     overrides.language_server, language_server_host)},
-                           {"debug_adapter", describe("network/debug_adapter/remote_port",
-                                                      overrides.debug_adapter, "127.0.0.1")}});
-    }
-    if (method == "editor.openScenes") {
-        // Asked before a writer replaces scene files, so a scene open in a tab
-        // that may hold unsaved changes stops the write before anything on disk
-        // changes (#1068). The unsaved list is the same report editor.getState
-        // carries, null with readable false before 4.7.
-        if (session_kind != "editor") return bridgeError(409, "session_kind_rejected");
-        if (!hasOnlyKeys(params, {})) return errorJson(400, "editor.openScenes takes no parameters");
-        if (requireMethodBind("EditorInterface", "get_open_scenes", 1139954409LL).isErr()) {
-            return bridgeError(501, "required_bind_unavailable");
-        }
-        auto editor = editorInterface();
-        if (editor.isErr()) return errorJson(editor.error());
-        auto open = openScenePaths(editor.value());
-        if (open.isErr()) return errorJson(open.error());
-        json answer = {{"open_scenes", open.value()}};
-        answer.update(unsavedScenesReport(editor.value()));
-        return liveResult(answer);
-    }
-    if (method == "resource.refreshCached") {
-        // Asked after the server has written a file. The editor keeps what it
-        // has loaded and does not re-read a file that changed underneath it, so
-        // a reader in this process answers from the old copy until something
-        // reloads it. One path, or up to 256 in `paths` for a writer that
-        // changed several files. ResourceLoader.has_cached is 2323990056 on
-        // 4.5.1, 4.6.2 and 4.7.2.
-        //
-        // A path open in a tab also has its tab reloaded, which
-        // reloadOpenSceneTab describes. discard_unsaved says the caller accepts
-        // losing a tab's unsaved changes to it. A path the editor's index does
-        // not list yet is indexed, which indexUnlistedWrite describes.
-        if (session_kind != "editor") return bridgeError(409, "session_kind_rejected");
-        if (params.contains("discard_unsaved") && !params["discard_unsaved"].is_boolean()) {
-            return errorJson(400, "discard_unsaved must be a boolean");
-        }
-        const bool discard_unsaved = params.value("discard_unsaved", false);
-        std::vector<std::string> paths;
-        const bool batch = params.contains("paths");
-        if (batch) {
-            const auto& listed = params["paths"];
-            if (!listed.is_array() || listed.empty() || listed.size() > 256) {
-                return errorJson(400, "paths must be an array of 1 to 256 res:// paths");
-            }
-            for (const auto& entry : listed) {
-                if (!entry.is_string()) return errorJson(400, "paths must hold only strings");
-                paths.push_back(entry.get<std::string>());
-            }
-        } else {
-            paths.push_back(params.value("path", ""));
-        }
-        for (const auto& path : paths) {
-            if (validateResPath(path, "").isErr()) {
-                return errorJson(400, "path must be a normalized res:// path: " + path);
-            }
-        }
-        for (const auto& bind : {std::make_tuple("ResourceLoader", "has_cached", 2323990056LL),
-                                 std::make_tuple("ResourceLoader", "load", 3358495409LL),
-                                 std::make_tuple("Object", "is_class", 3927539163LL),
-                                 std::make_tuple("Script", "get_source_code", 201670096LL),
-                                 std::make_tuple("Script", "set_source_code", 83702148LL),
-                                 std::make_tuple("Script", "reload", 1633102583LL),
-                                 std::make_tuple("EditorInterface", "get_open_scenes", 1139954409LL),
-                                 std::make_tuple("EditorInterface", "get_open_scene_roots", 3995934104LL),
-                                 std::make_tuple("EditorInterface", "reload_scene_from_path", 83702148LL)}) {
-            if (requireMethodBind(std::get<0>(bind), std::get<1>(bind), std::get<2>(bind)).isErr()) {
-                return bridgeError(501, "required_bind_unavailable");
-            }
-        }
-        auto loader = singleton("ResourceLoader");
-        if (loader.isErr()) return errorJson(loader.error());
-        auto editor = editorInterface();
-        if (editor.isErr()) return errorJson(editor.error());
-        auto open = openScenePaths(editor.value());
-        if (open.isErr()) return errorJson(open.error());
-        const std::set<std::string> open_scenes(open.value().begin(), open.value().end());
-        const json unsaved = open_scenes.empty() ? json::object() : unsavedScenesReport(editor.value());
-        bool reloaded_one = false;
-        json results = json::array();
-        for (const auto& path : paths) {
-            auto refreshed = refreshCachedCopy(loader.value(), path);
-            if (refreshed.isErr()) return errorJson(500, refreshed.error().message);
-            indexUnlistedWrite(loader.value(), path, refreshed.value());
-            if (open_scenes.count(path)) {
-                reloadOpenSceneTab(editor.value(), path, discard_unsaved, unsaved, reloaded_one,
-                                   refreshed.value());
-            }
-            results.push_back(std::move(refreshed.value()));
-        }
-        return batch ? liveResult({{"results", std::move(results)}}) : liveResult(results[0]);
-    }
-    if (method == "asset.readImportedStream") {
-        // What asset_configure_import checks a value against and reads back
-        // after the reimport: the imported stream, loaded from disk. The cache
-        // is ignored, because the question is what the file now loads as; the
-        // editor's cached copy is updated in place by the reimport and is not
-        // this read's business (#958). The properties are read through
-        // Object.get by name, and AudioStream.get_length is the one new bind:
-        // 1740695150 on 4.5.1, 4.6.2 and 4.7.2.
-        if (!hasOnlyKeys(params, {"path"}) || !params.contains("path") || !params["path"].is_string()) {
-            return errorJson(400, "asset.readImportedStream takes path, a res:// asset");
-        }
-        const auto path = params["path"].get<std::string>();
-        auto valid_path = validateResPath(path, "");
-        if (valid_path.isErr()) return errorJson(valid_path.error());
-        auto loader = singleton("ResourceLoader");
-        if (loader.isErr()) return errorJson(loader.error());
-        auto godot_path = makeString(path);
-        auto type_hint = makeString("");
-        auto ignore_cache = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(0));
-        if (godot_path.isErr() || type_hint.isErr() || ignore_cache.isErr()) {
-            return errorJson(500, "Failed to build the load request");
-        }
-        // Asked first, because loading a file that is not there prints an
-        // ERROR. ResourceLoader.exists is 4185558881 on all three lines.
-        auto exists = callObject(loader.value(), "ResourceLoader", "exists", 4185558881LL,
-                                 {&godot_path.value(), &type_hint.value()});
-        auto found = exists.isOk() ? scalarFromVariant<GDExtensionBool>(exists.value(), GDEXTENSION_VARIANT_TYPE_BOOL)
-                                   : Result<GDExtensionBool>(exists.error());
-        if (found.isErr() || found.value() == 0) {
-            return errorJson(404, "Godot finds nothing to load at " + path);
-        }
-        auto loaded = callObject(loader.value(), "ResourceLoader", "load", 3358495409LL,
-                                 {&godot_path.value(), &type_hint.value(), &ignore_cache.value()});
-        if (loaded.isErr()) return errorJson(loaded.error());
-        auto object = objectFromVariant(loaded.value());
-        if (object.isErr() || !object.value()) {
-            return errorJson(422, "Godot could not load " + path, json{{"code", "load_failed"}});
-        }
-        const auto class_name = nodeClassName(object.value());
-        json properties = json::object();
-        std::vector<const char*> names;
-        if (class_name == "AudioStreamWAV") names = {"mix_rate", "loop_mode", "loop_begin", "loop_end"};
-        if (class_name == "AudioStreamOggVorbis" || class_name == "AudioStreamMP3") {
-            names = {"loop", "loop_offset"};
-        }
-        for (const auto* name : names) {
-            auto property = makeStringName(name);
-            if (property.isErr()) continue;
-            auto value = callObject(object.value(), "Object", "get", 2760726917LL, {&property.value()});
-            if (value.isErr()) continue;
-            auto converted = variantToJson(value.value(), 0, true);
-            if (converted.isOk()) properties[name] = converted.value();
-        }
-        json answer = {{"path", path}, {"class", class_name}, {"properties", std::move(properties)}};
-        if (!names.empty()) {
-            auto length = callObject(object.value(), "AudioStream", "get_length", 1740695150LL);
-            if (length.isOk()) {
-                auto seconds = scalarFromVariant<double>(length.value(), GDEXTENSION_VARIANT_TYPE_FLOAT);
-                if (seconds.isOk()) answer["length_seconds"] = seconds.value();
-            }
-        }
-        return liveResult(std::move(answer));
-    }
-    // The audio reads answer an editor or a game, and a game has no
-    // EditorInterface, so they run before the lookup below. Behind it every
-    // game request failed on "Can't retrieve singleton 'EditorInterface'
-    // outside of editor" and audio_list_buses fell back to reading the file
-    // (vibe session nineteen).
-    if (method == "audio.listBuses") {
-        // Every method hash below is identical on Godot 4.5.1, 4.6.2 and 4.7.2,
-        // checked by dumping extension_api.json from each, so this needs no
-        // per-version branch. AudioServer is a core singleton and is present
-        // whether or not an editor scene is open.
-        auto server = singleton("AudioServer");
-        if (server.isErr()) return errorJson(server.error());
-
-        auto count_value = callObject(server.value(), "AudioServer", "get_bus_count", 3905245786LL);
-        if (count_value.isErr()) return errorJson(count_value.error());
-        auto count = scalarFromVariant<int64_t>(count_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
-        if (count.isErr()) return errorJson(count.error());
-
-        json buses = json::array();
-        for (int64_t index = 0; index < count.value(); ++index) {
-            auto bus_index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
-            if (bus_index.isErr()) return errorJson(bus_index.error());
-
-            auto name_value = callObject(server.value(), "AudioServer", "get_bus_name", 844755477LL,
-                                         {&bus_index.value()});
-            if (name_value.isErr()) return errorJson(name_value.error());
-            auto name = stringFromVariant(name_value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
-            if (name.isErr()) return errorJson(name.error());
-
-            auto volume_value = callObject(server.value(), "AudioServer", "get_bus_volume_db",
-                                           2339986948LL, {&bus_index.value()});
-            if (volume_value.isErr()) return errorJson(volume_value.error());
-            auto volume = scalarFromVariant<double>(volume_value.value(), GDEXTENSION_VARIANT_TYPE_FLOAT);
-            if (volume.isErr()) return errorJson(volume.error());
-
-            const auto boolOf = [&](const char* method_name, int64_t hash) -> Result<bool> {
-                auto value = callObject(server.value(), "AudioServer", method_name, hash,
-                                        {&bus_index.value()});
-                if (value.isErr()) return value.error();
-                return scalarFromVariant<bool>(value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
-            };
-            auto mute = boolOf("is_bus_mute", 1116898809LL);
-            if (mute.isErr()) return errorJson(mute.error());
-            auto solo = boolOf("is_bus_solo", 1116898809LL);
-            if (solo.isErr()) return errorJson(solo.error());
-            auto bypass = boolOf("is_bus_bypassing_effects", 1116898809LL);
-            if (bypass.isErr()) return errorJson(bypass.error());
-
-            auto send_value = callObject(server.value(), "AudioServer", "get_bus_send", 659327637LL,
-                                         {&bus_index.value()});
-            if (send_value.isErr()) return errorJson(send_value.error());
-            auto send = stringFromVariant(send_value.value(), GDEXTENSION_VARIANT_TYPE_STRING_NAME);
-            if (send.isErr()) {
-                send = stringFromVariant(send_value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
-                if (send.isErr()) return errorJson(send.error());
-            }
-
-            auto effect_count_value = callObject(server.value(), "AudioServer",
-                                                 "get_bus_effect_count", 3744713108LL,
-                                                 {&bus_index.value()});
-            if (effect_count_value.isErr()) {
-                return errorJson(effect_count_value.error());
-            }
-            auto effect_count =
-                scalarFromVariant<int64_t>(effect_count_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
-            if (effect_count.isErr()) return errorJson(effect_count.error());
-
-            // The effect chain is the part the offline layout file cannot
-            // report, so it is the reason to attach an editor at all.
-            json effects = json::array();
-            for (int64_t slot = 0; slot < effect_count.value(); ++slot) {
-                auto slot_index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, slot);
-                if (slot_index.isErr()) return errorJson(slot_index.error());
-                auto effect = callObject(server.value(), "AudioServer", "get_bus_effect", 726064442LL,
-                                         {&bus_index.value(), &slot_index.value()});
-                if (effect.isErr()) return errorJson(effect.error());
-                auto class_value = callVariant(effect.value(), "get_class");
-                std::string class_name = "AudioEffect";
-                if (class_value.isOk()) {
-                    auto text = stringFromVariant(class_value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
-                    if (text.isOk()) class_name = text.value();
-                }
-                effects.push_back({{"slot", slot}, {"class", class_name}});
-            }
-
-            buses.push_back({{"index", index},
-                             {"name", name.value()},
-                             {"volume_db", volume.value()},
-                             {"mute", mute.value()},
-                             {"solo", solo.value()},
-                             {"bypass_effects", bypass.value()},
-                             {"send", send.value()},
-                             {"effects", std::move(effects)}});
-        }
-
-        return liveResult({{"status", "success"},
-                           {"bus_count", count.value()},
-                           {"buses", std::move(buses)}});
-    }
-
-    if (method == "audio.configureBus") {
-        auto server = singleton("AudioServer");
-        if (server.isErr()) return errorJson(server.error());
-
-        auto count_value = callObject(server.value(), "AudioServer", "get_bus_count", 3905245786LL);
-        if (count_value.isErr()) return errorJson(count_value.error());
-        auto count = scalarFromVariant<int64_t>(count_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
-        if (count.isErr()) return errorJson(count.error());
-
-        // A bus can be named or numbered. Names are what a person uses and what
-        // the layout file records; indices are what AudioServer takes. Resolving
-        // a name through the engine rather than through the layout file means a
-        // bus added at runtime is still addressable.
-        int64_t index = -1;
-        const json bus_field = params.contains("bus") ? params["bus"] : json();
-        if (bus_field.is_string()) {
-            const auto wanted = bus_field.get<std::string>();
-            auto name_variant = makeString(wanted);
-            if (name_variant.isErr()) return errorJson(name_variant.error());
-            auto found = callObject(server.value(), "AudioServer", "get_bus_index", 2458036349LL,
-                                    {&name_variant.value()});
-            if (found.isErr()) return errorJson(found.error());
-            auto resolved = scalarFromVariant<int64_t>(found.value(), GDEXTENSION_VARIANT_TYPE_INT);
-            if (resolved.isErr()) return errorJson(resolved.error());
-            index = resolved.value();
-            if (index < 0) return errorJson(404, "No audio bus is named " + wanted);
-        } else if (bus_field.is_number_integer()) {
-            index = bus_field.get<int64_t>();
-        } else {
-            return errorJson(400, "bus must be a bus name or a bus index");
-        }
-        if (index < 0 || index >= count.value()) {
-            return errorJson(404, "Audio bus index " + std::to_string(index) +
-                                      " is out of range; this project has " +
-                                      std::to_string(count.value()) + " buses");
-        }
-
-        auto bus_index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
-        if (bus_index.isErr()) return errorJson(bus_index.error());
-
-        const auto readState = [&]() -> Result<json> {
-            auto name_value = callObject(server.value(), "AudioServer", "get_bus_name", 844755477LL,
-                                         {&bus_index.value()});
-            if (name_value.isErr()) return name_value.error();
-            auto name = stringFromVariant(name_value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
-            if (name.isErr()) return name.error();
-            auto volume_value = callObject(server.value(), "AudioServer", "get_bus_volume_db",
-                                           2339986948LL, {&bus_index.value()});
-            if (volume_value.isErr()) return volume_value.error();
-            auto volume = scalarFromVariant<double>(volume_value.value(), GDEXTENSION_VARIANT_TYPE_FLOAT);
-            if (volume.isErr()) return volume.error();
-            auto mute_value = callObject(server.value(), "AudioServer", "is_bus_mute", 1116898809LL,
-                                         {&bus_index.value()});
-            if (mute_value.isErr()) return mute_value.error();
-            auto mute = scalarFromVariant<bool>(mute_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
-            if (mute.isErr()) return mute.error();
-            auto solo_value = callObject(server.value(), "AudioServer", "is_bus_solo", 1116898809LL,
-                                         {&bus_index.value()});
-            if (solo_value.isErr()) return solo_value.error();
-            auto solo = scalarFromVariant<bool>(solo_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
-            if (solo.isErr()) return solo.error();
-            return json{{"index", index},
-                        {"name", name.value()},
-                        {"volume_db", volume.value()},
-                        {"mute", mute.value()},
-                        {"solo", solo.value()}};
-        };
-
-        // Read before anything is written. These values are the only way back,
-        // because bus state is not part of the edited scene and the editor undo
-        // stack does not carry it.
-        auto before = readState();
-        if (before.isErr()) return errorJson(before.error());
-
-        json applied = json::array();
-        if (params.contains("volume_db")) {
-            const auto& value = params["volume_db"];
-            if (!value.is_number()) return errorJson(400, "volume_db must be a number");
-            const double db = value.get<double>();
-            // The engine bus editor spans -80 to 24 decibels. Outside that a
-            // caller is either confusing decibels with a linear gain or has
-            // slipped a digit, and clamping silently would hide both.
-            if (!(db >= -80.0 && db <= 24.0)) {
-                return errorJson(400, "volume_db must be between -80 and 24 decibels");
-            }
-            auto db_variant = makeScalar(GDEXTENSION_VARIANT_TYPE_FLOAT, db);
-            if (db_variant.isErr()) return errorJson(db_variant.error());
-            auto set = callObject(server.value(), "AudioServer", "set_bus_volume_db", 1602489585LL,
-                                  {&bus_index.value(), &db_variant.value()});
-            if (set.isErr()) return errorJson(set.error());
-            applied.push_back("volume_db");
-        }
-
-        const auto applyFlag = [&](const char* field, const char* method_name,
-                                   int64_t hash) -> Result<bool> {
-            if (!params.contains(field)) return false;
-            const auto& value = params[field];
-            if (!value.is_boolean()) {
-                return Error::invalidArgument(std::string(field) + " must be a boolean");
-            }
-            auto flag = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, value.get<bool>());
-            if (flag.isErr()) return flag.error();
-            auto set = callObject(server.value(), "AudioServer", method_name, hash,
-                                  {&bus_index.value(), &flag.value()});
-            if (set.isErr()) return set.error();
-            return true;
-        };
-        auto muted = applyFlag("mute", "set_bus_mute", 300928843LL);
-        if (muted.isErr()) return errorJson(muted.error());
-        if (muted.value()) applied.push_back("mute");
-        auto soloed = applyFlag("solo", "set_bus_solo", 300928843LL);
-        if (soloed.isErr()) return errorJson(soloed.error());
-        if (soloed.value()) applied.push_back("solo");
-
-        if (applied.empty()) {
-            return errorJson(400, "Give at least one of volume_db, mute or solo to change");
-        }
-
-        auto after = readState();
-        if (after.isErr()) return errorJson(after.error());
-
-        // Where the change ends up, which is not where this handler leaves it.
-        //
-        // undo_redo_registered: false beside a revert_with block is the shape of
-        // "this lives in memory, here is how to put it back", and in an attached
-        // editor that is not the whole story. The editor's own bus-layout
-        // autosave notices the AudioServer change and writes
-        // res://default_bus_layout.tres a moment later with no call from here,
-        // so a tracked project file appears in the working tree carrying
-        // whatever value was tried last. A caller sweeping bus volumes to find
-        // a mix reasonably believed nothing had been committed (#622).
-        //
-        // Confirmed on 4.5.1: the file is absent from the integration fixture
-        // and present in the copy after a run whose only bus calls are this
-        // tool's.
-        const bool editor_session = session_kind == "editor";
-        // The file the editor writes, which is the one it opened the project
-        // with. A literal res://default_bus_layout.tres named a file that is
-        // never written in a project that moved its layout (#935), and the
-        // setting itself names the wrong one once it has moved underneath a
-        // running editor.
-        const auto project_layout_path =
-            busLayoutPathFrom(projectSettingString("audio/buses/default_bus_layout"));
-        const auto layout_path = editor_session
-            ? startupBusLayoutPath().value_or(project_layout_path)
-            : project_layout_path;
-        json result = {
-            {"status", "success"},
-            {"bus", index},
-            {"applied", std::move(applied)},
-            {"before", before.value()},
-            {"after", after.value()},
-            {"undo_redo_registered", false},
-            {"persisted_by_editor", editor_session},
-            {"layout_path", layout_path},
-            {"limitation",
-             editor_session
-                 ? "This sets the running engine's audio bus state. This tool writes no "
-                   "file, but the editor's own bus-layout autosave picks the change up and "
-                   "writes " + layout_path + " shortly afterwards, so it reaches "
-                   "the project on disk anyway. revert_with restores the previous values." +
-                       busLayoutMovedSentence(layout_path, project_layout_path)
-                 : "This sets the running game's audio bus state and nothing writes it "
-                   "down. It is gone when the process exits, and the project's bus layout "
-                   "on disk is unchanged. revert_with restores the previous values."},
-            {"revert_with", before.value()}};
-        if (project_layout_path != layout_path) result["project_layout_path"] = project_layout_path;
-        return liveResult(std::move(result));
-    }
-
     auto editor_result = editorInterface();
     if (editor_result.isErr()) return errorJson(editor_result.error());
     auto editor = editor_result.value();
-
-    if (method == "editor.getRecoveryState") {
-        auto scanning = isEditorFilesystemScanning();
-        if (scanning.isErr()) return errorJson(scanning.error());
-        return liveResult({{"filesystem_scanning", scanning.value()}});
+    if (found != table.end()) {
+        return (this->*found->second.with_editor)(method, params, session_kind, editor);
     }
+    return errorJson(501, "No trustworthy live implementation for method: " + method);
+}
 
-    if (method == "tilemap.getUsedRect") {
-        if (session_kind != "editor") return bridgeError(409, "session_kind_rejected");
-        if (!hasOnlyKeys(params, {"tilemap_path"}) || !params.contains("tilemap_path") ||
-            !params["tilemap_path"].is_string() || params["tilemap_path"].get<std::string>().empty() ||
-            params["tilemap_path"].get<std::string>().size() > 1024) {
-            return bridgeError(400, "invalid_tilemap_get_used_rect_request");
-        }
-        if (requireMethodBind("TileMapLayer", "get_used_rect", 410525958LL).isErr() ||
-            requireMethodBind("Object", "is_class", 3927539163LL).isErr()) {
+json GodotBridge::bridgeRuntimeEvalGdscript(const std::string& /*method*/, const json& params, const std::string& session_kind) {
+    return executeExpression(params, session_kind);
+}
+
+json GodotBridge::bridgeRuntimeTreeAndPause(const std::string& method, const json& params, const std::string& session_kind) {
+    return executeRuntimeBridge(method, params, session_kind);
+}
+
+// A game has no EditorInterface, so this runs before the editor lookup
+// the editor-only methods below depend on.
+json GodotBridge::bridgeRuntimeInjectInput(const std::string& /*method*/, const json& params, const std::string& session_kind) {
+    return injectInput(params, session_kind);
+}
+
+json GodotBridge::bridgeRuntimeMissingInputActions(const std::string& /*method*/, const json& params, const std::string& session_kind) {
+    return inputMapMissingActions(params, session_kind);
+}
+
+json GodotBridge::bridgePhysicsRaycast(const std::string& /*method*/, const json& params, const std::string& session_kind) {
+    return physicsRaycast(params, session_kind);
+}
+
+json GodotBridge::bridgePhysicsRaycastBatch(const std::string& /*method*/, const json& params, const std::string& session_kind) {
+    return physicsRaycastBatch(params, session_kind);
+}
+
+json GodotBridge::bridgePhysicsClearance(const std::string& /*method*/, const json& params, const std::string& session_kind) {
+    return physicsClearance(params, session_kind);
+}
+
+json GodotBridge::bridgeVisionFrustumQuery(const std::string& /*method*/, const json& params, const std::string& session_kind) {
+    return visionFrustumQuery(params, session_kind);
+}
+
+json GodotBridge::bridgePreviewRenderGhost(const std::string& /*method*/, const json& params, const std::string& /*session_kind*/) {
+    return ghostPreviewRender(params);
+}
+
+json GodotBridge::bridgePreviewClearGhosts(const std::string& /*method*/, const json& params, const std::string& /*session_kind*/) {
+    return ghostPreviewClear(params);
+}
+
+json GodotBridge::bridgeNavQueryPath(const std::string& /*method*/, const json& params, const std::string& session_kind) {
+    return navQueryPath(params, session_kind);
+}
+
+json GodotBridge::bridgeUiListControls(const std::string& /*method*/, const json& params, const std::string& session_kind) {
+    return uiListControls(params, session_kind);
+}
+
+json GodotBridge::bridgeUiHitTest(const std::string& /*method*/, const json& params, const std::string& session_kind) {
+    return uiHitTest(params, session_kind);
+}
+
+json GodotBridge::bridgeAnimListTracks(const std::string& /*method*/, const json& params, const std::string& session_kind) {
+    return animListTracks(params, session_kind);
+}
+
+json GodotBridge::bridgeAnimPlayTrack(const std::string& /*method*/, const json& params, const std::string& session_kind) {
+    return animPlayTrack(params, session_kind);
+}
+
+json GodotBridge::bridgeAnimAddLibrary(const std::string& /*method*/, const json& params, const std::string& session_kind) {
+    return animAddLibrary(params, session_kind);
+}
+
+json GodotBridge::bridgeExportReloadPresets(const std::string& /*method*/, const json& params, const std::string& session_kind) {
+    // project_add_export_preset asks this after it has written
+    // export_presets.cfg. The editor reads that file once, when it starts,
+    // and writes its own list back over it 0.8 s after any preset changes,
+    // so a preset written underneath it is lost with no error anywhere.
+    // Registering or removing an export platform is the one public event
+    // that makes it read the file again: EditorExport marks its presets
+    // for reload and reloads them on its next process frame. A bare
+    // EditorExportPlatformExtension, added and removed in one frame through
+    // an EditorPlugin that is never in the tree, does that and prints
+    // nothing. Measured on 4.5.1, 4.6.2 and 4.7.2 with
+    // tools/vibe/probes/export_preset_engine.py; both binds are 3431312373
+    // on all three.
+    //
+    // "request" does it. "confirm" does nothing: the server sends it only
+    // once "request" has been answered, and this bridge serves requests
+    // from its frame callback, so it is answered on a later frame, after
+    // the editor has processed and read the file.
+    if (session_kind != "editor") return bridgeError(409, "session_kind_rejected");
+    const std::string step = params.value("step", "");
+    if (step == "confirm") return liveResult({{"frame_passed", true}});
+    if (step != "request") return errorJson(400, "step must be request or confirm");
+    for (const char* bind : {"add_export_platform", "remove_export_platform"}) {
+        if (requireMethodBind("EditorPlugin", bind, 3431312373LL).isErr()) {
             return bridgeError(501, "required_bind_unavailable");
         }
-        auto root = editedSceneRoot(editor);
-        if (root.isErr()) return errorJson(root.error());
-        auto layer = resolveNode(root.value(), params["tilemap_path"].get<std::string>());
-        const auto tilemap_path = params["tilemap_path"].get<std::string>();
-        if (layer.isErr()) {
-            return bridgeError(404, "tilemap_target_not_found", {{"path", tilemap_path}},
-                               "Path " + tilemap_path + " resolves to nothing.");
+    }
+    NativeName platform_class("EditorExportPlatformExtension");
+    auto platform = constructObject(platform_class.ptr());
+    if (!platform) return bridgeError(501, "export_platform_unavailable");
+    // The Variant holds the platform's only reference, so it is freed when
+    // this returns, after the editor has let go of it.
+    auto platform_value = makeObject(platform);
+    if (platform_value.isErr()) return errorJson(500, platform_value.error().message);
+    NativeName plugin_class("EditorPlugin");
+    auto plugin = constructObject(plugin_class.ptr());
+    if (!plugin) return errorJson(500, "Godot ClassDB could not construct an EditorPlugin");
+    auto added = callObject(plugin, "EditorPlugin", "add_export_platform", 3431312373LL,
+                            {&platform_value.value()});
+    auto removed = added.isOk()
+                       ? callObject(plugin, "EditorPlugin", "remove_export_platform",
+                                    3431312373LL, {&platform_value.value()})
+                       : Result<VariantValue>(added.error());
+    GodotApi::instance().object_destroy(plugin);
+    if (added.isErr()) return errorJson(500, added.error().message);
+    if (removed.isErr()) {
+        // Added and not removed would leave a platform with no name in the
+        // editor's list, so this is reported rather than passed over.
+        return errorJson(500, "The export platform was registered and could not be removed: " +
+                                  removed.error().message);
+    }
+    return liveResult({{"reload_requested", true}});
+}
+
+json GodotBridge::bridgeEditorGetProtocolServers(const std::string& /*method*/, const json& params, const std::string& session_kind) {
+    // Where this editor's GDScript language server and Debug Adapter
+    // Protocol server listen, so the server can reach them (Q11). The
+    // settings name a port; an editor started with --lsp-port or
+    // --dap-port listens on that instead, and only the process's own
+    // command line still says so. A server this engine was built without
+    // has no setting and is answered null.
+    if (session_kind != "editor") return bridgeError(409, "session_kind_rejected");
+    if (!hasOnlyKeys(params, {})) {
+        return errorJson(400, "editor.getProtocolServers takes no parameters");
+    }
+    auto editor = editorInterface();
+    if (editor.isErr()) return errorJson(editor.error());
+    // EditorInterface.get_editor_settings is 4086932459, and
+    // EditorSettings.has_setting 3927539163 and get_setting 1868160156, on
+    // 4.5.1, 4.6.2 and 4.7.2.
+    auto settings_value =
+        callObject(editor.value(), "EditorInterface", "get_editor_settings", 4086932459LL);
+    if (settings_value.isErr()) {
+        return errorJson(settings_value.error());
+    }
+    auto settings = objectFromVariant(settings_value.value());
+    if (settings.isErr() || !settings.value()) {
+        return errorJson(500, "The editor has no EditorSettings to read its servers' ports from");
+    }
+    const auto setting = [&](const std::string& name) -> std::optional<VariantValue> {
+        auto setting_name = makeString(name);
+        if (setting_name.isErr()) return std::nullopt;
+        auto present = callObject(settings.value(), "EditorSettings", "has_setting", 3927539163LL,
+                                  {&setting_name.value()});
+        if (present.isErr()) return std::nullopt;
+        auto has = scalarFromVariant<GDExtensionBool>(present.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+        if (has.isErr() || !has.value()) return std::nullopt;
+        auto value = callObject(settings.value(), "EditorSettings", "get_setting", 1868160156LL,
+                                {&setting_name.value()});
+        if (value.isErr()) return std::nullopt;
+        return std::move(value.value());
+    };
+    const auto setting_port = [&](const std::string& name) -> std::optional<int64_t> {
+        auto value = setting(name);
+        if (!value) return std::nullopt;
+        const auto type = GodotApi::instance().variant_get_type(value->ptr());
+        if (type != GDEXTENSION_VARIANT_TYPE_INT) return std::nullopt;
+        auto port = scalarFromVariant<int64_t>(*value, type);
+        if (port.isErr()) return std::nullopt;
+        return port.value();
+    };
+    const auto overrides = runtime::protocolPortOverrides(runtime::processArguments());
+    const auto describe = [&](const std::string& port_setting, const std::optional<int>& override,
+                              const std::string& host) -> json {
+        const auto configured = setting_port(port_setting);
+        if (!configured.has_value()) return nullptr;
+        json server = {{"host", host},
+                       {"port", override.has_value() ? int64_t{*override} : *configured},
+                       {"port_source", override.has_value() ? "command_line" : "editor_settings"}};
+        if (override.has_value()) server["settings_port"] = *configured;
+        return server;
+    };
+    std::string language_server_host = "127.0.0.1";
+    if (auto host = setting("network/language_server/remote_host")) {
+        const auto type = GodotApi::instance().variant_get_type(host->ptr());
+        if (type == GDEXTENSION_VARIANT_TYPE_STRING) {
+            auto text = stringFromVariant(*host, type);
+            if (text.isOk()) language_server_host = text.value();
         }
-        auto correct_class = objectIsClass(layer.value(), "TileMapLayer");
-        if (correct_class.isErr()) return errorJson(500, correct_class.error().message);
-        if (!correct_class.value()) {
-            return wrongNodeTypeError("tilemap_target_wrong_type", tilemap_path, layer.value());
+    }
+    // The debug adapter always binds 127.0.0.1; it has no host setting.
+    return liveResult({{"language_server",
+                        describe("network/language_server/remote_port",
+                                 overrides.language_server, language_server_host)},
+                       {"debug_adapter", describe("network/debug_adapter/remote_port",
+                                                  overrides.debug_adapter, "127.0.0.1")}});
+}
+
+json GodotBridge::bridgeEditorOpenScenes(const std::string& /*method*/, const json& params, const std::string& session_kind) {
+    // Asked before a writer replaces scene files, so a scene open in a tab
+    // that may hold unsaved changes stops the write before anything on disk
+    // changes (#1068). The unsaved list is the same report editor.getState
+    // carries, null with readable false before 4.7.
+    if (session_kind != "editor") return bridgeError(409, "session_kind_rejected");
+    if (!hasOnlyKeys(params, {})) return errorJson(400, "editor.openScenes takes no parameters");
+    if (requireMethodBind("EditorInterface", "get_open_scenes", 1139954409LL).isErr()) {
+        return bridgeError(501, "required_bind_unavailable");
+    }
+    auto editor = editorInterface();
+    if (editor.isErr()) return errorJson(editor.error());
+    auto open = openScenePaths(editor.value());
+    if (open.isErr()) return errorJson(open.error());
+    json answer = {{"open_scenes", open.value()}};
+    answer.update(unsavedScenesReport(editor.value()));
+    return liveResult(answer);
+}
+
+json GodotBridge::bridgeResourceRefreshCached(const std::string& /*method*/, const json& params, const std::string& session_kind) {
+    // Asked after the server has written a file. The editor keeps what it
+    // has loaded and does not re-read a file that changed underneath it, so
+    // a reader in this process answers from the old copy until something
+    // reloads it. One path, or up to 256 in `paths` for a writer that
+    // changed several files. ResourceLoader.has_cached is 2323990056 on
+    // 4.5.1, 4.6.2 and 4.7.2.
+    //
+    // A path open in a tab also has its tab reloaded, which
+    // reloadOpenSceneTab describes. discard_unsaved says the caller accepts
+    // losing a tab's unsaved changes to it. A path the editor's index does
+    // not list yet is indexed, which indexUnlistedWrite describes.
+    if (session_kind != "editor") return bridgeError(409, "session_kind_rejected");
+    if (params.contains("discard_unsaved") && !params["discard_unsaved"].is_boolean()) {
+        return errorJson(400, "discard_unsaved must be a boolean");
+    }
+    const bool discard_unsaved = params.value("discard_unsaved", false);
+    std::vector<std::string> paths;
+    const bool batch = params.contains("paths");
+    if (batch) {
+        const auto& listed = params["paths"];
+        if (!listed.is_array() || listed.empty() || listed.size() > 256) {
+            return errorJson(400, "paths must be an array of 1 to 256 res:// paths");
         }
-        auto rect = callObject(layer.value(), "TileMapLayer", "get_used_rect", 410525958LL);
-        if (rect.isErr()) return errorJson(500, rect.error().message);
-        auto& api = GodotApi::instance();
-        if (api.variant_get_type(rect.value().ptr()) != GDEXTENSION_VARIANT_TYPE_RECT2I ||
-            !api.variant_get_ptr_getter) return bridgeError(500, "extension_protocol_error");
-        auto converter = api.get_variant_to_type_constructor(GDEXTENSION_VARIANT_TYPE_RECT2I);
-        NativeName position_name("position"), size_name("size");
-        auto get_position = position_name.valid()
-                                ? api.variant_get_ptr_getter(GDEXTENSION_VARIANT_TYPE_RECT2I, position_name.ptr())
-                                : nullptr;
-        auto get_size = size_name.valid()
-                            ? api.variant_get_ptr_getter(GDEXTENSION_VARIANT_TYPE_RECT2I, size_name.ptr())
+        for (const auto& entry : listed) {
+            if (!entry.is_string()) return errorJson(400, "paths must hold only strings");
+            paths.push_back(entry.get<std::string>());
+        }
+    } else {
+        paths.push_back(params.value("path", ""));
+    }
+    for (const auto& path : paths) {
+        if (validateResPath(path, "").isErr()) {
+            return errorJson(400, "path must be a normalized res:// path: " + path);
+        }
+    }
+    for (const auto& bind : {std::make_tuple("ResourceLoader", "has_cached", 2323990056LL),
+                             std::make_tuple("ResourceLoader", "load", 3358495409LL),
+                             std::make_tuple("Object", "is_class", 3927539163LL),
+                             std::make_tuple("Script", "get_source_code", 201670096LL),
+                             std::make_tuple("Script", "set_source_code", 83702148LL),
+                             std::make_tuple("Script", "reload", 1633102583LL),
+                             std::make_tuple("EditorInterface", "get_open_scenes", 1139954409LL),
+                             std::make_tuple("EditorInterface", "get_open_scene_roots", 3995934104LL),
+                             std::make_tuple("EditorInterface", "reload_scene_from_path", 83702148LL)}) {
+        if (requireMethodBind(std::get<0>(bind), std::get<1>(bind), std::get<2>(bind)).isErr()) {
+            return bridgeError(501, "required_bind_unavailable");
+        }
+    }
+    auto loader = singleton("ResourceLoader");
+    if (loader.isErr()) return errorJson(loader.error());
+    auto editor = editorInterface();
+    if (editor.isErr()) return errorJson(editor.error());
+    auto open = openScenePaths(editor.value());
+    if (open.isErr()) return errorJson(open.error());
+    const std::set<std::string> open_scenes(open.value().begin(), open.value().end());
+    const json unsaved = open_scenes.empty() ? json::object() : unsavedScenesReport(editor.value());
+    bool reloaded_one = false;
+    json results = json::array();
+    for (const auto& path : paths) {
+        auto refreshed = refreshCachedCopy(loader.value(), path);
+        if (refreshed.isErr()) return errorJson(500, refreshed.error().message);
+        indexUnlistedWrite(loader.value(), path, refreshed.value());
+        if (open_scenes.count(path)) {
+            reloadOpenSceneTab(editor.value(), path, discard_unsaved, unsaved, reloaded_one,
+                               refreshed.value());
+        }
+        results.push_back(std::move(refreshed.value()));
+    }
+    return batch ? liveResult({{"results", std::move(results)}}) : liveResult(results[0]);
+}
+
+json GodotBridge::bridgeAssetReadImportedStream(const std::string& /*method*/, const json& params, const std::string& /*session_kind*/) {
+    // What asset_configure_import checks a value against and reads back
+    // after the reimport: the imported stream, loaded from disk. The cache
+    // is ignored, because the question is what the file now loads as; the
+    // editor's cached copy is updated in place by the reimport and is not
+    // this read's business (#958). The properties are read through
+    // Object.get by name, and AudioStream.get_length is the one new bind:
+    // 1740695150 on 4.5.1, 4.6.2 and 4.7.2.
+    if (!hasOnlyKeys(params, {"path"}) || !params.contains("path") || !params["path"].is_string()) {
+        return errorJson(400, "asset.readImportedStream takes path, a res:// asset");
+    }
+    const auto path = params["path"].get<std::string>();
+    auto valid_path = validateResPath(path, "");
+    if (valid_path.isErr()) return errorJson(valid_path.error());
+    auto loader = singleton("ResourceLoader");
+    if (loader.isErr()) return errorJson(loader.error());
+    auto godot_path = makeString(path);
+    auto type_hint = makeString("");
+    auto ignore_cache = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(0));
+    if (godot_path.isErr() || type_hint.isErr() || ignore_cache.isErr()) {
+        return errorJson(500, "Failed to build the load request");
+    }
+    // Asked first, because loading a file that is not there prints an
+    // ERROR. ResourceLoader.exists is 4185558881 on all three lines.
+    auto exists = callObject(loader.value(), "ResourceLoader", "exists", 4185558881LL,
+                             {&godot_path.value(), &type_hint.value()});
+    auto found = exists.isOk() ? scalarFromVariant<GDExtensionBool>(exists.value(), GDEXTENSION_VARIANT_TYPE_BOOL)
+                               : Result<GDExtensionBool>(exists.error());
+    if (found.isErr() || found.value() == 0) {
+        return errorJson(404, "Godot finds nothing to load at " + path);
+    }
+    auto loaded = callObject(loader.value(), "ResourceLoader", "load", 3358495409LL,
+                             {&godot_path.value(), &type_hint.value(), &ignore_cache.value()});
+    if (loaded.isErr()) return errorJson(loaded.error());
+    auto object = objectFromVariant(loaded.value());
+    if (object.isErr() || !object.value()) {
+        return errorJson(422, "Godot could not load " + path, json{{"code", "load_failed"}});
+    }
+    const auto class_name = nodeClassName(object.value());
+    json properties = json::object();
+    std::vector<const char*> names;
+    if (class_name == "AudioStreamWAV") names = {"mix_rate", "loop_mode", "loop_begin", "loop_end"};
+    if (class_name == "AudioStreamOggVorbis" || class_name == "AudioStreamMP3") {
+        names = {"loop", "loop_offset"};
+    }
+    for (const auto* name : names) {
+        auto property = makeStringName(name);
+        if (property.isErr()) continue;
+        auto value = callObject(object.value(), "Object", "get", 2760726917LL, {&property.value()});
+        if (value.isErr()) continue;
+        auto converted = variantToJson(value.value(), 0, true);
+        if (converted.isOk()) properties[name] = converted.value();
+    }
+    json answer = {{"path", path}, {"class", class_name}, {"properties", std::move(properties)}};
+    if (!names.empty()) {
+        auto length = callObject(object.value(), "AudioStream", "get_length", 1740695150LL);
+        if (length.isOk()) {
+            auto seconds = scalarFromVariant<double>(length.value(), GDEXTENSION_VARIANT_TYPE_FLOAT);
+            if (seconds.isOk()) answer["length_seconds"] = seconds.value();
+        }
+    }
+    return liveResult(std::move(answer));
+}
+
+// The audio reads answer an editor or a game, and a game has no
+// EditorInterface, so they run before the lookup below. Behind it every
+// game request failed on "Can't retrieve singleton 'EditorInterface'
+// outside of editor" and audio_list_buses fell back to reading the file
+// (vibe session nineteen).
+json GodotBridge::bridgeAudioListBuses(const std::string& /*method*/, const json& /*params*/, const std::string& /*session_kind*/) {
+    // Every method hash below is identical on Godot 4.5.1, 4.6.2 and 4.7.2,
+    // checked by dumping extension_api.json from each, so this needs no
+    // per-version branch. AudioServer is a core singleton and is present
+    // whether or not an editor scene is open.
+    auto server = singleton("AudioServer");
+    if (server.isErr()) return errorJson(server.error());
+
+    auto count_value = callObject(server.value(), "AudioServer", "get_bus_count", 3905245786LL);
+    if (count_value.isErr()) return errorJson(count_value.error());
+    auto count = scalarFromVariant<int64_t>(count_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+    if (count.isErr()) return errorJson(count.error());
+
+    json buses = json::array();
+    for (int64_t index = 0; index < count.value(); ++index) {
+        auto bus_index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
+        if (bus_index.isErr()) return errorJson(bus_index.error());
+
+        auto name_value = callObject(server.value(), "AudioServer", "get_bus_name", 844755477LL,
+                                     {&bus_index.value()});
+        if (name_value.isErr()) return errorJson(name_value.error());
+        auto name = stringFromVariant(name_value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+        if (name.isErr()) return errorJson(name.error());
+
+        auto volume_value = callObject(server.value(), "AudioServer", "get_bus_volume_db",
+                                       2339986948LL, {&bus_index.value()});
+        if (volume_value.isErr()) return errorJson(volume_value.error());
+        auto volume = scalarFromVariant<double>(volume_value.value(), GDEXTENSION_VARIANT_TYPE_FLOAT);
+        if (volume.isErr()) return errorJson(volume.error());
+
+        const auto boolOf = [&](const char* method_name, int64_t hash) -> Result<bool> {
+            auto value = callObject(server.value(), "AudioServer", method_name, hash,
+                                    {&bus_index.value()});
+            if (value.isErr()) return value.error();
+            return scalarFromVariant<bool>(value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+        };
+        auto mute = boolOf("is_bus_mute", 1116898809LL);
+        if (mute.isErr()) return errorJson(mute.error());
+        auto solo = boolOf("is_bus_solo", 1116898809LL);
+        if (solo.isErr()) return errorJson(solo.error());
+        auto bypass = boolOf("is_bus_bypassing_effects", 1116898809LL);
+        if (bypass.isErr()) return errorJson(bypass.error());
+
+        auto send_value = callObject(server.value(), "AudioServer", "get_bus_send", 659327637LL,
+                                     {&bus_index.value()});
+        if (send_value.isErr()) return errorJson(send_value.error());
+        auto send = stringFromVariant(send_value.value(), GDEXTENSION_VARIANT_TYPE_STRING_NAME);
+        if (send.isErr()) {
+            send = stringFromVariant(send_value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+            if (send.isErr()) return errorJson(send.error());
+        }
+
+        auto effect_count_value = callObject(server.value(), "AudioServer",
+                                             "get_bus_effect_count", 3744713108LL,
+                                             {&bus_index.value()});
+        if (effect_count_value.isErr()) {
+            return errorJson(effect_count_value.error());
+        }
+        auto effect_count =
+            scalarFromVariant<int64_t>(effect_count_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+        if (effect_count.isErr()) return errorJson(effect_count.error());
+
+        // The effect chain is the part the offline layout file cannot
+        // report, so it is the reason to attach an editor at all.
+        json effects = json::array();
+        for (int64_t slot = 0; slot < effect_count.value(); ++slot) {
+            auto slot_index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, slot);
+            if (slot_index.isErr()) return errorJson(slot_index.error());
+            auto effect = callObject(server.value(), "AudioServer", "get_bus_effect", 726064442LL,
+                                     {&bus_index.value(), &slot_index.value()});
+            if (effect.isErr()) return errorJson(effect.error());
+            auto class_value = callVariant(effect.value(), "get_class");
+            std::string class_name = "AudioEffect";
+            if (class_value.isOk()) {
+                auto text = stringFromVariant(class_value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+                if (text.isOk()) class_name = text.value();
+            }
+            effects.push_back({{"slot", slot}, {"class", class_name}});
+        }
+
+        buses.push_back({{"index", index},
+                         {"name", name.value()},
+                         {"volume_db", volume.value()},
+                         {"mute", mute.value()},
+                         {"solo", solo.value()},
+                         {"bypass_effects", bypass.value()},
+                         {"send", send.value()},
+                         {"effects", std::move(effects)}});
+    }
+
+    return liveResult({{"status", "success"},
+                       {"bus_count", count.value()},
+                       {"buses", std::move(buses)}});
+}
+
+
+json GodotBridge::bridgeAudioConfigureBus(const std::string& /*method*/, const json& params, const std::string& session_kind) {
+    auto server = singleton("AudioServer");
+    if (server.isErr()) return errorJson(server.error());
+
+    auto count_value = callObject(server.value(), "AudioServer", "get_bus_count", 3905245786LL);
+    if (count_value.isErr()) return errorJson(count_value.error());
+    auto count = scalarFromVariant<int64_t>(count_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+    if (count.isErr()) return errorJson(count.error());
+
+    // A bus can be named or numbered. Names are what a person uses and what
+    // the layout file records; indices are what AudioServer takes. Resolving
+    // a name through the engine rather than through the layout file means a
+    // bus added at runtime is still addressable.
+    int64_t index = -1;
+    const json bus_field = params.contains("bus") ? params["bus"] : json();
+    if (bus_field.is_string()) {
+        const auto wanted = bus_field.get<std::string>();
+        auto name_variant = makeString(wanted);
+        if (name_variant.isErr()) return errorJson(name_variant.error());
+        auto found = callObject(server.value(), "AudioServer", "get_bus_index", 2458036349LL,
+                                {&name_variant.value()});
+        if (found.isErr()) return errorJson(found.error());
+        auto resolved = scalarFromVariant<int64_t>(found.value(), GDEXTENSION_VARIANT_TYPE_INT);
+        if (resolved.isErr()) return errorJson(resolved.error());
+        index = resolved.value();
+        if (index < 0) return errorJson(404, "No audio bus is named " + wanted);
+    } else if (bus_field.is_number_integer()) {
+        index = bus_field.get<int64_t>();
+    } else {
+        return errorJson(400, "bus must be a bus name or a bus index");
+    }
+    if (index < 0 || index >= count.value()) {
+        return errorJson(404, "Audio bus index " + std::to_string(index) +
+                                  " is out of range; this project has " +
+                                  std::to_string(count.value()) + " buses");
+    }
+
+    auto bus_index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
+    if (bus_index.isErr()) return errorJson(bus_index.error());
+
+    const auto readState = [&]() -> Result<json> {
+        auto name_value = callObject(server.value(), "AudioServer", "get_bus_name", 844755477LL,
+                                     {&bus_index.value()});
+        if (name_value.isErr()) return name_value.error();
+        auto name = stringFromVariant(name_value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+        if (name.isErr()) return name.error();
+        auto volume_value = callObject(server.value(), "AudioServer", "get_bus_volume_db",
+                                       2339986948LL, {&bus_index.value()});
+        if (volume_value.isErr()) return volume_value.error();
+        auto volume = scalarFromVariant<double>(volume_value.value(), GDEXTENSION_VARIANT_TYPE_FLOAT);
+        if (volume.isErr()) return volume.error();
+        auto mute_value = callObject(server.value(), "AudioServer", "is_bus_mute", 1116898809LL,
+                                     {&bus_index.value()});
+        if (mute_value.isErr()) return mute_value.error();
+        auto mute = scalarFromVariant<bool>(mute_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+        if (mute.isErr()) return mute.error();
+        auto solo_value = callObject(server.value(), "AudioServer", "is_bus_solo", 1116898809LL,
+                                     {&bus_index.value()});
+        if (solo_value.isErr()) return solo_value.error();
+        auto solo = scalarFromVariant<bool>(solo_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+        if (solo.isErr()) return solo.error();
+        return json{{"index", index},
+                    {"name", name.value()},
+                    {"volume_db", volume.value()},
+                    {"mute", mute.value()},
+                    {"solo", solo.value()}};
+    };
+
+    // Read before anything is written. These values are the only way back,
+    // because bus state is not part of the edited scene and the editor undo
+    // stack does not carry it.
+    auto before = readState();
+    if (before.isErr()) return errorJson(before.error());
+
+    json applied = json::array();
+    if (params.contains("volume_db")) {
+        const auto& value = params["volume_db"];
+        if (!value.is_number()) return errorJson(400, "volume_db must be a number");
+        const double db = value.get<double>();
+        // The engine bus editor spans -80 to 24 decibels. Outside that a
+        // caller is either confusing decibels with a linear gain or has
+        // slipped a digit, and clamping silently would hide both.
+        if (!(db >= -80.0 && db <= 24.0)) {
+            return errorJson(400, "volume_db must be between -80 and 24 decibels");
+        }
+        auto db_variant = makeScalar(GDEXTENSION_VARIANT_TYPE_FLOAT, db);
+        if (db_variant.isErr()) return errorJson(db_variant.error());
+        auto set = callObject(server.value(), "AudioServer", "set_bus_volume_db", 1602489585LL,
+                              {&bus_index.value(), &db_variant.value()});
+        if (set.isErr()) return errorJson(set.error());
+        applied.push_back("volume_db");
+    }
+
+    const auto applyFlag = [&](const char* field, const char* method_name,
+                               int64_t hash) -> Result<bool> {
+        if (!params.contains(field)) return false;
+        const auto& value = params[field];
+        if (!value.is_boolean()) {
+            return Error::invalidArgument(std::string(field) + " must be a boolean");
+        }
+        auto flag = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, value.get<bool>());
+        if (flag.isErr()) return flag.error();
+        auto set = callObject(server.value(), "AudioServer", method_name, hash,
+                              {&bus_index.value(), &flag.value()});
+        if (set.isErr()) return set.error();
+        return true;
+    };
+    auto muted = applyFlag("mute", "set_bus_mute", 300928843LL);
+    if (muted.isErr()) return errorJson(muted.error());
+    if (muted.value()) applied.push_back("mute");
+    auto soloed = applyFlag("solo", "set_bus_solo", 300928843LL);
+    if (soloed.isErr()) return errorJson(soloed.error());
+    if (soloed.value()) applied.push_back("solo");
+
+    if (applied.empty()) {
+        return errorJson(400, "Give at least one of volume_db, mute or solo to change");
+    }
+
+    auto after = readState();
+    if (after.isErr()) return errorJson(after.error());
+
+    // Where the change ends up, which is not where this handler leaves it.
+    //
+    // undo_redo_registered: false beside a revert_with block is the shape of
+    // "this lives in memory, here is how to put it back", and in an attached
+    // editor that is not the whole story. The editor's own bus-layout
+    // autosave notices the AudioServer change and writes
+    // res://default_bus_layout.tres a moment later with no call from here,
+    // so a tracked project file appears in the working tree carrying
+    // whatever value was tried last. A caller sweeping bus volumes to find
+    // a mix reasonably believed nothing had been committed (#622).
+    //
+    // Confirmed on 4.5.1: the file is absent from the integration fixture
+    // and present in the copy after a run whose only bus calls are this
+    // tool's.
+    const bool editor_session = session_kind == "editor";
+    // The file the editor writes, which is the one it opened the project
+    // with. A literal res://default_bus_layout.tres named a file that is
+    // never written in a project that moved its layout (#935), and the
+    // setting itself names the wrong one once it has moved underneath a
+    // running editor.
+    const auto project_layout_path =
+        busLayoutPathFrom(projectSettingString("audio/buses/default_bus_layout"));
+    const auto layout_path = editor_session
+        ? startupBusLayoutPath().value_or(project_layout_path)
+        : project_layout_path;
+    json result = {
+        {"status", "success"},
+        {"bus", index},
+        {"applied", std::move(applied)},
+        {"before", before.value()},
+        {"after", after.value()},
+        {"undo_redo_registered", false},
+        {"persisted_by_editor", editor_session},
+        {"layout_path", layout_path},
+        {"limitation",
+         editor_session
+             ? "This sets the running engine's audio bus state. This tool writes no "
+               "file, but the editor's own bus-layout autosave picks the change up and "
+               "writes " + layout_path + " shortly afterwards, so it reaches "
+               "the project on disk anyway. revert_with restores the previous values." +
+                   busLayoutMovedSentence(layout_path, project_layout_path)
+             : "This sets the running game's audio bus state and nothing writes it "
+               "down. It is gone when the process exits, and the project's bus layout "
+               "on disk is unchanged. revert_with restores the previous values."},
+        {"revert_with", before.value()}};
+    if (project_layout_path != layout_path) result["project_layout_path"] = project_layout_path;
+    return liveResult(std::move(result));
+}
+
+
+json GodotBridge::bridgeEditorGetRecoveryState(const std::string& /*method*/, const json& /*params*/, const std::string& /*session_kind*/, GDExtensionObjectPtr /*editor*/) {
+    auto scanning = isEditorFilesystemScanning();
+    if (scanning.isErr()) return errorJson(scanning.error());
+    return liveResult({{"filesystem_scanning", scanning.value()}});
+}
+
+
+json GodotBridge::bridgeTilemapGetUsedRect(const std::string& /*method*/, const json& params, const std::string& session_kind, GDExtensionObjectPtr editor) {
+    if (session_kind != "editor") return bridgeError(409, "session_kind_rejected");
+    if (!hasOnlyKeys(params, {"tilemap_path"}) || !params.contains("tilemap_path") ||
+        !params["tilemap_path"].is_string() || params["tilemap_path"].get<std::string>().empty() ||
+        params["tilemap_path"].get<std::string>().size() > 1024) {
+        return bridgeError(400, "invalid_tilemap_get_used_rect_request");
+    }
+    if (requireMethodBind("TileMapLayer", "get_used_rect", 410525958LL).isErr() ||
+        requireMethodBind("Object", "is_class", 3927539163LL).isErr()) {
+        return bridgeError(501, "required_bind_unavailable");
+    }
+    auto root = editedSceneRoot(editor);
+    if (root.isErr()) return errorJson(root.error());
+    auto layer = resolveNode(root.value(), params["tilemap_path"].get<std::string>());
+    const auto tilemap_path = params["tilemap_path"].get<std::string>();
+    if (layer.isErr()) {
+        return bridgeError(404, "tilemap_target_not_found", {{"path", tilemap_path}},
+                           "Path " + tilemap_path + " resolves to nothing.");
+    }
+    auto correct_class = objectIsClass(layer.value(), "TileMapLayer");
+    if (correct_class.isErr()) return errorJson(500, correct_class.error().message);
+    if (!correct_class.value()) {
+        return wrongNodeTypeError("tilemap_target_wrong_type", tilemap_path, layer.value());
+    }
+    auto rect = callObject(layer.value(), "TileMapLayer", "get_used_rect", 410525958LL);
+    if (rect.isErr()) return errorJson(500, rect.error().message);
+    auto& api = GodotApi::instance();
+    if (api.variant_get_type(rect.value().ptr()) != GDEXTENSION_VARIANT_TYPE_RECT2I ||
+        !api.variant_get_ptr_getter) return bridgeError(500, "extension_protocol_error");
+    auto converter = api.get_variant_to_type_constructor(GDEXTENSION_VARIANT_TYPE_RECT2I);
+    NativeName position_name("position"), size_name("size");
+    auto get_position = position_name.valid()
+                            ? api.variant_get_ptr_getter(GDEXTENSION_VARIANT_TYPE_RECT2I, position_name.ptr())
                             : nullptr;
-        if (!converter || !get_position || !get_size) return bridgeError(501, "required_bind_unavailable");
-        NativeValue native_rect(GDEXTENSION_VARIANT_TYPE_RECT2I);
-        converter(native_rect.ptr(), rect.value().ptr());
-        native_rect.markInitialized();
-        NativeValue native_position(GDEXTENSION_VARIANT_TYPE_VECTOR2I);
-        NativeValue native_size(GDEXTENSION_VARIANT_TYPE_VECTOR2I);
-        get_position(native_rect.ptr(), native_position.ptr());
-        get_size(native_rect.ptr(), native_size.ptr());
-        native_position.markInitialized();
-        native_size.markInitialized();
-        auto position_variant = variantFromNative(GDEXTENSION_VARIANT_TYPE_VECTOR2I, native_position.ptr());
-        auto size_variant = variantFromNative(GDEXTENSION_VARIANT_TYPE_VECTOR2I, native_size.ptr());
-        if (position_variant.isErr() || size_variant.isErr()) return bridgeError(500, "extension_protocol_error");
-        auto position = integerVectorToJson(position_variant.value(), 2);
-        auto size = integerVectorToJson(size_variant.value(), 2);
-        if (position.isErr() || size.isErr()) return bridgeError(500, "extension_protocol_error");
-        return liveResult({{"tilemap_path", params["tilemap_path"]},
-                           {"position", position.value()}, {"size", size.value()},
-                           {"end", {{"x", position.value()["x"].get<int64_t>() + size.value()["x"].get<int64_t>()},
-                                    {"y", position.value()["y"].get<int64_t>() + size.value()["y"].get<int64_t>()}}}});
+    auto get_size = size_name.valid()
+                        ? api.variant_get_ptr_getter(GDEXTENSION_VARIANT_TYPE_RECT2I, size_name.ptr())
+                        : nullptr;
+    if (!converter || !get_position || !get_size) return bridgeError(501, "required_bind_unavailable");
+    NativeValue native_rect(GDEXTENSION_VARIANT_TYPE_RECT2I);
+    converter(native_rect.ptr(), rect.value().ptr());
+    native_rect.markInitialized();
+    NativeValue native_position(GDEXTENSION_VARIANT_TYPE_VECTOR2I);
+    NativeValue native_size(GDEXTENSION_VARIANT_TYPE_VECTOR2I);
+    get_position(native_rect.ptr(), native_position.ptr());
+    get_size(native_rect.ptr(), native_size.ptr());
+    native_position.markInitialized();
+    native_size.markInitialized();
+    auto position_variant = variantFromNative(GDEXTENSION_VARIANT_TYPE_VECTOR2I, native_position.ptr());
+    auto size_variant = variantFromNative(GDEXTENSION_VARIANT_TYPE_VECTOR2I, native_size.ptr());
+    if (position_variant.isErr() || size_variant.isErr()) return bridgeError(500, "extension_protocol_error");
+    auto position = integerVectorToJson(position_variant.value(), 2);
+    auto size = integerVectorToJson(size_variant.value(), 2);
+    if (position.isErr() || size.isErr()) return bridgeError(500, "extension_protocol_error");
+    return liveResult({{"tilemap_path", params["tilemap_path"]},
+                       {"position", position.value()}, {"size", size.value()},
+                       {"end", {{"x", position.value()["x"].get<int64_t>() + size.value()["x"].get<int64_t>()},
+                                {"y", position.value()["y"].get<int64_t>() + size.value()["y"].get<int64_t>()}}}});
+}
+
+
+json GodotBridge::bridgeTilemapSetCells(const std::string& /*method*/, const json& params, const std::string& session_kind, GDExtensionObjectPtr editor) {
+    if (session_kind != "editor") return bridgeError(409, "session_kind_rejected");
+    if (!hasOnlyKeys(params, {"tilemap_path", "cells"}) ||
+        !params.contains("tilemap_path") || !params["tilemap_path"].is_string() ||
+        params["tilemap_path"].get<std::string>().empty() ||
+        params["tilemap_path"].get<std::string>().size() > 1024 ||
+        !params.contains("cells") || !params["cells"].is_array() ||
+        params["cells"].empty() || params["cells"].size() > 256) {
+        return bridgeError(400, "invalid_tilemap_set_cells_request");
+    }
+    for (const auto& bind : {
+             std::make_tuple("Object", "is_class", 3927539163LL),
+             std::make_tuple("TileMapLayer", "get_tile_set", 2678226422LL),
+             std::make_tuple("TileMapLayer", "set_cell", 2428518503LL),
+             std::make_tuple("TileMapLayer", "erase_cell", 1130785943LL),
+             std::make_tuple("TileMapLayer", "get_cell_source_id", 2485466453LL),
+             std::make_tuple("TileMapLayer", "get_cell_atlas_coords", 3050897911LL),
+             std::make_tuple("TileMapLayer", "get_cell_alternative_tile", 2485466453LL),
+             std::make_tuple("TileSet", "has_source", 1116898809LL),
+             std::make_tuple("TileSet", "get_source", 1763540252LL),
+             std::make_tuple("TileSetAtlasSource", "get_tile_data", 3534028207LL)}) {
+        if (requireMethodBind(std::get<0>(bind), std::get<1>(bind), std::get<2>(bind)).isErr())
+            return bridgeError(501, "required_bind_unavailable");
+    }
+    if (preflightUndoManagerBindings().isErr() || preflightUndoRollbackBindings().isErr())
+        return bridgeError(501, "required_bind_unavailable");
+    auto root = editedSceneRoot(editor);
+    if (root.isErr()) return errorJson(root.error());
+    auto layer = resolveNode(root.value(), params["tilemap_path"].get<std::string>());
+    const auto tilemap_path = params["tilemap_path"].get<std::string>();
+    if (layer.isErr()) {
+        return bridgeError(404, "tilemap_target_not_found", {{"path", tilemap_path}},
+                           "Path " + tilemap_path + " resolves to nothing.");
+    }
+    if (auto refused = refuseUnsavableEdit(root.value(), layer.value(), tilemap_path,
+                                           SceneEdit::Property)) {
+        return *refused;
+    }
+    auto correct_class = objectIsClass(layer.value(), "TileMapLayer");
+    if (correct_class.isErr() || !correct_class.value()) {
+        return wrongNodeTypeError("tilemap_target_wrong_type", tilemap_path, layer.value());
+    }
+    auto tile_set_variant = callObject(layer.value(), "TileMapLayer", "get_tile_set", 2678226422LL);
+    if (tile_set_variant.isErr()) return errorJson(500, tile_set_variant.error().message);
+    auto tile_set = objectFromVariant(tile_set_variant.value());
+    if (tile_set.isErr()) return errorJson(500, tile_set.error().message);
+    // A layer with no TileSet used to be reported as tilemap_tile_not_found
+    // once the first cell was examined, which reads as a bad source id or
+    // bad atlas coordinates and sends the caller looking at their payload.
+    // The cause is one unset property on the node, and it is worth saying so
+    // before any cell is looked at.
+    if (!tile_set.value()) {
+        return bridgeError(409, "tilemap_layer_has_no_tileset",
+                         {{"tilemap_path", params["tilemap_path"].get<std::string>()},
+                          {"retryable", false}});
     }
 
-    if (method == "tilemap.setCells") {
-        if (session_kind != "editor") return bridgeError(409, "session_kind_rejected");
-        if (!hasOnlyKeys(params, {"tilemap_path", "cells"}) ||
-            !params.contains("tilemap_path") || !params["tilemap_path"].is_string() ||
-            params["tilemap_path"].get<std::string>().empty() ||
-            params["tilemap_path"].get<std::string>().size() > 1024 ||
-            !params.contains("cells") || !params["cells"].is_array() ||
-            params["cells"].empty() || params["cells"].size() > 256) {
+    struct Cell {
+        VariantValue coords;
+        bool erase{false};
+        int64_t source{-1};
+        VariantValue atlas;
+        int64_t alternative{-1};
+        int64_t old_source{-1};
+        VariantValue old_atlas;
+        int64_t old_alternative{-1};
+        bool changed{false};
+    };
+    std::vector<Cell> cells;
+    std::set<std::pair<int64_t, int64_t>> seen;
+    for (const auto& record : params["cells"]) {
+        if (!record.is_object() || !record.contains("coords") || !record["coords"].is_array() ||
+            record["coords"].size() != 2) return bridgeError(400, "invalid_tilemap_set_cells_request");
+        const auto x_value = boundedJsonInteger(record["coords"][0], -1048576, 1048576);
+        const auto y_value = boundedJsonInteger(record["coords"][1], -1048576, 1048576);
+        if (!x_value.has_value() || !y_value.has_value())
             return bridgeError(400, "invalid_tilemap_set_cells_request");
-        }
-        for (const auto& bind : {
-                 std::make_tuple("Object", "is_class", 3927539163LL),
-                 std::make_tuple("TileMapLayer", "get_tile_set", 2678226422LL),
-                 std::make_tuple("TileMapLayer", "set_cell", 2428518503LL),
-                 std::make_tuple("TileMapLayer", "erase_cell", 1130785943LL),
-                 std::make_tuple("TileMapLayer", "get_cell_source_id", 2485466453LL),
-                 std::make_tuple("TileMapLayer", "get_cell_atlas_coords", 3050897911LL),
-                 std::make_tuple("TileMapLayer", "get_cell_alternative_tile", 2485466453LL),
-                 std::make_tuple("TileSet", "has_source", 1116898809LL),
-                 std::make_tuple("TileSet", "get_source", 1763540252LL),
-                 std::make_tuple("TileSetAtlasSource", "get_tile_data", 3534028207LL)}) {
-            if (requireMethodBind(std::get<0>(bind), std::get<1>(bind), std::get<2>(bind)).isErr())
-                return bridgeError(501, "required_bind_unavailable");
-        }
-        if (preflightUndoManagerBindings().isErr() || preflightUndoRollbackBindings().isErr())
-            return bridgeError(501, "required_bind_unavailable");
-        auto root = editedSceneRoot(editor);
-        if (root.isErr()) return errorJson(root.error());
-        auto layer = resolveNode(root.value(), params["tilemap_path"].get<std::string>());
-        const auto tilemap_path = params["tilemap_path"].get<std::string>();
-        if (layer.isErr()) {
-            return bridgeError(404, "tilemap_target_not_found", {{"path", tilemap_path}},
-                               "Path " + tilemap_path + " resolves to nothing.");
-        }
-        if (auto refused = refuseUnsavableEdit(root.value(), layer.value(), tilemap_path,
-                                               SceneEdit::Property)) {
-            return *refused;
-        }
-        auto correct_class = objectIsClass(layer.value(), "TileMapLayer");
-        if (correct_class.isErr() || !correct_class.value()) {
-            return wrongNodeTypeError("tilemap_target_wrong_type", tilemap_path, layer.value());
-        }
-        auto tile_set_variant = callObject(layer.value(), "TileMapLayer", "get_tile_set", 2678226422LL);
-        if (tile_set_variant.isErr()) return errorJson(500, tile_set_variant.error().message);
-        auto tile_set = objectFromVariant(tile_set_variant.value());
-        if (tile_set.isErr()) return errorJson(500, tile_set.error().message);
-        // A layer with no TileSet used to be reported as tilemap_tile_not_found
-        // once the first cell was examined, which reads as a bad source id or
-        // bad atlas coordinates and sends the caller looking at their payload.
-        // The cause is one unset property on the node, and it is worth saying so
-        // before any cell is looked at.
-        if (!tile_set.value()) {
-            return bridgeError(409, "tilemap_layer_has_no_tileset",
-                             {{"tilemap_path", params["tilemap_path"].get<std::string>()},
-                              {"retryable", false}});
-        }
-
-        struct Cell {
-            VariantValue coords;
-            bool erase{false};
-            int64_t source{-1};
-            VariantValue atlas;
-            int64_t alternative{-1};
-            int64_t old_source{-1};
-            VariantValue old_atlas;
-            int64_t old_alternative{-1};
-            bool changed{false};
-        };
-        std::vector<Cell> cells;
-        std::set<std::pair<int64_t, int64_t>> seen;
-        for (const auto& record : params["cells"]) {
-            if (!record.is_object() || !record.contains("coords") || !record["coords"].is_array() ||
-                record["coords"].size() != 2) return bridgeError(400, "invalid_tilemap_set_cells_request");
-            const auto x_value = boundedJsonInteger(record["coords"][0], -1048576, 1048576);
-            const auto y_value = boundedJsonInteger(record["coords"][1], -1048576, 1048576);
-            if (!x_value.has_value() || !y_value.has_value())
-                return bridgeError(400, "invalid_tilemap_set_cells_request");
-            const int64_t x = *x_value;
-            const int64_t y = *y_value;
-            if (!seen.emplace(x, y).second) return bridgeError(409, "duplicate_tilemap_coordinate");
-            const bool erase = record.contains("erase");
-            if ((erase && (!hasOnlyKeys(record, {"coords", "erase"}) || !record["erase"].is_boolean() || !record["erase"].get<bool>())) ||
-                (!erase && (!hasOnlyKeys(record, {"coords", "source_id", "atlas_coords", "alternative_tile"}) ||
-                            !record.contains("source_id") || !record["source_id"].is_number_integer() ||
-                            !record.contains("atlas_coords") || !record["atlas_coords"].is_array() || record["atlas_coords"].size() != 2)))
-                return bridgeError(400, "invalid_tilemap_set_cells_request");
-            auto coords = makeVector2i(x, y);
-            auto empty_atlas = makeVector2i(-1, -1);
-            if (coords.isErr() || empty_atlas.isErr()) return bridgeError(501, "required_bind_unavailable");
-            int64_t source = -1, alternative = -1;
-            VariantValue atlas = std::move(empty_atlas.value());
-            if (!erase) {
-                const auto source_value_int = boundedJsonInteger(record["source_id"], 0, 2147483647LL);
-                const auto alternative_value_int = record.contains("alternative_tile")
-                    ? boundedJsonInteger(record["alternative_tile"], 0, 65535)
-                    : std::optional<int64_t>(0);
-                if (!source_value_int.has_value() || !alternative_value_int.has_value())
-                    return bridgeError(400, "invalid_tilemap_set_cells_request");
-                source = *source_value_int;
-                alternative = *alternative_value_int;
-                const auto ax_value = boundedJsonInteger(record["atlas_coords"][0], 0, 1048576);
-                const auto ay_value = boundedJsonInteger(record["atlas_coords"][1], 0, 1048576);
-                if (!ax_value.has_value() || !ay_value.has_value())
-                    return bridgeError(400, "invalid_tilemap_set_cells_request");
-                const int64_t ax = *ax_value;
-                const int64_t ay = *ay_value;
-                auto source_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, source);
-                auto has_source = callObject(tile_set.value(), "TileSet", "has_source", 1116898809LL, {&source_value.value()});
-                auto has_flag = has_source.isOk() ? scalarFromVariant<GDExtensionBool>(has_source.value(), GDEXTENSION_VARIANT_TYPE_BOOL)
-                                                  : Result<GDExtensionBool>(has_source.error());
-                if (has_flag.isErr() || !has_flag.value()) return bridgeError(404, "tilemap_tile_not_found");
-                auto source_object_value = callObject(tile_set.value(), "TileSet", "get_source", 1763540252LL, {&source_value.value()});
-                auto source_object = source_object_value.isOk() ? objectFromVariant(source_object_value.value())
-                                                                : Result<GDExtensionObjectPtr>(source_object_value.error());
-                if (source_object.isErr() || !source_object.value()) return bridgeError(404, "tilemap_tile_not_found");
-                auto atlas_class = objectIsClass(source_object.value(), "TileSetAtlasSource");
-                if (atlas_class.isErr() || !atlas_class.value()) return bridgeError(404, "tilemap_tile_not_found");
-                auto requested_atlas = makeVector2i(ax, ay);
-                auto alternative_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, alternative);
-                auto tile_data_value = callObject(source_object.value(), "TileSetAtlasSource", "get_tile_data", 3534028207LL,
-                                                  {&requested_atlas.value(), &alternative_value.value()});
-                auto tile_data = tile_data_value.isOk() ? objectFromVariant(tile_data_value.value())
-                                                        : Result<GDExtensionObjectPtr>(tile_data_value.error());
-                if (tile_data.isErr() || !tile_data.value()) return bridgeError(404, "tilemap_tile_not_found");
-                atlas = std::move(requested_atlas.value());
-            }
-            auto old_source_value = callObject(layer.value(), "TileMapLayer", "get_cell_source_id", 2485466453LL, {&coords.value()});
-            auto old_atlas = callObject(layer.value(), "TileMapLayer", "get_cell_atlas_coords", 3050897911LL, {&coords.value()});
-            auto old_alt_value = callObject(layer.value(), "TileMapLayer", "get_cell_alternative_tile", 2485466453LL, {&coords.value()});
-            if (old_source_value.isErr() || old_atlas.isErr() || old_alt_value.isErr()) return bridgeError(500, "tilemap_snapshot_failed");
-            auto old_source = scalarFromVariant<int64_t>(old_source_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
-            auto old_alt = scalarFromVariant<int64_t>(old_alt_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
-            auto old_atlas_json = integerVectorToJson(old_atlas.value(), 2);
-            auto atlas_json = integerVectorToJson(atlas, 2);
-            if (old_source.isErr() || old_alt.isErr() || old_atlas_json.isErr() || atlas_json.isErr()) return bridgeError(500, "tilemap_snapshot_failed");
-            const bool changed = old_source.value() != source || old_alt.value() != alternative || old_atlas_json.value() != atlas_json.value();
-            cells.push_back(Cell{std::move(coords.value()), erase, source, std::move(atlas), alternative,
-                                 old_source.value(), std::move(old_atlas.value()), old_alt.value(), changed});
-        }
-        const size_t changed_count = std::count_if(cells.begin(), cells.end(), [](const Cell& cell) { return cell.changed; });
-        // What each requested cell holds, read from the layer: the snapshot
-        // for a cell nothing changed, the read after the commit for the rest.
-        // The counts are about the request, and nothing in the answer came
-        // from the layer after the write (#1019).
-        json observed_cells = json::array();
-        const auto observedCell = [](VariantValue& coords, int64_t source, const json& atlas,
-                                     int64_t alternative) {
-            auto coords_json = integerVectorToJson(coords, 2);
-            return json{{"coords", coords_json.isOk() ? coords_json.value() : json(nullptr)},
-                        {"source_id", source}, {"atlas_coords", atlas}, {"alternative_tile", alternative}};
-        };
-        const auto snapshotCell = [&](Cell& cell) {
-            auto atlas = integerVectorToJson(cell.old_atlas, 2);
-            return observedCell(cell.coords, cell.old_source, atlas.isOk() ? atlas.value() : json(nullptr),
-                                cell.old_alternative);
-        };
-        if (changed_count == 0) {
-            for (auto& cell : cells) observed_cells.push_back(snapshotCell(cell));
-            return liveResult({{"requested_cells", cells.size()}, {"changed_cells", 0},
-                {"unchanged_cells", cells.size()}, {"cells", std::move(observed_cells)}, {"undo_redo_registered", false}, {"outcome", "completed"}, {"rollback", "not_required"}});
-        }
-        auto manager = undoManager(editor);
-        if (manager.isErr()) return errorJson(manager.error());
-        auto action = createAction(manager.value(), "Didi: set TileMapLayer cells", layer.value());
-        if (action.isErr()) return errorJson(500, action.error().message);
-        for (auto& cell : cells) if (cell.changed) {
-            auto source_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, cell.source);
-            auto alt_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, cell.alternative);
-            auto old_source_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, cell.old_source);
-            auto old_alt_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, cell.old_alternative);
-            auto registered = cell.erase
-                ? managerMethod(manager.value(), "add_do_method", layer.value(), "erase_cell", {&cell.coords})
-                : managerMethod(manager.value(), "add_do_method", layer.value(), "set_cell", {&cell.coords, &source_value.value(), &cell.atlas, &alt_value.value()});
-            if (registered.isOk()) registered = cell.old_source < 0
-                ? managerMethod(manager.value(), "add_undo_method", layer.value(), "erase_cell", {&cell.coords})
-                : managerMethod(manager.value(), "add_undo_method", layer.value(), "set_cell", {&cell.coords, &old_source_value.value(), &cell.old_atlas, &old_alt_value.value()});
-            if (registered.isErr()) { abandonAction(manager.value()); return bridgeError(500, "tilemap_undo_registration_failed"); }
-        }
-        auto committed = commitAction(manager.value());
-        if (committed.isErr()) return errorJson(500, committed.error().message);
-        for (auto& cell : cells) {
-            if (!cell.changed) {
-                observed_cells.push_back(snapshotCell(cell));
-                continue;
-            }
-            auto observed_source_value = callObject(layer.value(), "TileMapLayer", "get_cell_source_id", 2485466453LL, {&cell.coords});
-            auto observed_atlas_value = callObject(layer.value(), "TileMapLayer", "get_cell_atlas_coords", 3050897911LL, {&cell.coords});
-            auto observed_alt_value = callObject(layer.value(), "TileMapLayer", "get_cell_alternative_tile", 2485466453LL, {&cell.coords});
-            auto observed_source = observed_source_value.isOk() ? scalarFromVariant<int64_t>(observed_source_value.value(), GDEXTENSION_VARIANT_TYPE_INT)
-                                                                : Result<int64_t>(observed_source_value.error());
-            auto observed_alt = observed_alt_value.isOk() ? scalarFromVariant<int64_t>(observed_alt_value.value(), GDEXTENSION_VARIANT_TYPE_INT)
-                                                          : Result<int64_t>(observed_alt_value.error());
-            auto observed_atlas = observed_atlas_value.isOk() ? integerVectorToJson(observed_atlas_value.value(), 2)
-                                                              : Result<json>(observed_atlas_value.error());
-            auto expected_atlas = integerVectorToJson(cell.atlas, 2);
-            if (observed_source.isErr() || observed_alt.isErr() || observed_atlas.isErr() ||
-                expected_atlas.isErr() || observed_source.value() != cell.source ||
-                observed_alt.value() != cell.alternative || observed_atlas.value() != expected_atlas.value()) {
-                const auto restored = undoLastAction(manager.value(), root.value());
-                return bridgeError(500, "tilemap_postcondition_mismatch", {{"outcome", restored.isOk() ? "rolled_back" : "unknown"}});
-            }
-            observed_cells.push_back(observedCell(cell.coords, observed_source.value(),
-                                                  observed_atlas.value(), observed_alt.value()));
-        }
-        return liveSceneMutation({{"requested_cells", cells.size()}, {"changed_cells", changed_count},
-            {"unchanged_cells", cells.size() - changed_count}, {"cells", std::move(observed_cells)}, {"undo_redo_registered", true}, {"outcome", "completed"}, {"rollback", "undo_redo"}});
-    }
-
-    if (method == "gridmap.setCells") {
-        if (session_kind != "editor") return bridgeError(409, "session_kind_rejected");
-        if (!hasOnlyKeys(params, {"gridmap_path", "cells"}) || !params.contains("gridmap_path") ||
-            !params["gridmap_path"].is_string() || params["gridmap_path"].get<std::string>().empty() ||
-            params["gridmap_path"].get<std::string>().size() > 1024 ||
-            !params.contains("cells") || !params["cells"].is_array() || params["cells"].empty() ||
-            params["cells"].size() > 256) return bridgeError(400, "invalid_gridmap_set_cells_request");
-        for (const auto& bind : {std::make_tuple("Object", "is_class", 3927539163LL),
-                 std::make_tuple("GridMap", "get_mesh_library", 3350993772LL),
-                 std::make_tuple("GridMap", "set_cell_item", 3449088946LL),
-                 std::make_tuple("GridMap", "get_cell_item", 3724960147LL),
-                 std::make_tuple("GridMap", "get_cell_item_orientation", 3724960147LL),
-                 std::make_tuple("MeshLibrary", "get_item_list", 1930428628LL)}) {
-            if (requireMethodBind(std::get<0>(bind), std::get<1>(bind), std::get<2>(bind)).isErr()) return bridgeError(501, "required_bind_unavailable");
-        }
-        if (preflightUndoManagerBindings().isErr() || preflightUndoRollbackBindings().isErr())
-            return bridgeError(501, "required_bind_unavailable");
-        auto root = editedSceneRoot(editor);
-        if (root.isErr()) return errorJson(root.error());
-        auto grid = resolveNode(root.value(), params["gridmap_path"].get<std::string>());
-        const auto gridmap_path = params["gridmap_path"].get<std::string>();
-        if (grid.isErr()) {
-            return bridgeError(404, "gridmap_target_not_found", {{"path", gridmap_path}},
-                               "Path " + gridmap_path + " resolves to nothing.");
-        }
-        if (auto refused = refuseUnsavableEdit(root.value(), grid.value(), gridmap_path,
-                                               SceneEdit::Property)) {
-            return *refused;
-        }
-        auto correct_class = objectIsClass(grid.value(), "GridMap");
-        if (correct_class.isErr() || !correct_class.value()) {
-            return wrongNodeTypeError("gridmap_target_wrong_type", gridmap_path, grid.value());
-        }
-        auto library_value = callObject(grid.value(), "GridMap", "get_mesh_library", 3350993772LL);
-        auto library = library_value.isOk() ? objectFromVariant(library_value.value())
-                                            : Result<GDExtensionObjectPtr>(library_value.error());
-        std::set<int64_t> item_ids;
-        if (library.isOk() && library.value()) {
-            auto list = callObject(library.value(), "MeshLibrary", "get_item_list", 1930428628LL);
-            if (list.isErr()) return errorJson(500, list.error().message);
-            auto ids = packedIntegerSet(list.value());
-            if (ids.isErr()) return errorJson(500, ids.error().message);
-            item_ids = std::move(ids.value());
-        }
-        struct Cell { VariantValue position; int64_t item; int64_t orientation; int64_t old_item; int64_t old_orientation; bool changed; };
-        std::vector<Cell> cells;
-        std::set<std::tuple<int64_t, int64_t, int64_t>> seen;
-        for (const auto& record : params["cells"]) {
-            if (!hasOnlyKeys(record, {"position", "item", "orientation"}) || !record.contains("position") ||
-                !record["position"].is_array() || record["position"].size() != 3 || !record.contains("item") ||
-                !record["item"].is_number_integer()) return bridgeError(400, "invalid_gridmap_set_cells_request");
-            int64_t xyz[3];
-            for (int axis = 0; axis < 3; ++axis) {
-                const auto coordinate = boundedJsonInteger(record["position"][axis], -1048576, 1048576);
-                if (!coordinate.has_value()) return bridgeError(400, "invalid_gridmap_set_cells_request");
-                xyz[axis] = *coordinate;
-            }
-            if (!seen.emplace(xyz[0], xyz[1], xyz[2]).second) return bridgeError(409, "duplicate_gridmap_position");
-            const auto item_value = boundedJsonInteger(record["item"], -1, 2147483647LL);
-            const auto orientation_value = record.contains("orientation")
-                ? boundedJsonInteger(record["orientation"], 0, 23)
+        const int64_t x = *x_value;
+        const int64_t y = *y_value;
+        if (!seen.emplace(x, y).second) return bridgeError(409, "duplicate_tilemap_coordinate");
+        const bool erase = record.contains("erase");
+        if ((erase && (!hasOnlyKeys(record, {"coords", "erase"}) || !record["erase"].is_boolean() || !record["erase"].get<bool>())) ||
+            (!erase && (!hasOnlyKeys(record, {"coords", "source_id", "atlas_coords", "alternative_tile"}) ||
+                        !record.contains("source_id") || !record["source_id"].is_number_integer() ||
+                        !record.contains("atlas_coords") || !record["atlas_coords"].is_array() || record["atlas_coords"].size() != 2)))
+            return bridgeError(400, "invalid_tilemap_set_cells_request");
+        auto coords = makeVector2i(x, y);
+        auto empty_atlas = makeVector2i(-1, -1);
+        if (coords.isErr() || empty_atlas.isErr()) return bridgeError(501, "required_bind_unavailable");
+        int64_t source = -1, alternative = -1;
+        VariantValue atlas = std::move(empty_atlas.value());
+        if (!erase) {
+            const auto source_value_int = boundedJsonInteger(record["source_id"], 0, 2147483647LL);
+            const auto alternative_value_int = record.contains("alternative_tile")
+                ? boundedJsonInteger(record["alternative_tile"], 0, 65535)
                 : std::optional<int64_t>(0);
-            if (!item_value.has_value() || !orientation_value.has_value())
-                return bridgeError(400, "invalid_gridmap_set_cells_request");
-            const int64_t item = *item_value;
-            const int64_t orientation = *orientation_value;
-            if (item == -1 && orientation != 0) return bridgeError(400, "invalid_gridmap_set_cells_request");
-            if (item >= 0 && (!library.isOk() || !library.value() || !item_ids.count(item))) return bridgeError(404, "gridmap_item_not_found");
-            auto position = makeVector3i(xyz[0], xyz[1], xyz[2]);
-            if (position.isErr()) return bridgeError(501, "required_bind_unavailable");
-            auto old_item_value = callObject(grid.value(), "GridMap", "get_cell_item", 3724960147LL, {&position.value()});
-            auto old_orientation_value = callObject(grid.value(), "GridMap", "get_cell_item_orientation", 3724960147LL, {&position.value()});
-            if (old_item_value.isErr() || old_orientation_value.isErr()) return bridgeError(500, "gridmap_snapshot_failed");
-            auto old_item = scalarFromVariant<int64_t>(old_item_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
-            auto old_orientation = scalarFromVariant<int64_t>(old_orientation_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
-            if (old_item.isErr() || old_orientation.isErr()) return bridgeError(500, "gridmap_snapshot_failed");
-            const bool changed = item != old_item.value() || (item >= 0 && orientation != old_orientation.value());
-            cells.push_back(Cell{std::move(position.value()), item, orientation, old_item.value(), old_orientation.value(), changed});
+            if (!source_value_int.has_value() || !alternative_value_int.has_value())
+                return bridgeError(400, "invalid_tilemap_set_cells_request");
+            source = *source_value_int;
+            alternative = *alternative_value_int;
+            const auto ax_value = boundedJsonInteger(record["atlas_coords"][0], 0, 1048576);
+            const auto ay_value = boundedJsonInteger(record["atlas_coords"][1], 0, 1048576);
+            if (!ax_value.has_value() || !ay_value.has_value())
+                return bridgeError(400, "invalid_tilemap_set_cells_request");
+            const int64_t ax = *ax_value;
+            const int64_t ay = *ay_value;
+            auto source_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, source);
+            auto has_source = callObject(tile_set.value(), "TileSet", "has_source", 1116898809LL, {&source_value.value()});
+            auto has_flag = has_source.isOk() ? scalarFromVariant<GDExtensionBool>(has_source.value(), GDEXTENSION_VARIANT_TYPE_BOOL)
+                                              : Result<GDExtensionBool>(has_source.error());
+            if (has_flag.isErr() || !has_flag.value()) return bridgeError(404, "tilemap_tile_not_found");
+            auto source_object_value = callObject(tile_set.value(), "TileSet", "get_source", 1763540252LL, {&source_value.value()});
+            auto source_object = source_object_value.isOk() ? objectFromVariant(source_object_value.value())
+                                                            : Result<GDExtensionObjectPtr>(source_object_value.error());
+            if (source_object.isErr() || !source_object.value()) return bridgeError(404, "tilemap_tile_not_found");
+            auto atlas_class = objectIsClass(source_object.value(), "TileSetAtlasSource");
+            if (atlas_class.isErr() || !atlas_class.value()) return bridgeError(404, "tilemap_tile_not_found");
+            auto requested_atlas = makeVector2i(ax, ay);
+            auto alternative_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, alternative);
+            auto tile_data_value = callObject(source_object.value(), "TileSetAtlasSource", "get_tile_data", 3534028207LL,
+                                              {&requested_atlas.value(), &alternative_value.value()});
+            auto tile_data = tile_data_value.isOk() ? objectFromVariant(tile_data_value.value())
+                                                    : Result<GDExtensionObjectPtr>(tile_data_value.error());
+            if (tile_data.isErr() || !tile_data.value()) return bridgeError(404, "tilemap_tile_not_found");
+            atlas = std::move(requested_atlas.value());
         }
-        const size_t changed_count = std::count_if(cells.begin(), cells.end(), [](const Cell& cell) { return cell.changed; });
-        // What each requested cell holds, read from the grid, as the layer
-        // writer does (#1019).
-        json observed_cells = json::array();
-        const auto observedCell = [](VariantValue& position, int64_t item, int64_t orientation) {
-            auto position_json = integerVectorToJson(position, 3);
-            return json{{"position", position_json.isOk() ? position_json.value() : json(nullptr)},
-                        {"item", item}, {"orientation", orientation}};
-        };
-        if (changed_count == 0) {
-            for (auto& cell : cells) observed_cells.push_back(observedCell(cell.position, cell.old_item, cell.old_orientation));
-            return liveResult({{"requested_cells", cells.size()}, {"changed_cells", 0},
-                {"unchanged_cells", cells.size()}, {"cells", std::move(observed_cells)}, {"undo_redo_registered", false}, {"outcome", "completed"}, {"rollback", "not_required"}});
+        auto old_source_value = callObject(layer.value(), "TileMapLayer", "get_cell_source_id", 2485466453LL, {&coords.value()});
+        auto old_atlas = callObject(layer.value(), "TileMapLayer", "get_cell_atlas_coords", 3050897911LL, {&coords.value()});
+        auto old_alt_value = callObject(layer.value(), "TileMapLayer", "get_cell_alternative_tile", 2485466453LL, {&coords.value()});
+        if (old_source_value.isErr() || old_atlas.isErr() || old_alt_value.isErr()) return bridgeError(500, "tilemap_snapshot_failed");
+        auto old_source = scalarFromVariant<int64_t>(old_source_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+        auto old_alt = scalarFromVariant<int64_t>(old_alt_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+        auto old_atlas_json = integerVectorToJson(old_atlas.value(), 2);
+        auto atlas_json = integerVectorToJson(atlas, 2);
+        if (old_source.isErr() || old_alt.isErr() || old_atlas_json.isErr() || atlas_json.isErr()) return bridgeError(500, "tilemap_snapshot_failed");
+        const bool changed = old_source.value() != source || old_alt.value() != alternative || old_atlas_json.value() != atlas_json.value();
+        cells.push_back(Cell{std::move(coords.value()), erase, source, std::move(atlas), alternative,
+                             old_source.value(), std::move(old_atlas.value()), old_alt.value(), changed});
+    }
+    const size_t changed_count = std::count_if(cells.begin(), cells.end(), [](const Cell& cell) { return cell.changed; });
+    // What each requested cell holds, read from the layer: the snapshot
+    // for a cell nothing changed, the read after the commit for the rest.
+    // The counts are about the request, and nothing in the answer came
+    // from the layer after the write (#1019).
+    json observed_cells = json::array();
+    const auto observedCell = [](VariantValue& coords, int64_t source, const json& atlas,
+                                 int64_t alternative) {
+        auto coords_json = integerVectorToJson(coords, 2);
+        return json{{"coords", coords_json.isOk() ? coords_json.value() : json(nullptr)},
+                    {"source_id", source}, {"atlas_coords", atlas}, {"alternative_tile", alternative}};
+    };
+    const auto snapshotCell = [&](Cell& cell) {
+        auto atlas = integerVectorToJson(cell.old_atlas, 2);
+        return observedCell(cell.coords, cell.old_source, atlas.isOk() ? atlas.value() : json(nullptr),
+                            cell.old_alternative);
+    };
+    if (changed_count == 0) {
+        for (auto& cell : cells) observed_cells.push_back(snapshotCell(cell));
+        return liveResult({{"requested_cells", cells.size()}, {"changed_cells", 0},
+            {"unchanged_cells", cells.size()}, {"cells", std::move(observed_cells)}, {"undo_redo_registered", false}, {"outcome", "completed"}, {"rollback", "not_required"}});
+    }
+    auto manager = undoManager(editor);
+    if (manager.isErr()) return errorJson(manager.error());
+    auto action = createAction(manager.value(), "Didi: set TileMapLayer cells", layer.value());
+    if (action.isErr()) return errorJson(500, action.error().message);
+    for (auto& cell : cells) if (cell.changed) {
+        auto source_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, cell.source);
+        auto alt_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, cell.alternative);
+        auto old_source_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, cell.old_source);
+        auto old_alt_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, cell.old_alternative);
+        auto registered = cell.erase
+            ? managerMethod(manager.value(), "add_do_method", layer.value(), "erase_cell", {&cell.coords})
+            : managerMethod(manager.value(), "add_do_method", layer.value(), "set_cell", {&cell.coords, &source_value.value(), &cell.atlas, &alt_value.value()});
+        if (registered.isOk()) registered = cell.old_source < 0
+            ? managerMethod(manager.value(), "add_undo_method", layer.value(), "erase_cell", {&cell.coords})
+            : managerMethod(manager.value(), "add_undo_method", layer.value(), "set_cell", {&cell.coords, &old_source_value.value(), &cell.old_atlas, &old_alt_value.value()});
+        if (registered.isErr()) { abandonAction(manager.value()); return bridgeError(500, "tilemap_undo_registration_failed"); }
+    }
+    auto committed = commitAction(manager.value());
+    if (committed.isErr()) return errorJson(500, committed.error().message);
+    for (auto& cell : cells) {
+        if (!cell.changed) {
+            observed_cells.push_back(snapshotCell(cell));
+            continue;
         }
-        auto manager = undoManager(editor);
-        if (manager.isErr()) return errorJson(manager.error());
-        auto action = createAction(manager.value(), "Didi: set GridMap cells", grid.value());
-        if (action.isErr()) return errorJson(500, action.error().message);
-        for (auto& cell : cells) if (cell.changed) {
-            auto item = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, cell.item);
-            auto orientation = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, cell.orientation);
-            auto old_item = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, cell.old_item);
-            auto old_orientation = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, cell.old_orientation);
-            auto registered = managerMethod(manager.value(), "add_do_method", grid.value(), "set_cell_item", {&cell.position, &item.value(), &orientation.value()});
-            if (registered.isOk()) registered = managerMethod(manager.value(), "add_undo_method", grid.value(), "set_cell_item", {&cell.position, &old_item.value(), &old_orientation.value()});
-            if (registered.isErr()) { abandonAction(manager.value()); return bridgeError(500, "gridmap_undo_registration_failed"); }
+        auto observed_source_value = callObject(layer.value(), "TileMapLayer", "get_cell_source_id", 2485466453LL, {&cell.coords});
+        auto observed_atlas_value = callObject(layer.value(), "TileMapLayer", "get_cell_atlas_coords", 3050897911LL, {&cell.coords});
+        auto observed_alt_value = callObject(layer.value(), "TileMapLayer", "get_cell_alternative_tile", 2485466453LL, {&cell.coords});
+        auto observed_source = observed_source_value.isOk() ? scalarFromVariant<int64_t>(observed_source_value.value(), GDEXTENSION_VARIANT_TYPE_INT)
+                                                            : Result<int64_t>(observed_source_value.error());
+        auto observed_alt = observed_alt_value.isOk() ? scalarFromVariant<int64_t>(observed_alt_value.value(), GDEXTENSION_VARIANT_TYPE_INT)
+                                                      : Result<int64_t>(observed_alt_value.error());
+        auto observed_atlas = observed_atlas_value.isOk() ? integerVectorToJson(observed_atlas_value.value(), 2)
+                                                          : Result<json>(observed_atlas_value.error());
+        auto expected_atlas = integerVectorToJson(cell.atlas, 2);
+        if (observed_source.isErr() || observed_alt.isErr() || observed_atlas.isErr() ||
+            expected_atlas.isErr() || observed_source.value() != cell.source ||
+            observed_alt.value() != cell.alternative || observed_atlas.value() != expected_atlas.value()) {
+            const auto restored = undoLastAction(manager.value(), root.value());
+            return bridgeError(500, "tilemap_postcondition_mismatch", {{"outcome", restored.isOk() ? "rolled_back" : "unknown"}});
         }
-        auto committed = commitAction(manager.value());
-        if (committed.isErr()) return errorJson(500, committed.error().message);
-        for (auto& cell : cells) {
-            if (!cell.changed) {
-                observed_cells.push_back(observedCell(cell.position, cell.old_item, cell.old_orientation));
-                continue;
+        observed_cells.push_back(observedCell(cell.coords, observed_source.value(),
+                                              observed_atlas.value(), observed_alt.value()));
+    }
+    return liveSceneMutation({{"requested_cells", cells.size()}, {"changed_cells", changed_count},
+        {"unchanged_cells", cells.size() - changed_count}, {"cells", std::move(observed_cells)}, {"undo_redo_registered", true}, {"outcome", "completed"}, {"rollback", "undo_redo"}});
+}
+
+
+json GodotBridge::bridgeGridmapSetCells(const std::string& /*method*/, const json& params, const std::string& session_kind, GDExtensionObjectPtr editor) {
+    if (session_kind != "editor") return bridgeError(409, "session_kind_rejected");
+    if (!hasOnlyKeys(params, {"gridmap_path", "cells"}) || !params.contains("gridmap_path") ||
+        !params["gridmap_path"].is_string() || params["gridmap_path"].get<std::string>().empty() ||
+        params["gridmap_path"].get<std::string>().size() > 1024 ||
+        !params.contains("cells") || !params["cells"].is_array() || params["cells"].empty() ||
+        params["cells"].size() > 256) return bridgeError(400, "invalid_gridmap_set_cells_request");
+    for (const auto& bind : {std::make_tuple("Object", "is_class", 3927539163LL),
+             std::make_tuple("GridMap", "get_mesh_library", 3350993772LL),
+             std::make_tuple("GridMap", "set_cell_item", 3449088946LL),
+             std::make_tuple("GridMap", "get_cell_item", 3724960147LL),
+             std::make_tuple("GridMap", "get_cell_item_orientation", 3724960147LL),
+             std::make_tuple("MeshLibrary", "get_item_list", 1930428628LL)}) {
+        if (requireMethodBind(std::get<0>(bind), std::get<1>(bind), std::get<2>(bind)).isErr()) return bridgeError(501, "required_bind_unavailable");
+    }
+    if (preflightUndoManagerBindings().isErr() || preflightUndoRollbackBindings().isErr())
+        return bridgeError(501, "required_bind_unavailable");
+    auto root = editedSceneRoot(editor);
+    if (root.isErr()) return errorJson(root.error());
+    auto grid = resolveNode(root.value(), params["gridmap_path"].get<std::string>());
+    const auto gridmap_path = params["gridmap_path"].get<std::string>();
+    if (grid.isErr()) {
+        return bridgeError(404, "gridmap_target_not_found", {{"path", gridmap_path}},
+                           "Path " + gridmap_path + " resolves to nothing.");
+    }
+    if (auto refused = refuseUnsavableEdit(root.value(), grid.value(), gridmap_path,
+                                           SceneEdit::Property)) {
+        return *refused;
+    }
+    auto correct_class = objectIsClass(grid.value(), "GridMap");
+    if (correct_class.isErr() || !correct_class.value()) {
+        return wrongNodeTypeError("gridmap_target_wrong_type", gridmap_path, grid.value());
+    }
+    auto library_value = callObject(grid.value(), "GridMap", "get_mesh_library", 3350993772LL);
+    auto library = library_value.isOk() ? objectFromVariant(library_value.value())
+                                        : Result<GDExtensionObjectPtr>(library_value.error());
+    std::set<int64_t> item_ids;
+    if (library.isOk() && library.value()) {
+        auto list = callObject(library.value(), "MeshLibrary", "get_item_list", 1930428628LL);
+        if (list.isErr()) return errorJson(500, list.error().message);
+        auto ids = packedIntegerSet(list.value());
+        if (ids.isErr()) return errorJson(500, ids.error().message);
+        item_ids = std::move(ids.value());
+    }
+    struct Cell { VariantValue position; int64_t item; int64_t orientation; int64_t old_item; int64_t old_orientation; bool changed; };
+    std::vector<Cell> cells;
+    std::set<std::tuple<int64_t, int64_t, int64_t>> seen;
+    for (const auto& record : params["cells"]) {
+        if (!hasOnlyKeys(record, {"position", "item", "orientation"}) || !record.contains("position") ||
+            !record["position"].is_array() || record["position"].size() != 3 || !record.contains("item") ||
+            !record["item"].is_number_integer()) return bridgeError(400, "invalid_gridmap_set_cells_request");
+        int64_t xyz[3];
+        for (int axis = 0; axis < 3; ++axis) {
+            const auto coordinate = boundedJsonInteger(record["position"][axis], -1048576, 1048576);
+            if (!coordinate.has_value()) return bridgeError(400, "invalid_gridmap_set_cells_request");
+            xyz[axis] = *coordinate;
+        }
+        if (!seen.emplace(xyz[0], xyz[1], xyz[2]).second) return bridgeError(409, "duplicate_gridmap_position");
+        const auto item_value = boundedJsonInteger(record["item"], -1, 2147483647LL);
+        const auto orientation_value = record.contains("orientation")
+            ? boundedJsonInteger(record["orientation"], 0, 23)
+            : std::optional<int64_t>(0);
+        if (!item_value.has_value() || !orientation_value.has_value())
+            return bridgeError(400, "invalid_gridmap_set_cells_request");
+        const int64_t item = *item_value;
+        const int64_t orientation = *orientation_value;
+        if (item == -1 && orientation != 0) return bridgeError(400, "invalid_gridmap_set_cells_request");
+        if (item >= 0 && (!library.isOk() || !library.value() || !item_ids.count(item))) return bridgeError(404, "gridmap_item_not_found");
+        auto position = makeVector3i(xyz[0], xyz[1], xyz[2]);
+        if (position.isErr()) return bridgeError(501, "required_bind_unavailable");
+        auto old_item_value = callObject(grid.value(), "GridMap", "get_cell_item", 3724960147LL, {&position.value()});
+        auto old_orientation_value = callObject(grid.value(), "GridMap", "get_cell_item_orientation", 3724960147LL, {&position.value()});
+        if (old_item_value.isErr() || old_orientation_value.isErr()) return bridgeError(500, "gridmap_snapshot_failed");
+        auto old_item = scalarFromVariant<int64_t>(old_item_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+        auto old_orientation = scalarFromVariant<int64_t>(old_orientation_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+        if (old_item.isErr() || old_orientation.isErr()) return bridgeError(500, "gridmap_snapshot_failed");
+        const bool changed = item != old_item.value() || (item >= 0 && orientation != old_orientation.value());
+        cells.push_back(Cell{std::move(position.value()), item, orientation, old_item.value(), old_orientation.value(), changed});
+    }
+    const size_t changed_count = std::count_if(cells.begin(), cells.end(), [](const Cell& cell) { return cell.changed; });
+    // What each requested cell holds, read from the grid, as the layer
+    // writer does (#1019).
+    json observed_cells = json::array();
+    const auto observedCell = [](VariantValue& position, int64_t item, int64_t orientation) {
+        auto position_json = integerVectorToJson(position, 3);
+        return json{{"position", position_json.isOk() ? position_json.value() : json(nullptr)},
+                    {"item", item}, {"orientation", orientation}};
+    };
+    if (changed_count == 0) {
+        for (auto& cell : cells) observed_cells.push_back(observedCell(cell.position, cell.old_item, cell.old_orientation));
+        return liveResult({{"requested_cells", cells.size()}, {"changed_cells", 0},
+            {"unchanged_cells", cells.size()}, {"cells", std::move(observed_cells)}, {"undo_redo_registered", false}, {"outcome", "completed"}, {"rollback", "not_required"}});
+    }
+    auto manager = undoManager(editor);
+    if (manager.isErr()) return errorJson(manager.error());
+    auto action = createAction(manager.value(), "Didi: set GridMap cells", grid.value());
+    if (action.isErr()) return errorJson(500, action.error().message);
+    for (auto& cell : cells) if (cell.changed) {
+        auto item = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, cell.item);
+        auto orientation = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, cell.orientation);
+        auto old_item = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, cell.old_item);
+        auto old_orientation = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, cell.old_orientation);
+        auto registered = managerMethod(manager.value(), "add_do_method", grid.value(), "set_cell_item", {&cell.position, &item.value(), &orientation.value()});
+        if (registered.isOk()) registered = managerMethod(manager.value(), "add_undo_method", grid.value(), "set_cell_item", {&cell.position, &old_item.value(), &old_orientation.value()});
+        if (registered.isErr()) { abandonAction(manager.value()); return bridgeError(500, "gridmap_undo_registration_failed"); }
+    }
+    auto committed = commitAction(manager.value());
+    if (committed.isErr()) return errorJson(500, committed.error().message);
+    for (auto& cell : cells) {
+        if (!cell.changed) {
+            observed_cells.push_back(observedCell(cell.position, cell.old_item, cell.old_orientation));
+            continue;
+        }
+        auto observed_item_value = callObject(grid.value(), "GridMap", "get_cell_item", 3724960147LL, {&cell.position});
+        auto observed_orientation_value = callObject(grid.value(), "GridMap", "get_cell_item_orientation", 3724960147LL, {&cell.position});
+        auto observed_item = observed_item_value.isOk() ? scalarFromVariant<int64_t>(observed_item_value.value(), GDEXTENSION_VARIANT_TYPE_INT)
+                                                        : Result<int64_t>(observed_item_value.error());
+        auto observed_orientation = observed_orientation_value.isOk() ? scalarFromVariant<int64_t>(observed_orientation_value.value(), GDEXTENSION_VARIANT_TYPE_INT)
+                                                                      : Result<int64_t>(observed_orientation_value.error());
+        if (observed_item.isErr() || observed_orientation.isErr() ||
+            observed_item.value() != cell.item ||
+            (cell.item >= 0 && observed_orientation.value() != cell.orientation)) {
+            const auto restored = undoLastAction(manager.value(), root.value());
+            return bridgeError(500, "gridmap_postcondition_mismatch", {{"outcome", restored.isOk() ? "rolled_back" : "unknown"}});
+        }
+        observed_cells.push_back(observedCell(cell.position, observed_item.value(), observed_orientation.value()));
+    }
+    return liveSceneMutation({{"requested_cells", cells.size()}, {"changed_cells", changed_count},
+        {"unchanged_cells", cells.size() - changed_count}, {"cells", std::move(observed_cells)}, {"undo_redo_registered", true}, {"outcome", "completed"}, {"rollback", "undo_redo"}});
+}
+
+
+json GodotBridge::bridgeVisionSetCameraTransform(const std::string& /*method*/, const json& params, const std::string& session_kind, GDExtensionObjectPtr editor) {
+    if (session_kind != "editor") return bridgeError(409, "session_kind_rejected");
+    auto vector_is_valid = [](const json& value, double limit) {
+        if (!value.is_object() || value.size() != 3) return false;
+        for (const auto* axis : {"x", "y", "z"}) {
+            if (!value.contains(axis) || !value[axis].is_number()) return false;
+            const double component = value[axis].get<double>();
+            if (!std::isfinite(component) || component < -limit || component > limit) {
+                return false;
             }
-            auto observed_item_value = callObject(grid.value(), "GridMap", "get_cell_item", 3724960147LL, {&cell.position});
-            auto observed_orientation_value = callObject(grid.value(), "GridMap", "get_cell_item_orientation", 3724960147LL, {&cell.position});
-            auto observed_item = observed_item_value.isOk() ? scalarFromVariant<int64_t>(observed_item_value.value(), GDEXTENSION_VARIANT_TYPE_INT)
-                                                            : Result<int64_t>(observed_item_value.error());
-            auto observed_orientation = observed_orientation_value.isOk() ? scalarFromVariant<int64_t>(observed_orientation_value.value(), GDEXTENSION_VARIANT_TYPE_INT)
-                                                                          : Result<int64_t>(observed_orientation_value.error());
-            if (observed_item.isErr() || observed_orientation.isErr() ||
-                observed_item.value() != cell.item ||
-                (cell.item >= 0 && observed_orientation.value() != cell.orientation)) {
-                const auto restored = undoLastAction(manager.value(), root.value());
-                return bridgeError(500, "gridmap_postcondition_mismatch", {{"outcome", restored.isOk() ? "rolled_back" : "unknown"}});
-            }
-            observed_cells.push_back(observedCell(cell.position, observed_item.value(), observed_orientation.value()));
         }
-        return liveSceneMutation({{"requested_cells", cells.size()}, {"changed_cells", changed_count},
-            {"unchanged_cells", cells.size() - changed_count}, {"cells", std::move(observed_cells)}, {"undo_redo_registered", true}, {"outcome", "completed"}, {"rollback", "undo_redo"}});
+        return true;
+    };
+    if (!hasOnlyKeys(params, {"camera_path", "position", "rotation_degrees", "fov"}) ||
+        !params.contains("camera_path") || !params["camera_path"].is_string() ||
+        params["camera_path"].get_ref<const std::string&>().empty() ||
+        params["camera_path"].get_ref<const std::string&>().size() > 1024 ||
+        !params.contains("position") || !vector_is_valid(params["position"], 1000000.0) ||
+        (params.contains("rotation_degrees") &&
+         !vector_is_valid(params["rotation_degrees"], 360000.0)) ||
+        (params.contains("fov") &&
+         (!params["fov"].is_number() || !std::isfinite(params["fov"].get<double>()) ||
+          params["fov"].get<double>() < 1.0 || params["fov"].get<double>() > 179.0))) {
+        return bridgeError(400, "invalid_viewport_set_camera_transform_request");
     }
 
-    if (method == "vision.setCameraTransform") {
-        if (session_kind != "editor") return bridgeError(409, "session_kind_rejected");
-        auto vector_is_valid = [](const json& value, double limit) {
-            if (!value.is_object() || value.size() != 3) return false;
-            for (const auto* axis : {"x", "y", "z"}) {
-                if (!value.contains(axis) || !value[axis].is_number()) return false;
-                const double component = value[axis].get<double>();
-                if (!std::isfinite(component) || component < -limit || component > limit) {
-                    return false;
-                }
-            }
-            return true;
-        };
-        if (!hasOnlyKeys(params, {"camera_path", "position", "rotation_degrees", "fov"}) ||
-            !params.contains("camera_path") || !params["camera_path"].is_string() ||
-            params["camera_path"].get_ref<const std::string&>().empty() ||
-            params["camera_path"].get_ref<const std::string&>().size() > 1024 ||
-            !params.contains("position") || !vector_is_valid(params["position"], 1000000.0) ||
-            (params.contains("rotation_degrees") &&
-             !vector_is_valid(params["rotation_degrees"], 360000.0)) ||
-            (params.contains("fov") &&
-             (!params["fov"].is_number() || !std::isfinite(params["fov"].get<double>()) ||
-              params["fov"].get<double>() < 1.0 || params["fov"].get<double>() > 179.0))) {
-            return bridgeError(400, "invalid_viewport_set_camera_transform_request");
-        }
-
-        for (const auto& bind : {
-                 std::make_tuple("Object", "is_class", 3927539163LL),
-                 std::make_tuple("Node3D", "get_position", 3360562783LL),
-                 std::make_tuple("Node3D", "set_position", 3460891852LL),
-                 std::make_tuple("Node3D", "get_rotation_degrees", 3360562783LL),
-                 std::make_tuple("Node3D", "set_rotation_degrees", 3460891852LL),
-                 std::make_tuple("Camera3D", "get_fov", 1740695150LL),
-                 std::make_tuple("Camera3D", "set_fov", 373806689LL),
-                 std::make_tuple("EditorUndoRedoManager", "get_object_history_id", 1107568780LL),
-                 std::make_tuple("EditorUndoRedoManager", "get_history_undo_redo", 2417974513LL),
-                 std::make_tuple("UndoRedo", "has_undo", 36873697LL),
-                 std::make_tuple("UndoRedo", "undo", 2240911060LL)}) {
-            if (requireMethodBind(std::get<0>(bind), std::get<1>(bind),
-                                  std::get<2>(bind)).isErr()) {
-                return bridgeError(501, "required_bind_unavailable");
-            }
-        }
-        if (preflightUndoManagerBindings().isErr()) {
+    for (const auto& bind : {
+             std::make_tuple("Object", "is_class", 3927539163LL),
+             std::make_tuple("Node3D", "get_position", 3360562783LL),
+             std::make_tuple("Node3D", "set_position", 3460891852LL),
+             std::make_tuple("Node3D", "get_rotation_degrees", 3360562783LL),
+             std::make_tuple("Node3D", "set_rotation_degrees", 3460891852LL),
+             std::make_tuple("Camera3D", "get_fov", 1740695150LL),
+             std::make_tuple("Camera3D", "set_fov", 373806689LL),
+             std::make_tuple("EditorUndoRedoManager", "get_object_history_id", 1107568780LL),
+             std::make_tuple("EditorUndoRedoManager", "get_history_undo_redo", 2417974513LL),
+             std::make_tuple("UndoRedo", "has_undo", 36873697LL),
+             std::make_tuple("UndoRedo", "undo", 2240911060LL)}) {
+        if (requireMethodBind(std::get<0>(bind), std::get<1>(bind),
+                              std::get<2>(bind)).isErr()) {
             return bridgeError(501, "required_bind_unavailable");
         }
-
-        auto root = editedSceneRoot(editor);
-        if (root.isErr()) return errorJson(root.error());
-        const auto camera_path = params["camera_path"].get<std::string>();
-        auto camera = resolveNode(root.value(), camera_path);
-        if (camera.isErr()) return errorJson(camera.error());
-        if (auto refused = refuseUnsavableEdit(root.value(), camera.value(), camera_path,
-                                               SceneEdit::Property)) {
-            return *refused;
-        }
-        auto class_name = makeString("Camera3D");
-        if (class_name.isErr()) return errorJson(500, class_name.error().message);
-        auto class_result = callObject(camera.value(), "Object", "is_class", 3927539163LL,
-                                       {&class_name.value()});
-        if (class_result.isErr()) return errorJson(500, class_result.error().message);
-        auto is_camera = scalarFromVariant<GDExtensionBool>(
-            class_result.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
-        if (is_camera.isErr()) return errorJson(500, is_camera.error().message);
-        if (!is_camera.value()) return bridgeError(404, "camera_path_does_not_resolve_to_camera3d");
-
-        auto old_position = callObject(camera.value(), "Node3D", "get_position", 3360562783LL);
-        auto old_rotation = callObject(camera.value(), "Node3D", "get_rotation_degrees", 3360562783LL);
-        auto old_fov_value = callObject(camera.value(), "Camera3D", "get_fov", 1740695150LL);
-        if (old_position.isErr() || old_rotation.isErr() || old_fov_value.isErr()) {
-            return bridgeError(500, "camera_state_read_failed");
-        }
-        auto old_position_json = pointVariantToJson(old_position.value(), 3);
-        auto old_rotation_json = pointVariantToJson(old_rotation.value(), 3);
-        auto old_fov = scalarFromVariant<double>(old_fov_value.value(),
-                                                 GDEXTENSION_VARIANT_TYPE_FLOAT);
-        if (old_position_json.isErr() || old_rotation_json.isErr() || old_fov.isErr()) {
-            return bridgeError(500, "extension_protocol_error");
-        }
-
-        const auto& requested_position = params["position"];
-        auto new_position = makeVector3(requested_position["x"].get<double>(),
-                                        requested_position["y"].get<double>(),
-                                        requested_position["z"].get<double>());
-        if (new_position.isErr()) return bridgeError(501, "required_bind_unavailable");
-        std::optional<VariantValue> new_rotation;
-        if (params.contains("rotation_degrees")) {
-            const auto& requested = params["rotation_degrees"];
-            auto value = makeVector3(requested["x"].get<double>(), requested["y"].get<double>(),
-                                     requested["z"].get<double>());
-            if (value.isErr()) return bridgeError(501, "required_bind_unavailable");
-            new_rotation.emplace(std::move(value.value()));
-        }
-        std::optional<VariantValue> new_fov;
-        if (params.contains("fov")) {
-            auto value = makeScalar(GDEXTENSION_VARIANT_TYPE_FLOAT,
-                                    params["fov"].get<double>());
-            if (value.isErr()) return bridgeError(501, "required_bind_unavailable");
-            new_fov.emplace(std::move(value.value()));
-        }
-
-        auto manager = undoManager(editor);
-        if (manager.isErr()) return errorJson(manager.error());
-        auto action = createAction(manager.value(), "Set Camera3D Transform", camera.value());
-        if (action.isErr()) return errorJson(500, action.error().message);
-        auto add_step = [&](const char* operation, const char* property_method,
-                            VariantValue& value) {
-            return managerMethod(manager.value(), operation, camera.value(), property_method,
-                                 {&value});
-        };
-        auto registered = add_step("add_do_method", "set_position", new_position.value());
-        if (registered.isOk()) {
-            registered = add_step("add_undo_method", "set_position", old_position.value());
-        }
-        if (registered.isOk() && new_rotation.has_value()) {
-            registered = add_step("add_do_method", "set_rotation_degrees", *new_rotation);
-        }
-        if (registered.isOk() && new_rotation.has_value()) {
-            registered = add_step("add_undo_method", "set_rotation_degrees", old_rotation.value());
-        }
-        if (registered.isOk() && new_fov.has_value()) {
-            registered = add_step("add_do_method", "set_fov", *new_fov);
-        }
-        if (registered.isOk() && new_fov.has_value()) {
-            registered = add_step("add_undo_method", "set_fov", old_fov_value.value());
-        }
-        if (registered.isErr()) {
-            abandonAction(manager.value());
-            return bridgeError(500, "camera_undo_registration_failed");
-        }
-        auto committed = commitAction(manager.value());
-        if (committed.isErr()) return errorJson(500, committed.error().message);
-
-        auto observed_position = callObject(camera.value(), "Node3D", "get_position", 3360562783LL);
-        auto observed_rotation = callObject(camera.value(), "Node3D", "get_rotation_degrees", 3360562783LL);
-        auto observed_fov_value = callObject(camera.value(), "Camera3D", "get_fov", 1740695150LL);
-        if (observed_position.isErr() || observed_rotation.isErr() || observed_fov_value.isErr()) {
-            (void)undoLastAction(manager.value(), root.value());
-            return bridgeError(500, "camera_postcondition_read_failed");
-        }
-        auto observed_position_json = pointVariantToJson(observed_position.value(), 3);
-        auto observed_rotation_json = pointVariantToJson(observed_rotation.value(), 3);
-        auto observed_fov = scalarFromVariant<double>(observed_fov_value.value(),
-                                                      GDEXTENSION_VARIANT_TYPE_FLOAT);
-        if (observed_position_json.isErr() || observed_rotation_json.isErr() ||
-            observed_fov.isErr()) {
-            (void)undoLastAction(manager.value(), root.value());
-            return bridgeError(500, "extension_protocol_error");
-        }
-        auto close_enough = [](double left, double right) {
-            return std::abs(left - right) <=
-                   1e-5 * std::max({1.0, std::abs(left), std::abs(right)});
-        };
-        auto vector_matches = [&](const json& observed, const json& requested) {
-            for (const auto* axis : {"x", "y", "z"}) {
-                if (!close_enough(observed[axis].get<double>(), requested[axis].get<double>())) {
-                    return false;
-                }
-            }
-            return true;
-        };
-        bool matched = vector_matches(observed_position_json.value(), requested_position);
-        if (params.contains("rotation_degrees")) {
-            matched = matched && vector_matches(observed_rotation_json.value(),
-                                                params["rotation_degrees"]);
-        }
-        if (params.contains("fov")) {
-            matched = matched && close_enough(observed_fov.value(), params["fov"].get<double>());
-        }
-        if (!matched) {
-            const auto restored = undoLastAction(manager.value(), root.value());
-            return bridgeError(500, "camera_postcondition_mismatch",
-                             {{"outcome", restored.isOk() ? "rolled_back" : "unknown"},
-                              {"rollback", restored.isOk() ? "completed" : "failed"},
-                              {"retryable", false}});
-        }
-        return liveSceneMutation({
-            {"camera_path", camera_path},
-            {"old", {{"position", old_position_json.value()},
-                     {"rotation_degrees", old_rotation_json.value()},
-                     {"fov", old_fov.value()}}},
-            {"new", {{"position", observed_position_json.value()},
-                     {"rotation_degrees", observed_rotation_json.value()},
-                     {"fov", observed_fov.value()}}},
-            {"undo_redo_registered", true}, {"outcome", "completed"},
-            {"rollback", "undo_redo"}});
+    }
+    if (preflightUndoManagerBindings().isErr()) {
+        return bridgeError(501, "required_bind_unavailable");
     }
 
-    if (method == "vision.toggleDebugDraw") {
-        if (session_kind != "editor") return bridgeError(409, "session_kind_rejected");
-        if (!hasOnlyKeys(params, {"collision_shapes", "navigation_mesh", "wireframe"}) ||
-            (!params.contains("collision_shapes") && !params.contains("navigation_mesh")) ||
-            (params.contains("collision_shapes") && !params["collision_shapes"].is_boolean()) ||
-            (params.contains("navigation_mesh") && !params["navigation_mesh"].is_boolean()) ||
-            (params.contains("wireframe") &&
-             (!params["wireframe"].is_boolean() || params["wireframe"].get<bool>()))) {
-            return bridgeError(400, "invalid_viewport_toggle_debug_draw_request");
-        }
-        for (const auto& bind : {
-                 std::make_pair("is_debugging_collisions_hint", 36873697LL),
-                 std::make_pair("set_debug_collisions_hint", 2586408642LL),
-                 std::make_pair("is_debugging_navigation_hint", 36873697LL),
-                 std::make_pair("set_debug_navigation_hint", 2586408642LL)}) {
-            if (requireMethodBind("SceneTree", bind.first, bind.second).isErr()) {
-                return bridgeError(501, "required_bind_unavailable");
+    auto root = editedSceneRoot(editor);
+    if (root.isErr()) return errorJson(root.error());
+    const auto camera_path = params["camera_path"].get<std::string>();
+    auto camera = resolveNode(root.value(), camera_path);
+    if (camera.isErr()) return errorJson(camera.error());
+    if (auto refused = refuseUnsavableEdit(root.value(), camera.value(), camera_path,
+                                           SceneEdit::Property)) {
+        return *refused;
+    }
+    auto class_name = makeString("Camera3D");
+    if (class_name.isErr()) return errorJson(500, class_name.error().message);
+    auto class_result = callObject(camera.value(), "Object", "is_class", 3927539163LL,
+                                   {&class_name.value()});
+    if (class_result.isErr()) return errorJson(500, class_result.error().message);
+    auto is_camera = scalarFromVariant<GDExtensionBool>(
+        class_result.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+    if (is_camera.isErr()) return errorJson(500, is_camera.error().message);
+    if (!is_camera.value()) return bridgeError(404, "camera_path_does_not_resolve_to_camera3d");
+
+    auto old_position = callObject(camera.value(), "Node3D", "get_position", 3360562783LL);
+    auto old_rotation = callObject(camera.value(), "Node3D", "get_rotation_degrees", 3360562783LL);
+    auto old_fov_value = callObject(camera.value(), "Camera3D", "get_fov", 1740695150LL);
+    if (old_position.isErr() || old_rotation.isErr() || old_fov_value.isErr()) {
+        return bridgeError(500, "camera_state_read_failed");
+    }
+    auto old_position_json = pointVariantToJson(old_position.value(), 3);
+    auto old_rotation_json = pointVariantToJson(old_rotation.value(), 3);
+    auto old_fov = scalarFromVariant<double>(old_fov_value.value(),
+                                             GDEXTENSION_VARIANT_TYPE_FLOAT);
+    if (old_position_json.isErr() || old_rotation_json.isErr() || old_fov.isErr()) {
+        return bridgeError(500, "extension_protocol_error");
+    }
+
+    const auto& requested_position = params["position"];
+    auto new_position = makeVector3(requested_position["x"].get<double>(),
+                                    requested_position["y"].get<double>(),
+                                    requested_position["z"].get<double>());
+    if (new_position.isErr()) return bridgeError(501, "required_bind_unavailable");
+    std::optional<VariantValue> new_rotation;
+    if (params.contains("rotation_degrees")) {
+        const auto& requested = params["rotation_degrees"];
+        auto value = makeVector3(requested["x"].get<double>(), requested["y"].get<double>(),
+                                 requested["z"].get<double>());
+        if (value.isErr()) return bridgeError(501, "required_bind_unavailable");
+        new_rotation.emplace(std::move(value.value()));
+    }
+    std::optional<VariantValue> new_fov;
+    if (params.contains("fov")) {
+        auto value = makeScalar(GDEXTENSION_VARIANT_TYPE_FLOAT,
+                                params["fov"].get<double>());
+        if (value.isErr()) return bridgeError(501, "required_bind_unavailable");
+        new_fov.emplace(std::move(value.value()));
+    }
+
+    auto manager = undoManager(editor);
+    if (manager.isErr()) return errorJson(manager.error());
+    auto action = createAction(manager.value(), "Set Camera3D Transform", camera.value());
+    if (action.isErr()) return errorJson(500, action.error().message);
+    auto add_step = [&](const char* operation, const char* property_method,
+                        VariantValue& value) {
+        return managerMethod(manager.value(), operation, camera.value(), property_method,
+                             {&value});
+    };
+    auto registered = add_step("add_do_method", "set_position", new_position.value());
+    if (registered.isOk()) {
+        registered = add_step("add_undo_method", "set_position", old_position.value());
+    }
+    if (registered.isOk() && new_rotation.has_value()) {
+        registered = add_step("add_do_method", "set_rotation_degrees", *new_rotation);
+    }
+    if (registered.isOk() && new_rotation.has_value()) {
+        registered = add_step("add_undo_method", "set_rotation_degrees", old_rotation.value());
+    }
+    if (registered.isOk() && new_fov.has_value()) {
+        registered = add_step("add_do_method", "set_fov", *new_fov);
+    }
+    if (registered.isOk() && new_fov.has_value()) {
+        registered = add_step("add_undo_method", "set_fov", old_fov_value.value());
+    }
+    if (registered.isErr()) {
+        abandonAction(manager.value());
+        return bridgeError(500, "camera_undo_registration_failed");
+    }
+    auto committed = commitAction(manager.value());
+    if (committed.isErr()) return errorJson(500, committed.error().message);
+
+    auto observed_position = callObject(camera.value(), "Node3D", "get_position", 3360562783LL);
+    auto observed_rotation = callObject(camera.value(), "Node3D", "get_rotation_degrees", 3360562783LL);
+    auto observed_fov_value = callObject(camera.value(), "Camera3D", "get_fov", 1740695150LL);
+    if (observed_position.isErr() || observed_rotation.isErr() || observed_fov_value.isErr()) {
+        (void)undoLastAction(manager.value(), root.value());
+        return bridgeError(500, "camera_postcondition_read_failed");
+    }
+    auto observed_position_json = pointVariantToJson(observed_position.value(), 3);
+    auto observed_rotation_json = pointVariantToJson(observed_rotation.value(), 3);
+    auto observed_fov = scalarFromVariant<double>(observed_fov_value.value(),
+                                                  GDEXTENSION_VARIANT_TYPE_FLOAT);
+    if (observed_position_json.isErr() || observed_rotation_json.isErr() ||
+        observed_fov.isErr()) {
+        (void)undoLastAction(manager.value(), root.value());
+        return bridgeError(500, "extension_protocol_error");
+    }
+    auto close_enough = [](double left, double right) {
+        return std::abs(left - right) <=
+               1e-5 * std::max({1.0, std::abs(left), std::abs(right)});
+    };
+    auto vector_matches = [&](const json& observed, const json& requested) {
+        for (const auto* axis : {"x", "y", "z"}) {
+            if (!close_enough(observed[axis].get<double>(), requested[axis].get<double>())) {
+                return false;
             }
         }
-        auto tree = liveSceneTree();
-        if (tree.isErr()) return errorJson(tree.error());
-        auto read_hint = [&](const char* getter) -> Result<bool> {
-            auto value = callObject(tree.value(), "SceneTree", getter, 36873697LL);
-            if (value.isErr()) return value.error();
-            auto enabled = scalarFromVariant<GDExtensionBool>(
-                value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
-            return enabled.isOk() ? Result<bool>(enabled.value() != 0)
-                                  : Result<bool>(enabled.error());
-        };
-        auto old_collision = read_hint("is_debugging_collisions_hint");
-        auto old_navigation = read_hint("is_debugging_navigation_hint");
-        if (old_collision.isErr() || old_navigation.isErr()) {
-            return bridgeError(500, "debug_hint_read_failed");
+        return true;
+    };
+    bool matched = vector_matches(observed_position_json.value(), requested_position);
+    if (params.contains("rotation_degrees")) {
+        matched = matched && vector_matches(observed_rotation_json.value(),
+                                            params["rotation_degrees"]);
+    }
+    if (params.contains("fov")) {
+        matched = matched && close_enough(observed_fov.value(), params["fov"].get<double>());
+    }
+    if (!matched) {
+        const auto restored = undoLastAction(manager.value(), root.value());
+        return bridgeError(500, "camera_postcondition_mismatch",
+                         {{"outcome", restored.isOk() ? "rolled_back" : "unknown"},
+                          {"rollback", restored.isOk() ? "completed" : "failed"},
+                          {"retryable", false}});
+    }
+    return liveSceneMutation({
+        {"camera_path", camera_path},
+        {"old", {{"position", old_position_json.value()},
+                 {"rotation_degrees", old_rotation_json.value()},
+                 {"fov", old_fov.value()}}},
+        {"new", {{"position", observed_position_json.value()},
+                 {"rotation_degrees", observed_rotation_json.value()},
+                 {"fov", observed_fov.value()}}},
+        {"undo_redo_registered", true}, {"outcome", "completed"},
+        {"rollback", "undo_redo"}});
+}
+
+
+json GodotBridge::bridgeVisionToggleDebugDraw(const std::string& /*method*/, const json& params, const std::string& session_kind, GDExtensionObjectPtr /*editor*/) {
+    if (session_kind != "editor") return bridgeError(409, "session_kind_rejected");
+    if (!hasOnlyKeys(params, {"collision_shapes", "navigation_mesh", "wireframe"}) ||
+        (!params.contains("collision_shapes") && !params.contains("navigation_mesh")) ||
+        (params.contains("collision_shapes") && !params["collision_shapes"].is_boolean()) ||
+        (params.contains("navigation_mesh") && !params["navigation_mesh"].is_boolean()) ||
+        (params.contains("wireframe") &&
+         (!params["wireframe"].is_boolean() || params["wireframe"].get<bool>()))) {
+        return bridgeError(400, "invalid_viewport_toggle_debug_draw_request");
+    }
+    for (const auto& bind : {
+             std::make_pair("is_debugging_collisions_hint", 36873697LL),
+             std::make_pair("set_debug_collisions_hint", 2586408642LL),
+             std::make_pair("is_debugging_navigation_hint", 36873697LL),
+             std::make_pair("set_debug_navigation_hint", 2586408642LL)}) {
+        if (requireMethodBind("SceneTree", bind.first, bind.second).isErr()) {
+            return bridgeError(501, "required_bind_unavailable");
         }
-        auto set_hint = [&](const char* setter, bool enabled) -> Result<void> {
-            auto value = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL,
-                                    static_cast<GDExtensionBool>(enabled));
-            if (value.isErr()) return value.error();
-            auto result = callObject(tree.value(), "SceneTree", setter, 2586408642LL,
-                                     {&value.value()});
-            return result.isOk() ? Result<void>::ok() : Result<void>(result.error());
-        };
-        auto restore_hints = [&]() {
-            const auto collision = set_hint("set_debug_collisions_hint", old_collision.value());
-            const auto navigation = set_hint("set_debug_navigation_hint", old_navigation.value());
-            return collision.isOk() && navigation.isOk();
-        };
-        if (params.contains("collision_shapes")) {
-            auto changed = set_hint("set_debug_collisions_hint",
-                                    params["collision_shapes"].get<bool>());
-            if (changed.isErr()) {
-                const bool restored = restore_hints();
-                return errorJson(500, changed.error().message,
-                                 {{"outcome", restored ? "rolled_back" : "unknown"},
-                                  {"rollback", restored ? "completed" : "failed"},
-                                  {"retryable", false}});
-            }
-        }
-        if (params.contains("navigation_mesh")) {
-            auto changed = set_hint("set_debug_navigation_hint",
-                                    params["navigation_mesh"].get<bool>());
-            if (changed.isErr()) {
-                const bool restored = restore_hints();
-                return errorJson(500, changed.error().message,
-                                 {{"outcome", restored ? "rolled_back" : "unknown"},
-                                  {"rollback", restored ? "completed" : "failed"},
-                                  {"retryable", false}});
-            }
-        }
-        auto observed_collision = read_hint("is_debugging_collisions_hint");
-        auto observed_navigation = read_hint("is_debugging_navigation_hint");
-        const bool matched = observed_collision.isOk() && observed_navigation.isOk() &&
-            (!params.contains("collision_shapes") ||
-             observed_collision.value() == params["collision_shapes"].get<bool>()) &&
-            (!params.contains("navigation_mesh") ||
-             observed_navigation.value() == params["navigation_mesh"].get<bool>()) &&
-            (params.contains("collision_shapes") ||
-             observed_collision.value() == old_collision.value()) &&
-            (params.contains("navigation_mesh") ||
-             observed_navigation.value() == old_navigation.value());
-        if (!matched) {
+    }
+    auto tree = liveSceneTree();
+    if (tree.isErr()) return errorJson(tree.error());
+    auto read_hint = [&](const char* getter) -> Result<bool> {
+        auto value = callObject(tree.value(), "SceneTree", getter, 36873697LL);
+        if (value.isErr()) return value.error();
+        auto enabled = scalarFromVariant<GDExtensionBool>(
+            value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+        return enabled.isOk() ? Result<bool>(enabled.value() != 0)
+                              : Result<bool>(enabled.error());
+    };
+    auto old_collision = read_hint("is_debugging_collisions_hint");
+    auto old_navigation = read_hint("is_debugging_navigation_hint");
+    if (old_collision.isErr() || old_navigation.isErr()) {
+        return bridgeError(500, "debug_hint_read_failed");
+    }
+    auto set_hint = [&](const char* setter, bool enabled) -> Result<void> {
+        auto value = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL,
+                                static_cast<GDExtensionBool>(enabled));
+        if (value.isErr()) return value.error();
+        auto result = callObject(tree.value(), "SceneTree", setter, 2586408642LL,
+                                 {&value.value()});
+        return result.isOk() ? Result<void>::ok() : Result<void>(result.error());
+    };
+    auto restore_hints = [&]() {
+        const auto collision = set_hint("set_debug_collisions_hint", old_collision.value());
+        const auto navigation = set_hint("set_debug_navigation_hint", old_navigation.value());
+        return collision.isOk() && navigation.isOk();
+    };
+    if (params.contains("collision_shapes")) {
+        auto changed = set_hint("set_debug_collisions_hint",
+                                params["collision_shapes"].get<bool>());
+        if (changed.isErr()) {
             const bool restored = restore_hints();
-            return bridgeError(500, "debug_draw_postcondition_mismatch",
+            return errorJson(500, changed.error().message,
                              {{"outcome", restored ? "rolled_back" : "unknown"},
                               {"rollback", restored ? "completed" : "failed"},
                               {"retryable", false}});
         }
-        return liveResult({
-            {"previous", {{"collision_shapes", old_collision.value()},
-                          {"navigation_mesh", old_navigation.value()}}},
-            {"observed", {{"collision_shapes", observed_collision.value()},
-                          {"navigation_mesh", observed_navigation.value()}}},
-            {"effective_scope", "future_games_run_from_editor"},
-            {"outcome", "completed"}, {"rollback", "explicit_restore"}});
     }
+    if (params.contains("navigation_mesh")) {
+        auto changed = set_hint("set_debug_navigation_hint",
+                                params["navigation_mesh"].get<bool>());
+        if (changed.isErr()) {
+            const bool restored = restore_hints();
+            return errorJson(500, changed.error().message,
+                             {{"outcome", restored ? "rolled_back" : "unknown"},
+                              {"rollback", restored ? "completed" : "failed"},
+                              {"retryable", false}});
+        }
+    }
+    auto observed_collision = read_hint("is_debugging_collisions_hint");
+    auto observed_navigation = read_hint("is_debugging_navigation_hint");
+    const bool matched = observed_collision.isOk() && observed_navigation.isOk() &&
+        (!params.contains("collision_shapes") ||
+         observed_collision.value() == params["collision_shapes"].get<bool>()) &&
+        (!params.contains("navigation_mesh") ||
+         observed_navigation.value() == params["navigation_mesh"].get<bool>()) &&
+        (params.contains("collision_shapes") ||
+         observed_collision.value() == old_collision.value()) &&
+        (params.contains("navigation_mesh") ||
+         observed_navigation.value() == old_navigation.value());
+    if (!matched) {
+        const bool restored = restore_hints();
+        return bridgeError(500, "debug_draw_postcondition_mismatch",
+                         {{"outcome", restored ? "rolled_back" : "unknown"},
+                          {"rollback", restored ? "completed" : "failed"},
+                          {"retryable", false}});
+    }
+    return liveResult({
+        {"previous", {{"collision_shapes", old_collision.value()},
+                      {"navigation_mesh", old_navigation.value()}}},
+        {"observed", {{"collision_shapes", observed_collision.value()},
+                      {"navigation_mesh", observed_navigation.value()}}},
+        {"effective_scope", "future_games_run_from_editor"},
+        {"outcome", "completed"}, {"rollback", "explicit_restore"}});
+}
 
-    if (method == "signal.listConnections" || method == "signal.connect" ||
-        method == "signal.disconnect" || method == "signal.emit") {
-        if (session_kind != "editor") return bridgeError(409, "session_kind_rejected");
 
-        auto bounded_string = [](const json& value, size_t minimum, size_t maximum) {
-            if (!value.is_string()) return false;
-            const auto& text = value.get_ref<const std::string&>();
-            if (text.size() < minimum || text.size() > maximum) return false;
-            try {
-                (void)json(text).dump();
-                return true;
-            } catch (const json::exception&) {
-                return false;
+json GodotBridge::bridgeSignals(const std::string& method, const json& params, const std::string& session_kind, GDExtensionObjectPtr editor) {
+    if (session_kind != "editor") return bridgeError(409, "session_kind_rejected");
+
+    auto bounded_string = [](const json& value, size_t minimum, size_t maximum) {
+        if (!value.is_string()) return false;
+        const auto& text = value.get_ref<const std::string&>();
+        if (text.size() < minimum || text.size() > maximum) return false;
+        try {
+            (void)json(text).dump();
+            return true;
+        } catch (const json::exception&) {
+            return false;
+        }
+    };
+    std::function<bool(const json&, int)> valid_emit_value =
+        [&](const json& value, int depth) {
+            if (depth > 8) return false;
+            if (value.is_null() || value.is_boolean()) return true;
+            if (value.is_number_unsigned()) {
+                return value.get<uint64_t>() <=
+                       static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
             }
+            if (value.is_number_integer()) return true;
+            if (value.is_number_float()) return std::isfinite(value.get<double>());
+            if (value.is_string()) return bounded_string(value, 0, 4096);
+            if (value.is_array()) {
+                if (value.size() > 64) return false;
+                for (const auto& element : value) {
+                    if (!valid_emit_value(element, depth + 1)) return false;
+                }
+                return true;
+            }
+            if (value.is_object()) {
+                if (value.size() > 64) return false;
+                for (auto it = value.begin(); it != value.end(); ++it) {
+                    if (!bounded_string(json(it.key()), 0, 4096) ||
+                        !valid_emit_value(it.value(), depth + 1)) {
+                        return false;
+                    }
+                }
+                return true;
+            }
+            return false;
         };
-        std::function<bool(const json&, int)> valid_emit_value =
-            [&](const json& value, int depth) {
-                if (depth > 8) return false;
-                if (value.is_null() || value.is_boolean()) return true;
-                if (value.is_number_unsigned()) {
-                    return value.get<uint64_t>() <=
-                           static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
-                }
-                if (value.is_number_integer()) return true;
-                if (value.is_number_float()) return std::isfinite(value.get<double>());
-                if (value.is_string()) return bounded_string(value, 0, 4096);
-                if (value.is_array()) {
-                    if (value.size() > 64) return false;
-                    for (const auto& element : value) {
-                        if (!valid_emit_value(element, depth + 1)) return false;
-                    }
-                    return true;
-                }
-                if (value.is_object()) {
-                    if (value.size() > 64) return false;
-                    for (auto it = value.begin(); it != value.end(); ++it) {
-                        if (!bounded_string(json(it.key()), 0, 4096) ||
-                            !valid_emit_value(it.value(), depth + 1)) {
-                            return false;
-                        }
-                    }
-                    return true;
-                }
-                return false;
-            };
-        auto utf8_prefix = [](const std::string& text, size_t maximum) -> Result<std::string> {
-            size_t index = 0;
-            size_t accepted = 0;
-            while (index < text.size()) {
-                const auto first = static_cast<unsigned char>(text[index]);
-                size_t length = 0;
-                if (first <= 0x7f) {
-                    length = 1;
-                } else if (first >= 0xc2 && first <= 0xdf) {
-                    length = 2;
-                } else if (first >= 0xe0 && first <= 0xef) {
-                    length = 3;
-                } else if (first >= 0xf0 && first <= 0xf4) {
-                    length = 4;
-                } else {
+    auto utf8_prefix = [](const std::string& text, size_t maximum) -> Result<std::string> {
+        size_t index = 0;
+        size_t accepted = 0;
+        while (index < text.size()) {
+            const auto first = static_cast<unsigned char>(text[index]);
+            size_t length = 0;
+            if (first <= 0x7f) {
+                length = 1;
+            } else if (first >= 0xc2 && first <= 0xdf) {
+                length = 2;
+            } else if (first >= 0xe0 && first <= 0xef) {
+                length = 3;
+            } else if (first >= 0xf0 && first <= 0xf4) {
+                length = 4;
+            } else {
+                return Error::internal("Godot returned invalid UTF-8 signal metadata");
+            }
+            if (index + length > text.size()) {
+                return Error::internal("Godot returned truncated UTF-8 signal metadata");
+            }
+            for (size_t continuation = 1; continuation < length; ++continuation) {
+                const auto byte = static_cast<unsigned char>(text[index + continuation]);
+                if ((byte & 0xc0) != 0x80) {
                     return Error::internal("Godot returned invalid UTF-8 signal metadata");
                 }
-                if (index + length > text.size()) {
-                    return Error::internal("Godot returned truncated UTF-8 signal metadata");
-                }
-                for (size_t continuation = 1; continuation < length; ++continuation) {
-                    const auto byte = static_cast<unsigned char>(text[index + continuation]);
-                    if ((byte & 0xc0) != 0x80) {
-                        return Error::internal("Godot returned invalid UTF-8 signal metadata");
-                    }
-                }
-                if (length == 3) {
-                    const auto second = static_cast<unsigned char>(text[index + 1]);
-                    if ((first == 0xe0 && second < 0xa0) ||
-                        (first == 0xed && second >= 0xa0)) {
-                        return Error::internal("Godot returned invalid UTF-8 signal metadata");
-                    }
-                }
-                if (length == 4) {
-                    const auto second = static_cast<unsigned char>(text[index + 1]);
-                    if ((first == 0xf0 && second < 0x90) ||
-                        (first == 0xf4 && second >= 0x90)) {
-                        return Error::internal("Godot returned invalid UTF-8 signal metadata");
-                    }
-                }
-                if (index + length > maximum) break;
-                index += length;
-                accepted = index;
             }
-            return text.substr(0, accepted);
-        };
-        auto array_size = [](VariantValue& value) -> Result<int64_t> {
-            auto result = callVariant(value, "size");
-            if (result.isErr()) return result.error();
-            return scalarFromVariant<int64_t>(result.value(), GDEXTENSION_VARIANT_TYPE_INT);
-        };
-        auto array_at = [](VariantValue& value, int64_t index) -> Result<VariantValue> {
-            auto native_index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
-            if (native_index.isErr()) return native_index.error();
-            return callVariant(value, "get", {&native_index.value()});
-        };
-        auto dictionary_field = [](VariantValue& value, const char* key) -> Result<VariantValue> {
-            auto native_key = makeString(key);
-            if (native_key.isErr()) return native_key.error();
-            return callVariant(value, "get", {&native_key.value()});
-        };
-        auto make_callable = [](GDExtensionObjectPtr object,
-                                const std::string& method_name) -> Result<VariantValue> {
-            auto& api = GodotApi::instance();
-            auto constructor = api.variant_get_ptr_constructor(
-                GDEXTENSION_VARIANT_TYPE_CALLABLE, 2);
-            if (!constructor) return Error::internal("Normal Callable constructor is unavailable");
-            NativeName native_method(method_name);
-            if (!native_method.valid()) return Error::internal("Callable method name is unavailable");
-            NativeValue native_callable(GDEXTENSION_VARIANT_TYPE_CALLABLE);
-            const void* arguments[] = {&object, native_method.ptr()};
-            constructor(native_callable.ptr(), arguments);
-            native_callable.markInitialized();
-            return variantFromNative(GDEXTENSION_VARIANT_TYPE_CALLABLE,
-                                     native_callable.ptr());
-        };
-        auto type_name = [](int64_t type) -> const char* {
-            static constexpr std::array<const char*, 39> names = {{
-                "nil", "bool", "int", "float", "string", "vector2", "vector2i",
-                "rect2", "rect2i", "vector3", "vector3i", "transform2d", "vector4",
-                "vector4i", "plane", "quaternion", "aabb", "basis", "transform3d",
-                "projection", "color", "string_name", "node_path", "rid", "object",
-                "callable", "signal", "dictionary", "array", "packed_byte_array",
-                "packed_int32_array", "packed_int64_array", "packed_float32_array",
-                "packed_float64_array", "packed_string_array", "packed_vector2_array",
-                "packed_vector3_array", "packed_color_array", "packed_vector4_array"}};
-            return type >= 0 && type < static_cast<int64_t>(names.size())
-                       ? names[static_cast<size_t>(type)]
-                       : "unknown";
-        };
+            if (length == 3) {
+                const auto second = static_cast<unsigned char>(text[index + 1]);
+                if ((first == 0xe0 && second < 0xa0) ||
+                    (first == 0xed && second >= 0xa0)) {
+                    return Error::internal("Godot returned invalid UTF-8 signal metadata");
+                }
+            }
+            if (length == 4) {
+                const auto second = static_cast<unsigned char>(text[index + 1]);
+                if ((first == 0xf0 && second < 0x90) ||
+                    (first == 0xf4 && second >= 0x90)) {
+                    return Error::internal("Godot returned invalid UTF-8 signal metadata");
+                }
+            }
+            if (index + length > maximum) break;
+            index += length;
+            accepted = index;
+        }
+        return text.substr(0, accepted);
+    };
+    auto array_size = [](VariantValue& value) -> Result<int64_t> {
+        auto result = callVariant(value, "size");
+        if (result.isErr()) return result.error();
+        return scalarFromVariant<int64_t>(result.value(), GDEXTENSION_VARIANT_TYPE_INT);
+    };
+    auto array_at = [](VariantValue& value, int64_t index) -> Result<VariantValue> {
+        auto native_index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
+        if (native_index.isErr()) return native_index.error();
+        return callVariant(value, "get", {&native_index.value()});
+    };
+    auto dictionary_field = [](VariantValue& value, const char* key) -> Result<VariantValue> {
+        auto native_key = makeString(key);
+        if (native_key.isErr()) return native_key.error();
+        return callVariant(value, "get", {&native_key.value()});
+    };
+    auto make_callable = [](GDExtensionObjectPtr object,
+                            const std::string& method_name) -> Result<VariantValue> {
+        auto& api = GodotApi::instance();
+        auto constructor = api.variant_get_ptr_constructor(
+            GDEXTENSION_VARIANT_TYPE_CALLABLE, 2);
+        if (!constructor) return Error::internal("Normal Callable constructor is unavailable");
+        NativeName native_method(method_name);
+        if (!native_method.valid()) return Error::internal("Callable method name is unavailable");
+        NativeValue native_callable(GDEXTENSION_VARIANT_TYPE_CALLABLE);
+        const void* arguments[] = {&object, native_method.ptr()};
+        constructor(native_callable.ptr(), arguments);
+        native_callable.markInitialized();
+        return variantFromNative(GDEXTENSION_VARIANT_TYPE_CALLABLE,
+                                 native_callable.ptr());
+    };
+    auto type_name = [](int64_t type) -> const char* {
+        static constexpr std::array<const char*, 39> names = {{
+            "nil", "bool", "int", "float", "string", "vector2", "vector2i",
+            "rect2", "rect2i", "vector3", "vector3i", "transform2d", "vector4",
+            "vector4i", "plane", "quaternion", "aabb", "basis", "transform3d",
+            "projection", "color", "string_name", "node_path", "rid", "object",
+            "callable", "signal", "dictionary", "array", "packed_byte_array",
+            "packed_int32_array", "packed_int64_array", "packed_float32_array",
+            "packed_float64_array", "packed_string_array", "packed_vector2_array",
+            "packed_vector3_array", "packed_color_array", "packed_vector4_array"}};
+        return type >= 0 && type < static_cast<int64_t>(names.size())
+                   ? names[static_cast<size_t>(type)]
+                   : "unknown";
+    };
 
-        constexpr int64_t kSignalNativeWorkCeiling = 1024;
-        constexpr int64_t kSignalArgumentWorkCeiling = 64;
-        auto utf8_less = [](const std::string& left, const std::string& right) {
-            return std::lexicographical_compare(
-                left.begin(), left.end(), right.begin(), right.end(),
-                [](char a, char b) {
-                    return static_cast<unsigned char>(a) < static_cast<unsigned char>(b);
-                });
-        };
-        struct SignalArgumentMetadata {
-            std::string name;
-            int64_t type{GDEXTENSION_VARIANT_TYPE_NIL};
-            int64_t hint{0};
-            std::string hint_string;
-            int64_t usage{0};
-            std::string class_name;
-        };
-        auto parse_argument_metadata = [](const json& argument)
-            -> Result<SignalArgumentMetadata> {
-            if (!argument.is_object() || !argument.contains("name") ||
-                !argument["name"].is_string() || !argument.contains("type") ||
-                !argument["type"].is_number_integer() || !argument.contains("hint") ||
-                !argument["hint"].is_number_integer() || !argument.contains("hint_string") ||
-                !argument["hint_string"].is_string() || !argument.contains("usage") ||
-                !argument["usage"].is_number_integer() || !argument.contains("class_name") ||
-                !argument["class_name"].is_string()) {
-                return Error::internal("Godot PropertyInfo metadata is malformed");
-            }
-            const auto type = argument["type"].get<int64_t>();
-            if (type < GDEXTENSION_VARIANT_TYPE_NIL ||
-                type > GDEXTENSION_VARIANT_TYPE_PACKED_VECTOR4_ARRAY) {
-                return Error::internal("Godot PropertyInfo Variant type is invalid");
-            }
-            return SignalArgumentMetadata{
-                argument["name"].get<std::string>(), type,
-                argument["hint"].get<int64_t>(),
-                argument["hint_string"].get<std::string>(),
-                argument["usage"].get<int64_t>(),
-                argument["class_name"].get<std::string>()};
-        };
-        struct SignalMetadata {
-            std::vector<SignalArgumentMetadata> arguments;
-        };
-        auto signal_metadata = [&](GDExtensionObjectPtr object,
-                                   const std::string& signal_name) -> Result<SignalMetadata> {
-            auto signals = callObject(object, "Object", "get_signal_list", 3995934104LL);
-            if (signals.isErr()) return signals.error();
-            auto signal_count = array_size(signals.value());
-            if (signal_count.isErr() || signal_count.value() < 0) {
+    constexpr int64_t kSignalNativeWorkCeiling = 1024;
+    constexpr int64_t kSignalArgumentWorkCeiling = 64;
+    auto utf8_less = [](const std::string& left, const std::string& right) {
+        return std::lexicographical_compare(
+            left.begin(), left.end(), right.begin(), right.end(),
+            [](char a, char b) {
+                return static_cast<unsigned char>(a) < static_cast<unsigned char>(b);
+            });
+    };
+    struct SignalArgumentMetadata {
+        std::string name;
+        int64_t type{GDEXTENSION_VARIANT_TYPE_NIL};
+        int64_t hint{0};
+        std::string hint_string;
+        int64_t usage{0};
+        std::string class_name;
+    };
+    auto parse_argument_metadata = [](const json& argument)
+        -> Result<SignalArgumentMetadata> {
+        if (!argument.is_object() || !argument.contains("name") ||
+            !argument["name"].is_string() || !argument.contains("type") ||
+            !argument["type"].is_number_integer() || !argument.contains("hint") ||
+            !argument["hint"].is_number_integer() || !argument.contains("hint_string") ||
+            !argument["hint_string"].is_string() || !argument.contains("usage") ||
+            !argument["usage"].is_number_integer() || !argument.contains("class_name") ||
+            !argument["class_name"].is_string()) {
+            return Error::internal("Godot PropertyInfo metadata is malformed");
+        }
+        const auto type = argument["type"].get<int64_t>();
+        if (type < GDEXTENSION_VARIANT_TYPE_NIL ||
+            type > GDEXTENSION_VARIANT_TYPE_PACKED_VECTOR4_ARRAY) {
+            return Error::internal("Godot PropertyInfo Variant type is invalid");
+        }
+        return SignalArgumentMetadata{
+            argument["name"].get<std::string>(), type,
+            argument["hint"].get<int64_t>(),
+            argument["hint_string"].get<std::string>(),
+            argument["usage"].get<int64_t>(),
+            argument["class_name"].get<std::string>()};
+    };
+    struct SignalMetadata {
+        std::vector<SignalArgumentMetadata> arguments;
+    };
+    auto signal_metadata = [&](GDExtensionObjectPtr object,
+                               const std::string& signal_name) -> Result<SignalMetadata> {
+        auto signals = callObject(object, "Object", "get_signal_list", 3995934104LL);
+        if (signals.isErr()) return signals.error();
+        auto signal_count = array_size(signals.value());
+        if (signal_count.isErr() || signal_count.value() < 0) {
+            return Error::internal("Godot signal metadata is malformed");
+        }
+        if (signal_count.value() > kSignalNativeWorkCeiling) {
+            return bridgeRefusal(413, "signal_metadata_work_limit");
+        }
+        for (int64_t index = 0; index < signal_count.value(); ++index) {
+            auto native_descriptor = array_at(signals.value(), index);
+            if (native_descriptor.isErr()) return native_descriptor.error();
+            auto serialized = variantToJson(native_descriptor.value());
+            if (serialized.isErr()) {
                 return Error::internal("Godot signal metadata is malformed");
             }
-            if (signal_count.value() > kSignalNativeWorkCeiling) {
-                return bridgeRefusal(413, "signal_metadata_work_limit");
+            const auto& descriptor = serialized.value();
+            if (!descriptor.is_object() || !descriptor.contains("name") ||
+                !descriptor["name"].is_string()) {
+                return Error::internal("Godot signal descriptor is malformed");
             }
-            for (int64_t index = 0; index < signal_count.value(); ++index) {
-                auto native_descriptor = array_at(signals.value(), index);
-                if (native_descriptor.isErr()) return native_descriptor.error();
-                auto serialized = variantToJson(native_descriptor.value());
-                if (serialized.isErr()) {
-                    return Error::internal("Godot signal metadata is malformed");
-                }
-                const auto& descriptor = serialized.value();
-                if (!descriptor.is_object() || !descriptor.contains("name") ||
-                    !descriptor["name"].is_string()) {
-                    return Error::internal("Godot signal descriptor is malformed");
-                }
-                if (descriptor["name"].get<std::string>() != signal_name) continue;
-                const auto arguments = descriptor.value("args", json::array());
-                if (!arguments.is_array()) {
-                    return Error::internal("Godot signal arguments are malformed");
-                }
-                if (arguments.size() > static_cast<size_t>(kSignalArgumentWorkCeiling)) {
-                    return bridgeRefusal(413, "signal_argument_metadata_work_limit");
-                }
-                SignalMetadata metadata;
-                metadata.arguments.reserve(arguments.size());
-                for (const auto& argument : arguments) {
-                    auto parsed = parse_argument_metadata(argument);
-                    if (parsed.isErr()) return parsed.error();
-                    metadata.arguments.push_back(std::move(parsed.value()));
-                }
-                return metadata;
+            if (descriptor["name"].get<std::string>() != signal_name) continue;
+            const auto arguments = descriptor.value("args", json::array());
+            if (!arguments.is_array()) {
+                return Error::internal("Godot signal arguments are malformed");
             }
-            return Error::notFound("Declared signal not found: " + signal_name);
-        };
-        struct MethodMetadata {
-            int64_t required_arguments{0};
-            int64_t total_arguments{0};
-            bool vararg{false};
-        };
-        auto method_metadata = [&](GDExtensionObjectPtr object,
-                                   const std::string& method_name) -> Result<MethodMetadata> {
-            auto methods = callObject(object, "Object", "get_method_list", 3995934104LL);
-            if (methods.isErr()) return methods.error();
-            auto serialized = variantToJson(methods.value(), 0, true);
-            if (serialized.isErr()) return serialized.error();
-            if (!serialized.value().is_array()) {
-                return Error::internal("Godot method metadata is malformed");
+            if (arguments.size() > static_cast<size_t>(kSignalArgumentWorkCeiling)) {
+                return bridgeRefusal(413, "signal_argument_metadata_work_limit");
             }
-            for (const auto& descriptor : serialized.value()) {
-                if (!descriptor.is_object() || !descriptor.contains("name") ||
-                    !descriptor["name"].is_string()) {
-                    return Error::internal("Godot method descriptor is malformed");
-                }
-                if (descriptor["name"].get<std::string>() != method_name) continue;
-                const auto arguments = descriptor.value("args", json::array());
-                const auto defaults = descriptor.value("default_args", json::array());
-                if (!arguments.is_array() || !defaults.is_array() ||
-                    !descriptor.contains("flags") ||
-                    !descriptor["flags"].is_number_integer() ||
-                    defaults.size() > arguments.size()) {
-                    return Error::internal("Godot method arity metadata is malformed");
-                }
-                MethodMetadata metadata;
-                metadata.total_arguments = static_cast<int64_t>(arguments.size());
-                metadata.required_arguments = static_cast<int64_t>(
-                    arguments.size() - defaults.size());
-                metadata.vararg =
-                    (descriptor["flags"].get<int64_t>() & GDEXTENSION_METHOD_FLAG_VARARG) != 0;
-                return metadata;
+            SignalMetadata metadata;
+            metadata.arguments.reserve(arguments.size());
+            for (const auto& argument : arguments) {
+                auto parsed = parse_argument_metadata(argument);
+                if (parsed.isErr()) return parsed.error();
+                metadata.arguments.push_back(std::move(parsed.value()));
             }
-            return Error::notFound("Target method not found: " + method_name);
-        };
-        auto preflight_object_binds = [&](std::initializer_list<std::pair<const char*, int64_t>> binds) {
-            for (const auto& [name, hash] : binds) {
-                if (requireMethodBind("Object", name, hash).isErr()) return false;
-            }
-            return true;
-        };
-
-        if (method == "signal.listConnections") {
-            if (!hasOnlyKeys(params, {"target_node"}) ||
-                !params.contains("target_node") ||
-                !bounded_string(params["target_node"], 1, 1024)) {
-                return bridgeError(400, "invalid_signal_list_connections_request");
-            }
-            if (!preflight_object_binds({
-                    {"get_signal_list", 3995934104LL},
-                    {"get_signal_connection_list", 3147814860LL},
-                    {"is_class", 3927539163LL}})) {
-                return bridgeError(501, "required_bind_unavailable");
-            }
-            auto root = editedSceneRoot(editor);
-            if (root.isErr()) return errorJson(root.error());
-            auto target = resolveNode(root.value(), params["target_node"].get<std::string>());
-            if (target.isErr()) return errorJson(target.error());
-#if defined(DIDI_PHASE7_SIGNAL_TEST_SEAMS)
-            if (takePhase7SignalTestSeam("malformed_metadata")) {
-                return bridgeError(500, "extension_protocol_error");
-            }
-#endif
-            auto signals = callObject(target.value(), "Object", "get_signal_list", 3995934104LL);
-            if (signals.isErr()) return errorJson(500, signals.error().message);
-            auto native_signal_count = array_size(signals.value());
-            if (native_signal_count.isErr() || native_signal_count.value() < 0) {
-                return bridgeError(500, "extension_protocol_error");
-            }
-            if (native_signal_count.value() > kSignalNativeWorkCeiling) {
-                return bridgeError(413, "signal_metadata_work_limit");
-            }
-            struct SignalRecord { std::string name; json arguments; };
-            std::vector<SignalRecord> descriptors;
-            descriptors.reserve(static_cast<size_t>(native_signal_count.value()));
-            for (int64_t index = 0; index < native_signal_count.value(); ++index) {
-                auto native_descriptor = array_at(signals.value(), index);
-                if (native_descriptor.isErr()) return bridgeError(500, "extension_protocol_error");
-                auto serialized = variantToJson(native_descriptor.value());
-                if (serialized.isErr() || !serialized.value().is_object() ||
-                    !serialized.value().contains("name") ||
-                    !serialized.value()["name"].is_string()) {
-                    return bridgeError(500, "extension_protocol_error");
-                }
-                auto arguments = serialized.value().value("args", json::array());
-                if (!arguments.is_array()) return bridgeError(500, "extension_protocol_error");
-                if (arguments.size() > static_cast<size_t>(kSignalArgumentWorkCeiling)) {
-                    return bridgeError(413, "signal_argument_metadata_work_limit");
-                }
-                const auto name = serialized.value()["name"].get<std::string>();
-                auto validated = utf8_prefix(name, name.size());
-                if (validated.isErr() || validated.value().size() != name.size()) {
-                    return bridgeError(500, "extension_protocol_error");
-                }
-                descriptors.push_back({name, std::move(arguments)});
-            }
-            std::sort(descriptors.begin(), descriptors.end(),
-                      [&](const SignalRecord& left, const SignalRecord& right) {
-                          return utf8_less(left.name, right.name);
-                      });
-
-            bool truncated = false;
-            json truncated_at = nullptr;
-            // How many of the reported connections belong to the editor rather
-            // than to the scene, so a caller can tell an empty answer from one
-            // that is entirely the scene dock without walking the list (#461).
-            size_t editor_connection_count = 0;
-            size_t engine_connection_count = 0;
-            auto mark_truncated = [&](const std::string& location) {
-                truncated = true;
-                if (truncated_at.is_null()) truncated_at = location;
-            };
-            json output_signals = json::array();
-            const size_t signal_count = std::min<size_t>(descriptors.size(), 256);
-            if (descriptors.size() > signal_count) mark_truncated("signals");
-            for (size_t signal_index = 0; signal_index < signal_count; ++signal_index) {
-                const auto& descriptor = descriptors[signal_index];
-                const auto& raw_name = descriptor.name;
-                auto name = utf8_prefix(raw_name, 256);
-                if (name.isErr()) return bridgeError(500, "extension_protocol_error");
-                if (name.value().size() != raw_name.size()) {
-                    mark_truncated("bytes");
-                }
-                const auto& raw_arguments = descriptor.arguments;
-                json arguments = json::array();
-                const size_t argument_count = std::min<size_t>(raw_arguments.size(), 16);
-                if (raw_arguments.size() > argument_count) {
-                    mark_truncated("arguments");
-                }
-                for (size_t argument_index = 0; argument_index < argument_count; ++argument_index) {
-                    auto parsed = parse_argument_metadata(raw_arguments[argument_index]);
-                    if (parsed.isErr()) return bridgeError(500, "extension_protocol_error");
-                    const auto& raw_argument_name = parsed.value().name;
-                    auto validated = utf8_prefix(raw_argument_name, raw_argument_name.size());
-                    if (validated.isErr() || validated.value().size() != raw_argument_name.size()) {
-                        return bridgeError(500, "extension_protocol_error");
-                    }
-                    auto argument_name = utf8_prefix(raw_argument_name, 256);
-                    if (argument_name.isErr()) return bridgeError(500, "extension_protocol_error");
-                    if (argument_name.value().size() != raw_argument_name.size()) {
-                        mark_truncated("bytes");
-                    }
-                    arguments.push_back({{"name", argument_name.value()},
-                                         {"type_id", parsed.value().type},
-                                         {"type_name", type_name(parsed.value().type)}});
-                }
-
-                auto signal_name_value = makeStringName(raw_name);
-                if (signal_name_value.isErr()) return errorJson(500, signal_name_value.error().message);
-                auto connection_values = callObject(
-                    target.value(), "Object", "get_signal_connection_list", 3147814860LL,
-                    {&signal_name_value.value()});
-                if (connection_values.isErr()) return errorJson(500, connection_values.error().message);
-                auto connection_count_result = array_size(connection_values.value());
-                if (connection_count_result.isErr() || connection_count_result.value() < 0) {
-                    return bridgeError(500, "extension_protocol_error");
-                }
-                if (connection_count_result.value() > kSignalNativeWorkCeiling) {
-                    return bridgeError(413, "signal_connection_metadata_work_limit");
-                }
-                struct ConnectionRecord {
-                    std::optional<std::string> target_node;
-                    std::string target_method;
-                    int64_t flags{0};
-                };
-                std::vector<ConnectionRecord> normalized_connections;
-                normalized_connections.reserve(
-                    static_cast<size_t>(connection_count_result.value()));
-                for (int64_t connection_index = 0;
-                     connection_index < connection_count_result.value(); ++connection_index) {
-                    auto connection = array_at(connection_values.value(), connection_index);
-                    if (connection.isErr()) return bridgeError(500, "extension_protocol_error");
-                    auto callable = dictionary_field(connection.value(), "callable");
-                    auto flags_value = dictionary_field(connection.value(), "flags");
-                    if (callable.isErr() || flags_value.isErr() ||
-                        GodotApi::instance().variant_get_type(callable.value().ptr()) !=
-                            GDEXTENSION_VARIANT_TYPE_CALLABLE) {
-                        return bridgeError(500, "extension_protocol_error");
-                    }
-                    auto flags = scalarFromVariant<int64_t>(
-                        flags_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
-                    auto callable_object_value = callVariant(callable.value(), "get_object");
-                    auto callable_method_value = callVariant(callable.value(), "get_method");
-                    if (flags.isErr() || callable_object_value.isErr() ||
-                        callable_method_value.isErr()) {
-                        return bridgeError(500, "extension_protocol_error");
-                    }
-                    if (flags.value() < 0 || flags.value() > 15) {
-                        return bridgeError(500, "extension_protocol_error");
-                    }
-                    auto callable_object = objectFromVariant(callable_object_value.value());
-                    const auto callable_method_type = GodotApi::instance().variant_get_type(
-                        callable_method_value.value().ptr());
-                    auto callable_method = stringFromVariant(
-                        callable_method_value.value(), callable_method_type);
-                    if (callable_object.isErr() || callable_method.isErr()) {
-                        return bridgeError(500, "extension_protocol_error");
-                    }
-                    auto validated_method = utf8_prefix(
-                        callable_method.value(), callable_method.value().size());
-                    if (validated_method.isErr() ||
-                        validated_method.value().size() != callable_method.value().size()) {
-                        return bridgeError(500, "extension_protocol_error");
-                    }
-                    std::optional<std::string> target_path;
-                    if (callable_object.value()) {
-                        auto node_name = makeString("Node");
-                        if (node_name.isErr()) return errorJson(500, node_name.error().message);
-                        auto is_node_value = callObject(
-                            callable_object.value(), "Object", "is_class", 3927539163LL,
-                            {&node_name.value()});
-                        if (is_node_value.isErr()) return errorJson(500, is_node_value.error().message);
-                        auto is_node = scalarFromVariant<GDExtensionBool>(
-                            is_node_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
-                        if (is_node.isErr()) return errorJson(500, is_node.error().message);
-                        if (is_node.value()) {
-                            auto path = logicalPathFromEditedRoot(root.value(), callable_object.value());
-                            if (path.isOk()) {
-                                auto validated_path = utf8_prefix(path.value(), path.value().size());
-                                if (validated_path.isErr() ||
-                                    validated_path.value().size() != path.value().size()) {
-                                    return bridgeError(500, "extension_protocol_error");
-                                }
-                                target_path = path.value();
-                            }
-                        }
-                    }
-                    normalized_connections.push_back(
-                        {std::move(target_path), callable_method.value(), flags.value()});
-                }
-                std::sort(normalized_connections.begin(), normalized_connections.end(),
-                          [&](const ConnectionRecord& left, const ConnectionRecord& right) {
-                              if (left.target_node.has_value() != right.target_node.has_value()) {
-                                  return !left.target_node.has_value();
-                              }
-                              if (left.target_node != right.target_node) {
-                                  return left.target_node.has_value() &&
-                                         utf8_less(*left.target_node, *right.target_node);
-                              }
-                              if (left.target_method != right.target_method) {
-                                  return utf8_less(left.target_method, right.target_method);
-                              }
-                              return left.flags < right.flags;
-                          });
-                json connections = json::array();
-                const size_t connection_count = std::min<size_t>(
-                    normalized_connections.size(), 256);
-                if (normalized_connections.size() > connection_count) {
-                    mark_truncated("connections");
-                }
-                for (size_t connection_index = 0;
-                     connection_index < connection_count; ++connection_index) {
-                    const auto& record = normalized_connections[connection_index];
-                    auto bounded_method = utf8_prefix(record.target_method, 128);
-                    if (bounded_method.isErr()) return bridgeError(500, "extension_protocol_error");
-                    if (bounded_method.value().size() != record.target_method.size()) {
-                        mark_truncated("bytes");
-                    }
-                    json target_path = nullptr;
-                    if (record.target_node.has_value()) {
-                        auto bounded_path = utf8_prefix(*record.target_node, 1024);
-                        if (bounded_path.isErr()) return bridgeError(500, "extension_protocol_error");
-                        if (bounded_path.value().size() != record.target_node->size()) {
-                            mark_truncated("bytes");
-                        }
-                        target_path = bounded_path.value();
-                    }
-                    // A freshly created Sprite2D with no user connections at all
-                    // reported five: the scene dock's own listeners, alive only
-                    // while the editor has this scene open, in none of the saved
-                    // .tscn and in nothing at runtime. An agent asking what is
-                    // wired to this node got five false positives and one true
-                    // one, at a ratio that gets worse the emptier the scene.
-                    // Marked rather than filtered, because a caller debugging the
-                    // editor itself has no other way to see them (#461).
-                    //
-                    // That fix keyed `scene` on where the receiver lives, which is
-                    // a different question from the one the field is read for, and
-                    // the two part company on any UI node. `Container::add_child`
-                    // wires the container to its own children to keep the layout
-                    // in order, and the receiver of those is inside the edited
-                    // scene, so a Button in a VBoxContainer reported four
-                    // connections where the saved .tscn carries one. They are not
-                    // what signal_connect makes and disconnecting one breaks the
-                    // layout (#768).
-                    //
-                    // CONNECT_PERSIST is the engine's own answer to "is this
-                    // stored in the scene", it is the only flag signal_connect
-                    // accepts, and it was already in this payload. So `scene`
-                    // means persistent, and the structural fact keeps its own
-                    // value rather than being thrown away:
-                    //
-                    //   scene   persistent, so it is in the .tscn and a caller
-                    //           can act on it
-                    //   engine  the receiver is in this scene and the connection
-                    //           is not saved, so the engine remade it and will
-                    //           remake it again
-                    //   editor  the receiver is not in this scene at all
-                    //
-                    // A filter of `origin != "editor"` selects the same set it
-                    // always did. A filter of `origin == "scene"` now selects what
-                    // the documentation always said it did.
-                    constexpr int64_t kConnectPersist = 2;
-                    const bool persistent = (record.flags & kConnectPersist) != 0;
-                    const bool receiver_in_scene = record.target_node.has_value();
-                    const char* origin = persistent          ? "scene"
-                                         : receiver_in_scene ? "engine"
-                                                             : "editor";
-                    connections.push_back({{"target_node", std::move(target_path)},
-                                           {"target_method", bounded_method.value()},
-                                           {"flags", record.flags},
-                                           {"origin", origin}});
-                    if (!persistent && !receiver_in_scene) ++editor_connection_count;
-                    if (!persistent && receiver_in_scene) ++engine_connection_count;
-                }
-                json signal = {{"name", name.value()}, {"arguments", std::move(arguments)},
-                               {"connections", std::move(connections)}};
-                output_signals.push_back(std::move(signal));
-                json candidate = {{"target_node", params["target_node"]},
-                                  {"signals", output_signals},
-                                  {"editor_connections", editor_connection_count},
-                                  // The same service the count above performs,
-                                  // for the bucket that used to be counted as
-                                  // authored: an answer that is entirely the
-                                  // engine's own layout plumbing is recognisable
-                                  // without walking the list.
-                                  {"engine_connections", engine_connection_count},
-                                  {"truncated", truncated},
-                                  {"truncated_at", truncated_at}};
-                if (liveResult(candidate).dump().size() > 63u * 1024u) {
-                    output_signals.erase(output_signals.end() - 1);
-                    mark_truncated("bytes");
-                    break;
-                }
-            }
-            json response = {{"target_node", params["target_node"]},
-                             {"signals", std::move(output_signals)},
-                             {"editor_connections", editor_connection_count},
-                             {"engine_connections", engine_connection_count},
-                             {"truncated", truncated},
-                             {"truncated_at", truncated_at}};
-            auto live = liveResult(response);
-            if (live.dump().size() > 64u * 1024u) {
-                return bridgeError(413, "response_limit");
-            }
-            return live;
+            return metadata;
         }
-
-        const bool is_connect = method == "signal.connect";
-        const bool is_disconnect = method == "signal.disconnect";
-        if (is_connect || is_disconnect) {
-            if (!hasOnlyKeys(params,
-                    is_connect
-                        ? std::initializer_list<const char*>{
-                              "emitter_node", "signal_name", "target_node", "target_method", "flags"}
-                        : std::initializer_list<const char*>{
-                              "emitter_node", "signal_name", "target_node", "target_method"}) ||
-                !params.contains("emitter_node") ||
-                !bounded_string(params["emitter_node"], 1, 1024) ||
-                !params.contains("signal_name") ||
-                !bounded_string(params["signal_name"], 1, 128) ||
-                !params.contains("target_node") ||
-                !bounded_string(params["target_node"], 1, 1024) ||
-                !params.contains("target_method") ||
-                !bounded_string(params["target_method"], 1, 128) ||
-                (is_connect && params.contains("flags") &&
-                 (!(params["flags"].is_number_integer() ||
-                    params["flags"].is_number_unsigned()) ||
-                  // Read as int64 below, so a value that does not fit is a
-                  // shape problem rather than a flag this tool will not write.
-                  (params["flags"].is_number_unsigned() &&
-                   params["flags"].get<uint64_t>() >
-                       static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))))) {
-                return bridgeError(400, is_connect ? "invalid_signal_connect_request"
-                                                   : "invalid_signal_disconnect_request");
-            }
-            // The flags this call will write. The server refuses an
-            // unacceptable value first and with the same rule, so reaching
-            // this means a client spoke to the bridge directly.
-            const int64_t requested_flags =
-                is_connect && params.contains("flags")
-                    ? connection_flags::authored(params["flags"].get<int64_t>())
-                    : connection_flags::kPersist;
-            if (is_connect && !connection_flags::isConnectable(requested_flags)) {
-                return bridgeError(
-                    400, "invalid_signal_connect_request",
-                    {{"flags", params["flags"]}},
-                    *connection_flags::refuseConnectFlags(params["flags"].get<int64_t>()));
-            }
-            if (!preflight_object_binds({
-                    {"get_signal_list", 3995934104LL},
-                    {"get_method_list", 3995934104LL},
-                    {"get_signal_connection_list", 3147814860LL},
-                    {"has_signal", 2619796661LL}, {"has_method", 2619796661LL},
-                    {"connect", 1518946055LL}, {"disconnect", 1874754934LL},
-                    {"is_connected", 768136979LL}}) ||
-                preflightUndoManagerBindings().isErr() ||
-                !GodotApi::instance().variant_get_ptr_constructor(
-                    GDEXTENSION_VARIANT_TYPE_CALLABLE, 2) ||
-                !GodotApi::instance().variant_call) {
-                return bridgeError(501, "required_bind_unavailable");
-            }
-            if (requireMethodBind("EditorUndoRedoManager", "get_object_history_id",
-                                  1107568780LL).isErr() ||
-                requireMethodBind("EditorUndoRedoManager", "get_history_undo_redo",
-                                  2417974513LL).isErr() ||
-                requireMethodBind("UndoRedo", "has_undo", 36873697LL).isErr() ||
-                requireMethodBind("UndoRedo", "undo", 2240911060LL).isErr()) {
-                return bridgeError(501, "required_bind_unavailable");
-            }
-
-            auto root = editedSceneRoot(editor);
-            if (root.isErr()) return errorJson(root.error());
-            auto emitter = resolveNode(root.value(), params["emitter_node"].get<std::string>());
-            auto target = resolveNode(root.value(), params["target_node"].get<std::string>());
-            if (emitter.isErr()) return errorJson(emitter.error());
-            if (target.isErr()) return errorJson(target.error());
-            const auto signal_name = params["signal_name"].get<std::string>();
-            const auto target_method = params["target_method"].get<std::string>();
-            auto signal_name_value = makeStringName(signal_name);
-            auto method_name_value = makeStringName(target_method);
-            if (signal_name_value.isErr() || method_name_value.isErr()) {
-                return bridgeError(500, "extension_protocol_error");
-            }
-            auto has_signal_value = callObject(
-                emitter.value(), "Object", "has_signal", 2619796661LL,
-                {&signal_name_value.value()});
-            auto has_method_value = callObject(
-                target.value(), "Object", "has_method", 2619796661LL,
-                {&method_name_value.value()});
-            if (has_signal_value.isErr() || has_method_value.isErr()) {
-                return bridgeError(500, "extension_protocol_error");
-            }
-            auto has_signal = scalarFromVariant<GDExtensionBool>(
-                has_signal_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
-            auto has_method = scalarFromVariant<GDExtensionBool>(
-                has_method_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
-            if (has_signal.isErr() || has_method.isErr()) {
-                return bridgeError(500, "extension_protocol_error");
-            }
-            if (!has_signal.value()) {
-                return bridgeError(
-                    404, "declared_signal_not_found",
-                    {{"emitter_node", params["emitter_node"].get<std::string>()},
-                     {"signal_name", signal_name}},
-                    "Looked for signal '" + signal_name + "' on " +
-                        params["emitter_node"].get<std::string>() + ".");
-            }
-            if (!has_method.value()) {
-                // Before blaming the name. A script that did not compile is
-                // still assigned to the node and has no instance behind it, so
-                // has_method answers false for every method the file declares
-                // and the refusal sent the caller to rename something that was
-                // already right (#729).
-                const auto uncompiled = uncompiledScriptOn(target.value(), target_method);
-                if (uncompiled.found) {
-                    json data = {{"target_node", params["target_node"].get<std::string>()},
-                                 {"target_method", target_method},
-                                 {"script_path",
-                                  uncompiled.path.empty() ? json(nullptr) : json(uncompiled.path)},
-                                 {"unresolved_autoloads", uncompiled.unresolved_autoloads}};
-                    std::string detail = "The script is ";
-                    detail += uncompiled.path.empty() ? "attached to " + params["target_node"].get<std::string>()
-                                                      : uncompiled.path;
-                    detail += ", it declares '" + target_method +
-                              "', and the engine does not have that method on the node.";
-                    if (!uncompiled.unresolved_autoloads.empty()) {
-                        detail += " It names ";
-                        for (size_t index = 0; index < uncompiled.unresolved_autoloads.size(); ++index) {
-                            if (index > 0) detail += ", ";
-                            detail += "'" + uncompiled.unresolved_autoloads[index] + "'";
-                        }
-                        detail += uncompiled.unresolved_autoloads.size() == 1
-                                      ? ", which is an autoload registered in this project. "
-                                      : ", which are autoloads registered in this project. ";
-                        detail += kAutoloadRestartNote;
-                        data["note"] = kAutoloadRestartNote;
-                    } else {
-                        detail += " Check it with script_check_syntax.";
-                    }
-                    return bridgeError(409, "target_script_not_compiled", std::move(data), detail);
-                }
-                return bridgeError(
-                    404, "target_method_not_found",
-                    {{"target_node", params["target_node"].get<std::string>()},
-                     {"target_method", target_method}},
-                    "Looked for method '" + target_method + "' on " +
-                        params["target_node"].get<std::string>() + ".");
-            }
-            auto signal = signal_metadata(emitter.value(), signal_name);
-            auto target_metadata = method_metadata(target.value(), target_method);
-            if (signal.isErr()) return errorJson(signal.error());
-            if (target_metadata.isErr()) {
-                return errorJson(target_metadata.error());
-            }
-            const int64_t signal_arity = static_cast<int64_t>(
-                signal.value().arguments.size());
-            // Connect only. Arity compatibility is a precondition for making a
-            // connection and cannot be one for removing it: a disconnect never
-            // calls the method, so whether the method could accept the signal's
-            // arguments is not a fact about whether the disconnect can proceed.
-            // Running it here told an agent tearing down the connections it made
-            // that its signature was wrong, by the call whose whole purpose is
-            // to stop the connection existing -- and the true answer, which the
-            // same tool already gives for a compatible pair that was never
-            // connected, is that no such connection exists (#714).
-            if (is_connect &&
-                (signal_arity < target_metadata.value().required_arguments ||
-                 (!target_metadata.value().vararg &&
-                  signal_arity > target_metadata.value().total_arguments))) {
-                return bridgeError(409, "signal_target_arity_incompatible");
-            }
-            auto callable = make_callable(target.value(), target_method);
-            if (callable.isErr()) return bridgeError(501, "required_bind_unavailable");
-
-            struct ExactConnection {
-                VariantValue callable;
-                int64_t flags{0};
-            };
-            auto exact_connections = [&]() -> Result<std::vector<ExactConnection>> {
-                auto values = callObject(
-                    emitter.value(), "Object", "get_signal_connection_list", 3147814860LL,
-                    {&signal_name_value.value()});
-                if (values.isErr()) return values.error();
-                auto count = array_size(values.value());
-                if (count.isErr() || count.value() < 0 || count.value() > 4096) {
-                    return Error::internal("Signal connection metadata exceeds the preflight cap");
-                }
-                std::vector<ExactConnection> matches;
-                for (int64_t index = 0; index < count.value(); ++index) {
-                    auto connection = array_at(values.value(), index);
-                    if (connection.isErr()) return connection.error();
-                    auto candidate = dictionary_field(connection.value(), "callable");
-                    auto flags_value = dictionary_field(connection.value(), "flags");
-                    if (candidate.isErr() || flags_value.isErr() ||
-                        GodotApi::instance().variant_get_type(candidate.value().ptr()) !=
-                            GDEXTENSION_VARIANT_TYPE_CALLABLE) {
-                        return Error::internal("Signal connection descriptor is malformed");
-                    }
-                    auto object_value = callVariant(candidate.value(), "get_object");
-                    auto method_value = callVariant(candidate.value(), "get_method");
-                    auto bound_count_value = callVariant(
-                        candidate.value(), "get_bound_arguments_count");
-                    if (object_value.isErr() || method_value.isErr() ||
-                        bound_count_value.isErr()) {
-                        return Error::internal("Signal Callable metadata is unavailable");
-                    }
-                    auto object = objectFromVariant(object_value.value());
-                    auto bound_count = scalarFromVariant<int64_t>(
-                        bound_count_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
-                    const auto method_type = GodotApi::instance().variant_get_type(
-                        method_value.value().ptr());
-                    auto candidate_method = stringFromVariant(method_value.value(), method_type);
-                    auto flags = scalarFromVariant<int64_t>(
-                        flags_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
-                    if (object.isErr() || bound_count.isErr() || candidate_method.isErr() ||
-                        flags.isErr()) {
-                        return Error::internal("Signal Callable metadata is malformed");
-                    }
-                    if (object.value() == target.value() &&
-                        candidate_method.value() == target_method &&
-                        bound_count.value() == 0) {
-                        matches.push_back(
-                            {std::move(candidate.value()), flags.value()});
-                    }
-                }
-                return matches;
-            };
-            auto connected_value = callObject(
-                emitter.value(), "Object", "is_connected", 768136979LL,
-                {&signal_name_value.value(), &callable.value()});
-            if (connected_value.isErr()) return errorJson(500, connected_value.error().message);
-            auto connected = scalarFromVariant<GDExtensionBool>(
-                connected_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
-            auto matches = exact_connections();
-            if (connected.isErr() || matches.isErr()) {
-                return bridgeError(500, "extension_protocol_error");
-            }
-            if ((connected.value() != 0) != !matches.value().empty()) {
-                return bridgeError(500, "signal_connection_state_inconsistent");
-            }
-            if (is_connect && !matches.value().empty()) {
-                return bridgeError(409, "signal_connection_already_exists");
-            }
-            if (is_disconnect && matches.value().size() != 1) {
-                return bridgeError(409, "missing_or_ambiguous_signal_connection");
-            }
-            // Only a connection the scene file stores is the caller's to
-            // remove. This used to demand exactly 2, which refused every
-            // deferred or one-shot connection the editor's Connect dialog
-            // writes, and every connection at all inside an instanced scene,
-            // where the engine adds CONNECT_INHERITED to the value it reports
-            // (#852). An engine or editor connection is still refused: it is
-            // not in the .tscn, the engine makes it again, and removing one
-            // breaks the layout it was keeping in order.
-            if (is_disconnect &&
-                !connection_flags::isPersistent(matches.value().front().flags)) {
-                return bridgeError(
-                    409, "unsupported_existing_connection_flags",
-                    {{"flags", matches.value().front().flags}},
-                    "The connection's flags are " +
-                        std::to_string(matches.value().front().flags) +
-                        ", which does not include 2, CONNECT_PERSIST, so it is not stored in "
-                        "the scene file. signal_list_connections reports it as origin 'engine' "
-                        "or 'editor': the engine or the editor made it and will make it again, "
-                        "and removing one breaks what it was keeping in order.");
-            }
-
-            auto manager = undoManager(editor);
-            if (manager.isErr()) return errorJson(manager.error());
-            // A connect writes what the caller asked for. A disconnect's undo
-            // restores what was there, verbatim, including CONNECT_INHERITED:
-            // undo that put a deferred connection back as a plain one would be
-            // its own silent behaviour change (#852).
-            const int64_t applied_flags =
-                is_connect ? requested_flags : matches.value().front().flags;
-            auto flags_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, applied_flags);
-            if (flags_value.isErr()) return errorJson(500, flags_value.error().message);
-            auto action = createAction(manager.value(),
-                                       is_connect ? "Connect signal" : "Disconnect signal",
-                                       emitter.value());
-            if (action.isErr()) return errorJson(500, action.error().message);
-            Result<void> do_method = Result<void>::ok();
-            Result<void> undo_method = Result<void>::ok();
-            if (is_connect) {
-                do_method = managerMethod(
-                    manager.value(), "add_do_method", emitter.value(), "connect",
-                    {&signal_name_value.value(), &callable.value(), &flags_value.value()});
-                undo_method = managerMethod(
-                    manager.value(), "add_undo_method", emitter.value(), "disconnect",
-                    {&signal_name_value.value(), &callable.value()});
-            } else {
-                do_method = managerMethod(
-                    manager.value(), "add_do_method", emitter.value(), "disconnect",
-                    {&signal_name_value.value(), &matches.value().front().callable});
-                undo_method = managerMethod(
-                    manager.value(), "add_undo_method", emitter.value(), "connect",
-                    {&signal_name_value.value(), &matches.value().front().callable,
-                     &flags_value.value()});
-            }
-            if (do_method.isErr() || undo_method.isErr()) {
-                // Closed, so the next mutation does not merge into it (#1152).
-                abandonAction(manager.value());
-                return bridgeError(500, "signal_undo_redo_registration_failed");
-            }
-            auto committed = commitAction(manager.value());
-            if (committed.isErr()) return errorJson(500, committed.error().message);
-
-            bool force_postcondition_mismatch = false;
-            bool force_rollback_failure = false;
-#if defined(DIDI_PHASE7_SIGNAL_TEST_SEAMS)
-            if (is_connect) {
-                force_postcondition_mismatch =
-                    takePhase7SignalTestSeam("connect_postcondition_mismatch");
-                if (!force_postcondition_mismatch &&
-                    takePhase7SignalTestSeam(
-                        "connect_postcondition_mismatch_rollback_failure")) {
-                    force_postcondition_mismatch = true;
-                    force_rollback_failure = true;
-                }
-            } else {
-                force_postcondition_mismatch =
-                    takePhase7SignalTestSeam("disconnect_postcondition_mismatch");
-            }
-#endif
-
-            auto observed_connected_value = callObject(
-                emitter.value(), "Object", "is_connected", 768136979LL,
-                {&signal_name_value.value(), &callable.value()});
-            auto observed_matches = exact_connections();
-            bool postcondition_ok = false;
-            if (observed_connected_value.isOk() && observed_matches.isOk()) {
-                auto observed_connected = scalarFromVariant<GDExtensionBool>(
-                    observed_connected_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
-                if (observed_connected.isOk()) {
-                    postcondition_ok = is_connect
-                        ? observed_connected.value() && observed_matches.value().size() == 1 &&
-                              connection_flags::authored(
-                                  observed_matches.value().front().flags) == requested_flags
-                        : !observed_connected.value() && observed_matches.value().empty();
-                }
-            }
-            if (force_postcondition_mismatch) postcondition_ok = false;
-            if (!postcondition_ok) {
-                const Result<void> rolled_back = undoLastAction(manager.value(), root.value());
-                bool restored = false;
-                if (rolled_back.isOk()) {
-                    auto restored_connected_value = callObject(
-                        emitter.value(), "Object", "is_connected", 768136979LL,
-                        {&signal_name_value.value(), &callable.value()});
-                    auto restored_matches = exact_connections();
-                    if (restored_connected_value.isOk() && restored_matches.isOk()) {
-                        auto restored_connected = scalarFromVariant<GDExtensionBool>(
-                            restored_connected_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
-                        if (restored_connected.isOk()) {
-                            restored = is_connect
-                                ? !restored_connected.value() && restored_matches.value().empty()
-                                : restored_connected.value() &&
-                                      restored_matches.value().size() == 1 &&
-                                      restored_matches.value().front().flags ==
-                                          matches.value().front().flags;
-                        }
-                    }
-                }
-                if (force_rollback_failure) restored = false;
-                return bridgeError(
-                    500, "signal_postcondition_mismatch",
-                    {{"retryable", false},
-                     {"rollback", restored ? "completed" : "failed"},
-                     {"outcome", restored ? "rolled_back" : "unknown"},
-                     {"restoration_observed", restored}});
-            }
-            // The flags the connection now has, not the flags this tool used to
-            // be able to write. A caller that asked for a deferred connection
-            // and was told `flags: 2` could not tell whether it got one.
-            // The connection as it stood before the commit (#1151): a connect
-            // is refused when one exists, and a disconnect removes the one it
-            // found, with the flags it had.
-            if (is_connect) {
-                return liveSceneMutation({{"connected", true}, {"flags", applied_flags},
-                                          {"before", {{"connected", false}}},
-                                          {"undo_redo_registered", true},
-                                          {"outcome", "completed"}, {"rollback", "undo_redo"}});
-            }
-            return liveSceneMutation({{"disconnected", true}, {"flags", applied_flags},
-                                      {"before", {{"connected", true},
-                                                  {"flags", matches.value().front().flags}}},
-                                      {"undo_redo_registered", true},
-                                      {"outcome", "completed"}, {"rollback", "undo_redo"}});
+        return Error::notFound("Declared signal not found: " + signal_name);
+    };
+    struct MethodMetadata {
+        int64_t required_arguments{0};
+        int64_t total_arguments{0};
+        bool vararg{false};
+    };
+    auto method_metadata = [&](GDExtensionObjectPtr object,
+                               const std::string& method_name) -> Result<MethodMetadata> {
+        auto methods = callObject(object, "Object", "get_method_list", 3995934104LL);
+        if (methods.isErr()) return methods.error();
+        auto serialized = variantToJson(methods.value(), 0, true);
+        if (serialized.isErr()) return serialized.error();
+        if (!serialized.value().is_array()) {
+            return Error::internal("Godot method metadata is malformed");
         }
+        for (const auto& descriptor : serialized.value()) {
+            if (!descriptor.is_object() || !descriptor.contains("name") ||
+                !descriptor["name"].is_string()) {
+                return Error::internal("Godot method descriptor is malformed");
+            }
+            if (descriptor["name"].get<std::string>() != method_name) continue;
+            const auto arguments = descriptor.value("args", json::array());
+            const auto defaults = descriptor.value("default_args", json::array());
+            if (!arguments.is_array() || !defaults.is_array() ||
+                !descriptor.contains("flags") ||
+                !descriptor["flags"].is_number_integer() ||
+                defaults.size() > arguments.size()) {
+                return Error::internal("Godot method arity metadata is malformed");
+            }
+            MethodMetadata metadata;
+            metadata.total_arguments = static_cast<int64_t>(arguments.size());
+            metadata.required_arguments = static_cast<int64_t>(
+                arguments.size() - defaults.size());
+            metadata.vararg =
+                (descriptor["flags"].get<int64_t>() & GDEXTENSION_METHOD_FLAG_VARARG) != 0;
+            return metadata;
+        }
+        return Error::notFound("Target method not found: " + method_name);
+    };
+    auto preflight_object_binds = [&](std::initializer_list<std::pair<const char*, int64_t>> binds) {
+        for (const auto& [name, hash] : binds) {
+            if (requireMethodBind("Object", name, hash).isErr()) return false;
+        }
+        return true;
+    };
 
-        if (!hasOnlyKeys(params, {"target_node", "signal_name", "arguments"}) ||
+    if (method == "signal.listConnections") {
+        if (!hasOnlyKeys(params, {"target_node"}) ||
             !params.contains("target_node") ||
-            !bounded_string(params["target_node"], 1, 1024) ||
-            !params.contains("signal_name") ||
-            !bounded_string(params["signal_name"], 1, 128) ||
-            (params.contains("arguments") && !params["arguments"].is_array())) {
-            return bridgeError(400, "invalid_signal_emit_request");
+            !bounded_string(params["target_node"], 1, 1024)) {
+            return bridgeError(400, "invalid_signal_list_connections_request");
         }
-        const auto emit_arguments = params.value("arguments", json::array());
-        if (emit_arguments.size() > 16) {
-            return bridgeError(400, "signal_emit_argument_count_exceeded");
-        }
-        for (const auto& argument : emit_arguments) {
-            if (!valid_emit_value(argument, 0)) {
-                return bridgeError(400, "unsupported_signal_emit_argument");
-            }
-        }
-        try {
-            if (emit_arguments.dump().size() > 32u * 1024u) {
-                return bridgeError(413, "signal_emit_arguments_too_large");
-            }
-        } catch (const json::exception&) {
-            return bridgeError(400, "invalid_signal_emit_argument_encoding");
-        }
-        if (!preflight_object_binds({{"get_signal_list", 3995934104LL},
-                                     {"has_signal", 2619796661LL},
-                                     {"emit_signal", 4047867050LL}})) {
+        if (!preflight_object_binds({
+                {"get_signal_list", 3995934104LL},
+                {"get_signal_connection_list", 3147814860LL},
+                {"is_class", 3927539163LL}})) {
             return bridgeError(501, "required_bind_unavailable");
         }
         auto root = editedSceneRoot(editor);
         if (root.isErr()) return errorJson(root.error());
         auto target = resolveNode(root.value(), params["target_node"].get<std::string>());
         if (target.isErr()) return errorJson(target.error());
-        const auto signal_name = params["signal_name"].get<std::string>();
-        auto signal_name_value = makeStringName(signal_name);
-        if (signal_name_value.isErr()) return errorJson(500, signal_name_value.error().message);
-        auto has_signal_value = callObject(
-            target.value(), "Object", "has_signal", 2619796661LL,
-            {&signal_name_value.value()});
-        if (has_signal_value.isErr()) return errorJson(500, has_signal_value.error().message);
-        auto has_signal = scalarFromVariant<GDExtensionBool>(
-            has_signal_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
-        if (has_signal.isErr()) return errorJson(500, has_signal.error().message);
-        if (!has_signal.value()) return bridgeError(404, "declared_signal_not_found");
-        auto metadata = signal_metadata(target.value(), signal_name);
-        if (metadata.isErr()) return errorJson(metadata.error());
-        if (metadata.value().arguments.size() != emit_arguments.size()) {
-            return bridgeError(409, "signal_emit_arity_mismatch");
-        }
-        auto compatible_argument = [](const json& argument,
-                                      const SignalArgumentMetadata& metadata) {
-            const bool typed_container =
-                (metadata.type == GDEXTENSION_VARIANT_TYPE_ARRAY ||
-                 metadata.type == GDEXTENSION_VARIANT_TYPE_DICTIONARY) &&
-                (metadata.hint != 0 || !metadata.hint_string.empty());
-            if (typed_container) return false;
-            switch (metadata.type) {
-                case GDEXTENSION_VARIANT_TYPE_NIL: return true;
-                case GDEXTENSION_VARIANT_TYPE_BOOL: return argument.is_boolean();
-                case GDEXTENSION_VARIANT_TYPE_INT:
-                    return argument.is_number_integer() || argument.is_number_unsigned();
-                case GDEXTENSION_VARIANT_TYPE_FLOAT:
-                    return argument.is_number() &&
-                           std::isfinite(argument.get<double>());
-                case GDEXTENSION_VARIANT_TYPE_STRING: return argument.is_string();
-                case GDEXTENSION_VARIANT_TYPE_DICTIONARY: return argument.is_object();
-                case GDEXTENSION_VARIANT_TYPE_ARRAY: return argument.is_array();
-                case GDEXTENSION_VARIANT_TYPE_OBJECT:
-                    return argument.is_null() &&
-                           (!metadata.class_name.empty() || !metadata.hint_string.empty());
-                default: return false;
-            }
-        };
-        bool missing_destination_float_constructor = false;
 #if defined(DIDI_PHASE7_SIGNAL_TEST_SEAMS)
-        missing_destination_float_constructor =
-            takePhase7SignalTestSeam("missing_destination_float_constructor");
-#endif
-        std::function<bool(const json&, std::optional<GDExtensionVariantType>)>
-            preflight_json_variant;
-        preflight_json_variant = [&](const json& value,
-                                     std::optional<GDExtensionVariantType> destination_type) {
-            auto& api = GodotApi::instance();
-            if (!api.variant_new_nil || !api.variant_destroy ||
-                !api.get_variant_from_type_constructor) return false;
-            if (value.is_null()) return true;
-            GDExtensionVariantType type = GDEXTENSION_VARIANT_TYPE_NIL;
-            if (destination_type.has_value() &&
-                *destination_type != GDEXTENSION_VARIANT_TYPE_NIL) {
-                type = *destination_type;
-            } else if (value.is_boolean()) type = GDEXTENSION_VARIANT_TYPE_BOOL;
-            else if (value.is_number_integer() || value.is_number_unsigned()) {
-                type = GDEXTENSION_VARIANT_TYPE_INT;
-            } else if (value.is_number_float()) type = GDEXTENSION_VARIANT_TYPE_FLOAT;
-            else if (value.is_string()) type = GDEXTENSION_VARIANT_TYPE_STRING;
-            else if (value.is_array()) type = GDEXTENSION_VARIANT_TYPE_ARRAY;
-            else if (value.is_object()) type = GDEXTENSION_VARIANT_TYPE_DICTIONARY;
-            else return false;
-
-            if (type == GDEXTENSION_VARIANT_TYPE_FLOAT &&
-                missing_destination_float_constructor) return false;
-            if (type == GDEXTENSION_VARIANT_TYPE_STRING &&
-                !api.string_new_with_utf8_chars) return false;
-            if (type == GDEXTENSION_VARIANT_TYPE_ARRAY) {
-                if (!value.is_array()) return false;
-                if (!api.variant_get_ptr_constructor(type, 0) || !api.variant_call) return false;
-                for (const auto& child : value) {
-                    if (!preflight_json_variant(child, std::nullopt)) return false;
-                }
-            } else if (type == GDEXTENSION_VARIANT_TYPE_DICTIONARY) {
-                if (!value.is_object()) return false;
-                if (!api.variant_get_ptr_constructor(type, 0) || !api.variant_call ||
-                    !api.string_new_with_utf8_chars ||
-                    !api.get_variant_from_type_constructor(GDEXTENSION_VARIANT_TYPE_STRING)) {
-                    return false;
-                }
-                for (auto it = value.begin(); it != value.end(); ++it) {
-                    if (!preflight_json_variant(it.value(), std::nullopt)) return false;
-                }
-            }
-            return api.get_variant_from_type_constructor(type) != nullptr;
-        };
-        for (size_t index = 0; index < emit_arguments.size(); ++index) {
-            if (!compatible_argument(emit_arguments[index], metadata.value().arguments[index])) {
-                return bridgeError(400, "signal_emit_argument_type_mismatch");
-            }
-        }
-#if defined(DIDI_PHASE7_SIGNAL_TEST_SEAMS)
-        if (takePhase7SignalTestSeam("missing_required_api")) {
-            return bridgeError(501, "required_bind_unavailable");
-        }
-#endif
-        for (size_t index = 0; index < emit_arguments.size(); ++index) {
-            if (!preflight_json_variant(
-                    emit_arguments[index],
-                    static_cast<GDExtensionVariantType>(metadata.value().arguments[index].type))) {
-                return bridgeError(501, "required_bind_unavailable");
-            }
-        }
-#if defined(DIDI_PHASE7_SIGNAL_TEST_SEAMS)
-        if (takePhase7SignalTestSeam("conversion_failure")) {
+        if (takePhase7SignalTestSeam("malformed_metadata")) {
             return bridgeError(500, "extension_protocol_error");
         }
 #endif
-        std::vector<VariantValue> native_arguments;
-        native_arguments.reserve(emit_arguments.size());
-        for (size_t index = 0; index < emit_arguments.size(); ++index) {
-            const auto& argument_metadata = metadata.value().arguments[index];
-            Result<VariantValue> converted =
-                argument_metadata.type == GDEXTENSION_VARIANT_TYPE_FLOAT &&
-                        (emit_arguments[index].is_number_integer() ||
-                         emit_arguments[index].is_number_unsigned())
-                    ? makeScalar(GDEXTENSION_VARIANT_TYPE_FLOAT,
-                                 static_cast<double>(emit_arguments[index].get<int64_t>()))
-                    : (argument_metadata.type == GDEXTENSION_VARIANT_TYPE_OBJECT &&
-                               emit_arguments[index].is_null()
-                           ? Result<VariantValue>(VariantValue{})
-                           : makeJsonVariant(emit_arguments[index]));
-            if (converted.isErr()) return bridgeError(500, "extension_protocol_error");
-            native_arguments.push_back(std::move(converted.value()));
+        auto signals = callObject(target.value(), "Object", "get_signal_list", 3995934104LL);
+        if (signals.isErr()) return errorJson(500, signals.error().message);
+        auto native_signal_count = array_size(signals.value());
+        if (native_signal_count.isErr() || native_signal_count.value() < 0) {
+            return bridgeError(500, "extension_protocol_error");
         }
-        std::vector<const VariantValue*> call_arguments{&signal_name_value.value()};
-        call_arguments.reserve(native_arguments.size() + 1);
-        for (auto& argument : native_arguments) call_arguments.push_back(&argument);
-        // How many listeners this emit can reach, read before the emit rather
-        // than after it, because a one-shot connection disconnects itself on
-        // delivery. It is also what tells a refusal apart from a no-op below.
-        int64_t connection_count = 0;
-        if (requireMethodBind("Object", "get_signal_connection_list", 3147814860LL).isOk()) {
-            auto connections = callObject(target.value(), "Object", "get_signal_connection_list",
-                                          3147814860LL, {&signal_name_value.value()});
-            if (connections.isOk()) {
-                auto size_value = callVariant(connections.value(), "size");
-                if (size_value.isOk()) {
-                    auto size = scalarFromVariant<int64_t>(size_value.value(),
-                                                           GDEXTENSION_VARIANT_TYPE_INT);
-                    if (size.isOk()) connection_count = size.value();
-                }
+        if (native_signal_count.value() > kSignalNativeWorkCeiling) {
+            return bridgeError(413, "signal_metadata_work_limit");
+        }
+        struct SignalRecord { std::string name; json arguments; };
+        std::vector<SignalRecord> descriptors;
+        descriptors.reserve(static_cast<size_t>(native_signal_count.value()));
+        for (int64_t index = 0; index < native_signal_count.value(); ++index) {
+            auto native_descriptor = array_at(signals.value(), index);
+            if (native_descriptor.isErr()) return bridgeError(500, "extension_protocol_error");
+            auto serialized = variantToJson(native_descriptor.value());
+            if (serialized.isErr() || !serialized.value().is_object() ||
+                !serialized.value().contains("name") ||
+                !serialized.value()["name"].is_string()) {
+                return bridgeError(500, "extension_protocol_error");
             }
+            auto arguments = serialized.value().value("args", json::array());
+            if (!arguments.is_array()) return bridgeError(500, "extension_protocol_error");
+            if (arguments.size() > static_cast<size_t>(kSignalArgumentWorkCeiling)) {
+                return bridgeError(413, "signal_argument_metadata_work_limit");
+            }
+            const auto name = serialized.value()["name"].get<std::string>();
+            auto validated = utf8_prefix(name, name.size());
+            if (validated.isErr() || validated.value().size() != name.size()) {
+                return bridgeError(500, "extension_protocol_error");
+            }
+            descriptors.push_back({name, std::move(arguments)});
         }
-        auto emitted = callObject(target.value(), "Object", "emit_signal", 4047867050LL,
-                                  call_arguments);
-        if (emitted.isErr()) return errorJson(500, emitted.error().message);
-        auto emit_code = scalarFromVariant<int64_t>(
-            emitted.value(), GDEXTENSION_VARIANT_TYPE_INT);
-        if (emit_code.isErr()) return errorJson(500, emit_code.error().message);
-        // ERR_UNAVAILABLE with nothing connected is not a failure. Godot keeps
-        // a signal in Object::signal_map only once it has a connection, so
-        // emitting a built-in signal nobody is listening to returns
-        // ERR_UNAVAILABLE and the bridge reported "The engine refused the
-        // emit." That is the state a caller is most likely to be in -- driving
-        // a signal by hand during bring-up, before the connection exists -- and
-        // in GDScript the same call is an unremarkable no-op (#624). The signal
-        // is known to be declared by this point: the arity check above read it
-        // out of the object's own signal list.
-        constexpr int64_t kErrUnavailable = 2;
-        if (emit_code.value() == kErrUnavailable && connection_count == 0) {
-            return liveResult({{"emitted", false},
-                               {"connection_count", 0},
-                               {"argument_count", emit_arguments.size()},
-                               {"note", "Nothing is connected to this signal, so the emit reached "
-                                        "no listeners. Connect something with signal_connect to "
-                                        "observe it."},
-                               {"outcome", "completed"},
-                               {"rollback", "not_available"}});
-        }
-        if (emit_code.value() != 0) return bridgeError(500, "signal_emit_failed");
-        // The connections ran project code, which can change the scene with
-        // or without an undo entry (#1049).
-        json emitted_answer = {{"emitted", true},
-                               {"connection_count", connection_count},
-                               {"argument_count", emit_arguments.size()},
-                               {"outcome", "completed"},
-                               {"rollback", "not_available"}};
-        reportEditedSceneSaved(emitted_answer);
-        return liveResult(emitted_answer);
-    }
+        std::sort(descriptors.begin(), descriptors.end(),
+                  [&](const SignalRecord& left, const SignalRecord& right) {
+                      return utf8_less(left.name, right.name);
+                  });
 
-    if (method == "project.resolveUids") {
-        // ResourceUID is the engine's own UID table. Didi reads it instead of
-        // .godot/uid_cache.bin, which is an undocumented binary cache written on
-        // the editor's schedule: absent on a fresh clone, stale between saves,
-        // and readable mid-write. Every bind below carries the same hash on
-        // Godot 4.5.1, 4.6.2 and 4.7.2, so there is no version gate here.
-        if (!params.contains("queries") || !params["queries"].is_array()) {
-            return errorJson(400, "project.resolveUids requires a queries array");
-        }
-        const auto& queries = params["queries"];
-        if (queries.empty() || queries.size() > 256) {
-            return errorJson(400, "project.resolveUids accepts 1 to 256 queries");
-        }
-        for (const auto& bind : {std::make_tuple("ResourceUID", "text_to_id", 1321353865LL),
-                                 std::make_tuple("ResourceUID", "has_id", 1116898809LL),
-                                 std::make_tuple("ResourceUID", "get_id_path", 844755477LL),
-                                 std::make_tuple("ResourceUID", "path_to_uid", 1703090593LL),
-                                 std::make_tuple("ResourceLoader", "exists", 4185558881LL)}) {
-            auto required = requireMethodBind(std::get<0>(bind), std::get<1>(bind), std::get<2>(bind));
-            if (required.isErr()) return errorJson(501, required.error().message);
-        }
-        auto uid_table = singleton("ResourceUID");
-        if (uid_table.isErr()) return errorJson(uid_table.error());
-        auto resource_loader = singleton("ResourceLoader");
-        if (resource_loader.isErr()) return errorJson(resource_loader.error());
-
-        // Whether Godot can load a path, which is the question a reference asks.
-        // It is not the same question as whether a file scan indexed the path:
-        // a remap, a type the scan does not index, or a scan that hit its own
-        // cap all read as absent on disk and load perfectly well here.
-        auto engineCanLoad = [&](const std::string& res_path) -> Result<bool> {
-            auto path_arg = makeString(res_path);
-            if (path_arg.isErr()) return path_arg.error();
-            auto hint = makeString(std::string{});
-            if (hint.isErr()) return hint.error();
-            auto answer = callObject(resource_loader.value(), "ResourceLoader", "exists", 4185558881LL,
-                                     {&path_arg.value(), &hint.value()});
-            if (answer.isErr()) return answer.error();
-            auto loadable = scalarFromVariant<GDExtensionBool>(answer.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
-            if (loadable.isErr()) return loadable.error();
-            return loadable.value() != 0;
+        bool truncated = false;
+        json truncated_at = nullptr;
+        // How many of the reported connections belong to the editor rather
+        // than to the scene, so a caller can tell an empty answer from one
+        // that is entirely the scene dock without walking the list (#461).
+        size_t editor_connection_count = 0;
+        size_t engine_connection_count = 0;
+        auto mark_truncated = [&](const std::string& location) {
+            truncated = true;
+            if (truncated_at.is_null()) truncated_at = location;
         };
-
-        json entries = json::array();
-        for (const auto& value : queries) {
-            if (!value.is_string()) return errorJson(400, "project.resolveUids queries must be strings");
-            const std::string query = value.get<std::string>();
-            json entry{{"query", query}, {"found", false}, {"uid", ""}, {"path", ""}};
-            if (query.rfind("uid://", 0) == 0) {
-                auto text = makeString(query);
-                if (text.isErr()) return errorJson(500, text.error().message);
-                auto id_value = callObject(uid_table.value(), "ResourceUID", "text_to_id", 1321353865LL,
-                                           {&text.value()});
-                if (id_value.isErr()) return errorJson(500, id_value.error().message);
-                auto id = scalarFromVariant<int64_t>(id_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
-                if (id.isErr()) return errorJson(500, id.error().message);
-                if (id.value() < 0) {
-                    // ResourceUID answers INVALID_ID for text that is not a UID
-                    // at all, which is a different fact from a UID it has never
-                    // been told about.
-                    entry["reason"] = "malformed_uid";
-                } else {
-                    auto id_arg = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, id.value());
-                    if (id_arg.isErr()) return errorJson(500, id_arg.error().message);
-                    auto known = callObject(uid_table.value(), "ResourceUID", "has_id", 1116898809LL,
-                                            {&id_arg.value()});
-                    if (known.isErr()) return errorJson(500, known.error().message);
-                    auto is_known = scalarFromVariant<GDExtensionBool>(known.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
-                    if (is_known.isErr()) return errorJson(500, is_known.error().message);
-                    if (!is_known.value()) {
-                        entry["reason"] = "unknown_to_engine";
-                    } else {
-                        auto path_value = callObject(uid_table.value(), "ResourceUID", "get_id_path", 844755477LL,
-                                                     {&id_arg.value()});
-                        if (path_value.isErr()) return errorJson(500, path_value.error().message);
-                        auto resolved = stringFromVariant(path_value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
-                        if (resolved.isErr()) return errorJson(500, resolved.error().message);
-                        entry["found"] = true;
-                        entry["uid"] = query;
-                        entry["path"] = resolved.value();
-                        // A UID the engine still holds can point at a file that
-                        // is gone. Registered is not the same as loadable.
-                        auto loadable = engineCanLoad(resolved.value());
-                        if (loadable.isErr()) return errorJson(500, loadable.error().message);
-                        entry["exists"] = loadable.value();
-                    }
+        json output_signals = json::array();
+        const size_t signal_count = std::min<size_t>(descriptors.size(), 256);
+        if (descriptors.size() > signal_count) mark_truncated("signals");
+        for (size_t signal_index = 0; signal_index < signal_count; ++signal_index) {
+            const auto& descriptor = descriptors[signal_index];
+            const auto& raw_name = descriptor.name;
+            auto name = utf8_prefix(raw_name, 256);
+            if (name.isErr()) return bridgeError(500, "extension_protocol_error");
+            if (name.value().size() != raw_name.size()) {
+                mark_truncated("bytes");
+            }
+            const auto& raw_arguments = descriptor.arguments;
+            json arguments = json::array();
+            const size_t argument_count = std::min<size_t>(raw_arguments.size(), 16);
+            if (raw_arguments.size() > argument_count) {
+                mark_truncated("arguments");
+            }
+            for (size_t argument_index = 0; argument_index < argument_count; ++argument_index) {
+                auto parsed = parse_argument_metadata(raw_arguments[argument_index]);
+                if (parsed.isErr()) return bridgeError(500, "extension_protocol_error");
+                const auto& raw_argument_name = parsed.value().name;
+                auto validated = utf8_prefix(raw_argument_name, raw_argument_name.size());
+                if (validated.isErr() || validated.value().size() != raw_argument_name.size()) {
+                    return bridgeError(500, "extension_protocol_error");
                 }
-            } else if (query.rfind("res://", 0) == 0) {
-                auto path_arg = makeString(query);
-                if (path_arg.isErr()) return errorJson(500, path_arg.error().message);
-                auto uid_value = callObject(uid_table.value(), "ResourceUID", "path_to_uid", 1703090593LL,
-                                            {&path_arg.value()});
-                if (uid_value.isErr()) return errorJson(500, uid_value.error().message);
-                auto uid_text = stringFromVariant(uid_value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
-                if (uid_text.isErr()) return errorJson(500, uid_text.error().message);
-                // path_to_uid hands back what it was given when the engine holds
-                // no UID for that path, so the prefix is what separates a hit
-                // from a miss rather than an empty string.
-                // A path can load without any UID registered for it, so
-                // existence is answered separately from resolution rather than
-                // inferred from it.
-                auto loadable = engineCanLoad(query);
-                if (loadable.isErr()) return errorJson(500, loadable.error().message);
-                entry["exists"] = loadable.value();
-                if (uid_text.value().rfind("uid://", 0) == 0) {
-                    entry["found"] = true;
-                    entry["uid"] = uid_text.value();
-                    entry["path"] = query;
-                } else {
-                    entry["reason"] = "unknown_to_engine";
+                auto argument_name = utf8_prefix(raw_argument_name, 256);
+                if (argument_name.isErr()) return bridgeError(500, "extension_protocol_error");
+                if (argument_name.value().size() != raw_argument_name.size()) {
+                    mark_truncated("bytes");
                 }
-            } else {
-                entry["reason"] = "unsupported_query";
+                arguments.push_back({{"name", argument_name.value()},
+                                     {"type_id", parsed.value().type},
+                                     {"type_name", type_name(parsed.value().type)}});
             }
-            entries.push_back(std::move(entry));
-        }
-        return liveResult({{"status", "success"}, {"entries", std::move(entries)}});
-    }
 
-    if (method == "project.getSetting" || method == "project.setSetting") {
-        const std::string setting = params.value("setting", "");
-        auto valid_name = method == "project.setSetting"
-            ? validateGenericSettingName(setting)
-            : validateSettingName(setting);
-        if (valid_name.isErr()) return errorJson(valid_name.error());
-
-        auto project_settings = singleton("ProjectSettings");
-        if (project_settings.isErr()) {
-            return errorJson(project_settings.error());
-        }
-        auto name = makeStringName(setting);
-        if (name.isErr()) return errorJson(name.error());
-        auto exists_value = callObject(project_settings.value(), "ProjectSettings", "has_setting", 3927539163LL,
-                                       {&name.value()});
-        if (exists_value.isErr()) return errorJson(exists_value.error());
-        auto exists = scalarFromVariant<GDExtensionBool>(exists_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
-        if (exists.isErr()) return errorJson(exists.error());
-
-        if (method == "project.getSetting") {
-            if (!exists.value()) {
-                return errorJson(404, "Project setting not found: " + setting +
-                                          ". The attached editor does not define it.",
-                                 {{"code", "setting_not_found"}});
+            auto signal_name_value = makeStringName(raw_name);
+            if (signal_name_value.isErr()) return errorJson(500, signal_name_value.error().message);
+            auto connection_values = callObject(
+                target.value(), "Object", "get_signal_connection_list", 3147814860LL,
+                {&signal_name_value.value()});
+            if (connection_values.isErr()) return errorJson(500, connection_values.error().message);
+            auto connection_count_result = array_size(connection_values.value());
+            if (connection_count_result.isErr() || connection_count_result.value() < 0) {
+                return bridgeError(500, "extension_protocol_error");
             }
-            VariantValue default_value;
-            auto current = callObject(project_settings.value(), "ProjectSettings", "get_setting", 223050753LL,
-                                      {&name.value(), &default_value});
-            if (current.isErr()) return errorJson(current.error());
-            auto value = variantToJson(current.value());
-            if (value.isErr()) return errorJson(value.error());
-            return liveResult({{"status", "success"}, {"setting", setting}, {"value", value.value()}});
-        }
-
-        const bool remove = params.value("remove", false);
-        if (remove && params.contains("value")) {
-            return errorJson(400, "Specify either value or remove: true, not both");
-        }
-        if (!remove && !params.contains("value")) {
-            return errorJson(400, "value is required unless remove is true");
-        }
-        if (remove && !exists.value()) {
-            return errorJson(404, "Project setting not found: " + setting + ". There is nothing to remove.",
-                             {{"code", "setting_not_found"}});
-        }
-
-        // Godot does support custom project settings, so writing a name the
-        // engine does not define is a legitimate mode. It is also
-        // indistinguishable from the overwhelmingly more common case, a typo in
-        // a real setting name, and the two were answered identically: status
-        // success, persisted true, and a key nothing in the engine will ever
-        // read. project_get_setting then returned it happily, so reading back
-        // did not catch it either (#464).
-        //
-        // has_setting is the same question project_get_setting already answers
-        // with a clean 404. The setter has it available and did not use it.
-        const bool create = params.value("create", false);
-        if (!remove && !exists.value() && !create) {
-            return errorJson(
-                404,
-                "Project setting not found: " + setting +
-                    ". The engine does not define this name, so writing it would add a key "
-                    "nothing reads and report it as persisted. Check the spelling against "
-                    "project_get_setting. To add a custom setting on purpose, pass "
-                    "create: true.",
-                {{"code", "setting_not_found"}});
-        }
-
-        VariantValue default_value;
-        auto previous = exists.value()
-            ? callObject(project_settings.value(), "ProjectSettings", "get_setting", 223050753LL,
-                         {&name.value(), &default_value})
-            : Result<VariantValue>(VariantValue{});
-        if (previous.isErr()) return errorJson(previous.error());
-        auto replacement = remove ? Result<VariantValue>(VariantValue{}) : makeJsonVariant(params["value"]);
-        if (replacement.isErr()) return errorJson(replacement.error());
-
-        // Having established that the engine defines this setting, the tool
-        // used to write whatever it was handed. The lookup that answered
-        // defined_by_engine is holding the engine's own value, so its type is
-        // available at exactly the point where the check belongs (#490).
-        if (!remove && exists.value()) {
-            const auto current_type = GodotApi::instance().variant_get_type(previous.value().ptr());
-            const auto incoming_type = GodotApi::instance().variant_get_type(replacement.value().ptr());
-            const bool whole_number = params["value"].is_number_float() &&
-                                      params["value"].get<double>() ==
-                                          std::floor(params["value"].get<double>());
-            if (!incomingTypeFitsSetting(current_type, incoming_type, whole_number)) {
-                return errorJson(
-                    409,
-                    std::string("Project setting type mismatch: ") + setting + " holds a " +
-                        variantTypeName(current_type) + " and the value given is a " +
-                        variantTypeName(incoming_type) +
-                        ". Writing it would persist a value the engine cannot read back as the "
-                        "setting it names.",
-                    {{"code", "setting_type_mismatch"},
-                     {"setting", setting},
-                     {"expected_type", variantTypeName(current_type)},
-                     {"given_type", variantTypeName(incoming_type)},
-                     {"retryable", false}});
+            if (connection_count_result.value() > kSignalNativeWorkCeiling) {
+                return bridgeError(413, "signal_connection_metadata_work_limit");
             }
-        }
-
-        // A res:// value names a file, and a setting pointed at a file that is
-        // not there is a project that no longer runs. project_set_autoload has
-        // refused this since it was written; this tool did not (#490).
-        if (!remove && params["value"].is_string()) {
-            const auto text = params["value"].get<std::string>();
-            if (strings::startsWith(text, "res://")) {
-                auto present = resourcePathExistsOnDisk(text);
-                if (present.isErr()) return errorJson(present.error());
-                if (!present.value()) {
-                    return errorJson(404,
-                                     "Project setting resource not found: " + text +
-                                         ". Nothing is at that path, so " + setting +
-                                         " would name a file the project cannot load.",
-                                     {{"setting", setting},
-                                      {"resource_path", text},
-                                      {"resource_exists", false},
-                                      {"retryable", false}});
+            struct ConnectionRecord {
+                std::optional<std::string> target_node;
+                std::string target_method;
+                int64_t flags{0};
+            };
+            std::vector<ConnectionRecord> normalized_connections;
+            normalized_connections.reserve(
+                static_cast<size_t>(connection_count_result.value()));
+            for (int64_t connection_index = 0;
+                 connection_index < connection_count_result.value(); ++connection_index) {
+                auto connection = array_at(connection_values.value(), connection_index);
+                if (connection.isErr()) return bridgeError(500, "extension_protocol_error");
+                auto callable = dictionary_field(connection.value(), "callable");
+                auto flags_value = dictionary_field(connection.value(), "flags");
+                if (callable.isErr() || flags_value.isErr() ||
+                    GodotApi::instance().variant_get_type(callable.value().ptr()) !=
+                        GDEXTENSION_VARIANT_TYPE_CALLABLE) {
+                    return bridgeError(500, "extension_protocol_error");
                 }
-            }
-        }
-
-        // What the file held for it before the write, read the way value_written
-        // is read after it: the literal, or null for no line (#1151).
-        auto literal_before = projectFileSettingLiteral(setting);
-        auto applied = callObject(project_settings.value(), "ProjectSettings", "set_setting", 402577236LL,
-                                  {&name.value(), &replacement.value()});
-        if (applied.isErr()) return errorJson(applied.error());
-        const auto file_before = projectFileStamp();
-        auto saved = callObject(project_settings.value(), "ProjectSettings", "save", 166280745LL);
-        auto save_code = saved.isOk()
-            ? scalarFromVariant<int64_t>(saved.value(), GDEXTENSION_VARIANT_TYPE_INT)
-            : Result<int64_t>(saved.error());
-        if (save_code.isErr() || save_code.value() != 0) {
-            auto rollback_save = restoreProjectSetting(project_settings.value(), name.value(), previous.value(),
-                                                       file_before);
-            const std::string detail = save_code.isErr()
-                ? save_code.error().message
-                : ::didi::godot::describeGodotError(save_code.value());
-            if (rollback_save.isErr()) {
-                return errorJson(500, "ProjectSettings.save failed (" + detail + ") and rollback failed: " +
-                                      rollback_save.error().message);
-            }
-            return projectFileNotWritable("setting", detail);
-        }
-        auto stored = projectFileSettingLiteral(setting);
-        if (stored.isErr()) {
-            return errorJson(500, "ProjectSettings.save reported success, and project.godot could not "
-                                  "be read back to confirm it: " + stored.error().message);
-        }
-        json result = {{"status", "success"}, {"setting", setting}, {"persisted", true},
-                       {"removed", remove},
-                       // What the file holds now, read back after the save
-                       // (#1019). Null when it has no line for the setting.
-                       {"value_written", stored.value()},
-                       // Whether the engine knew this name before the write. A
-                       // caller that passed create: true gets to see which of the
-                       // two things it did.
-                       {"defined_by_engine", static_cast<bool>(exists.value())}};
-        // The literal it replaced, under the name the offline route already
-        // uses (#1151): null when the file had no line, an engine default.
-        // Absent for a setting the engine did not have.
-        if (exists.value() && literal_before.isOk()) result["previous_value"] = literal_before.value();
-        // The editor's Audio panel read this setting when it was built and saves
-        // the bus layout to that file until the editor restarts. Moving it here
-        // left the editor writing the old file while the next start loaded the
-        // new one, which was empty, so every bus the project had was gone from
-        // the editor after a restart. Measured on 4.7.2 in vibe session
-        // nineteen; editor_reload_project is a filesystem scan and does not
-        // change it.
-        if (setting == "audio/buses/default_bus_layout") {
-            const auto editor_path = startupBusLayoutPath();
-            const auto project_path = busLayoutPathFrom(projectSettingString(setting));
-            if (editor_path.has_value() && *editor_path != project_path) {
-                result["requires_editor_restart"] = true;
-                result["editor_layout_path"] = *editor_path;
-                result["limitation"] =
-                    "The attached editor opened the project with " + *editor_path +
-                    " as its bus layout and keeps saving every bus change there until it "
-                    "restarts. The next start loads " + project_path + " instead, and the "
-                    "buses the editor holds now are in the other file, so copy the layout "
-                    "across or restart the editor before changing any bus.";
-            }
-        }
-        return liveResult(std::move(result));
-    }
-
-    if (method == "project.listAutoloads" || method == "project.setAutoload" ||
-        method == "project.removeAutoload") {
-        auto project_settings = singleton("ProjectSettings");
-        if (project_settings.isErr()) return errorJson(project_settings.error());
-
-        if (method == "project.listAutoloads") {
-            auto properties = callObject(project_settings.value(), "Object", "get_property_list", 3995934104LL);
-            if (properties.isErr()) return errorJson(properties.error());
-            auto size_value = callVariant(properties.value(), "size");
-            if (size_value.isErr()) return errorJson(size_value.error());
-            auto size = scalarFromVariant<int64_t>(size_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
-            if (size.isErr()) return errorJson(size.error());
-            auto name_key = makeString("name");
-            if (name_key.isErr()) return errorJson(name_key.error());
-            std::vector<json> entries;
-            for (int64_t i = 0; i < size.value(); ++i) {
-                auto index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, i);
-                if (index.isErr()) return errorJson(index.error());
-                auto descriptor = callVariant(properties.value(), "get", {&index.value()});
-                if (descriptor.isErr()) return errorJson(descriptor.error());
-                auto property_name_value = callVariant(descriptor.value(), "get", {&name_key.value()});
-                if (property_name_value.isErr()) return errorJson(property_name_value.error());
-                auto property_type = GodotApi::instance().variant_get_type(property_name_value.value().ptr());
-                if (property_type != GDEXTENSION_VARIANT_TYPE_STRING && property_type != GDEXTENSION_VARIANT_TYPE_STRING_NAME) continue;
-                auto property_name = stringFromVariant(property_name_value.value(), property_type);
-                if (property_name.isErr()) return errorJson(property_name.error());
-                if (!strings::startsWith(property_name.value(), "autoload/") || property_name.value().size() <= 9) continue;
-                auto setting_name = makeStringName(property_name.value());
-                VariantValue default_value;
-                if (setting_name.isErr()) return errorJson(setting_name.error());
-                auto setting = callObject(project_settings.value(), "ProjectSettings", "get_setting", 223050753LL,
-                                          {&setting_name.value(), &default_value});
-                if (setting.isErr()) return errorJson(setting.error());
-                auto setting_type = GodotApi::instance().variant_get_type(setting.value().ptr());
-                auto encoded = stringFromVariant(setting.value(), setting_type);
-                if (encoded.isErr()) return errorJson(encoded.error());
-                const bool autoload_singleton = strings::startsWith(encoded.value(), "*");
-                entries.push_back({{"name", property_name.value().substr(9)},
-                                   {"path", autoload_singleton ? encoded.value().substr(1) : encoded.value()},
-                                   {"singleton", autoload_singleton}});
-            }
-            std::sort(entries.begin(), entries.end(), [](const json& left, const json& right) {
-                return left["name"].get<std::string>() < right["name"].get<std::string>();
-            });
-            return liveResult({{"status", "success"}, {"autoloads", entries}});
-        }
-
-        const std::string autoload_name = params.value("name", "");
-        auto valid_name = validateIdentifier(autoload_name, "autoload name");
-        if (valid_name.isErr()) return errorJson(valid_name.error());
-        const std::string setting_path = "autoload/" + autoload_name;
-        auto setting_name = makeStringName(setting_path);
-        if (setting_name.isErr()) return errorJson(setting_name.error());
-        auto exists_value = callObject(project_settings.value(), "ProjectSettings", "has_setting", 3927539163LL,
-                                       {&setting_name.value()});
-        if (exists_value.isErr()) return errorJson(exists_value.error());
-        auto exists = scalarFromVariant<GDExtensionBool>(exists_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
-        if (exists.isErr()) return errorJson(exists.error());
-        const bool removing = method == "project.removeAutoload";
-        if (removing && !exists.value()) return errorJson(404, "Autoload not found: " + autoload_name);
-        if (!removing && exists.value() && !params.value("replace", false)) {
-            return errorJson(409, "Autoload already exists; pass replace: true to update it",
-                                  {{"code", "already_exists"}, {"retry_with", {{"replace", true}}}});
-        }
-
-        VariantValue default_value;
-        auto previous = exists.value()
-            ? callObject(project_settings.value(), "ProjectSettings", "get_setting", 223050753LL,
-                         {&setting_name.value(), &default_value})
-            : Result<VariantValue>(VariantValue{});
-        if (previous.isErr()) return errorJson(previous.error());
-        Result<VariantValue> replacement(VariantValue{});
-        std::string resource_path;
-        bool autoload_singleton = true;
-        if (!removing) {
-            resource_path = params.value("path", "");
-            auto valid_path = strings::endsWith(resource_path, ".gd") || strings::endsWith(resource_path, ".cs")
-                ? validateScriptPath(resource_path)
-                : validateResPath(resource_path, ".tscn");
-            if (valid_path.isErr()) return errorJson(valid_path.error());
-            auto loader = singleton("ResourceLoader");
-            if (loader.isErr()) return errorJson(loader.error());
-            auto path = makeString(resource_path);
-            auto hint = makeString("");
-            if (path.isErr() || hint.isErr()) return errorJson(500, "Failed to construct resource existence arguments");
-            auto resource_exists_value = callObject(loader.value(), "ResourceLoader", "exists", 4185558881LL,
-                                                    {&path.value(), &hint.value()});
-            if (resource_exists_value.isErr()) return errorJson(resource_exists_value.error());
-            auto resource_exists = scalarFromVariant<GDExtensionBool>(resource_exists_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
-            if (resource_exists.isErr()) return errorJson(resource_exists.error());
-            if (!resource_exists.value()) return errorJson(404, "Autoload resource not found: " + resource_path);
-            autoload_singleton = params.value("singleton", true);
-            replacement = makeString((autoload_singleton ? "*" : "") + resource_path);
-            if (replacement.isErr()) return errorJson(replacement.error());
-        }
-
-        auto applied = callObject(project_settings.value(), "ProjectSettings", "set_setting", 402577236LL,
-                                  {&setting_name.value(), &replacement.value()});
-        if (applied.isErr()) return errorJson(applied.error());
-        const auto file_before = projectFileStamp();
-        auto saved = callObject(project_settings.value(), "ProjectSettings", "save", 166280745LL);
-        auto save_code = saved.isOk()
-            ? scalarFromVariant<int64_t>(saved.value(), GDEXTENSION_VARIANT_TYPE_INT)
-            : Result<int64_t>(saved.error());
-        if (save_code.isErr() || save_code.value() != 0) {
-            auto rollback = restoreProjectSetting(project_settings.value(), setting_name.value(), previous.value(),
-                                                  file_before);
-            if (rollback.isErr()) return errorJson(500, "Autoload save failed and rollback failed: " + rollback.error().message);
-            return projectFileNotWritable("autoload", save_code.isErr()
-                                                          ? save_code.error().message
-                                                          : ::didi::godot::describeGodotError(save_code.value()));
-        }
-        auto stored = projectFileAutoload(autoload_name);
-        if (stored.isErr()) {
-            return errorJson(500, "ProjectSettings.save reported success, and project.godot could not "
-                                  "be read back to confirm it: " + stored.error().message);
-        }
-        // Say what this did and did not do. Writing the setting is not the same
-        // as the attached editor knowing about it: Godot registers an autoload's
-        // global name through editor-internal paths a GDExtension cannot reach,
-        // so scripts referring to the singleton keep failing to compile in this
-        // editor session until it restarts. `editor_reload_project` does not
-        // clear it either. Reporting only `persisted: true` left callers
-        // debugging their own scripts for a state this call had created.
-        return liveResult({{"status", "success"}, {"name", autoload_name}, {"path", resource_path},
-                           {"singleton", autoload_singleton}, {"removed", removing}, {"persisted", true},
-                           // The entry project.godot declares after the save,
-                           // or null once it declares none (#1019).
-                           {"autoload", stored.value()},
-                           {"registered_in_attached_editor", false},
-                           {"requires_editor_restart", true},
-                           {"limitation",
-                            removing
-                                ? std::string(
-                                      "The setting is removed from project.godot, but this editor "
-                                      "session keeps resolving the singleton until it is restarted. "
-                                      "editor_reload_project does not change that.")
-                                : std::string(
-                                      "The setting is written to project.godot, but this editor "
-                                      "session will not resolve the singleton until it is restarted. "
-                                      "Scripts referencing it report 'Identifier not found' until "
-                                      "then, and editor_reload_project does not change that.")}});
-    }
-
-    if (method == "project.listInputActions" || method == "project.setInputAction" ||
-        method == "project.removeInputAction") {
-        auto project_settings = singleton("ProjectSettings");
-        if (project_settings.isErr()) return errorJson(project_settings.error());
-
-        if (method == "project.listInputActions") {
-            // Ninety actions came back on every call, eighty-five of them the
-            // engine's ui_* map, and there was no smaller question to ask: not
-            // the project's own, not one by name (#775). A listing now keeps to
-            // what the project declares unless asked for the engine's too, as
-            // P4 says (#1108). An action named by the caller is that request,
-            // wherever the action comes from.
-            const std::string only_action = params.value("action", "");
-            const bool asked = params.contains("include_engine_defaults");
-            bool include_engine_defaults = params.value("include_engine_defaults", !only_action.empty());
-            const auto declared = projectFileInputActions();
-            if (declared.failure && !include_engine_defaults) {
-                if (asked) {
-                    return errorJson(declared.failure->code,
-                                     declared.failure->message +
-                                         " Which actions are the project's own cannot be told from "
-                                         "the engine's until the file reads.",
-                                     declared.failure->data.is_null() ? json::object()
-                                                                      : declared.failure->data);
+                auto flags = scalarFromVariant<int64_t>(
+                    flags_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+                auto callable_object_value = callVariant(callable.value(), "get_object");
+                auto callable_method_value = callVariant(callable.value(), "get_method");
+                if (flags.isErr() || callable_object_value.isErr() ||
+                    callable_method_value.isErr()) {
+                    return bridgeError(500, "extension_protocol_error");
                 }
-                // Nobody asked to leave the engine's out, and they cannot be
-                // told apart, so it lists every action and says why below.
-                include_engine_defaults = true;
-            }
-            size_t omitted_engine_defaults = 0;
-            bool named_action_omitted = false;
-            auto properties = callObject(project_settings.value(), "Object", "get_property_list", 3995934104LL);
-            if (properties.isErr()) return errorJson(properties.error());
-            auto size_value = callVariant(properties.value(), "size");
-            if (size_value.isErr()) return errorJson(size_value.error());
-            auto size = scalarFromVariant<int64_t>(size_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
-            if (size.isErr()) return errorJson(size.error());
-            auto name_key = makeString("name");
-            auto deadzone_key = makeString("deadzone");
-            auto events_key = makeString("events");
-            if (name_key.isErr() || deadzone_key.isErr() || events_key.isErr()) return errorJson(500, "Failed to construct InputMap keys");
-            std::vector<json> actions;
-            for (int64_t i = 0; i < size.value(); ++i) {
-                auto index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, i);
-                if (index.isErr()) return errorJson(index.error());
-                auto descriptor = callVariant(properties.value(), "get", {&index.value()});
-                if (descriptor.isErr()) return errorJson(descriptor.error());
-                auto property_name_value = callVariant(descriptor.value(), "get", {&name_key.value()});
-                if (property_name_value.isErr()) return errorJson(property_name_value.error());
-                auto property_type = GodotApi::instance().variant_get_type(property_name_value.value().ptr());
-                if (property_type != GDEXTENSION_VARIANT_TYPE_STRING && property_type != GDEXTENSION_VARIANT_TYPE_STRING_NAME) continue;
-                auto property_name = stringFromVariant(property_name_value.value(), property_type);
-                if (property_name.isErr()) return errorJson(property_name.error());
-                if (!strings::startsWith(property_name.value(), "input/") || property_name.value().size() <= 6) continue;
-                const std::string action_name = property_name.value().substr(6);
-                if (!only_action.empty() && action_name != only_action) continue;
-                const bool defined_by_project = declared.names.count(action_name) != 0;
-                if (!include_engine_defaults && !defined_by_project) {
-                    ++omitted_engine_defaults;
-                    named_action_omitted = !only_action.empty();
-                    continue;
+                if (flags.value() < 0 || flags.value() > 15) {
+                    return bridgeError(500, "extension_protocol_error");
                 }
-                auto setting_name = makeStringName(property_name.value());
-                VariantValue default_value;
-                if (setting_name.isErr()) return errorJson(setting_name.error());
-                auto setting = callObject(project_settings.value(), "ProjectSettings", "get_setting", 223050753LL,
-                                          {&setting_name.value(), &default_value});
-                if (setting.isErr()) return errorJson(setting.error());
-                if (GodotApi::instance().variant_get_type(setting.value().ptr()) != GDEXTENSION_VARIANT_TYPE_DICTIONARY) {
-                    return errorJson(422, "InputMap setting is not a Dictionary: " + property_name.value(),
-                                          {{"code", "malformed_input_map_entry"}});
+                auto callable_object = objectFromVariant(callable_object_value.value());
+                const auto callable_method_type = GodotApi::instance().variant_get_type(
+                    callable_method_value.value().ptr());
+                auto callable_method = stringFromVariant(
+                    callable_method_value.value(), callable_method_type);
+                if (callable_object.isErr() || callable_method.isErr()) {
+                    return bridgeError(500, "extension_protocol_error");
                 }
-                auto deadzone_value = callVariant(setting.value(), "get", {&deadzone_key.value()});
-                auto events_value = callVariant(setting.value(), "get", {&events_key.value()});
-                if (deadzone_value.isErr() || events_value.isErr()) {
-                    return errorJson(422, "InputMap setting is missing deadzone or events",
-                                     {{"code", "malformed_input_map_entry"}});
+                auto validated_method = utf8_prefix(
+                    callable_method.value(), callable_method.value().size());
+                if (validated_method.isErr() ||
+                    validated_method.value().size() != callable_method.value().size()) {
+                    return bridgeError(500, "extension_protocol_error");
                 }
-                auto deadzone = scalarFromVariant<double>(deadzone_value.value(), GDEXTENSION_VARIANT_TYPE_FLOAT);
-                if (deadzone.isErr()) return errorJson(deadzone.error());
-                auto event_count_value = callVariant(events_value.value(), "size");
-                if (event_count_value.isErr()) return errorJson(event_count_value.error());
-                auto event_count = scalarFromVariant<int64_t>(event_count_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
-                if (event_count.isErr()) return errorJson(event_count.error());
-                json events = json::array();
-                for (int64_t event_index = 0; event_index < event_count.value(); ++event_index) {
-                    auto native_index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, event_index);
-                    if (native_index.isErr()) return errorJson(native_index.error());
-                    auto event = callVariant(events_value.value(), "get", {&native_index.value()});
-                    if (event.isErr()) return errorJson(event.error());
-                    auto normalized = inputEventToJson(event.value());
-                    if (normalized.isErr()) return errorJson(normalized.error());
-                    events.push_back(normalized.value());
-                }
-                json entry = {{"action", action_name}, {"deadzone", deadzone.value()}, {"events", events}};
-                if (!declared.failure) entry["defined_by_project"] = defined_by_project;
-                actions.push_back(std::move(entry));
-            }
-            if (!only_action.empty() && actions.empty()) {
-                if (named_action_omitted) {
-                    return errorJson(404,
-                                     "Input action '" + only_action + "' is an engine default, and "
-                                     "include_engine_defaults is false.",
-                                     {{"code", "engine_default_action"},
-                                      {"action", only_action},
-                                      {"engine_default", true},
-                                      {"retry_with", {{"include_engine_defaults", true}}}});
-                }
-                return errorJson(404, "Input action not found: " + only_action,
-                                 {{"code", "input_action_not_found"}, {"action", only_action}});
-            }
-            std::sort(actions.begin(), actions.end(), [](const json& left, const json& right) {
-                return left["action"].get<std::string>() < right["action"].get<std::string>();
-            });
-            json listing = {{"status", "success"}, {"actions", actions}};
-            if (!include_engine_defaults) listing["omitted_engine_default_count"] = omitted_engine_defaults;
-            // Counted and said rather than guessed: an unreadable file leaves
-            // every action's origin unknown, not every action the engine's.
-            if (declared.failure) listing["defined_by_project_unavailable"] = declared.failure->message;
-            return liveResult(listing);
-        }
-
-        const std::string action = params.value("action", "");
-        auto valid_action = validateActionName(action);
-        if (valid_action.isErr()) return errorJson(valid_action.error());
-        const std::string setting_path = "input/" + action;
-        auto setting_name = makeStringName(setting_path);
-        if (setting_name.isErr()) return errorJson(setting_name.error());
-        auto exists_value = callObject(project_settings.value(), "ProjectSettings", "has_setting", 3927539163LL,
-                                       {&setting_name.value()});
-        if (exists_value.isErr()) return errorJson(exists_value.error());
-        auto exists = scalarFromVariant<GDExtensionBool>(exists_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
-        if (exists.isErr()) return errorJson(exists.error());
-        const bool removing = method == "project.removeInputAction";
-        if (removing && !exists.value()) return errorJson(404, "Input action not found: " + action);
-        if (removing) {
-            // has_setting says yes for ui_accept because the engine registers
-            // the built-in map as settings. Removing one wrote nothing to
-            // project.godot, left the running editor's InputMap without the
-            // action, and reported persisted: true, which is the opposite of
-            // what persisted promises: the removal is gone on the next load
-            // (#485).
-            auto defined = projectFileDefinesInputAction(action);
-            if (defined.isErr()) return errorJson(defined.error());
-            if (!defined.value()) {
-                return errorJson(
-                    409,
-                    "Input action '" + action +
-                        "' is an engine default rather than something this project defines. "
-                        "It is not in project.godot, so there is nothing to remove there: the "
-                        "removal would exist only in this editor session and be gone on the "
-                        "next load, while UI navigation broke in anything run from it. Use "
-                        "project_set_input_action to give the project its own events for this "
-                        "name.",
-                    {{"code", "engine_default_action"},
-                     {"action", action},
-                     {"engine_default", true},
-                     {"defined_by_project", false},
-                     {"retryable", false}});
-            }
-        }
-        if (!removing && exists.value() && !params.value("replace", false)) {
-            return errorJson(409, "Input action already exists; pass replace: true to update it",
-                                  {{"code", "already_exists"}, {"retry_with", {{"replace", true}}}});
-        }
-
-        VariantValue default_value;
-        auto previous = exists.value()
-            ? callObject(project_settings.value(), "ProjectSettings", "get_setting", 223050753LL,
-                         {&setting_name.value(), &default_value})
-            : Result<VariantValue>(VariantValue{});
-        if (previous.isErr()) return errorJson(previous.error());
-        Result<VariantValue> replacement(VariantValue{});
-        double deadzone = 0.2;
-        size_t event_count = 0;
-        if (!removing) {
-            deadzone = params.value("deadzone", 0.2);
-            if (!std::isfinite(deadzone) || deadzone < 0.0 || deadzone > 1.0) {
-                return errorJson(400, "deadzone must be finite and within 0.0..1.0");
-            }
-            json event_descriptors = params.value("events", json::array());
-            if (!event_descriptors.is_array()) return errorJson(400, "events must be an array");
-            auto dictionary = makeJsonVariant(json::object());
-            auto events = makeJsonVariant(json::array());
-            auto deadzone_key = makeString("deadzone");
-            auto events_key = makeString("events");
-            auto deadzone_value = makeScalar(GDEXTENSION_VARIANT_TYPE_FLOAT, deadzone);
-            if (dictionary.isErr() || events.isErr() || deadzone_key.isErr() || events_key.isErr() || deadzone_value.isErr()) {
-                return errorJson(500, "Failed to construct InputMap setting containers");
-            }
-            size_t event_index = 0;
-            for (const auto& descriptor : event_descriptors) {
-                auto event = makeInputEvent(descriptor);
-                if (event.isErr()) {
-                    // Which entry, because events takes many and a message about
-                    // one of them that does not say which is a message a caller
-                    // has to bisect (#737).
-                    return errorJson(event.error().code,
-                                     "Argument 'events' entry " + std::to_string(event_index) +
-                                         ": " + event.error().message);
-                }
-                ++event_index;
-                auto appended = callVariant(events.value(), "append", {&event.value()});
-                if (appended.isErr()) return errorJson(appended.error());
-            }
-            auto set_deadzone = callVariant(dictionary.value(), "set", {&deadzone_key.value(), &deadzone_value.value()});
-            auto set_events = callVariant(dictionary.value(), "set", {&events_key.value(), &events.value()});
-            if (set_deadzone.isErr() || set_events.isErr()) return errorJson(500, "Failed to construct InputMap setting");
-            event_count = event_descriptors.size();
-            replacement = std::move(dictionary.value());
-        }
-
-        // The editor's own InputMap is left as it is. An editor never loads a
-        // project's input actions into its map -- the project's actions are
-        // absent from it at startup on 4.5.1, 4.6.2 and 4.7.2 -- and Godot's
-        // Project Settings dialog writes ProjectSettings and nothing else. This
-        // used to finish with InputMap.load_from_project_settings(), which on
-        // 4.5.1 erased the 3D viewport's own navigation actions, so every mouse
-        // move over it printed "The InputMap action ... doesn't exist" and
-        // Shift-pan stopped working until a restart; on 4.6.2 and 4.7.2 it kept
-        // those and pulled the project's twenty actions, its ui_* overrides
-        // included, into the editor's map (#925). Measured with
-        // tools/vibe/probes/input_map_reload.py. A game loads the project's
-        // actions when it starts, which is where they take effect.
-        auto applied = callObject(project_settings.value(), "ProjectSettings", "set_setting", 402577236LL,
-                                  {&setting_name.value(), &replacement.value()});
-        if (applied.isErr()) return errorJson(applied.error());
-        const auto file_before = projectFileStamp();
-        auto saved = callObject(project_settings.value(), "ProjectSettings", "save", 166280745LL);
-        auto save_code = saved.isOk()
-            ? scalarFromVariant<int64_t>(saved.value(), GDEXTENSION_VARIANT_TYPE_INT)
-            : Result<int64_t>(saved.error());
-        if (save_code.isErr() || save_code.value() != 0) {
-            auto rollback = restoreProjectSetting(project_settings.value(), setting_name.value(), previous.value(),
-                                                  file_before);
-            if (rollback.isErr()) return errorJson(500, "InputMap save failed and rollback failed: " + rollback.error().message);
-            return projectFileNotWritable("input action", save_code.isErr()
-                                                              ? save_code.error().message
-                                                              : ::didi::godot::describeGodotError(save_code.value()));
-        }
-        auto stored = projectFileDefinesInputAction(action);
-        if (stored.isErr()) {
-            return errorJson(500, "ProjectSettings.save reported success, and project.godot could not "
-                                  "be read back to confirm it: " + stored.error().message);
-        }
-        if (removing) {
-            // The remove path never filled these in, so it echoed the defaults
-            // rather than what the action had. Read them off the value that was
-            // there a moment ago.
-            auto deadzone_key = makeString("deadzone");
-            auto events_key = makeString("events");
-            if (deadzone_key.isOk() && events_key.isOk() &&
-                GodotApi::instance().variant_get_type(previous.value().ptr()) ==
-                    GDEXTENSION_VARIANT_TYPE_DICTIONARY) {
-                auto had_deadzone = callVariant(previous.value(), "get", {&deadzone_key.value()});
-                if (had_deadzone.isOk()) {
-                    auto value = scalarFromVariant<double>(had_deadzone.value(),
-                                                           GDEXTENSION_VARIANT_TYPE_FLOAT);
-                    if (value.isOk()) deadzone = value.value();
-                }
-                auto had_events = callVariant(previous.value(), "get", {&events_key.value()});
-                if (had_events.isOk()) {
-                    auto count = callVariant(had_events.value(), "size");
-                    if (count.isOk()) {
-                        auto size = scalarFromVariant<int64_t>(count.value(),
-                                                               GDEXTENSION_VARIANT_TYPE_INT);
-                        if (size.isOk() && size.value() >= 0) {
-                            event_count = static_cast<size_t>(size.value());
+                std::optional<std::string> target_path;
+                if (callable_object.value()) {
+                    auto node_name = makeString("Node");
+                    if (node_name.isErr()) return errorJson(500, node_name.error().message);
+                    auto is_node_value = callObject(
+                        callable_object.value(), "Object", "is_class", 3927539163LL,
+                        {&node_name.value()});
+                    if (is_node_value.isErr()) return errorJson(500, is_node_value.error().message);
+                    auto is_node = scalarFromVariant<GDExtensionBool>(
+                        is_node_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+                    if (is_node.isErr()) return errorJson(500, is_node.error().message);
+                    if (is_node.value()) {
+                        auto path = logicalPathFromEditedRoot(root.value(), callable_object.value());
+                        if (path.isOk()) {
+                            auto validated_path = utf8_prefix(path.value(), path.value().size());
+                            if (validated_path.isErr() ||
+                                validated_path.value().size() != path.value().size()) {
+                                return bridgeError(500, "extension_protocol_error");
+                            }
+                            target_path = path.value();
                         }
                     }
                 }
+                normalized_connections.push_back(
+                    {std::move(target_path), callable_method.value(), flags.value()});
+            }
+            std::sort(normalized_connections.begin(), normalized_connections.end(),
+                      [&](const ConnectionRecord& left, const ConnectionRecord& right) {
+                          if (left.target_node.has_value() != right.target_node.has_value()) {
+                              return !left.target_node.has_value();
+                          }
+                          if (left.target_node != right.target_node) {
+                              return left.target_node.has_value() &&
+                                     utf8_less(*left.target_node, *right.target_node);
+                          }
+                          if (left.target_method != right.target_method) {
+                              return utf8_less(left.target_method, right.target_method);
+                          }
+                          return left.flags < right.flags;
+                      });
+            json connections = json::array();
+            const size_t connection_count = std::min<size_t>(
+                normalized_connections.size(), 256);
+            if (normalized_connections.size() > connection_count) {
+                mark_truncated("connections");
+            }
+            for (size_t connection_index = 0;
+                 connection_index < connection_count; ++connection_index) {
+                const auto& record = normalized_connections[connection_index];
+                auto bounded_method = utf8_prefix(record.target_method, 128);
+                if (bounded_method.isErr()) return bridgeError(500, "extension_protocol_error");
+                if (bounded_method.value().size() != record.target_method.size()) {
+                    mark_truncated("bytes");
+                }
+                json target_path = nullptr;
+                if (record.target_node.has_value()) {
+                    auto bounded_path = utf8_prefix(*record.target_node, 1024);
+                    if (bounded_path.isErr()) return bridgeError(500, "extension_protocol_error");
+                    if (bounded_path.value().size() != record.target_node->size()) {
+                        mark_truncated("bytes");
+                    }
+                    target_path = bounded_path.value();
+                }
+                // A freshly created Sprite2D with no user connections at all
+                // reported five: the scene dock's own listeners, alive only
+                // while the editor has this scene open, in none of the saved
+                // .tscn and in nothing at runtime. An agent asking what is
+                // wired to this node got five false positives and one true
+                // one, at a ratio that gets worse the emptier the scene.
+                // Marked rather than filtered, because a caller debugging the
+                // editor itself has no other way to see them (#461).
+                //
+                // That fix keyed `scene` on where the receiver lives, which is
+                // a different question from the one the field is read for, and
+                // the two part company on any UI node. `Container::add_child`
+                // wires the container to its own children to keep the layout
+                // in order, and the receiver of those is inside the edited
+                // scene, so a Button in a VBoxContainer reported four
+                // connections where the saved .tscn carries one. They are not
+                // what signal_connect makes and disconnecting one breaks the
+                // layout (#768).
+                //
+                // CONNECT_PERSIST is the engine's own answer to "is this
+                // stored in the scene", it is the only flag signal_connect
+                // accepts, and it was already in this payload. So `scene`
+                // means persistent, and the structural fact keeps its own
+                // value rather than being thrown away:
+                //
+                //   scene   persistent, so it is in the .tscn and a caller
+                //           can act on it
+                //   engine  the receiver is in this scene and the connection
+                //           is not saved, so the engine remade it and will
+                //           remake it again
+                //   editor  the receiver is not in this scene at all
+                //
+                // A filter of `origin != "editor"` selects the same set it
+                // always did. A filter of `origin == "scene"` now selects what
+                // the documentation always said it did.
+                constexpr int64_t kConnectPersist = 2;
+                const bool persistent = (record.flags & kConnectPersist) != 0;
+                const bool receiver_in_scene = record.target_node.has_value();
+                const char* origin = persistent          ? "scene"
+                                     : receiver_in_scene ? "engine"
+                                                         : "editor";
+                connections.push_back({{"target_node", std::move(target_path)},
+                                       {"target_method", bounded_method.value()},
+                                       {"flags", record.flags},
+                                       {"origin", origin}});
+                if (!persistent && !receiver_in_scene) ++editor_connection_count;
+                if (!persistent && receiver_in_scene) ++engine_connection_count;
+            }
+            json signal = {{"name", name.value()}, {"arguments", std::move(arguments)},
+                           {"connections", std::move(connections)}};
+            output_signals.push_back(std::move(signal));
+            json candidate = {{"target_node", params["target_node"]},
+                              {"signals", output_signals},
+                              {"editor_connections", editor_connection_count},
+                              // The same service the count above performs,
+                              // for the bucket that used to be counted as
+                              // authored: an answer that is entirely the
+                              // engine's own layout plumbing is recognisable
+                              // without walking the list.
+                              {"engine_connections", engine_connection_count},
+                              {"truncated", truncated},
+                              {"truncated_at", truncated_at}};
+            if (liveResult(candidate).dump().size() > 63u * 1024u) {
+                output_signals.erase(output_signals.end() - 1);
+                mark_truncated("bytes");
+                break;
             }
         }
-        json result = {{"status", "success"}, {"action", action}, {"deadzone", deadzone},
-                       {"event_count", event_count}, {"removed", removing}, {"persisted", true},
-                       // Whether project.godot declares the action after the
-                       // save, read back from the file (#1019).
-                       {"defined_by_project", stored.value()},
-                       // Kept for callers that read it, and false because the
-                       // editor's InputMap is no longer reloaded (#925).
-                       {"runtime_reloaded", false},
-                       {"takes_effect",
-                        "when a game starts, which loads the project's input actions. The "
-                        "editor does not load them into its own InputMap, so this editor "
-                        "session is unchanged, the same as after an edit in Godot's Project "
-                        "Settings dialog."}};
-        return liveResult(result);
+        json response = {{"target_node", params["target_node"]},
+                         {"signals", std::move(output_signals)},
+                         {"editor_connections", editor_connection_count},
+                         {"engine_connections", engine_connection_count},
+                         {"truncated", truncated},
+                         {"truncated_at", truncated_at}};
+        auto live = liveResult(response);
+        if (live.dump().size() > 64u * 1024u) {
+            return bridgeError(413, "response_limit");
+        }
+        return live;
     }
 
-    if (method == "script.attachToNode" || method == "script.detachFromNode") {
+    const bool is_connect = method == "signal.connect";
+    const bool is_disconnect = method == "signal.disconnect";
+    if (is_connect || is_disconnect) {
+        if (!hasOnlyKeys(params,
+                is_connect
+                    ? std::initializer_list<const char*>{
+                          "emitter_node", "signal_name", "target_node", "target_method", "flags"}
+                    : std::initializer_list<const char*>{
+                          "emitter_node", "signal_name", "target_node", "target_method"}) ||
+            !params.contains("emitter_node") ||
+            !bounded_string(params["emitter_node"], 1, 1024) ||
+            !params.contains("signal_name") ||
+            !bounded_string(params["signal_name"], 1, 128) ||
+            !params.contains("target_node") ||
+            !bounded_string(params["target_node"], 1, 1024) ||
+            !params.contains("target_method") ||
+            !bounded_string(params["target_method"], 1, 128) ||
+            (is_connect && params.contains("flags") &&
+             (!(params["flags"].is_number_integer() ||
+                params["flags"].is_number_unsigned()) ||
+              // Read as int64 below, so a value that does not fit is a
+              // shape problem rather than a flag this tool will not write.
+              (params["flags"].is_number_unsigned() &&
+               params["flags"].get<uint64_t>() >
+                   static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))))) {
+            return bridgeError(400, is_connect ? "invalid_signal_connect_request"
+                                               : "invalid_signal_disconnect_request");
+        }
+        // The flags this call will write. The server refuses an
+        // unacceptable value first and with the same rule, so reaching
+        // this means a client spoke to the bridge directly.
+        const int64_t requested_flags =
+            is_connect && params.contains("flags")
+                ? connection_flags::authored(params["flags"].get<int64_t>())
+                : connection_flags::kPersist;
+        if (is_connect && !connection_flags::isConnectable(requested_flags)) {
+            return bridgeError(
+                400, "invalid_signal_connect_request",
+                {{"flags", params["flags"]}},
+                *connection_flags::refuseConnectFlags(params["flags"].get<int64_t>()));
+        }
+        if (!preflight_object_binds({
+                {"get_signal_list", 3995934104LL},
+                {"get_method_list", 3995934104LL},
+                {"get_signal_connection_list", 3147814860LL},
+                {"has_signal", 2619796661LL}, {"has_method", 2619796661LL},
+                {"connect", 1518946055LL}, {"disconnect", 1874754934LL},
+                {"is_connected", 768136979LL}}) ||
+            preflightUndoManagerBindings().isErr() ||
+            !GodotApi::instance().variant_get_ptr_constructor(
+                GDEXTENSION_VARIANT_TYPE_CALLABLE, 2) ||
+            !GodotApi::instance().variant_call) {
+            return bridgeError(501, "required_bind_unavailable");
+        }
+        if (requireMethodBind("EditorUndoRedoManager", "get_object_history_id",
+                              1107568780LL).isErr() ||
+            requireMethodBind("EditorUndoRedoManager", "get_history_undo_redo",
+                              2417974513LL).isErr() ||
+            requireMethodBind("UndoRedo", "has_undo", 36873697LL).isErr() ||
+            requireMethodBind("UndoRedo", "undo", 2240911060LL).isErr()) {
+            return bridgeError(501, "required_bind_unavailable");
+        }
+
         auto root = editedSceneRoot(editor);
         if (root.isErr()) return errorJson(root.error());
-        auto node = resolveNode(root.value(), params.value("target_node", ""));
-        if (node.isErr()) return errorJson(node.error());
+        auto emitter = resolveNode(root.value(), params["emitter_node"].get<std::string>());
+        auto target = resolveNode(root.value(), params["target_node"].get<std::string>());
+        if (emitter.isErr()) return errorJson(emitter.error());
+        if (target.isErr()) return errorJson(target.error());
+        const auto signal_name = params["signal_name"].get<std::string>();
+        const auto target_method = params["target_method"].get<std::string>();
+        auto signal_name_value = makeStringName(signal_name);
+        auto method_name_value = makeStringName(target_method);
+        if (signal_name_value.isErr() || method_name_value.isErr()) {
+            return bridgeError(500, "extension_protocol_error");
+        }
+        auto has_signal_value = callObject(
+            emitter.value(), "Object", "has_signal", 2619796661LL,
+            {&signal_name_value.value()});
+        auto has_method_value = callObject(
+            target.value(), "Object", "has_method", 2619796661LL,
+            {&method_name_value.value()});
+        if (has_signal_value.isErr() || has_method_value.isErr()) {
+            return bridgeError(500, "extension_protocol_error");
+        }
+        auto has_signal = scalarFromVariant<GDExtensionBool>(
+            has_signal_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+        auto has_method = scalarFromVariant<GDExtensionBool>(
+            has_method_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+        if (has_signal.isErr() || has_method.isErr()) {
+            return bridgeError(500, "extension_protocol_error");
+        }
+        if (!has_signal.value()) {
+            return bridgeError(
+                404, "declared_signal_not_found",
+                {{"emitter_node", params["emitter_node"].get<std::string>()},
+                 {"signal_name", signal_name}},
+                "Looked for signal '" + signal_name + "' on " +
+                    params["emitter_node"].get<std::string>() + ".");
+        }
+        if (!has_method.value()) {
+            // Before blaming the name. A script that did not compile is
+            // still assigned to the node and has no instance behind it, so
+            // has_method answers false for every method the file declares
+            // and the refusal sent the caller to rename something that was
+            // already right (#729).
+            const auto uncompiled = uncompiledScriptOn(target.value(), target_method);
+            if (uncompiled.found) {
+                json data = {{"target_node", params["target_node"].get<std::string>()},
+                             {"target_method", target_method},
+                             {"script_path",
+                              uncompiled.path.empty() ? json(nullptr) : json(uncompiled.path)},
+                             {"unresolved_autoloads", uncompiled.unresolved_autoloads}};
+                std::string detail = "The script is ";
+                detail += uncompiled.path.empty() ? "attached to " + params["target_node"].get<std::string>()
+                                                  : uncompiled.path;
+                detail += ", it declares '" + target_method +
+                          "', and the engine does not have that method on the node.";
+                if (!uncompiled.unresolved_autoloads.empty()) {
+                    detail += " It names ";
+                    for (size_t index = 0; index < uncompiled.unresolved_autoloads.size(); ++index) {
+                        if (index > 0) detail += ", ";
+                        detail += "'" + uncompiled.unresolved_autoloads[index] + "'";
+                    }
+                    detail += uncompiled.unresolved_autoloads.size() == 1
+                                  ? ", which is an autoload registered in this project. "
+                                  : ", which are autoloads registered in this project. ";
+                    detail += kAutoloadRestartNote;
+                    data["note"] = kAutoloadRestartNote;
+                } else {
+                    detail += " Check it with script_check_syntax.";
+                }
+                return bridgeError(409, "target_script_not_compiled", std::move(data), detail);
+            }
+            return bridgeError(
+                404, "target_method_not_found",
+                {{"target_node", params["target_node"].get<std::string>()},
+                 {"target_method", target_method}},
+                "Looked for method '" + target_method + "' on " +
+                    params["target_node"].get<std::string>() + ".");
+        }
+        auto signal = signal_metadata(emitter.value(), signal_name);
+        auto target_metadata = method_metadata(target.value(), target_method);
+        if (signal.isErr()) return errorJson(signal.error());
+        if (target_metadata.isErr()) {
+            return errorJson(target_metadata.error());
+        }
+        const int64_t signal_arity = static_cast<int64_t>(
+            signal.value().arguments.size());
+        // Connect only. Arity compatibility is a precondition for making a
+        // connection and cannot be one for removing it: a disconnect never
+        // calls the method, so whether the method could accept the signal's
+        // arguments is not a fact about whether the disconnect can proceed.
+        // Running it here told an agent tearing down the connections it made
+        // that its signature was wrong, by the call whose whole purpose is
+        // to stop the connection existing -- and the true answer, which the
+        // same tool already gives for a compatible pair that was never
+        // connected, is that no such connection exists (#714).
+        if (is_connect &&
+            (signal_arity < target_metadata.value().required_arguments ||
+             (!target_metadata.value().vararg &&
+              signal_arity > target_metadata.value().total_arguments))) {
+            return bridgeError(409, "signal_target_arity_incompatible");
+        }
+        auto callable = make_callable(target.value(), target_method);
+        if (callable.isErr()) return bridgeError(501, "required_bind_unavailable");
+
+        struct ExactConnection {
+            VariantValue callable;
+            int64_t flags{0};
+        };
+        auto exact_connections = [&]() -> Result<std::vector<ExactConnection>> {
+            auto values = callObject(
+                emitter.value(), "Object", "get_signal_connection_list", 3147814860LL,
+                {&signal_name_value.value()});
+            if (values.isErr()) return values.error();
+            auto count = array_size(values.value());
+            if (count.isErr() || count.value() < 0 || count.value() > 4096) {
+                return Error::internal("Signal connection metadata exceeds the preflight cap");
+            }
+            std::vector<ExactConnection> matches;
+            for (int64_t index = 0; index < count.value(); ++index) {
+                auto connection = array_at(values.value(), index);
+                if (connection.isErr()) return connection.error();
+                auto candidate = dictionary_field(connection.value(), "callable");
+                auto flags_value = dictionary_field(connection.value(), "flags");
+                if (candidate.isErr() || flags_value.isErr() ||
+                    GodotApi::instance().variant_get_type(candidate.value().ptr()) !=
+                        GDEXTENSION_VARIANT_TYPE_CALLABLE) {
+                    return Error::internal("Signal connection descriptor is malformed");
+                }
+                auto object_value = callVariant(candidate.value(), "get_object");
+                auto method_value = callVariant(candidate.value(), "get_method");
+                auto bound_count_value = callVariant(
+                    candidate.value(), "get_bound_arguments_count");
+                if (object_value.isErr() || method_value.isErr() ||
+                    bound_count_value.isErr()) {
+                    return Error::internal("Signal Callable metadata is unavailable");
+                }
+                auto object = objectFromVariant(object_value.value());
+                auto bound_count = scalarFromVariant<int64_t>(
+                    bound_count_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+                const auto method_type = GodotApi::instance().variant_get_type(
+                    method_value.value().ptr());
+                auto candidate_method = stringFromVariant(method_value.value(), method_type);
+                auto flags = scalarFromVariant<int64_t>(
+                    flags_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+                if (object.isErr() || bound_count.isErr() || candidate_method.isErr() ||
+                    flags.isErr()) {
+                    return Error::internal("Signal Callable metadata is malformed");
+                }
+                if (object.value() == target.value() &&
+                    candidate_method.value() == target_method &&
+                    bound_count.value() == 0) {
+                    matches.push_back(
+                        {std::move(candidate.value()), flags.value()});
+                }
+            }
+            return matches;
+        };
+        auto connected_value = callObject(
+            emitter.value(), "Object", "is_connected", 768136979LL,
+            {&signal_name_value.value(), &callable.value()});
+        if (connected_value.isErr()) return errorJson(500, connected_value.error().message);
+        auto connected = scalarFromVariant<GDExtensionBool>(
+            connected_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+        auto matches = exact_connections();
+        if (connected.isErr() || matches.isErr()) {
+            return bridgeError(500, "extension_protocol_error");
+        }
+        if ((connected.value() != 0) != !matches.value().empty()) {
+            return bridgeError(500, "signal_connection_state_inconsistent");
+        }
+        if (is_connect && !matches.value().empty()) {
+            return bridgeError(409, "signal_connection_already_exists");
+        }
+        if (is_disconnect && matches.value().size() != 1) {
+            return bridgeError(409, "missing_or_ambiguous_signal_connection");
+        }
+        // Only a connection the scene file stores is the caller's to
+        // remove. This used to demand exactly 2, which refused every
+        // deferred or one-shot connection the editor's Connect dialog
+        // writes, and every connection at all inside an instanced scene,
+        // where the engine adds CONNECT_INHERITED to the value it reports
+        // (#852). An engine or editor connection is still refused: it is
+        // not in the .tscn, the engine makes it again, and removing one
+        // breaks the layout it was keeping in order.
+        if (is_disconnect &&
+            !connection_flags::isPersistent(matches.value().front().flags)) {
+            return bridgeError(
+                409, "unsupported_existing_connection_flags",
+                {{"flags", matches.value().front().flags}},
+                "The connection's flags are " +
+                    std::to_string(matches.value().front().flags) +
+                    ", which does not include 2, CONNECT_PERSIST, so it is not stored in "
+                    "the scene file. signal_list_connections reports it as origin 'engine' "
+                    "or 'editor': the engine or the editor made it and will make it again, "
+                    "and removing one breaks what it was keeping in order.");
+        }
+
+        auto manager = undoManager(editor);
+        if (manager.isErr()) return errorJson(manager.error());
+        // A connect writes what the caller asked for. A disconnect's undo
+        // restores what was there, verbatim, including CONNECT_INHERITED:
+        // undo that put a deferred connection back as a plain one would be
+        // its own silent behaviour change (#852).
+        const int64_t applied_flags =
+            is_connect ? requested_flags : matches.value().front().flags;
+        auto flags_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, applied_flags);
+        if (flags_value.isErr()) return errorJson(500, flags_value.error().message);
+        auto action = createAction(manager.value(),
+                                   is_connect ? "Connect signal" : "Disconnect signal",
+                                   emitter.value());
+        if (action.isErr()) return errorJson(500, action.error().message);
+        Result<void> do_method = Result<void>::ok();
+        Result<void> undo_method = Result<void>::ok();
+        if (is_connect) {
+            do_method = managerMethod(
+                manager.value(), "add_do_method", emitter.value(), "connect",
+                {&signal_name_value.value(), &callable.value(), &flags_value.value()});
+            undo_method = managerMethod(
+                manager.value(), "add_undo_method", emitter.value(), "disconnect",
+                {&signal_name_value.value(), &callable.value()});
+        } else {
+            do_method = managerMethod(
+                manager.value(), "add_do_method", emitter.value(), "disconnect",
+                {&signal_name_value.value(), &matches.value().front().callable});
+            undo_method = managerMethod(
+                manager.value(), "add_undo_method", emitter.value(), "connect",
+                {&signal_name_value.value(), &matches.value().front().callable,
+                 &flags_value.value()});
+        }
+        if (do_method.isErr() || undo_method.isErr()) {
+            // Closed, so the next mutation does not merge into it (#1152).
+            abandonAction(manager.value());
+            return bridgeError(500, "signal_undo_redo_registration_failed");
+        }
+        auto committed = commitAction(manager.value());
+        if (committed.isErr()) return errorJson(500, committed.error().message);
+
+        bool force_postcondition_mismatch = false;
+        bool force_rollback_failure = false;
+#if defined(DIDI_PHASE7_SIGNAL_TEST_SEAMS)
+        if (is_connect) {
+            force_postcondition_mismatch =
+                takePhase7SignalTestSeam("connect_postcondition_mismatch");
+            if (!force_postcondition_mismatch &&
+                takePhase7SignalTestSeam(
+                    "connect_postcondition_mismatch_rollback_failure")) {
+                force_postcondition_mismatch = true;
+                force_rollback_failure = true;
+            }
+        } else {
+            force_postcondition_mismatch =
+                takePhase7SignalTestSeam("disconnect_postcondition_mismatch");
+        }
+#endif
+
+        auto observed_connected_value = callObject(
+            emitter.value(), "Object", "is_connected", 768136979LL,
+            {&signal_name_value.value(), &callable.value()});
+        auto observed_matches = exact_connections();
+        bool postcondition_ok = false;
+        if (observed_connected_value.isOk() && observed_matches.isOk()) {
+            auto observed_connected = scalarFromVariant<GDExtensionBool>(
+                observed_connected_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+            if (observed_connected.isOk()) {
+                postcondition_ok = is_connect
+                    ? observed_connected.value() && observed_matches.value().size() == 1 &&
+                          connection_flags::authored(
+                              observed_matches.value().front().flags) == requested_flags
+                    : !observed_connected.value() && observed_matches.value().empty();
+            }
+        }
+        if (force_postcondition_mismatch) postcondition_ok = false;
+        if (!postcondition_ok) {
+            const Result<void> rolled_back = undoLastAction(manager.value(), root.value());
+            bool restored = false;
+            if (rolled_back.isOk()) {
+                auto restored_connected_value = callObject(
+                    emitter.value(), "Object", "is_connected", 768136979LL,
+                    {&signal_name_value.value(), &callable.value()});
+                auto restored_matches = exact_connections();
+                if (restored_connected_value.isOk() && restored_matches.isOk()) {
+                    auto restored_connected = scalarFromVariant<GDExtensionBool>(
+                        restored_connected_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+                    if (restored_connected.isOk()) {
+                        restored = is_connect
+                            ? !restored_connected.value() && restored_matches.value().empty()
+                            : restored_connected.value() &&
+                                  restored_matches.value().size() == 1 &&
+                                  restored_matches.value().front().flags ==
+                                      matches.value().front().flags;
+                    }
+                }
+            }
+            if (force_rollback_failure) restored = false;
+            return bridgeError(
+                500, "signal_postcondition_mismatch",
+                {{"retryable", false},
+                 {"rollback", restored ? "completed" : "failed"},
+                 {"outcome", restored ? "rolled_back" : "unknown"},
+                 {"restoration_observed", restored}});
+        }
+        // The flags the connection now has, not the flags this tool used to
+        // be able to write. A caller that asked for a deferred connection
+        // and was told `flags: 2` could not tell whether it got one.
+        // The connection as it stood before the commit (#1151): a connect
+        // is refused when one exists, and a disconnect removes the one it
+        // found, with the flags it had.
+        if (is_connect) {
+            return liveSceneMutation({{"connected", true}, {"flags", applied_flags},
+                                      {"before", {{"connected", false}}},
+                                      {"undo_redo_registered", true},
+                                      {"outcome", "completed"}, {"rollback", "undo_redo"}});
+        }
+        return liveSceneMutation({{"disconnected", true}, {"flags", applied_flags},
+                                  {"before", {{"connected", true},
+                                              {"flags", matches.value().front().flags}}},
+                                  {"undo_redo_registered", true},
+                                  {"outcome", "completed"}, {"rollback", "undo_redo"}});
+    }
+
+    if (!hasOnlyKeys(params, {"target_node", "signal_name", "arguments"}) ||
+        !params.contains("target_node") ||
+        !bounded_string(params["target_node"], 1, 1024) ||
+        !params.contains("signal_name") ||
+        !bounded_string(params["signal_name"], 1, 128) ||
+        (params.contains("arguments") && !params["arguments"].is_array())) {
+        return bridgeError(400, "invalid_signal_emit_request");
+    }
+    const auto emit_arguments = params.value("arguments", json::array());
+    if (emit_arguments.size() > 16) {
+        return bridgeError(400, "signal_emit_argument_count_exceeded");
+    }
+    for (const auto& argument : emit_arguments) {
+        if (!valid_emit_value(argument, 0)) {
+            return bridgeError(400, "unsupported_signal_emit_argument");
+        }
+    }
+    try {
+        if (emit_arguments.dump().size() > 32u * 1024u) {
+            return bridgeError(413, "signal_emit_arguments_too_large");
+        }
+    } catch (const json::exception&) {
+        return bridgeError(400, "invalid_signal_emit_argument_encoding");
+    }
+    if (!preflight_object_binds({{"get_signal_list", 3995934104LL},
+                                 {"has_signal", 2619796661LL},
+                                 {"emit_signal", 4047867050LL}})) {
+        return bridgeError(501, "required_bind_unavailable");
+    }
+    auto root = editedSceneRoot(editor);
+    if (root.isErr()) return errorJson(root.error());
+    auto target = resolveNode(root.value(), params["target_node"].get<std::string>());
+    if (target.isErr()) return errorJson(target.error());
+    const auto signal_name = params["signal_name"].get<std::string>();
+    auto signal_name_value = makeStringName(signal_name);
+    if (signal_name_value.isErr()) return errorJson(500, signal_name_value.error().message);
+    auto has_signal_value = callObject(
+        target.value(), "Object", "has_signal", 2619796661LL,
+        {&signal_name_value.value()});
+    if (has_signal_value.isErr()) return errorJson(500, has_signal_value.error().message);
+    auto has_signal = scalarFromVariant<GDExtensionBool>(
+        has_signal_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+    if (has_signal.isErr()) return errorJson(500, has_signal.error().message);
+    if (!has_signal.value()) return bridgeError(404, "declared_signal_not_found");
+    auto metadata = signal_metadata(target.value(), signal_name);
+    if (metadata.isErr()) return errorJson(metadata.error());
+    if (metadata.value().arguments.size() != emit_arguments.size()) {
+        return bridgeError(409, "signal_emit_arity_mismatch");
+    }
+    auto compatible_argument = [](const json& argument,
+                                  const SignalArgumentMetadata& metadata) {
+        const bool typed_container =
+            (metadata.type == GDEXTENSION_VARIANT_TYPE_ARRAY ||
+             metadata.type == GDEXTENSION_VARIANT_TYPE_DICTIONARY) &&
+            (metadata.hint != 0 || !metadata.hint_string.empty());
+        if (typed_container) return false;
+        switch (metadata.type) {
+            case GDEXTENSION_VARIANT_TYPE_NIL: return true;
+            case GDEXTENSION_VARIANT_TYPE_BOOL: return argument.is_boolean();
+            case GDEXTENSION_VARIANT_TYPE_INT:
+                return argument.is_number_integer() || argument.is_number_unsigned();
+            case GDEXTENSION_VARIANT_TYPE_FLOAT:
+                return argument.is_number() &&
+                       std::isfinite(argument.get<double>());
+            case GDEXTENSION_VARIANT_TYPE_STRING: return argument.is_string();
+            case GDEXTENSION_VARIANT_TYPE_DICTIONARY: return argument.is_object();
+            case GDEXTENSION_VARIANT_TYPE_ARRAY: return argument.is_array();
+            case GDEXTENSION_VARIANT_TYPE_OBJECT:
+                return argument.is_null() &&
+                       (!metadata.class_name.empty() || !metadata.hint_string.empty());
+            default: return false;
+        }
+    };
+    bool missing_destination_float_constructor = false;
+#if defined(DIDI_PHASE7_SIGNAL_TEST_SEAMS)
+    missing_destination_float_constructor =
+        takePhase7SignalTestSeam("missing_destination_float_constructor");
+#endif
+    std::function<bool(const json&, std::optional<GDExtensionVariantType>)>
+        preflight_json_variant;
+    preflight_json_variant = [&](const json& value,
+                                 std::optional<GDExtensionVariantType> destination_type) {
+        auto& api = GodotApi::instance();
+        if (!api.variant_new_nil || !api.variant_destroy ||
+            !api.get_variant_from_type_constructor) return false;
+        if (value.is_null()) return true;
+        GDExtensionVariantType type = GDEXTENSION_VARIANT_TYPE_NIL;
+        if (destination_type.has_value() &&
+            *destination_type != GDEXTENSION_VARIANT_TYPE_NIL) {
+            type = *destination_type;
+        } else if (value.is_boolean()) type = GDEXTENSION_VARIANT_TYPE_BOOL;
+        else if (value.is_number_integer() || value.is_number_unsigned()) {
+            type = GDEXTENSION_VARIANT_TYPE_INT;
+        } else if (value.is_number_float()) type = GDEXTENSION_VARIANT_TYPE_FLOAT;
+        else if (value.is_string()) type = GDEXTENSION_VARIANT_TYPE_STRING;
+        else if (value.is_array()) type = GDEXTENSION_VARIANT_TYPE_ARRAY;
+        else if (value.is_object()) type = GDEXTENSION_VARIANT_TYPE_DICTIONARY;
+        else return false;
+
+        if (type == GDEXTENSION_VARIANT_TYPE_FLOAT &&
+            missing_destination_float_constructor) return false;
+        if (type == GDEXTENSION_VARIANT_TYPE_STRING &&
+            !api.string_new_with_utf8_chars) return false;
+        if (type == GDEXTENSION_VARIANT_TYPE_ARRAY) {
+            if (!value.is_array()) return false;
+            if (!api.variant_get_ptr_constructor(type, 0) || !api.variant_call) return false;
+            for (const auto& child : value) {
+                if (!preflight_json_variant(child, std::nullopt)) return false;
+            }
+        } else if (type == GDEXTENSION_VARIANT_TYPE_DICTIONARY) {
+            if (!value.is_object()) return false;
+            if (!api.variant_get_ptr_constructor(type, 0) || !api.variant_call ||
+                !api.string_new_with_utf8_chars ||
+                !api.get_variant_from_type_constructor(GDEXTENSION_VARIANT_TYPE_STRING)) {
+                return false;
+            }
+            for (auto it = value.begin(); it != value.end(); ++it) {
+                if (!preflight_json_variant(it.value(), std::nullopt)) return false;
+            }
+        }
+        return api.get_variant_from_type_constructor(type) != nullptr;
+    };
+    for (size_t index = 0; index < emit_arguments.size(); ++index) {
+        if (!compatible_argument(emit_arguments[index], metadata.value().arguments[index])) {
+            return bridgeError(400, "signal_emit_argument_type_mismatch");
+        }
+    }
+#if defined(DIDI_PHASE7_SIGNAL_TEST_SEAMS)
+    if (takePhase7SignalTestSeam("missing_required_api")) {
+        return bridgeError(501, "required_bind_unavailable");
+    }
+#endif
+    for (size_t index = 0; index < emit_arguments.size(); ++index) {
+        if (!preflight_json_variant(
+                emit_arguments[index],
+                static_cast<GDExtensionVariantType>(metadata.value().arguments[index].type))) {
+            return bridgeError(501, "required_bind_unavailable");
+        }
+    }
+#if defined(DIDI_PHASE7_SIGNAL_TEST_SEAMS)
+    if (takePhase7SignalTestSeam("conversion_failure")) {
+        return bridgeError(500, "extension_protocol_error");
+    }
+#endif
+    std::vector<VariantValue> native_arguments;
+    native_arguments.reserve(emit_arguments.size());
+    for (size_t index = 0; index < emit_arguments.size(); ++index) {
+        const auto& argument_metadata = metadata.value().arguments[index];
+        Result<VariantValue> converted =
+            argument_metadata.type == GDEXTENSION_VARIANT_TYPE_FLOAT &&
+                    (emit_arguments[index].is_number_integer() ||
+                     emit_arguments[index].is_number_unsigned())
+                ? makeScalar(GDEXTENSION_VARIANT_TYPE_FLOAT,
+                             static_cast<double>(emit_arguments[index].get<int64_t>()))
+                : (argument_metadata.type == GDEXTENSION_VARIANT_TYPE_OBJECT &&
+                           emit_arguments[index].is_null()
+                       ? Result<VariantValue>(VariantValue{})
+                       : makeJsonVariant(emit_arguments[index]));
+        if (converted.isErr()) return bridgeError(500, "extension_protocol_error");
+        native_arguments.push_back(std::move(converted.value()));
+    }
+    std::vector<const VariantValue*> call_arguments{&signal_name_value.value()};
+    call_arguments.reserve(native_arguments.size() + 1);
+    for (auto& argument : native_arguments) call_arguments.push_back(&argument);
+    // How many listeners this emit can reach, read before the emit rather
+    // than after it, because a one-shot connection disconnects itself on
+    // delivery. It is also what tells a refusal apart from a no-op below.
+    int64_t connection_count = 0;
+    if (requireMethodBind("Object", "get_signal_connection_list", 3147814860LL).isOk()) {
+        auto connections = callObject(target.value(), "Object", "get_signal_connection_list",
+                                      3147814860LL, {&signal_name_value.value()});
+        if (connections.isOk()) {
+            auto size_value = callVariant(connections.value(), "size");
+            if (size_value.isOk()) {
+                auto size = scalarFromVariant<int64_t>(size_value.value(),
+                                                       GDEXTENSION_VARIANT_TYPE_INT);
+                if (size.isOk()) connection_count = size.value();
+            }
+        }
+    }
+    auto emitted = callObject(target.value(), "Object", "emit_signal", 4047867050LL,
+                              call_arguments);
+    if (emitted.isErr()) return errorJson(500, emitted.error().message);
+    auto emit_code = scalarFromVariant<int64_t>(
+        emitted.value(), GDEXTENSION_VARIANT_TYPE_INT);
+    if (emit_code.isErr()) return errorJson(500, emit_code.error().message);
+    // ERR_UNAVAILABLE with nothing connected is not a failure. Godot keeps
+    // a signal in Object::signal_map only once it has a connection, so
+    // emitting a built-in signal nobody is listening to returns
+    // ERR_UNAVAILABLE and the bridge reported "The engine refused the
+    // emit." That is the state a caller is most likely to be in -- driving
+    // a signal by hand during bring-up, before the connection exists -- and
+    // in GDScript the same call is an unremarkable no-op (#624). The signal
+    // is known to be declared by this point: the arity check above read it
+    // out of the object's own signal list.
+    constexpr int64_t kErrUnavailable = 2;
+    if (emit_code.value() == kErrUnavailable && connection_count == 0) {
+        return liveResult({{"emitted", false},
+                           {"connection_count", 0},
+                           {"argument_count", emit_arguments.size()},
+                           {"note", "Nothing is connected to this signal, so the emit reached "
+                                    "no listeners. Connect something with signal_connect to "
+                                    "observe it."},
+                           {"outcome", "completed"},
+                           {"rollback", "not_available"}});
+    }
+    if (emit_code.value() != 0) return bridgeError(500, "signal_emit_failed");
+    // The connections ran project code, which can change the scene with
+    // or without an undo entry (#1049).
+    json emitted_answer = {{"emitted", true},
+                           {"connection_count", connection_count},
+                           {"argument_count", emit_arguments.size()},
+                           {"outcome", "completed"},
+                           {"rollback", "not_available"}};
+    reportEditedSceneSaved(emitted_answer);
+    return liveResult(emitted_answer);
+}
+
+
+json GodotBridge::bridgeProjectResolveUids(const std::string& /*method*/, const json& params, const std::string& /*session_kind*/, GDExtensionObjectPtr /*editor*/) {
+    // ResourceUID is the engine's own UID table. Didi reads it instead of
+    // .godot/uid_cache.bin, which is an undocumented binary cache written on
+    // the editor's schedule: absent on a fresh clone, stale between saves,
+    // and readable mid-write. Every bind below carries the same hash on
+    // Godot 4.5.1, 4.6.2 and 4.7.2, so there is no version gate here.
+    if (!params.contains("queries") || !params["queries"].is_array()) {
+        return errorJson(400, "project.resolveUids requires a queries array");
+    }
+    const auto& queries = params["queries"];
+    if (queries.empty() || queries.size() > 256) {
+        return errorJson(400, "project.resolveUids accepts 1 to 256 queries");
+    }
+    for (const auto& bind : {std::make_tuple("ResourceUID", "text_to_id", 1321353865LL),
+                             std::make_tuple("ResourceUID", "has_id", 1116898809LL),
+                             std::make_tuple("ResourceUID", "get_id_path", 844755477LL),
+                             std::make_tuple("ResourceUID", "path_to_uid", 1703090593LL),
+                             std::make_tuple("ResourceLoader", "exists", 4185558881LL)}) {
+        auto required = requireMethodBind(std::get<0>(bind), std::get<1>(bind), std::get<2>(bind));
+        if (required.isErr()) return errorJson(501, required.error().message);
+    }
+    auto uid_table = singleton("ResourceUID");
+    if (uid_table.isErr()) return errorJson(uid_table.error());
+    auto resource_loader = singleton("ResourceLoader");
+    if (resource_loader.isErr()) return errorJson(resource_loader.error());
+
+    // Whether Godot can load a path, which is the question a reference asks.
+    // It is not the same question as whether a file scan indexed the path:
+    // a remap, a type the scan does not index, or a scan that hit its own
+    // cap all read as absent on disk and load perfectly well here.
+    auto engineCanLoad = [&](const std::string& res_path) -> Result<bool> {
+        auto path_arg = makeString(res_path);
+        if (path_arg.isErr()) return path_arg.error();
+        auto hint = makeString(std::string{});
+        if (hint.isErr()) return hint.error();
+        auto answer = callObject(resource_loader.value(), "ResourceLoader", "exists", 4185558881LL,
+                                 {&path_arg.value(), &hint.value()});
+        if (answer.isErr()) return answer.error();
+        auto loadable = scalarFromVariant<GDExtensionBool>(answer.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+        if (loadable.isErr()) return loadable.error();
+        return loadable.value() != 0;
+    };
+
+    json entries = json::array();
+    for (const auto& value : queries) {
+        if (!value.is_string()) return errorJson(400, "project.resolveUids queries must be strings");
+        const std::string query = value.get<std::string>();
+        json entry{{"query", query}, {"found", false}, {"uid", ""}, {"path", ""}};
+        if (query.rfind("uid://", 0) == 0) {
+            auto text = makeString(query);
+            if (text.isErr()) return errorJson(500, text.error().message);
+            auto id_value = callObject(uid_table.value(), "ResourceUID", "text_to_id", 1321353865LL,
+                                       {&text.value()});
+            if (id_value.isErr()) return errorJson(500, id_value.error().message);
+            auto id = scalarFromVariant<int64_t>(id_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+            if (id.isErr()) return errorJson(500, id.error().message);
+            if (id.value() < 0) {
+                // ResourceUID answers INVALID_ID for text that is not a UID
+                // at all, which is a different fact from a UID it has never
+                // been told about.
+                entry["reason"] = "malformed_uid";
+            } else {
+                auto id_arg = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, id.value());
+                if (id_arg.isErr()) return errorJson(500, id_arg.error().message);
+                auto known = callObject(uid_table.value(), "ResourceUID", "has_id", 1116898809LL,
+                                        {&id_arg.value()});
+                if (known.isErr()) return errorJson(500, known.error().message);
+                auto is_known = scalarFromVariant<GDExtensionBool>(known.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+                if (is_known.isErr()) return errorJson(500, is_known.error().message);
+                if (!is_known.value()) {
+                    entry["reason"] = "unknown_to_engine";
+                } else {
+                    auto path_value = callObject(uid_table.value(), "ResourceUID", "get_id_path", 844755477LL,
+                                                 {&id_arg.value()});
+                    if (path_value.isErr()) return errorJson(500, path_value.error().message);
+                    auto resolved = stringFromVariant(path_value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+                    if (resolved.isErr()) return errorJson(500, resolved.error().message);
+                    entry["found"] = true;
+                    entry["uid"] = query;
+                    entry["path"] = resolved.value();
+                    // A UID the engine still holds can point at a file that
+                    // is gone. Registered is not the same as loadable.
+                    auto loadable = engineCanLoad(resolved.value());
+                    if (loadable.isErr()) return errorJson(500, loadable.error().message);
+                    entry["exists"] = loadable.value();
+                }
+            }
+        } else if (query.rfind("res://", 0) == 0) {
+            auto path_arg = makeString(query);
+            if (path_arg.isErr()) return errorJson(500, path_arg.error().message);
+            auto uid_value = callObject(uid_table.value(), "ResourceUID", "path_to_uid", 1703090593LL,
+                                        {&path_arg.value()});
+            if (uid_value.isErr()) return errorJson(500, uid_value.error().message);
+            auto uid_text = stringFromVariant(uid_value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+            if (uid_text.isErr()) return errorJson(500, uid_text.error().message);
+            // path_to_uid hands back what it was given when the engine holds
+            // no UID for that path, so the prefix is what separates a hit
+            // from a miss rather than an empty string.
+            // A path can load without any UID registered for it, so
+            // existence is answered separately from resolution rather than
+            // inferred from it.
+            auto loadable = engineCanLoad(query);
+            if (loadable.isErr()) return errorJson(500, loadable.error().message);
+            entry["exists"] = loadable.value();
+            if (uid_text.value().rfind("uid://", 0) == 0) {
+                entry["found"] = true;
+                entry["uid"] = uid_text.value();
+                entry["path"] = query;
+            } else {
+                entry["reason"] = "unknown_to_engine";
+            }
+        } else {
+            entry["reason"] = "unsupported_query";
+        }
+        entries.push_back(std::move(entry));
+    }
+    return liveResult({{"status", "success"}, {"entries", std::move(entries)}});
+}
+
+
+json GodotBridge::bridgeProjectSettings(const std::string& method, const json& params, const std::string& /*session_kind*/, GDExtensionObjectPtr /*editor*/) {
+    const std::string setting = params.value("setting", "");
+    auto valid_name = method == "project.setSetting"
+        ? validateGenericSettingName(setting)
+        : validateSettingName(setting);
+    if (valid_name.isErr()) return errorJson(valid_name.error());
+
+    auto project_settings = singleton("ProjectSettings");
+    if (project_settings.isErr()) {
+        return errorJson(project_settings.error());
+    }
+    auto name = makeStringName(setting);
+    if (name.isErr()) return errorJson(name.error());
+    auto exists_value = callObject(project_settings.value(), "ProjectSettings", "has_setting", 3927539163LL,
+                                   {&name.value()});
+    if (exists_value.isErr()) return errorJson(exists_value.error());
+    auto exists = scalarFromVariant<GDExtensionBool>(exists_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+    if (exists.isErr()) return errorJson(exists.error());
+
+    if (method == "project.getSetting") {
+        if (!exists.value()) {
+            return errorJson(404, "Project setting not found: " + setting +
+                                      ". The attached editor does not define it.",
+                             {{"code", "setting_not_found"}});
+        }
+        VariantValue default_value;
+        auto current = callObject(project_settings.value(), "ProjectSettings", "get_setting", 223050753LL,
+                                  {&name.value(), &default_value});
+        if (current.isErr()) return errorJson(current.error());
+        auto value = variantToJson(current.value());
+        if (value.isErr()) return errorJson(value.error());
+        return liveResult({{"status", "success"}, {"setting", setting}, {"value", value.value()}});
+    }
+
+    const bool remove = params.value("remove", false);
+    if (remove && params.contains("value")) {
+        return errorJson(400, "Specify either value or remove: true, not both");
+    }
+    if (!remove && !params.contains("value")) {
+        return errorJson(400, "value is required unless remove is true");
+    }
+    if (remove && !exists.value()) {
+        return errorJson(404, "Project setting not found: " + setting + ". There is nothing to remove.",
+                         {{"code", "setting_not_found"}});
+    }
+
+    // Godot does support custom project settings, so writing a name the
+    // engine does not define is a legitimate mode. It is also
+    // indistinguishable from the overwhelmingly more common case, a typo in
+    // a real setting name, and the two were answered identically: status
+    // success, persisted true, and a key nothing in the engine will ever
+    // read. project_get_setting then returned it happily, so reading back
+    // did not catch it either (#464).
+    //
+    // has_setting is the same question project_get_setting already answers
+    // with a clean 404. The setter has it available and did not use it.
+    const bool create = params.value("create", false);
+    if (!remove && !exists.value() && !create) {
+        return errorJson(
+            404,
+            "Project setting not found: " + setting +
+                ". The engine does not define this name, so writing it would add a key "
+                "nothing reads and report it as persisted. Check the spelling against "
+                "project_get_setting. To add a custom setting on purpose, pass "
+                "create: true.",
+            {{"code", "setting_not_found"}});
+    }
+
+    VariantValue default_value;
+    auto previous = exists.value()
+        ? callObject(project_settings.value(), "ProjectSettings", "get_setting", 223050753LL,
+                     {&name.value(), &default_value})
+        : Result<VariantValue>(VariantValue{});
+    if (previous.isErr()) return errorJson(previous.error());
+    auto replacement = remove ? Result<VariantValue>(VariantValue{}) : makeJsonVariant(params["value"]);
+    if (replacement.isErr()) return errorJson(replacement.error());
+
+    // Having established that the engine defines this setting, the tool
+    // used to write whatever it was handed. The lookup that answered
+    // defined_by_engine is holding the engine's own value, so its type is
+    // available at exactly the point where the check belongs (#490).
+    if (!remove && exists.value()) {
+        const auto current_type = GodotApi::instance().variant_get_type(previous.value().ptr());
+        const auto incoming_type = GodotApi::instance().variant_get_type(replacement.value().ptr());
+        const bool whole_number = params["value"].is_number_float() &&
+                                  params["value"].get<double>() ==
+                                      std::floor(params["value"].get<double>());
+        if (!incomingTypeFitsSetting(current_type, incoming_type, whole_number)) {
+            return errorJson(
+                409,
+                std::string("Project setting type mismatch: ") + setting + " holds a " +
+                    variantTypeName(current_type) + " and the value given is a " +
+                    variantTypeName(incoming_type) +
+                    ". Writing it would persist a value the engine cannot read back as the "
+                    "setting it names.",
+                {{"code", "setting_type_mismatch"},
+                 {"setting", setting},
+                 {"expected_type", variantTypeName(current_type)},
+                 {"given_type", variantTypeName(incoming_type)},
+                 {"retryable", false}});
+        }
+    }
+
+    // A res:// value names a file, and a setting pointed at a file that is
+    // not there is a project that no longer runs. project_set_autoload has
+    // refused this since it was written; this tool did not (#490).
+    if (!remove && params["value"].is_string()) {
+        const auto text = params["value"].get<std::string>();
+        if (strings::startsWith(text, "res://")) {
+            auto present = resourcePathExistsOnDisk(text);
+            if (present.isErr()) return errorJson(present.error());
+            if (!present.value()) {
+                return errorJson(404,
+                                 "Project setting resource not found: " + text +
+                                     ". Nothing is at that path, so " + setting +
+                                     " would name a file the project cannot load.",
+                                 {{"setting", setting},
+                                  {"resource_path", text},
+                                  {"resource_exists", false},
+                                  {"retryable", false}});
+            }
+        }
+    }
+
+    // What the file held for it before the write, read the way value_written
+    // is read after it: the literal, or null for no line (#1151).
+    auto literal_before = projectFileSettingLiteral(setting);
+    auto applied = callObject(project_settings.value(), "ProjectSettings", "set_setting", 402577236LL,
+                              {&name.value(), &replacement.value()});
+    if (applied.isErr()) return errorJson(applied.error());
+    const auto file_before = projectFileStamp();
+    auto saved = callObject(project_settings.value(), "ProjectSettings", "save", 166280745LL);
+    auto save_code = saved.isOk()
+        ? scalarFromVariant<int64_t>(saved.value(), GDEXTENSION_VARIANT_TYPE_INT)
+        : Result<int64_t>(saved.error());
+    if (save_code.isErr() || save_code.value() != 0) {
+        auto rollback_save = restoreProjectSetting(project_settings.value(), name.value(), previous.value(),
+                                                   file_before);
+        const std::string detail = save_code.isErr()
+            ? save_code.error().message
+            : ::didi::godot::describeGodotError(save_code.value());
+        if (rollback_save.isErr()) {
+            return errorJson(500, "ProjectSettings.save failed (" + detail + ") and rollback failed: " +
+                                  rollback_save.error().message);
+        }
+        return projectFileNotWritable("setting", detail);
+    }
+    auto stored = projectFileSettingLiteral(setting);
+    if (stored.isErr()) {
+        return errorJson(500, "ProjectSettings.save reported success, and project.godot could not "
+                              "be read back to confirm it: " + stored.error().message);
+    }
+    json result = {{"status", "success"}, {"setting", setting}, {"persisted", true},
+                   {"removed", remove},
+                   // What the file holds now, read back after the save
+                   // (#1019). Null when it has no line for the setting.
+                   {"value_written", stored.value()},
+                   // Whether the engine knew this name before the write. A
+                   // caller that passed create: true gets to see which of the
+                   // two things it did.
+                   {"defined_by_engine", static_cast<bool>(exists.value())}};
+    // The literal it replaced, under the name the offline route already
+    // uses (#1151): null when the file had no line, an engine default.
+    // Absent for a setting the engine did not have.
+    if (exists.value() && literal_before.isOk()) result["previous_value"] = literal_before.value();
+    // The editor's Audio panel read this setting when it was built and saves
+    // the bus layout to that file until the editor restarts. Moving it here
+    // left the editor writing the old file while the next start loaded the
+    // new one, which was empty, so every bus the project had was gone from
+    // the editor after a restart. Measured on 4.7.2 in vibe session
+    // nineteen; editor_reload_project is a filesystem scan and does not
+    // change it.
+    if (setting == "audio/buses/default_bus_layout") {
+        const auto editor_path = startupBusLayoutPath();
+        const auto project_path = busLayoutPathFrom(projectSettingString(setting));
+        if (editor_path.has_value() && *editor_path != project_path) {
+            result["requires_editor_restart"] = true;
+            result["editor_layout_path"] = *editor_path;
+            result["limitation"] =
+                "The attached editor opened the project with " + *editor_path +
+                " as its bus layout and keeps saving every bus change there until it "
+                "restarts. The next start loads " + project_path + " instead, and the "
+                "buses the editor holds now are in the other file, so copy the layout "
+                "across or restart the editor before changing any bus.";
+        }
+    }
+    return liveResult(std::move(result));
+}
+
+
+json GodotBridge::bridgeProjectAutoloads(const std::string& method, const json& params, const std::string& /*session_kind*/, GDExtensionObjectPtr /*editor*/) {
+    auto project_settings = singleton("ProjectSettings");
+    if (project_settings.isErr()) return errorJson(project_settings.error());
+
+    if (method == "project.listAutoloads") {
+        auto properties = callObject(project_settings.value(), "Object", "get_property_list", 3995934104LL);
+        if (properties.isErr()) return errorJson(properties.error());
+        auto size_value = callVariant(properties.value(), "size");
+        if (size_value.isErr()) return errorJson(size_value.error());
+        auto size = scalarFromVariant<int64_t>(size_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+        if (size.isErr()) return errorJson(size.error());
+        auto name_key = makeString("name");
+        if (name_key.isErr()) return errorJson(name_key.error());
+        std::vector<json> entries;
+        for (int64_t i = 0; i < size.value(); ++i) {
+            auto index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, i);
+            if (index.isErr()) return errorJson(index.error());
+            auto descriptor = callVariant(properties.value(), "get", {&index.value()});
+            if (descriptor.isErr()) return errorJson(descriptor.error());
+            auto property_name_value = callVariant(descriptor.value(), "get", {&name_key.value()});
+            if (property_name_value.isErr()) return errorJson(property_name_value.error());
+            auto property_type = GodotApi::instance().variant_get_type(property_name_value.value().ptr());
+            if (property_type != GDEXTENSION_VARIANT_TYPE_STRING && property_type != GDEXTENSION_VARIANT_TYPE_STRING_NAME) continue;
+            auto property_name = stringFromVariant(property_name_value.value(), property_type);
+            if (property_name.isErr()) return errorJson(property_name.error());
+            if (!strings::startsWith(property_name.value(), "autoload/") || property_name.value().size() <= 9) continue;
+            auto setting_name = makeStringName(property_name.value());
+            VariantValue default_value;
+            if (setting_name.isErr()) return errorJson(setting_name.error());
+            auto setting = callObject(project_settings.value(), "ProjectSettings", "get_setting", 223050753LL,
+                                      {&setting_name.value(), &default_value});
+            if (setting.isErr()) return errorJson(setting.error());
+            auto setting_type = GodotApi::instance().variant_get_type(setting.value().ptr());
+            auto encoded = stringFromVariant(setting.value(), setting_type);
+            if (encoded.isErr()) return errorJson(encoded.error());
+            const bool autoload_singleton = strings::startsWith(encoded.value(), "*");
+            entries.push_back({{"name", property_name.value().substr(9)},
+                               {"path", autoload_singleton ? encoded.value().substr(1) : encoded.value()},
+                               {"singleton", autoload_singleton}});
+        }
+        std::sort(entries.begin(), entries.end(), [](const json& left, const json& right) {
+            return left["name"].get<std::string>() < right["name"].get<std::string>();
+        });
+        return liveResult({{"status", "success"}, {"autoloads", entries}});
+    }
+
+    const std::string autoload_name = params.value("name", "");
+    auto valid_name = validateIdentifier(autoload_name, "autoload name");
+    if (valid_name.isErr()) return errorJson(valid_name.error());
+    const std::string setting_path = "autoload/" + autoload_name;
+    auto setting_name = makeStringName(setting_path);
+    if (setting_name.isErr()) return errorJson(setting_name.error());
+    auto exists_value = callObject(project_settings.value(), "ProjectSettings", "has_setting", 3927539163LL,
+                                   {&setting_name.value()});
+    if (exists_value.isErr()) return errorJson(exists_value.error());
+    auto exists = scalarFromVariant<GDExtensionBool>(exists_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+    if (exists.isErr()) return errorJson(exists.error());
+    const bool removing = method == "project.removeAutoload";
+    if (removing && !exists.value()) return errorJson(404, "Autoload not found: " + autoload_name);
+    if (!removing && exists.value() && !params.value("replace", false)) {
+        return errorJson(409, "Autoload already exists; pass replace: true to update it",
+                              {{"code", "already_exists"}, {"retry_with", {{"replace", true}}}});
+    }
+
+    VariantValue default_value;
+    auto previous = exists.value()
+        ? callObject(project_settings.value(), "ProjectSettings", "get_setting", 223050753LL,
+                     {&setting_name.value(), &default_value})
+        : Result<VariantValue>(VariantValue{});
+    if (previous.isErr()) return errorJson(previous.error());
+    Result<VariantValue> replacement(VariantValue{});
+    std::string resource_path;
+    bool autoload_singleton = true;
+    if (!removing) {
+        resource_path = params.value("path", "");
+        auto valid_path = strings::endsWith(resource_path, ".gd") || strings::endsWith(resource_path, ".cs")
+            ? validateScriptPath(resource_path)
+            : validateResPath(resource_path, ".tscn");
+        if (valid_path.isErr()) return errorJson(valid_path.error());
+        auto loader = singleton("ResourceLoader");
+        if (loader.isErr()) return errorJson(loader.error());
+        auto path = makeString(resource_path);
+        auto hint = makeString("");
+        if (path.isErr() || hint.isErr()) return errorJson(500, "Failed to construct resource existence arguments");
+        auto resource_exists_value = callObject(loader.value(), "ResourceLoader", "exists", 4185558881LL,
+                                                {&path.value(), &hint.value()});
+        if (resource_exists_value.isErr()) return errorJson(resource_exists_value.error());
+        auto resource_exists = scalarFromVariant<GDExtensionBool>(resource_exists_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+        if (resource_exists.isErr()) return errorJson(resource_exists.error());
+        if (!resource_exists.value()) return errorJson(404, "Autoload resource not found: " + resource_path);
+        autoload_singleton = params.value("singleton", true);
+        replacement = makeString((autoload_singleton ? "*" : "") + resource_path);
+        if (replacement.isErr()) return errorJson(replacement.error());
+    }
+
+    auto applied = callObject(project_settings.value(), "ProjectSettings", "set_setting", 402577236LL,
+                              {&setting_name.value(), &replacement.value()});
+    if (applied.isErr()) return errorJson(applied.error());
+    const auto file_before = projectFileStamp();
+    auto saved = callObject(project_settings.value(), "ProjectSettings", "save", 166280745LL);
+    auto save_code = saved.isOk()
+        ? scalarFromVariant<int64_t>(saved.value(), GDEXTENSION_VARIANT_TYPE_INT)
+        : Result<int64_t>(saved.error());
+    if (save_code.isErr() || save_code.value() != 0) {
+        auto rollback = restoreProjectSetting(project_settings.value(), setting_name.value(), previous.value(),
+                                              file_before);
+        if (rollback.isErr()) return errorJson(500, "Autoload save failed and rollback failed: " + rollback.error().message);
+        return projectFileNotWritable("autoload", save_code.isErr()
+                                                      ? save_code.error().message
+                                                      : ::didi::godot::describeGodotError(save_code.value()));
+    }
+    auto stored = projectFileAutoload(autoload_name);
+    if (stored.isErr()) {
+        return errorJson(500, "ProjectSettings.save reported success, and project.godot could not "
+                              "be read back to confirm it: " + stored.error().message);
+    }
+    // Say what this did and did not do. Writing the setting is not the same
+    // as the attached editor knowing about it: Godot registers an autoload's
+    // global name through editor-internal paths a GDExtension cannot reach,
+    // so scripts referring to the singleton keep failing to compile in this
+    // editor session until it restarts. `editor_reload_project` does not
+    // clear it either. Reporting only `persisted: true` left callers
+    // debugging their own scripts for a state this call had created.
+    return liveResult({{"status", "success"}, {"name", autoload_name}, {"path", resource_path},
+                       {"singleton", autoload_singleton}, {"removed", removing}, {"persisted", true},
+                       // The entry project.godot declares after the save,
+                       // or null once it declares none (#1019).
+                       {"autoload", stored.value()},
+                       {"registered_in_attached_editor", false},
+                       {"requires_editor_restart", true},
+                       {"limitation",
+                        removing
+                            ? std::string(
+                                  "The setting is removed from project.godot, but this editor "
+                                  "session keeps resolving the singleton until it is restarted. "
+                                  "editor_reload_project does not change that.")
+                            : std::string(
+                                  "The setting is written to project.godot, but this editor "
+                                  "session will not resolve the singleton until it is restarted. "
+                                  "Scripts referencing it report 'Identifier not found' until "
+                                  "then, and editor_reload_project does not change that.")}});
+}
+
+
+json GodotBridge::bridgeProjectInputActions(const std::string& method, const json& params, const std::string& /*session_kind*/, GDExtensionObjectPtr /*editor*/) {
+    auto project_settings = singleton("ProjectSettings");
+    if (project_settings.isErr()) return errorJson(project_settings.error());
+
+    if (method == "project.listInputActions") {
+        // Ninety actions came back on every call, eighty-five of them the
+        // engine's ui_* map, and there was no smaller question to ask: not
+        // the project's own, not one by name (#775). A listing now keeps to
+        // what the project declares unless asked for the engine's too, as
+        // P4 says (#1108). An action named by the caller is that request,
+        // wherever the action comes from.
+        const std::string only_action = params.value("action", "");
+        const bool asked = params.contains("include_engine_defaults");
+        bool include_engine_defaults = params.value("include_engine_defaults", !only_action.empty());
+        const auto declared = projectFileInputActions();
+        if (declared.failure && !include_engine_defaults) {
+            if (asked) {
+                return errorJson(declared.failure->code,
+                                 declared.failure->message +
+                                     " Which actions are the project's own cannot be told from "
+                                     "the engine's until the file reads.",
+                                 declared.failure->data.is_null() ? json::object()
+                                                                  : declared.failure->data);
+            }
+            // Nobody asked to leave the engine's out, and they cannot be
+            // told apart, so it lists every action and says why below.
+            include_engine_defaults = true;
+        }
+        size_t omitted_engine_defaults = 0;
+        bool named_action_omitted = false;
+        auto properties = callObject(project_settings.value(), "Object", "get_property_list", 3995934104LL);
+        if (properties.isErr()) return errorJson(properties.error());
+        auto size_value = callVariant(properties.value(), "size");
+        if (size_value.isErr()) return errorJson(size_value.error());
+        auto size = scalarFromVariant<int64_t>(size_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+        if (size.isErr()) return errorJson(size.error());
+        auto name_key = makeString("name");
+        auto deadzone_key = makeString("deadzone");
+        auto events_key = makeString("events");
+        if (name_key.isErr() || deadzone_key.isErr() || events_key.isErr()) return errorJson(500, "Failed to construct InputMap keys");
+        std::vector<json> actions;
+        for (int64_t i = 0; i < size.value(); ++i) {
+            auto index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, i);
+            if (index.isErr()) return errorJson(index.error());
+            auto descriptor = callVariant(properties.value(), "get", {&index.value()});
+            if (descriptor.isErr()) return errorJson(descriptor.error());
+            auto property_name_value = callVariant(descriptor.value(), "get", {&name_key.value()});
+            if (property_name_value.isErr()) return errorJson(property_name_value.error());
+            auto property_type = GodotApi::instance().variant_get_type(property_name_value.value().ptr());
+            if (property_type != GDEXTENSION_VARIANT_TYPE_STRING && property_type != GDEXTENSION_VARIANT_TYPE_STRING_NAME) continue;
+            auto property_name = stringFromVariant(property_name_value.value(), property_type);
+            if (property_name.isErr()) return errorJson(property_name.error());
+            if (!strings::startsWith(property_name.value(), "input/") || property_name.value().size() <= 6) continue;
+            const std::string action_name = property_name.value().substr(6);
+            if (!only_action.empty() && action_name != only_action) continue;
+            const bool defined_by_project = declared.names.count(action_name) != 0;
+            if (!include_engine_defaults && !defined_by_project) {
+                ++omitted_engine_defaults;
+                named_action_omitted = !only_action.empty();
+                continue;
+            }
+            auto setting_name = makeStringName(property_name.value());
+            VariantValue default_value;
+            if (setting_name.isErr()) return errorJson(setting_name.error());
+            auto setting = callObject(project_settings.value(), "ProjectSettings", "get_setting", 223050753LL,
+                                      {&setting_name.value(), &default_value});
+            if (setting.isErr()) return errorJson(setting.error());
+            if (GodotApi::instance().variant_get_type(setting.value().ptr()) != GDEXTENSION_VARIANT_TYPE_DICTIONARY) {
+                return errorJson(422, "InputMap setting is not a Dictionary: " + property_name.value(),
+                                      {{"code", "malformed_input_map_entry"}});
+            }
+            auto deadzone_value = callVariant(setting.value(), "get", {&deadzone_key.value()});
+            auto events_value = callVariant(setting.value(), "get", {&events_key.value()});
+            if (deadzone_value.isErr() || events_value.isErr()) {
+                return errorJson(422, "InputMap setting is missing deadzone or events",
+                                 {{"code", "malformed_input_map_entry"}});
+            }
+            auto deadzone = scalarFromVariant<double>(deadzone_value.value(), GDEXTENSION_VARIANT_TYPE_FLOAT);
+            if (deadzone.isErr()) return errorJson(deadzone.error());
+            auto event_count_value = callVariant(events_value.value(), "size");
+            if (event_count_value.isErr()) return errorJson(event_count_value.error());
+            auto event_count = scalarFromVariant<int64_t>(event_count_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+            if (event_count.isErr()) return errorJson(event_count.error());
+            json events = json::array();
+            for (int64_t event_index = 0; event_index < event_count.value(); ++event_index) {
+                auto native_index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, event_index);
+                if (native_index.isErr()) return errorJson(native_index.error());
+                auto event = callVariant(events_value.value(), "get", {&native_index.value()});
+                if (event.isErr()) return errorJson(event.error());
+                auto normalized = inputEventToJson(event.value());
+                if (normalized.isErr()) return errorJson(normalized.error());
+                events.push_back(normalized.value());
+            }
+            json entry = {{"action", action_name}, {"deadzone", deadzone.value()}, {"events", events}};
+            if (!declared.failure) entry["defined_by_project"] = defined_by_project;
+            actions.push_back(std::move(entry));
+        }
+        if (!only_action.empty() && actions.empty()) {
+            if (named_action_omitted) {
+                return errorJson(404,
+                                 "Input action '" + only_action + "' is an engine default, and "
+                                 "include_engine_defaults is false.",
+                                 {{"code", "engine_default_action"},
+                                  {"action", only_action},
+                                  {"engine_default", true},
+                                  {"retry_with", {{"include_engine_defaults", true}}}});
+            }
+            return errorJson(404, "Input action not found: " + only_action,
+                             {{"code", "input_action_not_found"}, {"action", only_action}});
+        }
+        std::sort(actions.begin(), actions.end(), [](const json& left, const json& right) {
+            return left["action"].get<std::string>() < right["action"].get<std::string>();
+        });
+        json listing = {{"status", "success"}, {"actions", actions}};
+        if (!include_engine_defaults) listing["omitted_engine_default_count"] = omitted_engine_defaults;
+        // Counted and said rather than guessed: an unreadable file leaves
+        // every action's origin unknown, not every action the engine's.
+        if (declared.failure) listing["defined_by_project_unavailable"] = declared.failure->message;
+        return liveResult(listing);
+    }
+
+    const std::string action = params.value("action", "");
+    auto valid_action = validateActionName(action);
+    if (valid_action.isErr()) return errorJson(valid_action.error());
+    const std::string setting_path = "input/" + action;
+    auto setting_name = makeStringName(setting_path);
+    if (setting_name.isErr()) return errorJson(setting_name.error());
+    auto exists_value = callObject(project_settings.value(), "ProjectSettings", "has_setting", 3927539163LL,
+                                   {&setting_name.value()});
+    if (exists_value.isErr()) return errorJson(exists_value.error());
+    auto exists = scalarFromVariant<GDExtensionBool>(exists_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+    if (exists.isErr()) return errorJson(exists.error());
+    const bool removing = method == "project.removeInputAction";
+    if (removing && !exists.value()) return errorJson(404, "Input action not found: " + action);
+    if (removing) {
+        // has_setting says yes for ui_accept because the engine registers
+        // the built-in map as settings. Removing one wrote nothing to
+        // project.godot, left the running editor's InputMap without the
+        // action, and reported persisted: true, which is the opposite of
+        // what persisted promises: the removal is gone on the next load
+        // (#485).
+        auto defined = projectFileDefinesInputAction(action);
+        if (defined.isErr()) return errorJson(defined.error());
+        if (!defined.value()) {
+            return errorJson(
+                409,
+                "Input action '" + action +
+                    "' is an engine default rather than something this project defines. "
+                    "It is not in project.godot, so there is nothing to remove there: the "
+                    "removal would exist only in this editor session and be gone on the "
+                    "next load, while UI navigation broke in anything run from it. Use "
+                    "project_set_input_action to give the project its own events for this "
+                    "name.",
+                {{"code", "engine_default_action"},
+                 {"action", action},
+                 {"engine_default", true},
+                 {"defined_by_project", false},
+                 {"retryable", false}});
+        }
+    }
+    if (!removing && exists.value() && !params.value("replace", false)) {
+        return errorJson(409, "Input action already exists; pass replace: true to update it",
+                              {{"code", "already_exists"}, {"retry_with", {{"replace", true}}}});
+    }
+
+    VariantValue default_value;
+    auto previous = exists.value()
+        ? callObject(project_settings.value(), "ProjectSettings", "get_setting", 223050753LL,
+                     {&setting_name.value(), &default_value})
+        : Result<VariantValue>(VariantValue{});
+    if (previous.isErr()) return errorJson(previous.error());
+    Result<VariantValue> replacement(VariantValue{});
+    double deadzone = 0.2;
+    size_t event_count = 0;
+    if (!removing) {
+        deadzone = params.value("deadzone", 0.2);
+        if (!std::isfinite(deadzone) || deadzone < 0.0 || deadzone > 1.0) {
+            return errorJson(400, "deadzone must be finite and within 0.0..1.0");
+        }
+        json event_descriptors = params.value("events", json::array());
+        if (!event_descriptors.is_array()) return errorJson(400, "events must be an array");
+        auto dictionary = makeJsonVariant(json::object());
+        auto events = makeJsonVariant(json::array());
+        auto deadzone_key = makeString("deadzone");
+        auto events_key = makeString("events");
+        auto deadzone_value = makeScalar(GDEXTENSION_VARIANT_TYPE_FLOAT, deadzone);
+        if (dictionary.isErr() || events.isErr() || deadzone_key.isErr() || events_key.isErr() || deadzone_value.isErr()) {
+            return errorJson(500, "Failed to construct InputMap setting containers");
+        }
+        size_t event_index = 0;
+        for (const auto& descriptor : event_descriptors) {
+            auto event = makeInputEvent(descriptor);
+            if (event.isErr()) {
+                // Which entry, because events takes many and a message about
+                // one of them that does not say which is a message a caller
+                // has to bisect (#737).
+                return errorJson(event.error().code,
+                                 "Argument 'events' entry " + std::to_string(event_index) +
+                                     ": " + event.error().message);
+            }
+            ++event_index;
+            auto appended = callVariant(events.value(), "append", {&event.value()});
+            if (appended.isErr()) return errorJson(appended.error());
+        }
+        auto set_deadzone = callVariant(dictionary.value(), "set", {&deadzone_key.value(), &deadzone_value.value()});
+        auto set_events = callVariant(dictionary.value(), "set", {&events_key.value(), &events.value()});
+        if (set_deadzone.isErr() || set_events.isErr()) return errorJson(500, "Failed to construct InputMap setting");
+        event_count = event_descriptors.size();
+        replacement = std::move(dictionary.value());
+    }
+
+    // The editor's own InputMap is left as it is. An editor never loads a
+    // project's input actions into its map -- the project's actions are
+    // absent from it at startup on 4.5.1, 4.6.2 and 4.7.2 -- and Godot's
+    // Project Settings dialog writes ProjectSettings and nothing else. This
+    // used to finish with InputMap.load_from_project_settings(), which on
+    // 4.5.1 erased the 3D viewport's own navigation actions, so every mouse
+    // move over it printed "The InputMap action ... doesn't exist" and
+    // Shift-pan stopped working until a restart; on 4.6.2 and 4.7.2 it kept
+    // those and pulled the project's twenty actions, its ui_* overrides
+    // included, into the editor's map (#925). Measured with
+    // tools/vibe/probes/input_map_reload.py. A game loads the project's
+    // actions when it starts, which is where they take effect.
+    auto applied = callObject(project_settings.value(), "ProjectSettings", "set_setting", 402577236LL,
+                              {&setting_name.value(), &replacement.value()});
+    if (applied.isErr()) return errorJson(applied.error());
+    const auto file_before = projectFileStamp();
+    auto saved = callObject(project_settings.value(), "ProjectSettings", "save", 166280745LL);
+    auto save_code = saved.isOk()
+        ? scalarFromVariant<int64_t>(saved.value(), GDEXTENSION_VARIANT_TYPE_INT)
+        : Result<int64_t>(saved.error());
+    if (save_code.isErr() || save_code.value() != 0) {
+        auto rollback = restoreProjectSetting(project_settings.value(), setting_name.value(), previous.value(),
+                                              file_before);
+        if (rollback.isErr()) return errorJson(500, "InputMap save failed and rollback failed: " + rollback.error().message);
+        return projectFileNotWritable("input action", save_code.isErr()
+                                                          ? save_code.error().message
+                                                          : ::didi::godot::describeGodotError(save_code.value()));
+    }
+    auto stored = projectFileDefinesInputAction(action);
+    if (stored.isErr()) {
+        return errorJson(500, "ProjectSettings.save reported success, and project.godot could not "
+                              "be read back to confirm it: " + stored.error().message);
+    }
+    if (removing) {
+        // The remove path never filled these in, so it echoed the defaults
+        // rather than what the action had. Read them off the value that was
+        // there a moment ago.
+        auto deadzone_key = makeString("deadzone");
+        auto events_key = makeString("events");
+        if (deadzone_key.isOk() && events_key.isOk() &&
+            GodotApi::instance().variant_get_type(previous.value().ptr()) ==
+                GDEXTENSION_VARIANT_TYPE_DICTIONARY) {
+            auto had_deadzone = callVariant(previous.value(), "get", {&deadzone_key.value()});
+            if (had_deadzone.isOk()) {
+                auto value = scalarFromVariant<double>(had_deadzone.value(),
+                                                       GDEXTENSION_VARIANT_TYPE_FLOAT);
+                if (value.isOk()) deadzone = value.value();
+            }
+            auto had_events = callVariant(previous.value(), "get", {&events_key.value()});
+            if (had_events.isOk()) {
+                auto count = callVariant(had_events.value(), "size");
+                if (count.isOk()) {
+                    auto size = scalarFromVariant<int64_t>(count.value(),
+                                                           GDEXTENSION_VARIANT_TYPE_INT);
+                    if (size.isOk() && size.value() >= 0) {
+                        event_count = static_cast<size_t>(size.value());
+                    }
+                }
+            }
+        }
+    }
+    json result = {{"status", "success"}, {"action", action}, {"deadzone", deadzone},
+                   {"event_count", event_count}, {"removed", removing}, {"persisted", true},
+                   // Whether project.godot declares the action after the
+                   // save, read back from the file (#1019).
+                   {"defined_by_project", stored.value()},
+                   // Kept for callers that read it, and false because the
+                   // editor's InputMap is no longer reloaded (#925).
+                   {"runtime_reloaded", false},
+                   {"takes_effect",
+                    "when a game starts, which loads the project's input actions. The "
+                    "editor does not load them into its own InputMap, so this editor "
+                    "session is unchanged, the same as after an edit in Godot's Project "
+                    "Settings dialog."}};
+    return liveResult(result);
+}
+
+
+json GodotBridge::bridgeScriptAttachment(const std::string& method, const json& params, const std::string& /*session_kind*/, GDExtensionObjectPtr editor) {
+    auto root = editedSceneRoot(editor);
+    if (root.isErr()) return errorJson(root.error());
+    auto node = resolveNode(root.value(), params.value("target_node", ""));
+    if (node.isErr()) return errorJson(node.error());
+    if (auto refused = refuseUnsavableEdit(root.value(), node.value(),
+                                           params.value("target_node", ""),
+                                           SceneEdit::Property)) {
+        return *refused;
+    }
+    auto old_script = callObject(node.value(), "Object", "get_script", 1214101251LL);
+    if (old_script.isErr()) return errorJson(old_script.error());
+    auto old_type = GodotApi::instance().variant_get_type(old_script.value().ptr());
+    GDExtensionObjectPtr old_object = nullptr;
+    if (old_type == GDEXTENSION_VARIANT_TYPE_OBJECT) {
+        auto converted = objectFromVariant(old_script.value());
+        if (converted.isErr()) return errorJson(converted.error());
+        old_object = converted.value();
+    }
+
+    VariantValue new_script;
+    GDExtensionObjectPtr requested_script_object = nullptr;
+    std::string script_path;
+    const bool attaching = method == "script.attachToNode";
+    if (attaching) {
+        script_path = params.value("script_path", "");
+        auto attachable = loadAttachableScript(node.value(), script_path);
+        if (attachable.isErr()) {
+            const auto& failure = attachable.error();
+            return errorJson(failure);
+        }
+        requested_script_object = attachable.value().object;
+        new_script = std::move(attachable.value().script);
+    } else if (!old_object) {
+        return errorJson(409, "Target node has no script to detach",
+                              {{"code", "no_script_attached"}});
+    }
+
+    auto manager = undoManager(editor);
+    if (manager.isErr()) return errorJson(manager.error());
+    auto preflight = preflightUndoManagerBindings();
+    auto method_bind = requireMethodBind("Object", "set_script", 1114965689LL);
+    if (preflight.isErr()) return errorJson(preflight.error());
+    if (method_bind.isErr()) return errorJson(method_bind.error());
+    auto action = createAction(manager.value(), attaching ? "Didi: attach script" : "Didi: detach script", root.value());
+    if (action.isErr()) return errorJson(action.error());
+    auto apply = managerMethod(manager.value(), "add_do_method", node.value(), "set_script", {&new_script});
+    auto revert = managerMethod(manager.value(), "add_undo_method", node.value(), "set_script", {&old_script.value()});
+    if (apply.isErr() || revert.isErr()) {
+        // Closed, so the next mutation does not merge into it (#1152).
+        abandonAction(manager.value());
+        return errorJson(500, "Failed to register script UndoRedo transaction");
+    }
+    auto committed = commitAction(manager.value());
+    if (committed.isErr()) return errorJson(committed.error());
+    auto observed_script = callObject(node.value(), "Object", "get_script", 1214101251LL);
+    if (observed_script.isErr()) return errorJson(observed_script.error());
+    auto observed_type = GodotApi::instance().variant_get_type(observed_script.value().ptr());
+    GDExtensionObjectPtr observed_object = nullptr;
+    if (observed_type == GDEXTENSION_VARIANT_TYPE_OBJECT) {
+        auto converted = objectFromVariant(observed_script.value());
+        if (converted.isErr()) return errorJson(converted.error());
+        observed_object = converted.value();
+    }
+    if ((attaching && observed_object != requested_script_object) || (!attaching && observed_object)) {
+        // The action is already committed, so the node and the undo stack
+        // may both carry the change. Roll it back the way signal connect
+        // does, and if that also fails say the outcome is unknown rather
+        // than a bare 422, which reads as "nothing happened".
+        const std::string reason = attaching
+            ? "Godot rejected the script assignment; its native base may be incompatible with the target node"
+            : "Godot did not detach the target node's script";
+        auto reverted = undoLastAction(manager.value(), root.value());
+        if (reverted.isErr()) {
+            json failure = errorJson(500, reason + "; the committed action could not be undone: " +
+                                              reverted.error().message);
+            failure["error"]["data"] = {{"outcome", "unknown"}, {"rolled_back", false}};
+            return failure;
+        }
+        return errorJson(422, reason,
+                         {{"code", "script_assignment_rejected"},
+                          {"outcome", "rolled_back"}, {"rolled_back", true}});
+    }
+    // The script the node held before, read before the commit, so the
+    // change journal can say what was replaced (#1151).
+    const json before_script = old_object ? json(resourcePathOf(old_object)) : json(nullptr);
+    return liveSceneMutation({{"status", "success"}, {"target_node", params.value("target_node", "")},
+                              {"script_path", script_path}, {"attached", attaching}, {"detached", !attaching},
+                              {"before", {{"script", before_script}}},
+                              {"undo_redo_registered", true}});
+}
+
+
+json GodotBridge::bridgeAudioAddBus(const std::string& /*method*/, const json& params, const std::string& /*session_kind*/, GDExtensionObjectPtr /*editor*/) {
+    // One bus appended to the layout the editor holds, named, routed, and
+    // left for the editor's own bus-layout autosave to write down. Every
+    // fact below was measured on 4.5.1, 4.6.2 and 4.7.2 by
+    // tools/vibe/probes/audio_bus_engine.py, and every hash here is the
+    // same on all three (#771).
+    auto parsed = runtime::parseAudioAddBusRequest(params);
+    if (parsed.isErr()) {
+        return errorJson(parsed.error().code, parsed.error().message, parsed.error().data);
+    }
+    const auto& request = parsed.value();
+    for (const auto& bind : {std::make_tuple("AudioServer", "get_bus_count", 3905245786LL),
+                             std::make_tuple("AudioServer", "get_bus_name", 844755477LL),
+                             std::make_tuple("AudioServer", "get_bus_send", 659327637LL),
+                             std::make_tuple("AudioServer", "add_bus", 1025054187LL),
+                             std::make_tuple("AudioServer", "remove_bus", 1286410249LL),
+                             std::make_tuple("AudioServer", "set_bus_name", 501894301LL),
+                             std::make_tuple("AudioServer", "set_bus_send", 3780747571LL),
+                             std::make_tuple("Object", "emit_signal", 4047867050LL)}) {
+        if (requireMethodBind(std::get<0>(bind), std::get<1>(bind), std::get<2>(bind)).isErr()) {
+            return bridgeError(501, "required_bind_unavailable");
+        }
+    }
+    auto server = singleton("AudioServer");
+    if (server.isErr()) return errorJson(server.error());
+
+    const auto indexVariant = [](int64_t index) {
+        return makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
+    };
+    const auto busCount = [&]() -> Result<int64_t> {
+        auto value = callObject(server.value(), "AudioServer", "get_bus_count", 3905245786LL);
+        if (value.isErr()) return value.error();
+        return scalarFromVariant<int64_t>(value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+    };
+    const auto nameOf = [&](int64_t index) -> Result<std::string> {
+        auto at = indexVariant(index);
+        if (at.isErr()) return at.error();
+        auto value = callObject(server.value(), "AudioServer", "get_bus_name", 844755477LL,
+                                {&at.value()});
+        if (value.isErr()) return value.error();
+        return stringFromVariant(value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+    };
+    const auto sendOf = [&](int64_t index) -> Result<std::string> {
+        auto at = indexVariant(index);
+        if (at.isErr()) return at.error();
+        auto value = callObject(server.value(), "AudioServer", "get_bus_send", 659327637LL,
+                                {&at.value()});
+        if (value.isErr()) return value.error();
+        auto send = stringFromVariant(value.value(), GDEXTENSION_VARIANT_TYPE_STRING_NAME);
+        if (send.isErr()) send = stringFromVariant(value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+        return send;
+    };
+    // ASCII only. It is there to catch `music` beside `Music`, which the
+    // engine keeps as two buses and `get_bus_index` tells apart by case.
+    const auto folded = [](std::string text) {
+        for (auto& character : text) {
+            if (character >= 'A' && character <= 'Z') character = static_cast<char>(character - 'A' + 'a');
+        }
+        return text;
+    };
+
+    auto count = busCount();
+    if (count.isErr()) return errorJson(count.error());
+    std::vector<std::string> names;
+    std::vector<std::string> sends;
+    for (int64_t index = 0; index < count.value(); ++index) {
+        auto name = nameOf(index);
+        if (name.isErr()) return errorJson(name.error());
+        auto send = sendOf(index);
+        if (send.isErr()) return errorJson(send.error());
+        names.push_back(name.value());
+        sends.push_back(send.value());
+    }
+
+    // The engine never refuses a name. One already in use comes back as
+    // `Music 2`, and `Master` on another bus as `Master 2`, with nothing
+    // printed, so the name the caller asked for would belong to the other
+    // bus. The check is against the engine, not the layout file, because
+    // the editor holds the layout in memory and writes it when it likes.
+    for (const auto& existing : names) {
+        if (existing == request.name) {
+            return errorJson(409, "A bus named \"" + request.name + "\" already exists. Godot "
+                                  "would name the new one \"" + request.name + " 2\" rather "
+                                  "than refuse, so this is refused instead. "
+                                  "audio_configure_bus changes the bus that is there.",
+                             {{"code", "bus_name_in_use"}, {"name", request.name},
+                              {"buses", names}, {"retryable", false}});
+        }
+    }
+    for (const auto& existing : names) {
+        if (folded(existing) == folded(request.name)) {
+            return errorJson(409, "\"" + request.name + "\" differs from the existing bus \"" +
+                                  existing + "\" only in letter case. Godot would keep both, "
+                                  "and nobody can tell them apart in the Audio panel.",
+                             {{"code", "bus_name_differs_only_in_case"}, {"name", request.name},
+                              {"existing", existing}, {"buses", names}, {"retryable", false}});
+        }
+    }
+
+    // A send the engine cannot use still reads back as set, and the sound
+    // goes to Master with no message: a later bus, a bus that does not
+    // exist, the bus itself and the empty send all did, measured with a
+    // tone on every bus's peak meter. The new bus goes on the end, so every
+    // bus already there comes before it and is a target that works.
+    if (request.send == request.name) {
+        return errorJson(400, "A bus cannot send to itself. Godot would store the send and "
+                              "route the bus to Master.",
+                         {{"code", "invalid_arguments"}, {"parameter", "send"},
+                          {"retry_with", {{"send", "Master"}}}, {"retryable", false}});
+    }
+    bool send_found = false;
+    std::optional<std::string> send_meant;
+    for (const auto& existing : names) {
+        if (existing == request.send) send_found = true;
+        else if (!send_meant && folded(existing) == folded(request.send)) send_meant = existing;
+    }
+    if (!send_found) {
+        json data = {{"code", "send_bus_not_found"}, {"parameter", "send"},
+                     {"send", request.send}, {"buses", names}, {"retryable", false}};
+        std::string message = "No bus is named \"" + request.send + "\", so there is nothing "
+                              "to send to. Godot would store the send and route the bus to "
+                              "Master.";
+        if (send_meant) {
+            data["did_you_mean"] = *send_meant;
+            data["retry_with"] = {{"send", *send_meant}};
+            message += " The bus \"" + *send_meant + "\" differs only in letter case.";
+        }
+        return errorJson(404, message, std::move(data));
+    }
+
+    // A send is kept by name and does not follow a rename, so a project
+    // can already hold one that names no bus. Adding a bus with that name
+    // routes those buses through it, and that changes a mix the caller did
+    // not name.
+    json adopted = json::array();
+    for (size_t index = 0; index < names.size(); ++index) {
+        if (sends[index] == request.name) adopted.push_back(names[index]);
+    }
+
+    if (request.preview) {
+        return liveResult({{"status", "success"},
+                           {"preview", true},
+                           {"index", count.value()},
+                           {"name", request.name},
+                           {"send", request.send},
+                           {"buses", names},
+                           {"adopted_sends", std::move(adopted)}});
+    }
+
+    auto at_end = indexVariant(-1);
+    if (at_end.isErr()) return errorJson(at_end.error());
+    auto added = callObject(server.value(), "AudioServer", "add_bus", 1025054187LL,
+                            {&at_end.value()});
+    if (added.isErr()) return errorJson(added.error());
+    auto grown = busCount();
+    if (grown.isErr()) return errorJson(grown.error());
+    if (grown.value() != count.value() + 1) {
+        return errorJson(500, "AudioServer.add_bus did not add a bus: the layout has " +
+                                  std::to_string(grown.value()) + " buses, expected " +
+                                  std::to_string(count.value() + 1) + ".");
+    }
+    const int64_t index = count.value();
+    auto bus_index = indexVariant(index);
+    if (bus_index.isErr()) return errorJson(bus_index.error());
+    const auto removeAdded = [&]() {
+        (void)callObject(server.value(), "AudioServer", "remove_bus", 1286410249LL,
+                         {&bus_index.value()});
+    };
+
+    auto name_variant = makeString(request.name);
+    if (name_variant.isErr()) {
+        removeAdded();
+        return errorJson(name_variant.error());
+    }
+    auto named = callObject(server.value(), "AudioServer", "set_bus_name", 501894301LL,
+                            {&bus_index.value(), &name_variant.value()});
+    if (named.isErr()) {
+        removeAdded();
+        return errorJson(named.error());
+    }
+    // Read back rather than trusted. Something else in the editor can add a
+    // bus between the check above and this call, and the engine would
+    // answer that with `Music 2` rather than an error. The engine can also
+    // change a name on its way in: its UTF-8 reader drops a leading
+    // byte-order mark, and this said "another bus took the name meanwhile",
+    // retryable, for a name no bus held, which every retry repeated.
+    // Which of the two it was is read off the layout once the bus is gone.
+    auto kept = nameOf(index);
+    if (kept.isErr() || kept.value() != request.name) {
+        removeAdded();
+        bool asked_name_taken = false;
+        if (auto remaining = busCount(); remaining.isOk()) {
+            for (int64_t other = 0; other < remaining.value(); ++other) {
+                auto other_name = nameOf(other);
+                if (other_name.isOk() && other_name.value() == request.name) asked_name_taken = true;
+            }
+        }
+        const auto refusal = runtime::busNameChangedRefusal(
+            request.name, kept.isOk() ? kept.value() : std::string("?"), asked_name_taken);
+        return errorJson(refusal.code, refusal.message, refusal.data);
+    }
+
+    auto send_variant = makeStringName(request.send);
+    if (send_variant.isErr()) {
+        removeAdded();
+        return errorJson(send_variant.error());
+    }
+    auto routed = callObject(server.value(), "AudioServer", "set_bus_send", 3780747571LL,
+                             {&bus_index.value(), &send_variant.value()});
+    if (routed.isErr()) {
+        removeAdded();
+        return errorJson(routed.error());
+    }
+    if (request.volume_db) {
+        auto db = makeScalar(GDEXTENSION_VARIANT_TYPE_FLOAT, *request.volume_db);
+        if (db.isOk()) {
+            (void)callObject(server.value(), "AudioServer", "set_bus_volume_db", 1602489585LL,
+                             {&bus_index.value(), &db.value()});
+        }
+    }
+    for (const auto& [value, method_name] :
+         {std::make_pair(request.mute, "set_bus_mute"), std::make_pair(request.solo, "set_bus_solo")}) {
+        if (!value) continue;
+        auto flag = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, *value);
+        if (flag.isOk()) {
+            (void)callObject(server.value(), "AudioServer", method_name, 300928843LL,
+                             {&bus_index.value(), &flag.value()});
+        }
+    }
+
+    // On 4.5.1 and 4.6.2 the editor's Audio panel rebuilds when a bus is
+    // added and does not follow a rename, so the new strip says New Bus.
+    // A person who clicks into that name field and away renames the bus
+    // back to New Bus through the panel, and every player set to the name
+    // given here goes to Master. This signal makes the panel rebuild with
+    // the right name on all three lines, and it changed no name, send,
+    // volume or effect when measured.
+    bool panel_refreshed = false;
+    auto signal_name = makeStringName("bus_layout_changed");
+    if (signal_name.isOk()) {
+        std::vector<const VariantValue*> signal_arguments{&signal_name.value()};
+        auto emitted = callObject(server.value(), "Object", "emit_signal", 4047867050LL,
+                                  signal_arguments);
+        panel_refreshed = emitted.isOk();
+    }
+
+    const auto readState = [&]() -> Result<json> {
+        auto name = nameOf(index);
+        if (name.isErr()) return name.error();
+        auto send = sendOf(index);
+        if (send.isErr()) return send.error();
+        auto volume = callObject(server.value(), "AudioServer", "get_bus_volume_db",
+                                 2339986948LL, {&bus_index.value()});
+        if (volume.isErr()) return volume.error();
+        auto db = scalarFromVariant<double>(volume.value(), GDEXTENSION_VARIANT_TYPE_FLOAT);
+        if (db.isErr()) return db.error();
+        const auto flagOf = [&](const char* method_name) -> Result<bool> {
+            auto value = callObject(server.value(), "AudioServer", method_name, 1116898809LL,
+                                    {&bus_index.value()});
+            if (value.isErr()) return value.error();
+            return scalarFromVariant<bool>(value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+        };
+        auto mute = flagOf("is_bus_mute");
+        if (mute.isErr()) return mute.error();
+        auto solo = flagOf("is_bus_solo");
+        if (solo.isErr()) return solo.error();
+        return json{{"index", index}, {"name", name.value()}, {"send", send.value()},
+                    {"volume_db", db.value()}, {"mute", mute.value()}, {"solo", solo.value()}};
+    };
+    auto after = readState();
+    if (after.isErr()) return errorJson(after.error());
+
+    // The file the editor writes is the one it opened the project with,
+    // which is the one the project names unless the setting moved while
+    // the editor was running.
+    const auto project_layout_path =
+        busLayoutPathFrom(projectSettingString("audio/buses/default_bus_layout"));
+    const auto layout_path = startupBusLayoutPath().value_or(project_layout_path);
+    json result = {
+        {"status", "success"},
+        {"bus", index},
+        {"name", request.name},
+        {"send", request.send},
+        {"after", after.value()},
+        {"bus_count", grown.value()},
+        {"adopted_sends", std::move(adopted)},
+        {"layout_path", layout_path},
+        {"persisted_by_editor", true},
+        {"panel_refreshed", panel_refreshed},
+        {"undo_redo_registered", false},
+        {"limitation",
+         "This adds the bus to the editor's running AudioServer and writes no file. The "
+         "editor's own bus-layout autosave writes " + layout_path + " a moment later. There "
+         "is no undo entry: delete the bus in the editor's Audio panel to take it back." +
+             busLayoutMovedSentence(layout_path, project_layout_path)},
+        {"next_step",
+         "Set each AudioStreamPlayer's bus to \"" + request.name + "\" with "
+         "scene_set_property, then editor_save_scene. A player set to a bus before the bus "
+         "exists reads Master and is saved as Master."}};
+    if (project_layout_path != layout_path) result["project_layout_path"] = project_layout_path;
+    return liveResult(std::move(result));
+}
+
+
+json GodotBridge::bridgeEngineClassExists(const std::string& /*method*/, const json& params, const std::string& /*session_kind*/, GDExtensionObjectPtr /*editor*/) {
+    // The class list of the engine that will load the file. resource_create
+    // checked its type guard against the pinned 4.7 dump and wrote
+    // resources a 4.5.1 editor then refused to load at all -- not one
+    // dropped property, the whole file -- while reporting the version
+    // mismatch in the same payload (#766).
+    //
+    // ClassDB.class_exists is 2619796661 on 4.5.1, 4.6.2 and 4.7.2, and its
+    // answers were measured on all three: DrawableTexture2D and
+    // BlitMaterial exist only on 4.7, JointLimitation3D arrived in 4.6.
+    //
+    // A class_name script type is not in ClassDB -- it lives in the script
+    // server's global list -- so it answers false here exactly as it is
+    // absent from the dump. allow_unknown_type stays the route for those.
+    if (!params.contains("class_names") || !params["class_names"].is_array()) {
+        return errorJson(400, "engine.classExists requires a class_names array");
+    }
+    const auto& names = params["class_names"];
+    // 65 because resource_create asks about one root type and up to 64
+    // sub-resource types, and a cap below what the caller can legitimately
+    // ask would send it back to the pinned reference in silence, which is
+    // the bug this route exists to close.
+    if (names.empty() || names.size() > 65) {
+        return errorJson(400, "engine.classExists accepts 1 to 65 class names");
+    }
+    auto required = requireMethodBind("ClassDB", "class_exists", 2619796661LL);
+    if (required.isErr()) return errorJson(501, required.error().message);
+    auto class_db = singleton("ClassDB");
+    if (class_db.isErr()) return errorJson(class_db.error());
+
+    json classes = json::array();
+    for (const auto& value : names) {
+        if (!value.is_string()) {
+            return errorJson(400, "engine.classExists class_names must be strings");
+        }
+        const std::string name = value.get<std::string>();
+        auto class_name = makeStringName(name);
+        if (class_name.isErr()) return errorJson(500, class_name.error().message);
+        auto answer = callObject(class_db.value(), "ClassDB", "class_exists", 2619796661LL,
+                                 {&class_name.value()});
+        if (answer.isErr()) return errorJson(500, answer.error().message);
+        auto known =
+            scalarFromVariant<GDExtensionBool>(answer.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+        if (known.isErr()) return errorJson(500, known.error().message);
+        classes.push_back({{"name", name}, {"exists", known.value() != 0}});
+    }
+    return liveResult({{"status", "success"}, {"classes", std::move(classes)}});
+}
+
+
+json GodotBridge::bridgeSceneGroups(const std::string& method, const json& params, const std::string& /*session_kind*/, GDExtensionObjectPtr editor) {
+    const std::string group = params.value("group", "");
+    if (method != "scene.listGroups") {
+        auto valid_group = validateGroupName(group);
+        if (valid_group.isErr()) return errorJson(valid_group.error());
+    }
+    auto root = editedSceneRoot(editor);
+    if (root.isErr()) return errorJson(root.error());
+
+    if (method == "scene.getGroupMembers") {
+        auto group_name = makeStringName(group);
+        if (group_name.isErr()) return errorJson(group_name.error());
+        json members = json::array();
+        // A group name nobody has ever used and one that was just emptied
+        // were answered identically, field for field, and scene_list_groups
+        // requires a target_node so nothing enumerated the groups a scene
+        // has. An agent asking for "enemys" instead of "enemies" got a
+        // successful empty answer and no second question available to ask
+        // (#472).
+        //
+        // Godot has no empty group to find: membership lives on the nodes,
+        // so removing the last member is the same thing as the name never
+        // having been used. That is what makes the typo unanswerable, and
+        // it is why the fix is the list rather than a flag. The walk
+        // already visits every node, so the names in use cost one more
+        // call per node, and "enemys" comes back beside "enemies".
+        std::set<std::string> known_groups;
+        bool known_groups_truncated = false;
+        constexpr size_t kMaxReportedGroups = 128;
+        std::function<Result<void>(GDExtensionObjectPtr)> visit = [&](GDExtensionObjectPtr current) -> Result<void> {
+            auto member_value = callObject(current, "Node", "is_in_group", 2619796661LL, {&group_name.value()});
+            if (member_value.isErr()) return member_value.error();
+            auto member = scalarFromVariant<GDExtensionBool>(member_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+            if (member.isErr()) return member.error();
+            if (member.value()) {
+                auto path = logicalPathFromEditedRoot(root.value(), current);
+                if (path.isErr()) return path.error();
+                members.push_back(path.value());
+            }
+
+            auto groups_value = callObject(current, "Node", "get_groups", 3995934104LL);
+            if (groups_value.isErr()) return groups_value.error();
+            auto group_count_value = callVariant(groups_value.value(), "size");
+            if (group_count_value.isErr()) return group_count_value.error();
+            auto group_count = scalarFromVariant<int64_t>(group_count_value.value(),
+                                                          GDEXTENSION_VARIANT_TYPE_INT);
+            if (group_count.isErr()) return group_count.error();
+            for (int64_t g = 0; g < group_count.value(); ++g) {
+                auto group_index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, g);
+                if (group_index.isErr()) return group_index.error();
+                auto item = callVariant(groups_value.value(), "get", {&group_index.value()});
+                if (item.isErr()) return item.error();
+                const auto item_type = GodotApi::instance().variant_get_type(item.value().ptr());
+                auto text = stringFromVariant(item.value(), item_type);
+                if (text.isErr()) continue;
+                // A group name starting with _ is Godot's own internal
+                // bookkeeping and is not a name a caller would have meant.
+                if (text.value().empty() || text.value().front() == '_') continue;
+                if (known_groups.size() >= kMaxReportedGroups) {
+                    known_groups_truncated = true;
+                    break;
+                }
+                known_groups.insert(boundUtf8(text.value(), 128).value);
+            }
+            auto include_internal = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(0));
+            if (include_internal.isErr()) return include_internal.error();
+            auto children = callObject(current, "Node", "get_children", 873284517LL, {&include_internal.value()});
+            if (children.isErr()) return children.error();
+            auto size_value = callVariant(children.value(), "size");
+            if (size_value.isErr()) return size_value.error();
+            auto size = scalarFromVariant<int64_t>(size_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+            if (size.isErr()) return size.error();
+            for (int64_t i = 0; i < size.value(); ++i) {
+                auto index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, i);
+                if (index.isErr()) return index.error();
+                auto child_value = callVariant(children.value(), "get", {&index.value()});
+                if (child_value.isErr()) return child_value.error();
+                auto child = objectFromVariant(child_value.value());
+                if (child.isErr() || !child.value()) return Error::internal("Godot returned an invalid child node");
+                auto nested = visit(child.value());
+                if (nested.isErr()) return nested;
+            }
+            return Result<void>::ok();
+        };
+        auto visited = visit(root.value());
+        if (visited.isErr()) return errorJson(visited.error());
+        std::sort(members.begin(), members.end());
+        json names = json::array();
+        for (const auto& name : known_groups) names.push_back(name);
+        return liveResult({{"status", "success"}, {"group", group}, {"members", members},
+                           // Whether any node in the edited scene is in this
+                           // group. It tracks members exactly, because in
+                           // Godot that is all a group is; it is here so a
+                           // caller can branch without counting an array.
+                           // known_groups is the field that answers the typo.
+                           {"group_exists", known_groups.count(group) != 0},
+                           {"known_groups", std::move(names)},
+                           {"known_groups_truncated", known_groups_truncated}});
+    }
+
+    auto node = resolveNode(root.value(), params.value("target_node", ""));
+    if (node.isErr()) return errorJson(node.error());
+    if (method != "scene.listGroups") {
         if (auto refused = refuseUnsavableEdit(root.value(), node.value(),
                                                params.value("target_node", ""),
                                                SceneEdit::Property)) {
             return *refused;
         }
-        auto old_script = callObject(node.value(), "Object", "get_script", 1214101251LL);
-        if (old_script.isErr()) return errorJson(old_script.error());
-        auto old_type = GodotApi::instance().variant_get_type(old_script.value().ptr());
-        GDExtensionObjectPtr old_object = nullptr;
-        if (old_type == GDEXTENSION_VARIANT_TYPE_OBJECT) {
-            auto converted = objectFromVariant(old_script.value());
-            if (converted.isErr()) return errorJson(converted.error());
-            old_object = converted.value();
-        }
-
-        VariantValue new_script;
-        GDExtensionObjectPtr requested_script_object = nullptr;
-        std::string script_path;
-        const bool attaching = method == "script.attachToNode";
-        if (attaching) {
-            script_path = params.value("script_path", "");
-            auto attachable = loadAttachableScript(node.value(), script_path);
-            if (attachable.isErr()) {
-                const auto& failure = attachable.error();
-                return errorJson(failure);
-            }
-            requested_script_object = attachable.value().object;
-            new_script = std::move(attachable.value().script);
-        } else if (!old_object) {
-            return errorJson(409, "Target node has no script to detach",
-                                  {{"code", "no_script_attached"}});
-        }
-
-        auto manager = undoManager(editor);
-        if (manager.isErr()) return errorJson(manager.error());
-        auto preflight = preflightUndoManagerBindings();
-        auto method_bind = requireMethodBind("Object", "set_script", 1114965689LL);
-        if (preflight.isErr()) return errorJson(preflight.error());
-        if (method_bind.isErr()) return errorJson(method_bind.error());
-        auto action = createAction(manager.value(), attaching ? "Didi: attach script" : "Didi: detach script", root.value());
-        if (action.isErr()) return errorJson(action.error());
-        auto apply = managerMethod(manager.value(), "add_do_method", node.value(), "set_script", {&new_script});
-        auto revert = managerMethod(manager.value(), "add_undo_method", node.value(), "set_script", {&old_script.value()});
-        if (apply.isErr() || revert.isErr()) {
-            // Closed, so the next mutation does not merge into it (#1152).
-            abandonAction(manager.value());
-            return errorJson(500, "Failed to register script UndoRedo transaction");
-        }
-        auto committed = commitAction(manager.value());
-        if (committed.isErr()) return errorJson(committed.error());
-        auto observed_script = callObject(node.value(), "Object", "get_script", 1214101251LL);
-        if (observed_script.isErr()) return errorJson(observed_script.error());
-        auto observed_type = GodotApi::instance().variant_get_type(observed_script.value().ptr());
-        GDExtensionObjectPtr observed_object = nullptr;
-        if (observed_type == GDEXTENSION_VARIANT_TYPE_OBJECT) {
-            auto converted = objectFromVariant(observed_script.value());
-            if (converted.isErr()) return errorJson(converted.error());
-            observed_object = converted.value();
-        }
-        if ((attaching && observed_object != requested_script_object) || (!attaching && observed_object)) {
-            // The action is already committed, so the node and the undo stack
-            // may both carry the change. Roll it back the way signal connect
-            // does, and if that also fails say the outcome is unknown rather
-            // than a bare 422, which reads as "nothing happened".
-            const std::string reason = attaching
-                ? "Godot rejected the script assignment; its native base may be incompatible with the target node"
-                : "Godot did not detach the target node's script";
-            auto reverted = undoLastAction(manager.value(), root.value());
-            if (reverted.isErr()) {
-                json failure = errorJson(500, reason + "; the committed action could not be undone: " +
-                                                  reverted.error().message);
-                failure["error"]["data"] = {{"outcome", "unknown"}, {"rolled_back", false}};
-                return failure;
-            }
-            return errorJson(422, reason,
-                             {{"code", "script_assignment_rejected"},
-                              {"outcome", "rolled_back"}, {"rolled_back", true}});
-        }
-        // The script the node held before, read before the commit, so the
-        // change journal can say what was replaced (#1151).
-        const json before_script = old_object ? json(resourcePathOf(old_object)) : json(nullptr);
-        return liveSceneMutation({{"status", "success"}, {"target_node", params.value("target_node", "")},
-                                  {"script_path", script_path}, {"attached", attaching}, {"detached", !attaching},
-                                  {"before", {{"script", before_script}}},
-                                  {"undo_redo_registered", true}});
     }
-
-    if (method == "audio.addBus") {
-        // One bus appended to the layout the editor holds, named, routed, and
-        // left for the editor's own bus-layout autosave to write down. Every
-        // fact below was measured on 4.5.1, 4.6.2 and 4.7.2 by
-        // tools/vibe/probes/audio_bus_engine.py, and every hash here is the
-        // same on all three (#771).
-        auto parsed = runtime::parseAudioAddBusRequest(params);
-        if (parsed.isErr()) {
-            return errorJson(parsed.error().code, parsed.error().message, parsed.error().data);
-        }
-        const auto& request = parsed.value();
-        for (const auto& bind : {std::make_tuple("AudioServer", "get_bus_count", 3905245786LL),
-                                 std::make_tuple("AudioServer", "get_bus_name", 844755477LL),
-                                 std::make_tuple("AudioServer", "get_bus_send", 659327637LL),
-                                 std::make_tuple("AudioServer", "add_bus", 1025054187LL),
-                                 std::make_tuple("AudioServer", "remove_bus", 1286410249LL),
-                                 std::make_tuple("AudioServer", "set_bus_name", 501894301LL),
-                                 std::make_tuple("AudioServer", "set_bus_send", 3780747571LL),
-                                 std::make_tuple("Object", "emit_signal", 4047867050LL)}) {
-            if (requireMethodBind(std::get<0>(bind), std::get<1>(bind), std::get<2>(bind)).isErr()) {
-                return bridgeError(501, "required_bind_unavailable");
-            }
-        }
-        auto server = singleton("AudioServer");
-        if (server.isErr()) return errorJson(server.error());
-
-        const auto indexVariant = [](int64_t index) {
-            return makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
-        };
-        const auto busCount = [&]() -> Result<int64_t> {
-            auto value = callObject(server.value(), "AudioServer", "get_bus_count", 3905245786LL);
-            if (value.isErr()) return value.error();
-            return scalarFromVariant<int64_t>(value.value(), GDEXTENSION_VARIANT_TYPE_INT);
-        };
-        const auto nameOf = [&](int64_t index) -> Result<std::string> {
-            auto at = indexVariant(index);
-            if (at.isErr()) return at.error();
-            auto value = callObject(server.value(), "AudioServer", "get_bus_name", 844755477LL,
-                                    {&at.value()});
-            if (value.isErr()) return value.error();
-            return stringFromVariant(value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
-        };
-        const auto sendOf = [&](int64_t index) -> Result<std::string> {
-            auto at = indexVariant(index);
-            if (at.isErr()) return at.error();
-            auto value = callObject(server.value(), "AudioServer", "get_bus_send", 659327637LL,
-                                    {&at.value()});
-            if (value.isErr()) return value.error();
-            auto send = stringFromVariant(value.value(), GDEXTENSION_VARIANT_TYPE_STRING_NAME);
-            if (send.isErr()) send = stringFromVariant(value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
-            return send;
-        };
-        // ASCII only. It is there to catch `music` beside `Music`, which the
-        // engine keeps as two buses and `get_bus_index` tells apart by case.
-        const auto folded = [](std::string text) {
-            for (auto& character : text) {
-                if (character >= 'A' && character <= 'Z') character = static_cast<char>(character - 'A' + 'a');
-            }
-            return text;
-        };
-
-        auto count = busCount();
-        if (count.isErr()) return errorJson(count.error());
-        std::vector<std::string> names;
-        std::vector<std::string> sends;
-        for (int64_t index = 0; index < count.value(); ++index) {
-            auto name = nameOf(index);
-            if (name.isErr()) return errorJson(name.error());
-            auto send = sendOf(index);
-            if (send.isErr()) return errorJson(send.error());
-            names.push_back(name.value());
-            sends.push_back(send.value());
-        }
-
-        // The engine never refuses a name. One already in use comes back as
-        // `Music 2`, and `Master` on another bus as `Master 2`, with nothing
-        // printed, so the name the caller asked for would belong to the other
-        // bus. The check is against the engine, not the layout file, because
-        // the editor holds the layout in memory and writes it when it likes.
-        for (const auto& existing : names) {
-            if (existing == request.name) {
-                return errorJson(409, "A bus named \"" + request.name + "\" already exists. Godot "
-                                      "would name the new one \"" + request.name + " 2\" rather "
-                                      "than refuse, so this is refused instead. "
-                                      "audio_configure_bus changes the bus that is there.",
-                                 {{"code", "bus_name_in_use"}, {"name", request.name},
-                                  {"buses", names}, {"retryable", false}});
-            }
-        }
-        for (const auto& existing : names) {
-            if (folded(existing) == folded(request.name)) {
-                return errorJson(409, "\"" + request.name + "\" differs from the existing bus \"" +
-                                      existing + "\" only in letter case. Godot would keep both, "
-                                      "and nobody can tell them apart in the Audio panel.",
-                                 {{"code", "bus_name_differs_only_in_case"}, {"name", request.name},
-                                  {"existing", existing}, {"buses", names}, {"retryable", false}});
-            }
-        }
-
-        // A send the engine cannot use still reads back as set, and the sound
-        // goes to Master with no message: a later bus, a bus that does not
-        // exist, the bus itself and the empty send all did, measured with a
-        // tone on every bus's peak meter. The new bus goes on the end, so every
-        // bus already there comes before it and is a target that works.
-        if (request.send == request.name) {
-            return errorJson(400, "A bus cannot send to itself. Godot would store the send and "
-                                  "route the bus to Master.",
-                             {{"code", "invalid_arguments"}, {"parameter", "send"},
-                              {"retry_with", {{"send", "Master"}}}, {"retryable", false}});
-        }
-        bool send_found = false;
-        std::optional<std::string> send_meant;
-        for (const auto& existing : names) {
-            if (existing == request.send) send_found = true;
-            else if (!send_meant && folded(existing) == folded(request.send)) send_meant = existing;
-        }
-        if (!send_found) {
-            json data = {{"code", "send_bus_not_found"}, {"parameter", "send"},
-                         {"send", request.send}, {"buses", names}, {"retryable", false}};
-            std::string message = "No bus is named \"" + request.send + "\", so there is nothing "
-                                  "to send to. Godot would store the send and route the bus to "
-                                  "Master.";
-            if (send_meant) {
-                data["did_you_mean"] = *send_meant;
-                data["retry_with"] = {{"send", *send_meant}};
-                message += " The bus \"" + *send_meant + "\" differs only in letter case.";
-            }
-            return errorJson(404, message, std::move(data));
-        }
-
-        // A send is kept by name and does not follow a rename, so a project
-        // can already hold one that names no bus. Adding a bus with that name
-        // routes those buses through it, and that changes a mix the caller did
-        // not name.
-        json adopted = json::array();
-        for (size_t index = 0; index < names.size(); ++index) {
-            if (sends[index] == request.name) adopted.push_back(names[index]);
-        }
-
-        if (request.preview) {
-            return liveResult({{"status", "success"},
-                               {"preview", true},
-                               {"index", count.value()},
-                               {"name", request.name},
-                               {"send", request.send},
-                               {"buses", names},
-                               {"adopted_sends", std::move(adopted)}});
-        }
-
-        auto at_end = indexVariant(-1);
-        if (at_end.isErr()) return errorJson(at_end.error());
-        auto added = callObject(server.value(), "AudioServer", "add_bus", 1025054187LL,
-                                {&at_end.value()});
-        if (added.isErr()) return errorJson(added.error());
-        auto grown = busCount();
-        if (grown.isErr()) return errorJson(grown.error());
-        if (grown.value() != count.value() + 1) {
-            return errorJson(500, "AudioServer.add_bus did not add a bus: the layout has " +
-                                      std::to_string(grown.value()) + " buses, expected " +
-                                      std::to_string(count.value() + 1) + ".");
-        }
-        const int64_t index = count.value();
-        auto bus_index = indexVariant(index);
-        if (bus_index.isErr()) return errorJson(bus_index.error());
-        const auto removeAdded = [&]() {
-            (void)callObject(server.value(), "AudioServer", "remove_bus", 1286410249LL,
-                             {&bus_index.value()});
-        };
-
-        auto name_variant = makeString(request.name);
-        if (name_variant.isErr()) {
-            removeAdded();
-            return errorJson(name_variant.error());
-        }
-        auto named = callObject(server.value(), "AudioServer", "set_bus_name", 501894301LL,
-                                {&bus_index.value(), &name_variant.value()});
-        if (named.isErr()) {
-            removeAdded();
-            return errorJson(named.error());
-        }
-        // Read back rather than trusted. Something else in the editor can add a
-        // bus between the check above and this call, and the engine would
-        // answer that with `Music 2` rather than an error. The engine can also
-        // change a name on its way in: its UTF-8 reader drops a leading
-        // byte-order mark, and this said "another bus took the name meanwhile",
-        // retryable, for a name no bus held, which every retry repeated.
-        // Which of the two it was is read off the layout once the bus is gone.
-        auto kept = nameOf(index);
-        if (kept.isErr() || kept.value() != request.name) {
-            removeAdded();
-            bool asked_name_taken = false;
-            if (auto remaining = busCount(); remaining.isOk()) {
-                for (int64_t other = 0; other < remaining.value(); ++other) {
-                    auto other_name = nameOf(other);
-                    if (other_name.isOk() && other_name.value() == request.name) asked_name_taken = true;
-                }
-            }
-            const auto refusal = runtime::busNameChangedRefusal(
-                request.name, kept.isOk() ? kept.value() : std::string("?"), asked_name_taken);
-            return errorJson(refusal.code, refusal.message, refusal.data);
-        }
-
-        auto send_variant = makeStringName(request.send);
-        if (send_variant.isErr()) {
-            removeAdded();
-            return errorJson(send_variant.error());
-        }
-        auto routed = callObject(server.value(), "AudioServer", "set_bus_send", 3780747571LL,
-                                 {&bus_index.value(), &send_variant.value()});
-        if (routed.isErr()) {
-            removeAdded();
-            return errorJson(routed.error());
-        }
-        if (request.volume_db) {
-            auto db = makeScalar(GDEXTENSION_VARIANT_TYPE_FLOAT, *request.volume_db);
-            if (db.isOk()) {
-                (void)callObject(server.value(), "AudioServer", "set_bus_volume_db", 1602489585LL,
-                                 {&bus_index.value(), &db.value()});
-            }
-        }
-        for (const auto& [value, method_name] :
-             {std::make_pair(request.mute, "set_bus_mute"), std::make_pair(request.solo, "set_bus_solo")}) {
-            if (!value) continue;
-            auto flag = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, *value);
-            if (flag.isOk()) {
-                (void)callObject(server.value(), "AudioServer", method_name, 300928843LL,
-                                 {&bus_index.value(), &flag.value()});
-            }
-        }
-
-        // On 4.5.1 and 4.6.2 the editor's Audio panel rebuilds when a bus is
-        // added and does not follow a rename, so the new strip says New Bus.
-        // A person who clicks into that name field and away renames the bus
-        // back to New Bus through the panel, and every player set to the name
-        // given here goes to Master. This signal makes the panel rebuild with
-        // the right name on all three lines, and it changed no name, send,
-        // volume or effect when measured.
-        bool panel_refreshed = false;
-        auto signal_name = makeStringName("bus_layout_changed");
-        if (signal_name.isOk()) {
-            std::vector<const VariantValue*> signal_arguments{&signal_name.value()};
-            auto emitted = callObject(server.value(), "Object", "emit_signal", 4047867050LL,
-                                      signal_arguments);
-            panel_refreshed = emitted.isOk();
-        }
-
-        const auto readState = [&]() -> Result<json> {
-            auto name = nameOf(index);
-            if (name.isErr()) return name.error();
-            auto send = sendOf(index);
-            if (send.isErr()) return send.error();
-            auto volume = callObject(server.value(), "AudioServer", "get_bus_volume_db",
-                                     2339986948LL, {&bus_index.value()});
-            if (volume.isErr()) return volume.error();
-            auto db = scalarFromVariant<double>(volume.value(), GDEXTENSION_VARIANT_TYPE_FLOAT);
-            if (db.isErr()) return db.error();
-            const auto flagOf = [&](const char* method_name) -> Result<bool> {
-                auto value = callObject(server.value(), "AudioServer", method_name, 1116898809LL,
-                                        {&bus_index.value()});
-                if (value.isErr()) return value.error();
-                return scalarFromVariant<bool>(value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
-            };
-            auto mute = flagOf("is_bus_mute");
-            if (mute.isErr()) return mute.error();
-            auto solo = flagOf("is_bus_solo");
-            if (solo.isErr()) return solo.error();
-            return json{{"index", index}, {"name", name.value()}, {"send", send.value()},
-                        {"volume_db", db.value()}, {"mute", mute.value()}, {"solo", solo.value()}};
-        };
-        auto after = readState();
-        if (after.isErr()) return errorJson(after.error());
-
-        // The file the editor writes is the one it opened the project with,
-        // which is the one the project names unless the setting moved while
-        // the editor was running.
-        const auto project_layout_path =
-            busLayoutPathFrom(projectSettingString("audio/buses/default_bus_layout"));
-        const auto layout_path = startupBusLayoutPath().value_or(project_layout_path);
-        json result = {
-            {"status", "success"},
-            {"bus", index},
-            {"name", request.name},
-            {"send", request.send},
-            {"after", after.value()},
-            {"bus_count", grown.value()},
-            {"adopted_sends", std::move(adopted)},
-            {"layout_path", layout_path},
-            {"persisted_by_editor", true},
-            {"panel_refreshed", panel_refreshed},
-            {"undo_redo_registered", false},
-            {"limitation",
-             "This adds the bus to the editor's running AudioServer and writes no file. The "
-             "editor's own bus-layout autosave writes " + layout_path + " a moment later. There "
-             "is no undo entry: delete the bus in the editor's Audio panel to take it back." +
-                 busLayoutMovedSentence(layout_path, project_layout_path)},
-            {"next_step",
-             "Set each AudioStreamPlayer's bus to \"" + request.name + "\" with "
-             "scene_set_property, then editor_save_scene. A player set to a bus before the bus "
-             "exists reads Master and is saved as Master."}};
-        if (project_layout_path != layout_path) result["project_layout_path"] = project_layout_path;
-        return liveResult(std::move(result));
-    }
-
-    if (method == "engine.classExists") {
-        // The class list of the engine that will load the file. resource_create
-        // checked its type guard against the pinned 4.7 dump and wrote
-        // resources a 4.5.1 editor then refused to load at all -- not one
-        // dropped property, the whole file -- while reporting the version
-        // mismatch in the same payload (#766).
-        //
-        // ClassDB.class_exists is 2619796661 on 4.5.1, 4.6.2 and 4.7.2, and its
-        // answers were measured on all three: DrawableTexture2D and
-        // BlitMaterial exist only on 4.7, JointLimitation3D arrived in 4.6.
-        //
-        // A class_name script type is not in ClassDB -- it lives in the script
-        // server's global list -- so it answers false here exactly as it is
-        // absent from the dump. allow_unknown_type stays the route for those.
-        if (!params.contains("class_names") || !params["class_names"].is_array()) {
-            return errorJson(400, "engine.classExists requires a class_names array");
-        }
-        const auto& names = params["class_names"];
-        // 65 because resource_create asks about one root type and up to 64
-        // sub-resource types, and a cap below what the caller can legitimately
-        // ask would send it back to the pinned reference in silence, which is
-        // the bug this route exists to close.
-        if (names.empty() || names.size() > 65) {
-            return errorJson(400, "engine.classExists accepts 1 to 65 class names");
-        }
-        auto required = requireMethodBind("ClassDB", "class_exists", 2619796661LL);
-        if (required.isErr()) return errorJson(501, required.error().message);
-        auto class_db = singleton("ClassDB");
-        if (class_db.isErr()) return errorJson(class_db.error());
-
-        json classes = json::array();
-        for (const auto& value : names) {
-            if (!value.is_string()) {
-                return errorJson(400, "engine.classExists class_names must be strings");
-            }
-            const std::string name = value.get<std::string>();
-            auto class_name = makeStringName(name);
-            if (class_name.isErr()) return errorJson(500, class_name.error().message);
-            auto answer = callObject(class_db.value(), "ClassDB", "class_exists", 2619796661LL,
-                                     {&class_name.value()});
-            if (answer.isErr()) return errorJson(500, answer.error().message);
-            auto known =
-                scalarFromVariant<GDExtensionBool>(answer.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
-            if (known.isErr()) return errorJson(500, known.error().message);
-            classes.push_back({{"name", name}, {"exists", known.value() != 0}});
-        }
-        return liveResult({{"status", "success"}, {"classes", std::move(classes)}});
-    }
-
-    if (method == "scene.listGroups" || method == "scene.addToGroup" ||
-        method == "scene.removeFromGroup" || method == "scene.getGroupMembers") {
-        const std::string group = params.value("group", "");
-        if (method != "scene.listGroups") {
-            auto valid_group = validateGroupName(group);
-            if (valid_group.isErr()) return errorJson(valid_group.error());
-        }
-        auto root = editedSceneRoot(editor);
-        if (root.isErr()) return errorJson(root.error());
-
-        if (method == "scene.getGroupMembers") {
-            auto group_name = makeStringName(group);
-            if (group_name.isErr()) return errorJson(group_name.error());
-            json members = json::array();
-            // A group name nobody has ever used and one that was just emptied
-            // were answered identically, field for field, and scene_list_groups
-            // requires a target_node so nothing enumerated the groups a scene
-            // has. An agent asking for "enemys" instead of "enemies" got a
-            // successful empty answer and no second question available to ask
-            // (#472).
-            //
-            // Godot has no empty group to find: membership lives on the nodes,
-            // so removing the last member is the same thing as the name never
-            // having been used. That is what makes the typo unanswerable, and
-            // it is why the fix is the list rather than a flag. The walk
-            // already visits every node, so the names in use cost one more
-            // call per node, and "enemys" comes back beside "enemies".
-            std::set<std::string> known_groups;
-            bool known_groups_truncated = false;
-            constexpr size_t kMaxReportedGroups = 128;
-            std::function<Result<void>(GDExtensionObjectPtr)> visit = [&](GDExtensionObjectPtr current) -> Result<void> {
-                auto member_value = callObject(current, "Node", "is_in_group", 2619796661LL, {&group_name.value()});
-                if (member_value.isErr()) return member_value.error();
-                auto member = scalarFromVariant<GDExtensionBool>(member_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
-                if (member.isErr()) return member.error();
-                if (member.value()) {
-                    auto path = logicalPathFromEditedRoot(root.value(), current);
-                    if (path.isErr()) return path.error();
-                    members.push_back(path.value());
-                }
-
-                auto groups_value = callObject(current, "Node", "get_groups", 3995934104LL);
-                if (groups_value.isErr()) return groups_value.error();
-                auto group_count_value = callVariant(groups_value.value(), "size");
-                if (group_count_value.isErr()) return group_count_value.error();
-                auto group_count = scalarFromVariant<int64_t>(group_count_value.value(),
-                                                              GDEXTENSION_VARIANT_TYPE_INT);
-                if (group_count.isErr()) return group_count.error();
-                for (int64_t g = 0; g < group_count.value(); ++g) {
-                    auto group_index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, g);
-                    if (group_index.isErr()) return group_index.error();
-                    auto item = callVariant(groups_value.value(), "get", {&group_index.value()});
-                    if (item.isErr()) return item.error();
-                    const auto item_type = GodotApi::instance().variant_get_type(item.value().ptr());
-                    auto text = stringFromVariant(item.value(), item_type);
-                    if (text.isErr()) continue;
-                    // A group name starting with _ is Godot's own internal
-                    // bookkeeping and is not a name a caller would have meant.
-                    if (text.value().empty() || text.value().front() == '_') continue;
-                    if (known_groups.size() >= kMaxReportedGroups) {
-                        known_groups_truncated = true;
-                        break;
-                    }
-                    known_groups.insert(boundUtf8(text.value(), 128).value);
-                }
-                auto include_internal = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(0));
-                if (include_internal.isErr()) return include_internal.error();
-                auto children = callObject(current, "Node", "get_children", 873284517LL, {&include_internal.value()});
-                if (children.isErr()) return children.error();
-                auto size_value = callVariant(children.value(), "size");
-                if (size_value.isErr()) return size_value.error();
-                auto size = scalarFromVariant<int64_t>(size_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
-                if (size.isErr()) return size.error();
-                for (int64_t i = 0; i < size.value(); ++i) {
-                    auto index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, i);
-                    if (index.isErr()) return index.error();
-                    auto child_value = callVariant(children.value(), "get", {&index.value()});
-                    if (child_value.isErr()) return child_value.error();
-                    auto child = objectFromVariant(child_value.value());
-                    if (child.isErr() || !child.value()) return Error::internal("Godot returned an invalid child node");
-                    auto nested = visit(child.value());
-                    if (nested.isErr()) return nested;
-                }
-                return Result<void>::ok();
-            };
-            auto visited = visit(root.value());
-            if (visited.isErr()) return errorJson(visited.error());
-            std::sort(members.begin(), members.end());
-            json names = json::array();
-            for (const auto& name : known_groups) names.push_back(name);
-            return liveResult({{"status", "success"}, {"group", group}, {"members", members},
-                               // Whether any node in the edited scene is in this
-                               // group. It tracks members exactly, because in
-                               // Godot that is all a group is; it is here so a
-                               // caller can branch without counting an array.
-                               // known_groups is the field that answers the typo.
-                               {"group_exists", known_groups.count(group) != 0},
-                               {"known_groups", std::move(names)},
-                               {"known_groups_truncated", known_groups_truncated}});
-        }
-
-        auto node = resolveNode(root.value(), params.value("target_node", ""));
-        if (node.isErr()) return errorJson(node.error());
-        if (method != "scene.listGroups") {
-            if (auto refused = refuseUnsavableEdit(root.value(), node.value(),
-                                                   params.value("target_node", ""),
-                                                   SceneEdit::Property)) {
-                return *refused;
-            }
-        }
-        if (method == "scene.listGroups") {
-            auto groups_value = callObject(node.value(), "Node", "get_groups", 3995934104LL);
-            if (groups_value.isErr()) return errorJson(groups_value.error());
-            auto size_value = callVariant(groups_value.value(), "size");
-            if (size_value.isErr()) return errorJson(size_value.error());
-            auto size = scalarFromVariant<int64_t>(size_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
-            if (size.isErr()) return errorJson(size.error());
-            std::vector<std::string> groups;
-            for (int64_t i = 0; i < size.value(); ++i) {
-                auto index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, i);
-                if (index.isErr()) return errorJson(index.error());
-                auto item = callVariant(groups_value.value(), "get", {&index.value()});
-                if (item.isErr()) return errorJson(item.error());
-                auto type = GodotApi::instance().variant_get_type(item.value().ptr());
-                auto text = stringFromVariant(item.value(), type);
-                if (text.isErr()) return errorJson(text.error());
-                groups.push_back(text.value());
-            }
-            std::sort(groups.begin(), groups.end());
-            return liveResult({{"status", "success"}, {"target_node", params.value("target_node", "")},
-                               {"groups", groups}});
-        }
-
-        auto group_name = makeStringName(group);
-        if (group_name.isErr()) return errorJson(group_name.error());
-        auto membership_value = callObject(node.value(), "Node", "is_in_group", 2619796661LL, {&group_name.value()});
-        if (membership_value.isErr()) return errorJson(membership_value.error());
-        auto membership = scalarFromVariant<GDExtensionBool>(membership_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
-        if (membership.isErr()) return errorJson(membership.error());
-        const bool adding = method == "scene.addToGroup";
-        if (adding && membership.value()) {
-        // No retry_with: the node is in the group, so there is no argument
-        // that would make the call do something different.
-        return errorJson(409, "Target node is already in group: " + group,
-                         {{"code", "already_exists"}});
-    }
-        if (!adding && !membership.value()) return errorJson(404, "Target node is not in group: " + group);
-        bool original_persistent = params.value("persistent", true);
-        if (!adding) {
-            NativeName packed_scene_name("PackedScene");
-            auto packed_scene = constructObject(packed_scene_name.ptr());
-            if (!packed_scene) return errorJson(500, "Godot could not inspect group persistence");
-            auto packed_scene_value = makeObject(packed_scene);
-            auto root_value = makeObject(root.value());
-            if (packed_scene_value.isErr() || root_value.isErr()) return errorJson(500, "Failed to inspect group persistence");
-            auto packed = callObject(packed_scene, "PackedScene", "pack", 2584678054LL, {&root_value.value()});
-            if (packed.isErr()) return errorJson(packed.error());
-            auto pack_code = scalarFromVariant<int64_t>(packed.value(), GDEXTENSION_VARIANT_TYPE_INT);
-            if (pack_code.isErr() || pack_code.value() != 0) return errorJson(500, "Failed to snapshot scene groups");
-            auto state_value = callObject(packed_scene, "PackedScene", "get_state", 3479783971LL);
-            if (state_value.isErr()) return errorJson(state_value.error());
-            auto state = objectFromVariant(state_value.value());
-            if (state.isErr() || !state.value()) return errorJson(500, "PackedScene returned no SceneState");
-            auto count_value = callObject(state.value(), "SceneState", "get_node_count", 3905245786LL);
-            if (count_value.isErr()) return errorJson(count_value.error());
-            auto count = scalarFromVariant<int64_t>(count_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
-            if (count.isErr()) return errorJson(count.error());
-            auto relative_path = relativePathWithinEditedRoot(root.value(), node.value());
-            if (relative_path.isErr()) return errorJson(relative_path.error());
-            original_persistent = false;
-            for (int64_t i = 0; i < count.value(); ++i) {
-                auto index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, i);
-                auto for_parent = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(0));
-                if (index.isErr() || for_parent.isErr()) return errorJson(500, "Failed to inspect SceneState node path");
-                auto state_path_value = callObject(state.value(), "SceneState", "get_node_path", 2272487792LL,
-                                                   {&index.value(), &for_parent.value()});
-                if (state_path_value.isErr()) return errorJson(state_path_value.error());
-                auto state_path = stringFromVariant(state_path_value.value(), GDEXTENSION_VARIANT_TYPE_NODE_PATH);
-                if (state_path.isErr()) return errorJson(state_path.error());
-                if (sceneStatePathWithinEditedRoot(state_path.value()) != relative_path.value()) continue;
-                auto groups = callObject(state.value(), "SceneState", "get_node_groups", 647634434LL, {&index.value()});
-                if (groups.isErr()) return errorJson(groups.error());
-                auto group_count_value = callVariant(groups.value(), "size");
-                if (group_count_value.isErr()) return errorJson(group_count_value.error());
-                auto group_count = scalarFromVariant<int64_t>(group_count_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
-                if (group_count.isErr()) return errorJson(group_count.error());
-                for (int64_t group_index = 0; group_index < group_count.value(); ++group_index) {
-                    auto native_group_index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, group_index);
-                    if (native_group_index.isErr()) return errorJson(native_group_index.error());
-                    auto stored_group_value = callVariant(groups.value(), "get", {&native_group_index.value()});
-                    if (stored_group_value.isErr()) return errorJson(stored_group_value.error());
-                    auto stored_group = stringFromVariant(stored_group_value.value(),
-                        GodotApi::instance().variant_get_type(stored_group_value.value().ptr()));
-                    if (stored_group.isErr()) return errorJson(stored_group.error());
-                    if (stored_group.value() == group) original_persistent = true;
-                }
-                break;
-            }
-        }
-        auto persistent = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL,
-                                     static_cast<GDExtensionBool>(original_persistent));
-        if (persistent.isErr()) return errorJson(persistent.error());
-        auto manager = undoManager(editor);
-        if (manager.isErr()) return errorJson(manager.error());
-        auto preflight = preflightUndoManagerBindings();
-        if (preflight.isErr()) return errorJson(preflight.error());
-        auto add_bind = requireMethodBind("Node", "add_to_group", 3683006648LL);
-        auto remove_bind = requireMethodBind("Node", "remove_from_group", 3304788590LL);
-        if (add_bind.isErr()) return errorJson(add_bind.error());
-        if (remove_bind.isErr()) return errorJson(remove_bind.error());
-        auto action = createAction(manager.value(), adding ? "Didi: add node to group" : "Didi: remove node from group", root.value());
-        if (action.isErr()) return errorJson(action.error());
-        auto apply = adding
-            ? managerMethod(manager.value(), "add_do_method", node.value(), "add_to_group", {&group_name.value(), &persistent.value()})
-            : managerMethod(manager.value(), "add_do_method", node.value(), "remove_from_group", {&group_name.value()});
-        auto revert = adding
-            ? managerMethod(manager.value(), "add_undo_method", node.value(), "remove_from_group", {&group_name.value()})
-            : managerMethod(manager.value(), "add_undo_method", node.value(), "add_to_group", {&group_name.value(), &persistent.value()});
-#if defined(DIDI_PHASE7_SIGNAL_TEST_SEAMS)
-        if (takePhase7SignalTestSeam("group_undo_registration_failure")) {
-            apply = Error::internal("The test seam failed the registration");
-        }
-#endif
-        if (apply.isErr() || revert.isErr()) {
-            // Closed, so the next mutation does not merge into it (#1152).
-            abandonAction(manager.value());
-            return errorJson(500, "Failed to register group UndoRedo transaction");
-        }
-        auto committed = commitAction(manager.value());
-        if (committed.isErr()) return errorJson(committed.error());
-        // Membership read again after the commit, and the answer built from
-        // it. added and removed were constants, and membership was read only
-        // before the write, so a commit the node did not take read as done
-        // (#1019).
-        auto after_value = callObject(node.value(), "Node", "is_in_group", 2619796661LL, {&group_name.value()});
-        if (after_value.isErr()) return errorJson(after_value.error());
-        auto in_group = scalarFromVariant<GDExtensionBool>(after_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
-        if (in_group.isErr()) return errorJson(in_group.error());
-        if (static_cast<bool>(in_group.value()) != adding) {
-            return errorJson(500, std::string("The group change was committed and the node is ") +
-                                      (in_group.value() ? "still" : "not") + " in group " + group +
-                                      " afterwards");
-        }
-        // Membership as it was read before the commit (#1151). A removal also
-        // says whether the scene file kept the membership, which its undo
-        // puts back.
-        json before_group = {{"in_group", static_cast<bool>(membership.value())}};
-        if (!adding) before_group["persistent"] = original_persistent;
-        return liveSceneMutation({{"status", "success"}, {"target_node", params.value("target_node", "")},
-                                  {"group", group}, {"in_group", static_cast<bool>(in_group.value())},
-                                  {"added", adding}, {"removed", !adding},
-                                  {"before", std::move(before_group)},
-                                  {"undo_redo_registered", true}});
-    }
-
-    if (method == "scene.create" || method == "scene.open" || method == "scene.close" ||
-        method == "scene.packBranch") {
-        if (method == "scene.close") {
-            auto root = editedSceneRoot(editor);
-            if (root.isErr()) return errorJson(root.error());
-            auto path_value = callObject(root.value(), "Node", "get_scene_file_path", 201670096LL);
-            if (path_value.isErr()) return errorJson(path_value.error());
-            auto path = stringFromVariant(path_value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
-            if (path.isErr()) return errorJson(path.error());
-            const bool discard_unsaved = params.value("discard_unsaved", false);
-            // Godot 4.5 and 4.6 expose only the write side of dirty state
-            // (mark_scene_as_unsaved). The read side, get_unsaved_scenes,
-            // arrives in 4.7, so this is a runtime bind probe rather than a
-            // version-string comparison: the guard stays wherever it is absent.
-            const bool dirty_state_readable =
-                unsavedScenesBindAvailable();
-            bool verified_clean = false;
-            if (!discard_unsaved) {
-                if (!dirty_state_readable) {
-                    return errorJson(409, "This Godot build cannot report active-scene dirty state; "
-                                          "EditorInterface.get_unsaved_scenes arrives in Godot 4.7. "
-                                          "Pass discard_unsaved: true to close explicitly",
-                                     {{"code", "dirty_state_unavailable"},
-                                      {"retry_with", {{"discard_unsaved", true}}}});
-                }
-                if (path.value().empty()) {
-                    return errorJson(409, "The active scene has never been saved, so the engine cannot "
-                                          "report it as clean; save it with editor_save_scene or pass "
-                                          "discard_unsaved: true to close explicitly",
-                                     {{"code", "scene_never_saved"},
-                                      {"retry_with", {{"discard_unsaved", true}}}});
-                }
-                auto unsaved = callObject(editor, "EditorInterface", "get_unsaved_scenes", 1139954409LL);
-                if (unsaved.isErr()) return errorJson(unsaved.error());
-                auto unsaved_size = callVariant(unsaved.value(), "size");
-                if (unsaved_size.isErr()) return errorJson(500, unsaved_size.error().message);
-                auto unsaved_count = scalarFromVariant<int64_t>(unsaved_size.value(), GDEXTENSION_VARIANT_TYPE_INT);
-                if (unsaved_count.isErr()) return errorJson(500, unsaved_count.error().message);
-                // The list holds one entry per open scene, so this bound is far
-                // above anything an editor produces. Refusing past it matters
-                // because a partial scan cannot prove the active scene absent.
-                constexpr int64_t kMaxUnsavedScenesScanned = 1024;
-                if (unsaved_count.value() > kMaxUnsavedScenesScanned) {
-                    return errorJson(409, "The editor reports more unsaved scenes than Didi will scan (" +
-                                          std::to_string(unsaved_count.value()) + "), so this scene cannot be "
-                                          "proven clean; pass discard_unsaved: true to close explicitly",
-                                     {{"code", "unsaved_scan_limit"},
-                                      {"retry_with", {{"discard_unsaved", true}}}});
-                }
-                for (int64_t index = 0; index < unsaved_count.value(); ++index) {
-                    auto index_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
-                    if (index_value.isErr()) return errorJson(500, index_value.error().message);
-                    auto entry = callVariant(unsaved.value(), "get", {&index_value.value()});
-                    if (entry.isErr()) return errorJson(500, entry.error().message);
-                    auto entry_path = stringFromVariant(
-                        entry.value(), GodotApi::instance().variant_get_type(entry.value().ptr()));
-                    if (entry_path.isErr()) return errorJson(500, entry_path.error().message);
-                    if (entry_path.value() == path.value()) {
-                        return errorJson(409, "The active scene has unsaved changes: " + path.value() +
-                                              "; save it with editor_save_scene or pass "
-                                              "discard_unsaved: true to discard them",
-                                         {{"code", "unsaved_changes"},
-                                          {"retry_with", {{"discard_unsaved", true}}}});
-                    }
-                }
-                verified_clean = true;
-            }
-            auto closed = callObject(editor, "EditorInterface", "close_scene", 166280745LL);
-            if (closed.isErr()) return errorJson(closed.error());
-            auto code = scalarFromVariant<int64_t>(closed.value(), GDEXTENSION_VARIANT_TYPE_INT);
-            if (code.isErr()) return errorJson(code.error());
-            if (code.value() != 0) {
-                return errorJson(500, "Godot close_scene failed with " +
-                                          ::didi::godot::describeGodotError(code.value()));
-            }
-            // Whether a tab still holds the scene, read after the close rather
-            // than taken from close_scene's return code (#1019). A scene that
-            // was never saved has no path to look for, so it is null.
-            json still_open = nullptr;
-            if (!path.value().empty()) {
-                auto open = openScenePaths(editor);
-                if (open.isErr()) {
-                    return errorJson(500, "Godot closed the scene, and the open tabs could not be "
-                                          "read back to confirm it: " + open.error().message);
-                }
-                still_open = std::find(open.value().begin(), open.value().end(), path.value()) !=
-                             open.value().end();
-            }
-            return liveResult({{"status", "success"}, {"closed", true}, {"scene_path", path.value()},
-                               {"still_open", still_open},
-                               {"discarded_unsaved", discard_unsaved},
-                               {"dirty_state_readable", dirty_state_readable},
-                               {"dirty_state", verified_clean ? "clean" : "unchecked"}});
-        }
-
-        const std::string scene_path = params.value("scene_path", "");
-        auto valid_path = validateResPath(scene_path, ".tscn");
-        if (valid_path.isErr()) return errorJson(valid_path.error());
-        auto loader = singleton("ResourceLoader");
-        if (loader.isErr()) return errorJson(loader.error());
-        auto path = makeString(scene_path);
-        auto packed_hint = makeString("PackedScene");
-        if (path.isErr() || packed_hint.isErr()) return errorJson(500, "Failed to construct scene resource arguments");
-        auto exists_value = callObject(loader.value(), "ResourceLoader", "exists", 4185558881LL,
-                                       {&path.value(), &packed_hint.value()});
-        if (exists_value.isErr()) return errorJson(exists_value.error());
-        auto target_exists = scalarFromVariant<GDExtensionBool>(exists_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
-        if (target_exists.isErr()) return errorJson(target_exists.error());
-
-        auto open_and_verify = [&]() -> Result<void> {
-            auto inherited = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(0));
-            if (inherited.isErr()) return inherited.error();
-            auto opened = callObject(editor, "EditorInterface", "open_scene_from_path", 1168363258LL,
-                                     {&path.value(), &inherited.value()});
-            if (opened.isErr()) return opened.error();
-            auto opened_root = editedSceneRoot(editor);
-            if (opened_root.isErr()) return opened_root.error();
-            auto opened_path_value = callObject(opened_root.value(), "Node", "get_scene_file_path", 201670096LL);
-            if (opened_path_value.isErr()) return opened_path_value.error();
-            auto opened_path = stringFromVariant(opened_path_value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
-            if (opened_path.isErr()) return opened_path.error();
-            if (opened_path.value() != scene_path) {
-                return Error::internal("Godot did not activate the requested scene: " + scene_path);
-            }
-            return Result<void>::ok();
-        };
-
-        if (method == "scene.open") {
-            if (!target_exists.value()) return errorJson(404, "PackedScene not found: " + scene_path);
-            auto cache_mode = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(1));
-            if (cache_mode.isErr()) return errorJson(cache_mode.error());
-            auto resource = callObject(loader.value(), "ResourceLoader", "load", 3358495409LL,
-                                       {&path.value(), &packed_hint.value(), &cache_mode.value()});
-            if (resource.isErr()) return errorJson(resource.error());
-            auto packed = objectFromVariant(resource.value());
-            if (packed.isErr() || !packed.value()) {
-                return errorJson(422, "Resource is not a loadable PackedScene: " + scene_path,
-                                 {{"code", "not_a_packed_scene"}});
-            }
-            auto class_name = makeString("PackedScene");
-            auto class_value = class_name.isOk()
-                ? callObject(packed.value(), "Object", "is_class", 3927539163LL, {&class_name.value()})
-                : Result<VariantValue>(class_name.error());
-            auto is_packed = class_value.isOk()
-                ? scalarFromVariant<GDExtensionBool>(class_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL)
-                : Result<GDExtensionBool>(class_value.error());
-            if (is_packed.isErr() || !is_packed.value()) {
-                return errorJson(422, "Resource is not a PackedScene: " + scene_path,
-                                 {{"code", "not_a_packed_scene"}});
-            }
-            auto opened = open_and_verify();
-            if (opened.isErr()) return errorJson(opened.error());
-            return liveResult({{"status", "success"}, {"opened", true}, {"scene_path", scene_path}});
-        }
-
-        if (target_exists.value() && !params.value("overwrite", false)) {
-            return errorJson(409, "Scene target already exists; pass overwrite: true to replace it",
-                                  {{"code", "already_exists"}, {"retry_with", {{"overwrite", true}}}});
-        }
-
-        // Only the two writers reach this line, and ResourceSaver cannot create
-        // the directory it writes into: a missing parent came back as a bare
-        // Error 19 with nothing in it naming the cause. script_create and
-        // resource_create both create theirs. validateResPath has already
-        // refused traversal, absolute paths and backslashes, so the target is
-        // project-contained by construction and the check below is a second
-        // reading of that rather than the only one.
-        {
-            namespace fs = std::filesystem;
-            auto project_path = resolveGodotProjectPath();
-            if (project_path.isErr()) {
-                return errorJson(project_path.error());
-            }
-            std::error_code ec;
-            const auto root = fs::weakly_canonical(
-                didi::paths::projectPathFromUtf8(project_path.value()), ec);
-            if (ec || !fs::is_directory(root, ec)) {
-                return errorJson(500, "Godot project root is unavailable");
-            }
-            const auto target = root / didi::paths::projectPathFromUtf8(scene_path.substr(6));
-            const auto parent = target.parent_path();
-            if (!pathWithin(root, parent)) {
-                return errorJson(400, "Scene path resolves outside the project: " + scene_path);
-            }
-            std::error_code directory_error;
-            fs::create_directories(parent, directory_error);
-            if (directory_error && !fs::is_directory(parent, ec)) {
-                return errorJson(500, "Cannot create the directory for " + scene_path + ": " +
-                                      directory_error.message());
-            }
-        }
-
-        GDExtensionObjectPtr packed_root = nullptr;
-        if (method == "scene.create") {
-            // Any ClassDB type that inherits Node, which is what
-            // scene_instantiate_node has always taken.
-            //
-            // The enum was Node2D, Node3D and Control, and almost every scene
-            // in a real project has a root outside it: a player is a
-            // CharacterBody2D, a pickup an Area2D, terrain a StaticBody2D, a
-            // HUD a CanvasLayer. The route that worked was to create a throwaway
-            // Node2D scene, instantiate the type you wanted under it, build the
-            // subtree there and scene_pack_branch it to the real path -- four
-            // calls, nothing saying so, and a scratch scene left on disk that
-            // the caller then has to remember to delete (#740).
-            const std::string root_type = params.value("root_type", "Node2D");
-            if (root_type.empty() || root_type.size() > 128) {
-                return errorJson(400, "root_type must be a Godot class name that inherits Node");
-            }
-            const std::string root_name = params.value("root_name", "Root");
-            if (root_name.empty() || root_name.find('/') != std::string::npos || root_name.find('\\') != std::string::npos) {
-                return errorJson(400, "root_name must be a non-empty node name without path separators");
-            }
-            if (!engineHasClass(root_type)) {
-                return errorJson(400, "Godot ClassDB could not instantiate scene root type: " +
-                                          root_type + ". The engine has no class by that name.");
-            }
-            NativeName native_type(root_type);
-            packed_root = constructObject(native_type.ptr());
-            if (!packed_root) {
-                return errorJson(400, "Godot ClassDB could not instantiate scene root type: " +
-                                          root_type);
-            }
-            {
-                // A Variant type or a RefCounted resource constructs and is not
-                // a node, and a .tscn whose root is not a Node cannot be
-                // instanced into anything. Same check, same words, as the
-                // sibling that instantiates one.
-                auto node_class = makeString("Node");
-                auto is_node_variant = node_class.isOk()
-                    ? callObject(packed_root, "Object", "is_class", 3927539163LL, {&node_class.value()})
-                    : Result<VariantValue>(node_class.error());
-                auto is_node = is_node_variant.isOk()
-                    ? scalarFromVariant<GDExtensionBool>(is_node_variant.value(), GDEXTENSION_VARIANT_TYPE_BOOL)
-                    : Result<GDExtensionBool>(is_node_variant.error());
-                if (is_node.isErr() || !is_node.value()) {
-                    GodotApi::instance().object_destroy(packed_root);
-                    return is_node.isErr()
-                        ? errorJson(is_node.error())
-                        : errorJson(400, "Godot ClassDB type does not inherit Node: " + root_type);
-                }
-            }
-            auto name = makeStringName(root_name);
-            auto named = name.isOk()
-                ? callObject(packed_root, "Node", "set_name", 3304788590LL, {&name.value()})
-                : Result<VariantValue>(name.error());
-            if (named.isErr()) {
-                GodotApi::instance().object_destroy(packed_root);
-                return errorJson(named.error());
-            }
-        } else {
-            auto root = editedSceneRoot(editor);
-            if (root.isErr()) return errorJson(root.error());
-            auto target = resolveNode(root.value(), params.value("target_node", ""));
-            if (target.isErr()) return errorJson(target.error());
-            auto flags = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(15));
-            if (flags.isErr()) return errorJson(flags.error());
-            auto duplicated = callObject(target.value(), "Node", "duplicate", 3511555459LL, {&flags.value()});
-            if (duplicated.isErr()) return errorJson(duplicated.error());
-            auto duplicate_object = objectFromVariant(duplicated.value());
-            if (duplicate_object.isErr() || !duplicate_object.value()) return errorJson(500, "Godot failed to duplicate the branch");
-            packed_root = duplicate_object.value();
-            auto owner = makeObject(packed_root);
-            if (owner.isErr()) {
-                GodotApi::instance().object_destroy(packed_root);
-                return errorJson(owner.error());
-            }
-            std::function<Result<void>(GDExtensionObjectPtr)> normalize_owner = [&](GDExtensionObjectPtr current) -> Result<void> {
-                auto include_internal = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(0));
-                if (include_internal.isErr()) return include_internal.error();
-                auto children = callObject(current, "Node", "get_children", 873284517LL, {&include_internal.value()});
-                if (children.isErr()) return children.error();
-                auto size_value = callVariant(children.value(), "size");
-                if (size_value.isErr()) return size_value.error();
-                auto size = scalarFromVariant<int64_t>(size_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
-                if (size.isErr()) return size.error();
-                for (int64_t i = 0; i < size.value(); ++i) {
-                    auto index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, i);
-                    if (index.isErr()) return index.error();
-                    auto child_value = callVariant(children.value(), "get", {&index.value()});
-                    if (child_value.isErr()) return child_value.error();
-                    auto child = objectFromVariant(child_value.value());
-                    if (child.isErr() || !child.value()) return Error::internal("Godot returned an invalid duplicate child");
-                    auto owned = callObject(child.value(), "Node", "set_owner", 1078189570LL, {&owner.value()});
-                    if (owned.isErr()) return owned.error();
-                    auto nested = normalize_owner(child.value());
-                    if (nested.isErr()) return nested;
-                }
-                return Result<void>::ok();
-            };
-            auto normalized = normalize_owner(packed_root);
-            if (normalized.isErr()) {
-                GodotApi::instance().object_destroy(packed_root);
-                return errorJson(normalized.error());
-            }
-        }
-
-        NativeName packed_scene_name("PackedScene");
-        auto packed_scene = constructObject(packed_scene_name.ptr());
-        if (!packed_scene) {
-            GodotApi::instance().object_destroy(packed_root);
-            return errorJson(500, "Godot could not construct PackedScene");
-        }
-        auto root_value = makeObject(packed_root);
-        auto packed_value = makeObject(packed_scene);
-        if (root_value.isErr() || packed_value.isErr()) {
-            GodotApi::instance().object_destroy(packed_root);
-            return errorJson(500, "Failed to construct PackedScene arguments");
-        }
-        auto packed = callObject(packed_scene, "PackedScene", "pack", 2584678054LL, {&root_value.value()});
-        if (packed.isErr()) {
-            GodotApi::instance().object_destroy(packed_root);
-            return errorJson(packed.error());
-        }
-        auto pack_code = scalarFromVariant<int64_t>(packed.value(), GDEXTENSION_VARIANT_TYPE_INT);
-        if (pack_code.isErr() || pack_code.value() != 0) {
-            GodotApi::instance().object_destroy(packed_root);
-            return errorJson(500, "PackedScene.pack failed");
-        }
-        auto saver = singleton("ResourceSaver");
-        auto flags = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(0));
-        if (saver.isErr() || flags.isErr()) {
-            GodotApi::instance().object_destroy(packed_root);
-            return errorJson(500, "ResourceSaver is unavailable");
-        }
-        auto saved = callObject(saver.value(), "ResourceSaver", "save", 2983274697LL,
-                                {&packed_value.value(), &path.value(), &flags.value()});
-        GodotApi::instance().object_destroy(packed_root);
-        if (saved.isErr()) return errorJson(saved.error());
-        auto save_code = scalarFromVariant<int64_t>(saved.value(), GDEXTENSION_VARIANT_TYPE_INT);
-        if (save_code.isErr()) return errorJson(save_code.error());
-        if (save_code.value() != 0) {
-            // A 300-character filename reached ResourceSaver and came back as
-            // "Error 19": a 500 that says the server broke, with no next move
-            // and no name on the number. The engine's file-and-path errors are
-            // the caller's argument to fix, so they answer 400 (#535).
-            const auto engine_code = save_code.value();
-            const bool caller_path = ::didi::godot::isGodotPathError(engine_code);
-            return errorJson(caller_path ? 400 : 500,
-                             "ResourceSaver.save could not write " + scene_path + ": " +
-                                 ::didi::godot::describeGodotError(engine_code) +
-                                 (caller_path ? ". Check that scene_path is a writable res:// "
-                                                "path and that its name is not too long."
-                                              : ""));
-        }
-
-        // The file is on disk with a uid in its header. Whether the engine
-        // knows that uid is a separate question, and the answer is no whenever
-        // the editor filesystem happens to be scanning.
-        const auto uid_state = registerWrittenResourceUid(scene_path);
-        const auto uidFields = [&](json result) {
-            if (!uid_state.uid.empty()) result["uid"] = uid_state.uid;
-            result["uid_registered"] = uid_state.registered;
-            if (uid_state.deferred) {
-                result["uid_registration_deferred"] = true;
-                result["limitation"] =
-                    "The scene is saved and carries its uid, but the editor had not indexed "
-                    "it when this answered: it was still scanning, or still listing a folder "
-                    "new to it. Anything loading a scene that references this one warns and "
-                    "falls back to the text path until it has. Didi indexes it once the "
-                    "editor has applied the scan.";
-            }
-            return result;
-        };
-
-        if (method == "scene.create") {
-            // Everything below this point runs after ResourceSaver.save returned
-            // Error 0, so the .tscn is already on disk. A bare error here told
-            // the caller the create failed; the retry with overwrite:false then
-            // hit 409 already exists and the agent concluded nothing had worked.
-            // Carry saved: true through every one of these failures.
-            const auto openFailure = [&](const Error& error) {
-                json failure = errorJson(error.code, "The scene file was written but could not be "
-                                                     "opened in the editor: " + error.message);
-                failure["error"]["data"] = {{"saved", true}, {"opened", false},
-                                            {"scene_path", scene_path}};
-                return failure;
-            };
-            // What was open before this call replaces it. `opened: true` said
-            // the new scene was open and nothing said the old one no longer
-            // was, so every later scene_* call answered about a different file
-            // with no field naming either one. Read before anything moves it.
-            auto previous_root = editedSceneRoot(editor);
-            const std::string previous_scene =
-                previous_root.isOk() ? editedScenePath(previous_root.value()) : std::string();
-            bool tab_stale = false;
-            if (target_exists.value()) {
-                auto replace_cache = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(4));
-                if (replace_cache.isErr()) return openFailure(replace_cache.error());
-                auto refreshed = callObject(loader.value(), "ResourceLoader", "load", 3358495409LL,
-                                            {&path.value(), &packed_hint.value(), &replace_cache.value()});
-                if (refreshed.isErr()) return openFailure(refreshed.error());
-                auto open_root = openSceneRootId(editor, scene_path);
-                if (open_root.isErr()) return openFailure(open_root.error());
-                tab_stale = open_root.value() != 0;
-            }
-            // A tab that holds the scene still has the tree from before the
-            // write. The open below makes it current, and the server rebuilds
-            // it from the file on a later request, through the reload every
-            // writer uses. Rebuilding it here first left the editor switching
-            // scenes for the rest of the frame on 4.5 and 4.6, so the open did
-            // nothing and a tab right of the current one never came to the
-            // front (#1079). A current tab stays current when it is rebuilt.
-            auto opened = open_and_verify();
-            if (opened.isErr()) return openFailure(opened.error());
-            json created = uidFields({{"status", "success"}, {"saved", true}, {"opened", true},
-                                      {"scene_path", scene_path}});
-            created["edited_scene_changed"] = previous_scene != scene_path;
-            created["previous_scene_file_path"] =
-                previous_scene.empty() ? json(nullptr) : json(previous_scene);
-            created["scene_file_path"] = scene_path;
-            if (tab_stale) created["scene_tab_stale"] = true;
-            return liveResult(created);
-        }
-        return liveResult(uidFields({{"status", "success"}, {"saved", true},
-                                     {"scene_path", scene_path},
-                                     {"source_node", params.value("target_node", "")}}));
-    }
-
-    if (method == "editor.getSelection") {
-        // What the person has selected is the referent of "this node". Nothing
-        // else in the surface can answer it, and a second MCP client cannot ask
-        // at all, because only one may hold the editor route.
-        auto selection_value = callObject(editor, "EditorInterface", "get_selection", 2690272531LL);
-        if (selection_value.isErr()) {
-            return errorJson(selection_value.error());
-        }
-        auto selection = objectFromVariant(selection_value.value());
-        if (selection.isErr()) return errorJson(selection.error());
-        if (!selection.value()) {
-            return errorJson(500, "Godot returned no EditorSelection");
-        }
-
-        auto root_result = editedSceneRoot(editor);
-        if (root_result.isErr()) {
-            return errorJson(root_result.error());
-        }
-        auto root = root_result.value();
-
-        auto nodes_value = callObject(selection.value(), "EditorSelection", "get_selected_nodes",
-                                      2915620761LL);
-        if (nodes_value.isErr()) {
-            return errorJson(nodes_value.error());
-        }
-        auto size_value = callVariant(nodes_value.value(), "size");
+    if (method == "scene.listGroups") {
+        auto groups_value = callObject(node.value(), "Node", "get_groups", 3995934104LL);
+        if (groups_value.isErr()) return errorJson(groups_value.error());
+        auto size_value = callVariant(groups_value.value(), "size");
         if (size_value.isErr()) return errorJson(size_value.error());
         auto size = scalarFromVariant<int64_t>(size_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
         if (size.isErr()) return errorJson(size.error());
-
-        // A selection is a handful of nodes, but it is engine-supplied and this
-        // runs on the main loop, so it is bounded like every other list.
-        constexpr int64_t kMaxSelected = 256;
-        const int64_t total = size.value();
-        const int64_t reported = std::min(total, kMaxSelected);
-
-        json selected = json::array();
-        for (int64_t index = 0; index < reported; ++index) {
-            auto position = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
-            if (position.isErr()) return errorJson(position.error());
-            auto node_value = callVariant(nodes_value.value(), "get", {&position.value()});
-            if (node_value.isErr()) return errorJson(node_value.error());
-            auto node = objectFromVariant(node_value.value());
-            if (node.isErr()) return errorJson(node.error());
-            // A selected node can be freed between the engine building the list
-            // and this reading it. Skipping is right: reporting a null path
-            // would be a node path that resolves to nothing.
-            if (!node.value()) continue;
-
-            auto path = logicalPathFromEditedRoot(root, node.value());
-            auto node_class = nodeString(node.value(), "get_class", 201670096LL);
-            auto node_name = nodeString(node.value(), "get_name", 2002593661LL);
-            // A node selected in another open scene is not addressable from the
-            // edited root, so it is counted and not named rather than reported
-            // with a path that does not resolve.
-            if (path.isErr()) continue;
-            json entry = {{"node_path", path.value()}};
-            if (node_class.isOk()) entry["class"] = node_class.value();
-            if (node_name.isOk()) entry["name"] = node_name.value();
-            selected.push_back(std::move(entry));
+        std::vector<std::string> groups;
+        for (int64_t i = 0; i < size.value(); ++i) {
+            auto index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, i);
+            if (index.isErr()) return errorJson(index.error());
+            auto item = callVariant(groups_value.value(), "get", {&index.value()});
+            if (item.isErr()) return errorJson(item.error());
+            auto type = GodotApi::instance().variant_get_type(item.value().ptr());
+            auto text = stringFromVariant(item.value(), type);
+            if (text.isErr()) return errorJson(text.error());
+            groups.push_back(text.value());
         }
-
-        json selection_result = {{"status", "success"},
-                                 {"selected", selected},
-                                 {"count", selected.size()},
-                                 {"selected_total", total},
-                                 {"truncated", total > reported}};
-        addEditedSceneIdentity(selection_result, root);
-        return liveResult(selection_result);
+        std::sort(groups.begin(), groups.end());
+        return liveResult({{"status", "success"}, {"target_node", params.value("target_node", "")},
+                           {"groups", groups}});
     }
 
-    if (method == "editor.getState" || method == "scene.getHierarchy") {
-        auto root_result = editedSceneRoot(editor);
-        if (root_result.isErr()) return errorJson(root_result.error());
-        auto root = root_result.value();
-        if (method == "editor.getState") {
-            // The path the rest of the surface speaks, not Node.get_path().
-            //
-            // This is the resource a client reads to find out which scene is
-            // being edited, and it answered with the node's internal editor
-            // path: 364 characters of @EditorNode@20438/@Panel@14/... down to
-            // the SubViewport the editor parents an edited scene under. Every
-            // scene_* tool refuses that, so a caller that did the obvious thing
-            // and passed it on got a 404 blaming the node. Where Godot parents
-            // an edited scene is an implementation detail of the editor, and
-            // publishing it both leaked that and handed back a value that
-            // cannot be used (#502).
-            //
-            // logicalPathFromEditedRoot is the same function every scene answer
-            // already builds its paths with, so the resource and the tools now
-            // describe the same tree in the same vocabulary.
-            auto root_path = logicalPathFromEditedRoot(root, root);
-            if (root_path.isErr()) return errorJson(root_path.error());
-            // The editor's dirty state travels with its state, so the one
-            // reader that asks before deciding anything, didi_control_room,
-            // can show an amber light for a scene that is one "don't save"
-            // away from losing its changes (#557).
-            json state = {{"status", "online"}, {"editor_connected", true},
-                          {"active_scene_root", root_path.value()}};
-            // Whether this engine can draw. A headless editor is the only one a
-            // build machine, a container or an ssh session can run, and every
-            // tool whose answer is a picture fails on it for as long as it
-            // lives. The control room already knows how to report an engine
-            // limitation; it could not report this one because nothing told it
-            // (#676).
-            state["display_server"] = displayServerName().empty()
-                                          ? json(nullptr)
-                                          : json(displayServerName());
-            state["renders"] = engineCanRender();
-            state.update(unsavedScenesReport(editor));
-            return liveResult(state);
+    auto group_name = makeStringName(group);
+    if (group_name.isErr()) return errorJson(group_name.error());
+    auto membership_value = callObject(node.value(), "Node", "is_in_group", 2619796661LL, {&group_name.value()});
+    if (membership_value.isErr()) return errorJson(membership_value.error());
+    auto membership = scalarFromVariant<GDExtensionBool>(membership_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+    if (membership.isErr()) return errorJson(membership.error());
+    const bool adding = method == "scene.addToGroup";
+    if (adding && membership.value()) {
+    // No retry_with: the node is in the group, so there is no argument
+    // that would make the call do something different.
+    return errorJson(409, "Target node is already in group: " + group,
+                     {{"code", "already_exists"}});
+}
+    if (!adding && !membership.value()) return errorJson(404, "Target node is not in group: " + group);
+    bool original_persistent = params.value("persistent", true);
+    if (!adding) {
+        NativeName packed_scene_name("PackedScene");
+        auto packed_scene = constructObject(packed_scene_name.ptr());
+        if (!packed_scene) return errorJson(500, "Godot could not inspect group persistence");
+        auto packed_scene_value = makeObject(packed_scene);
+        auto root_value = makeObject(root.value());
+        if (packed_scene_value.isErr() || root_value.isErr()) return errorJson(500, "Failed to inspect group persistence");
+        auto packed = callObject(packed_scene, "PackedScene", "pack", 2584678054LL, {&root_value.value()});
+        if (packed.isErr()) return errorJson(packed.error());
+        auto pack_code = scalarFromVariant<int64_t>(packed.value(), GDEXTENSION_VARIANT_TYPE_INT);
+        if (pack_code.isErr() || pack_code.value() != 0) return errorJson(500, "Failed to snapshot scene groups");
+        auto state_value = callObject(packed_scene, "PackedScene", "get_state", 3479783971LL);
+        if (state_value.isErr()) return errorJson(state_value.error());
+        auto state = objectFromVariant(state_value.value());
+        if (state.isErr() || !state.value()) return errorJson(500, "PackedScene returned no SceneState");
+        auto count_value = callObject(state.value(), "SceneState", "get_node_count", 3905245786LL);
+        if (count_value.isErr()) return errorJson(count_value.error());
+        auto count = scalarFromVariant<int64_t>(count_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+        if (count.isErr()) return errorJson(count.error());
+        auto relative_path = relativePathWithinEditedRoot(root.value(), node.value());
+        if (relative_path.isErr()) return errorJson(relative_path.error());
+        original_persistent = false;
+        for (int64_t i = 0; i < count.value(); ++i) {
+            auto index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, i);
+            auto for_parent = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(0));
+            if (index.isErr() || for_parent.isErr()) return errorJson(500, "Failed to inspect SceneState node path");
+            auto state_path_value = callObject(state.value(), "SceneState", "get_node_path", 2272487792LL,
+                                               {&index.value(), &for_parent.value()});
+            if (state_path_value.isErr()) return errorJson(state_path_value.error());
+            auto state_path = stringFromVariant(state_path_value.value(), GDEXTENSION_VARIANT_TYPE_NODE_PATH);
+            if (state_path.isErr()) return errorJson(state_path.error());
+            if (sceneStatePathWithinEditedRoot(state_path.value()) != relative_path.value()) continue;
+            auto groups = callObject(state.value(), "SceneState", "get_node_groups", 647634434LL, {&index.value()});
+            if (groups.isErr()) return errorJson(groups.error());
+            auto group_count_value = callVariant(groups.value(), "size");
+            if (group_count_value.isErr()) return errorJson(group_count_value.error());
+            auto group_count = scalarFromVariant<int64_t>(group_count_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+            if (group_count.isErr()) return errorJson(group_count.error());
+            for (int64_t group_index = 0; group_index < group_count.value(); ++group_index) {
+                auto native_group_index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, group_index);
+                if (native_group_index.isErr()) return errorJson(native_group_index.error());
+                auto stored_group_value = callVariant(groups.value(), "get", {&native_group_index.value()});
+                if (stored_group_value.isErr()) return errorJson(stored_group_value.error());
+                auto stored_group = stringFromVariant(stored_group_value.value(),
+                    GodotApi::instance().variant_get_type(stored_group_value.value().ptr()));
+                if (stored_group.isErr()) return errorJson(stored_group.error());
+                if (stored_group.value() == group) original_persistent = true;
+            }
+            break;
         }
-        const std::string requested_root = params.value("root_path", "/root");
-        auto target = resolveNode(root, requested_root);
+    }
+    auto persistent = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL,
+                                 static_cast<GDExtensionBool>(original_persistent));
+    if (persistent.isErr()) return errorJson(persistent.error());
+    auto manager = undoManager(editor);
+    if (manager.isErr()) return errorJson(manager.error());
+    auto preflight = preflightUndoManagerBindings();
+    if (preflight.isErr()) return errorJson(preflight.error());
+    auto add_bind = requireMethodBind("Node", "add_to_group", 3683006648LL);
+    auto remove_bind = requireMethodBind("Node", "remove_from_group", 3304788590LL);
+    if (add_bind.isErr()) return errorJson(add_bind.error());
+    if (remove_bind.isErr()) return errorJson(remove_bind.error());
+    auto action = createAction(manager.value(), adding ? "Didi: add node to group" : "Didi: remove node from group", root.value());
+    if (action.isErr()) return errorJson(action.error());
+    auto apply = adding
+        ? managerMethod(manager.value(), "add_do_method", node.value(), "add_to_group", {&group_name.value(), &persistent.value()})
+        : managerMethod(manager.value(), "add_do_method", node.value(), "remove_from_group", {&group_name.value()});
+    auto revert = adding
+        ? managerMethod(manager.value(), "add_undo_method", node.value(), "remove_from_group", {&group_name.value()})
+        : managerMethod(manager.value(), "add_undo_method", node.value(), "add_to_group", {&group_name.value(), &persistent.value()});
+#if defined(DIDI_PHASE7_SIGNAL_TEST_SEAMS)
+    if (takePhase7SignalTestSeam("group_undo_registration_failure")) {
+        apply = Error::internal("The test seam failed the registration");
+    }
+#endif
+    if (apply.isErr() || revert.isErr()) {
+        // Closed, so the next mutation does not merge into it (#1152).
+        abandonAction(manager.value());
+        return errorJson(500, "Failed to register group UndoRedo transaction");
+    }
+    auto committed = commitAction(manager.value());
+    if (committed.isErr()) return errorJson(committed.error());
+    // Membership read again after the commit, and the answer built from
+    // it. added and removed were constants, and membership was read only
+    // before the write, so a commit the node did not take read as done
+    // (#1019).
+    auto after_value = callObject(node.value(), "Node", "is_in_group", 2619796661LL, {&group_name.value()});
+    if (after_value.isErr()) return errorJson(after_value.error());
+    auto in_group = scalarFromVariant<GDExtensionBool>(after_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+    if (in_group.isErr()) return errorJson(in_group.error());
+    if (static_cast<bool>(in_group.value()) != adding) {
+        return errorJson(500, std::string("The group change was committed and the node is ") +
+                                  (in_group.value() ? "still" : "not") + " in group " + group +
+                                  " afterwards");
+    }
+    // Membership as it was read before the commit (#1151). A removal also
+    // says whether the scene file kept the membership, which its undo
+    // puts back.
+    json before_group = {{"in_group", static_cast<bool>(membership.value())}};
+    if (!adding) before_group["persistent"] = original_persistent;
+    return liveSceneMutation({{"status", "success"}, {"target_node", params.value("target_node", "")},
+                              {"group", group}, {"in_group", static_cast<bool>(in_group.value())},
+                              {"added", adding}, {"removed", !adding},
+                              {"before", std::move(before_group)},
+                              {"undo_redo_registered", true}});
+}
+
+
+json GodotBridge::bridgeSceneFiles(const std::string& method, const json& params, const std::string& /*session_kind*/, GDExtensionObjectPtr editor) {
+    if (method == "scene.close") {
+        auto root = editedSceneRoot(editor);
+        if (root.isErr()) return errorJson(root.error());
+        auto path_value = callObject(root.value(), "Node", "get_scene_file_path", 201670096LL);
+        if (path_value.isErr()) return errorJson(path_value.error());
+        auto path = stringFromVariant(path_value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+        if (path.isErr()) return errorJson(path.error());
+        const bool discard_unsaved = params.value("discard_unsaved", false);
+        // Godot 4.5 and 4.6 expose only the write side of dirty state
+        // (mark_scene_as_unsaved). The read side, get_unsaved_scenes,
+        // arrives in 4.7, so this is a runtime bind probe rather than a
+        // version-string comparison: the guard stays wherever it is absent.
+        const bool dirty_state_readable =
+            unsavedScenesBindAvailable();
+        bool verified_clean = false;
+        if (!discard_unsaved) {
+            if (!dirty_state_readable) {
+                return errorJson(409, "This Godot build cannot report active-scene dirty state; "
+                                      "EditorInterface.get_unsaved_scenes arrives in Godot 4.7. "
+                                      "Pass discard_unsaved: true to close explicitly",
+                                 {{"code", "dirty_state_unavailable"},
+                                  {"retry_with", {{"discard_unsaved", true}}}});
+            }
+            if (path.value().empty()) {
+                return errorJson(409, "The active scene has never been saved, so the engine cannot "
+                                      "report it as clean; save it with editor_save_scene or pass "
+                                      "discard_unsaved: true to close explicitly",
+                                 {{"code", "scene_never_saved"},
+                                  {"retry_with", {{"discard_unsaved", true}}}});
+            }
+            auto unsaved = callObject(editor, "EditorInterface", "get_unsaved_scenes", 1139954409LL);
+            if (unsaved.isErr()) return errorJson(unsaved.error());
+            auto unsaved_size = callVariant(unsaved.value(), "size");
+            if (unsaved_size.isErr()) return errorJson(500, unsaved_size.error().message);
+            auto unsaved_count = scalarFromVariant<int64_t>(unsaved_size.value(), GDEXTENSION_VARIANT_TYPE_INT);
+            if (unsaved_count.isErr()) return errorJson(500, unsaved_count.error().message);
+            // The list holds one entry per open scene, so this bound is far
+            // above anything an editor produces. Refusing past it matters
+            // because a partial scan cannot prove the active scene absent.
+            constexpr int64_t kMaxUnsavedScenesScanned = 1024;
+            if (unsaved_count.value() > kMaxUnsavedScenesScanned) {
+                return errorJson(409, "The editor reports more unsaved scenes than Didi will scan (" +
+                                      std::to_string(unsaved_count.value()) + "), so this scene cannot be "
+                                      "proven clean; pass discard_unsaved: true to close explicitly",
+                                 {{"code", "unsaved_scan_limit"},
+                                  {"retry_with", {{"discard_unsaved", true}}}});
+            }
+            for (int64_t index = 0; index < unsaved_count.value(); ++index) {
+                auto index_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
+                if (index_value.isErr()) return errorJson(500, index_value.error().message);
+                auto entry = callVariant(unsaved.value(), "get", {&index_value.value()});
+                if (entry.isErr()) return errorJson(500, entry.error().message);
+                auto entry_path = stringFromVariant(
+                    entry.value(), GodotApi::instance().variant_get_type(entry.value().ptr()));
+                if (entry_path.isErr()) return errorJson(500, entry_path.error().message);
+                if (entry_path.value() == path.value()) {
+                    return errorJson(409, "The active scene has unsaved changes: " + path.value() +
+                                          "; save it with editor_save_scene or pass "
+                                          "discard_unsaved: true to discard them",
+                                     {{"code", "unsaved_changes"},
+                                      {"retry_with", {{"discard_unsaved", true}}}});
+                }
+            }
+            verified_clean = true;
+        }
+        auto closed = callObject(editor, "EditorInterface", "close_scene", 166280745LL);
+        if (closed.isErr()) return errorJson(closed.error());
+        auto code = scalarFromVariant<int64_t>(closed.value(), GDEXTENSION_VARIANT_TYPE_INT);
+        if (code.isErr()) return errorJson(code.error());
+        if (code.value() != 0) {
+            return errorJson(500, "Godot close_scene failed with " +
+                                      ::didi::godot::describeGodotError(code.value()));
+        }
+        // Whether a tab still holds the scene, read after the close rather
+        // than taken from close_scene's return code (#1019). A scene that
+        // was never saved has no path to look for, so it is null.
+        json still_open = nullptr;
+        if (!path.value().empty()) {
+            auto open = openScenePaths(editor);
+            if (open.isErr()) {
+                return errorJson(500, "Godot closed the scene, and the open tabs could not be "
+                                      "read back to confirm it: " + open.error().message);
+            }
+            still_open = std::find(open.value().begin(), open.value().end(), path.value()) !=
+                         open.value().end();
+        }
+        return liveResult({{"status", "success"}, {"closed", true}, {"scene_path", path.value()},
+                           {"still_open", still_open},
+                           {"discarded_unsaved", discard_unsaved},
+                           {"dirty_state_readable", dirty_state_readable},
+                           {"dirty_state", verified_clean ? "clean" : "unchecked"}});
+    }
+
+    const std::string scene_path = params.value("scene_path", "");
+    auto valid_path = validateResPath(scene_path, ".tscn");
+    if (valid_path.isErr()) return errorJson(valid_path.error());
+    auto loader = singleton("ResourceLoader");
+    if (loader.isErr()) return errorJson(loader.error());
+    auto path = makeString(scene_path);
+    auto packed_hint = makeString("PackedScene");
+    if (path.isErr() || packed_hint.isErr()) return errorJson(500, "Failed to construct scene resource arguments");
+    auto exists_value = callObject(loader.value(), "ResourceLoader", "exists", 4185558881LL,
+                                   {&path.value(), &packed_hint.value()});
+    if (exists_value.isErr()) return errorJson(exists_value.error());
+    auto target_exists = scalarFromVariant<GDExtensionBool>(exists_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+    if (target_exists.isErr()) return errorJson(target_exists.error());
+
+    auto open_and_verify = [&]() -> Result<void> {
+        auto inherited = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(0));
+        if (inherited.isErr()) return inherited.error();
+        auto opened = callObject(editor, "EditorInterface", "open_scene_from_path", 1168363258LL,
+                                 {&path.value(), &inherited.value()});
+        if (opened.isErr()) return opened.error();
+        auto opened_root = editedSceneRoot(editor);
+        if (opened_root.isErr()) return opened_root.error();
+        auto opened_path_value = callObject(opened_root.value(), "Node", "get_scene_file_path", 201670096LL);
+        if (opened_path_value.isErr()) return opened_path_value.error();
+        auto opened_path = stringFromVariant(opened_path_value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+        if (opened_path.isErr()) return opened_path.error();
+        if (opened_path.value() != scene_path) {
+            return Error::internal("Godot did not activate the requested scene: " + scene_path);
+        }
+        return Result<void>::ok();
+    };
+
+    if (method == "scene.open") {
+        if (!target_exists.value()) return errorJson(404, "PackedScene not found: " + scene_path);
+        auto cache_mode = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(1));
+        if (cache_mode.isErr()) return errorJson(cache_mode.error());
+        auto resource = callObject(loader.value(), "ResourceLoader", "load", 3358495409LL,
+                                   {&path.value(), &packed_hint.value(), &cache_mode.value()});
+        if (resource.isErr()) return errorJson(resource.error());
+        auto packed = objectFromVariant(resource.value());
+        if (packed.isErr() || !packed.value()) {
+            return errorJson(422, "Resource is not a loadable PackedScene: " + scene_path,
+                             {{"code", "not_a_packed_scene"}});
+        }
+        auto class_name = makeString("PackedScene");
+        auto class_value = class_name.isOk()
+            ? callObject(packed.value(), "Object", "is_class", 3927539163LL, {&class_name.value()})
+            : Result<VariantValue>(class_name.error());
+        auto is_packed = class_value.isOk()
+            ? scalarFromVariant<GDExtensionBool>(class_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL)
+            : Result<GDExtensionBool>(class_value.error());
+        if (is_packed.isErr() || !is_packed.value()) {
+            return errorJson(422, "Resource is not a PackedScene: " + scene_path,
+                             {{"code", "not_a_packed_scene"}});
+        }
+        auto opened = open_and_verify();
+        if (opened.isErr()) return errorJson(opened.error());
+        return liveResult({{"status", "success"}, {"opened", true}, {"scene_path", scene_path}});
+    }
+
+    if (target_exists.value() && !params.value("overwrite", false)) {
+        return errorJson(409, "Scene target already exists; pass overwrite: true to replace it",
+                              {{"code", "already_exists"}, {"retry_with", {{"overwrite", true}}}});
+    }
+
+    // Only the two writers reach this line, and ResourceSaver cannot create
+    // the directory it writes into: a missing parent came back as a bare
+    // Error 19 with nothing in it naming the cause. script_create and
+    // resource_create both create theirs. validateResPath has already
+    // refused traversal, absolute paths and backslashes, so the target is
+    // project-contained by construction and the check below is a second
+    // reading of that rather than the only one.
+    {
+        namespace fs = std::filesystem;
+        auto project_path = resolveGodotProjectPath();
+        if (project_path.isErr()) {
+            return errorJson(project_path.error());
+        }
+        std::error_code ec;
+        const auto root = fs::weakly_canonical(
+            didi::paths::projectPathFromUtf8(project_path.value()), ec);
+        if (ec || !fs::is_directory(root, ec)) {
+            return errorJson(500, "Godot project root is unavailable");
+        }
+        const auto target = root / didi::paths::projectPathFromUtf8(scene_path.substr(6));
+        const auto parent = target.parent_path();
+        if (!pathWithin(root, parent)) {
+            return errorJson(400, "Scene path resolves outside the project: " + scene_path);
+        }
+        std::error_code directory_error;
+        fs::create_directories(parent, directory_error);
+        if (directory_error && !fs::is_directory(parent, ec)) {
+            return errorJson(500, "Cannot create the directory for " + scene_path + ": " +
+                                  directory_error.message());
+        }
+    }
+
+    GDExtensionObjectPtr packed_root = nullptr;
+    if (method == "scene.create") {
+        // Any ClassDB type that inherits Node, which is what
+        // scene_instantiate_node has always taken.
+        //
+        // The enum was Node2D, Node3D and Control, and almost every scene
+        // in a real project has a root outside it: a player is a
+        // CharacterBody2D, a pickup an Area2D, terrain a StaticBody2D, a
+        // HUD a CanvasLayer. The route that worked was to create a throwaway
+        // Node2D scene, instantiate the type you wanted under it, build the
+        // subtree there and scene_pack_branch it to the real path -- four
+        // calls, nothing saying so, and a scratch scene left on disk that
+        // the caller then has to remember to delete (#740).
+        const std::string root_type = params.value("root_type", "Node2D");
+        if (root_type.empty() || root_type.size() > 128) {
+            return errorJson(400, "root_type must be a Godot class name that inherits Node");
+        }
+        const std::string root_name = params.value("root_name", "Root");
+        if (root_name.empty() || root_name.find('/') != std::string::npos || root_name.find('\\') != std::string::npos) {
+            return errorJson(400, "root_name must be a non-empty node name without path separators");
+        }
+        if (!engineHasClass(root_type)) {
+            return errorJson(400, "Godot ClassDB could not instantiate scene root type: " +
+                                      root_type + ". The engine has no class by that name.");
+        }
+        NativeName native_type(root_type);
+        packed_root = constructObject(native_type.ptr());
+        if (!packed_root) {
+            return errorJson(400, "Godot ClassDB could not instantiate scene root type: " +
+                                      root_type);
+        }
+        {
+            // A Variant type or a RefCounted resource constructs and is not
+            // a node, and a .tscn whose root is not a Node cannot be
+            // instanced into anything. Same check, same words, as the
+            // sibling that instantiates one.
+            auto node_class = makeString("Node");
+            auto is_node_variant = node_class.isOk()
+                ? callObject(packed_root, "Object", "is_class", 3927539163LL, {&node_class.value()})
+                : Result<VariantValue>(node_class.error());
+            auto is_node = is_node_variant.isOk()
+                ? scalarFromVariant<GDExtensionBool>(is_node_variant.value(), GDEXTENSION_VARIANT_TYPE_BOOL)
+                : Result<GDExtensionBool>(is_node_variant.error());
+            if (is_node.isErr() || !is_node.value()) {
+                GodotApi::instance().object_destroy(packed_root);
+                return is_node.isErr()
+                    ? errorJson(is_node.error())
+                    : errorJson(400, "Godot ClassDB type does not inherit Node: " + root_type);
+            }
+        }
+        auto name = makeStringName(root_name);
+        auto named = name.isOk()
+            ? callObject(packed_root, "Node", "set_name", 3304788590LL, {&name.value()})
+            : Result<VariantValue>(name.error());
+        if (named.isErr()) {
+            GodotApi::instance().object_destroy(packed_root);
+            return errorJson(named.error());
+        }
+    } else {
+        auto root = editedSceneRoot(editor);
+        if (root.isErr()) return errorJson(root.error());
+        auto target = resolveNode(root.value(), params.value("target_node", ""));
         if (target.isErr()) return errorJson(target.error());
-        int max_depth = std::clamp(params.value("max_depth", 10), 0, 64);
-        auto logical_root = logicalPathFromEditedRoot(root, target.value());
-        if (logical_root.isErr()) return errorJson(logical_root.error());
-        auto inherited = inheritedSceneState(root);
-        if (inherited.isErr()) return errorJson(inherited.error());
-        HierarchyBudget budget;
-        auto hierarchy = buildHierarchy(target.value(), 0, max_depth, logical_root.value(), budget,
-                                        root, inherited.value());
-        if (hierarchy.isErr()) return errorJson(hierarchy.error());
-        if (hierarchy.value().is_null()) {
-            return errorJson(413, "The edited scene root alone exceeds the hierarchy response budget");
+        auto flags = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(15));
+        if (flags.isErr()) return errorJson(flags.error());
+        auto duplicated = callObject(target.value(), "Node", "duplicate", 3511555459LL, {&flags.value()});
+        if (duplicated.isErr()) return errorJson(duplicated.error());
+        auto duplicate_object = objectFromVariant(duplicated.value());
+        if (duplicate_object.isErr() || !duplicate_object.value()) return errorJson(500, "Godot failed to duplicate the branch");
+        packed_root = duplicate_object.value();
+        auto owner = makeObject(packed_root);
+        if (owner.isErr()) {
+            GodotApi::instance().object_destroy(packed_root);
+            return errorJson(owner.error());
         }
-        // The live walk reads names, classes and paths and nothing else, so the
-        // list of what it left out is the same on every call. It used to be
-        // derived from include_properties and friends, which meant asking for
-        // properties added "bulk_properties" to the list of things omitted, and
-        // declining them took it off while the properties stayed empty (#482).
-        json omitted = json::array({"bulk_properties", "signals", "scripts"});
-        json hierarchy_result = {{"root_path", params.value("root_path", "/root")},
-                                 {"source", "live_scene_tree"}, {"scene_tree", hierarchy.value()},
-                                 {"omitted_fields", omitted},
-                                 {"node_count", budget.node_count},
-                                 {"max_nodes", kMaxHierarchyNodes},
-                                 {"max_response_bytes", kMaxHierarchyResponseBytes},
-                                 {"message", "Use focused property/signal tools for fields omitted from hierarchy traversal."}};
-        if (budget.truncated) hierarchy_result["truncated"] = true;
-        // The base scene, once, at the top: the root is that scene's root
-        // rather than an instance of it, so it does not carry instance_of.
-        if (!inherited.value().base_scene.empty()) {
-            hierarchy_result["inherits"] = inherited.value().base_scene;
+        std::function<Result<void>(GDExtensionObjectPtr)> normalize_owner = [&](GDExtensionObjectPtr current) -> Result<void> {
+            auto include_internal = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(0));
+            if (include_internal.isErr()) return include_internal.error();
+            auto children = callObject(current, "Node", "get_children", 873284517LL, {&include_internal.value()});
+            if (children.isErr()) return children.error();
+            auto size_value = callVariant(children.value(), "size");
+            if (size_value.isErr()) return size_value.error();
+            auto size = scalarFromVariant<int64_t>(size_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+            if (size.isErr()) return size.error();
+            for (int64_t i = 0; i < size.value(); ++i) {
+                auto index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, i);
+                if (index.isErr()) return index.error();
+                auto child_value = callVariant(children.value(), "get", {&index.value()});
+                if (child_value.isErr()) return child_value.error();
+                auto child = objectFromVariant(child_value.value());
+                if (child.isErr() || !child.value()) return Error::internal("Godot returned an invalid duplicate child");
+                auto owned = callObject(child.value(), "Node", "set_owner", 1078189570LL, {&owner.value()});
+                if (owned.isErr()) return owned.error();
+                auto nested = normalize_owner(child.value());
+                if (nested.isErr()) return nested;
+            }
+            return Result<void>::ok();
+        };
+        auto normalized = normalize_owner(packed_root);
+        if (normalized.isErr()) {
+            GodotApi::instance().object_destroy(packed_root);
+            return errorJson(normalized.error());
         }
-        addEditedSceneIdentity(hierarchy_result, root);
-        return liveResult(hierarchy_result);
     }
+
+    NativeName packed_scene_name("PackedScene");
+    auto packed_scene = constructObject(packed_scene_name.ptr());
+    if (!packed_scene) {
+        GodotApi::instance().object_destroy(packed_root);
+        return errorJson(500, "Godot could not construct PackedScene");
+    }
+    auto root_value = makeObject(packed_root);
+    auto packed_value = makeObject(packed_scene);
+    if (root_value.isErr() || packed_value.isErr()) {
+        GodotApi::instance().object_destroy(packed_root);
+        return errorJson(500, "Failed to construct PackedScene arguments");
+    }
+    auto packed = callObject(packed_scene, "PackedScene", "pack", 2584678054LL, {&root_value.value()});
+    if (packed.isErr()) {
+        GodotApi::instance().object_destroy(packed_root);
+        return errorJson(packed.error());
+    }
+    auto pack_code = scalarFromVariant<int64_t>(packed.value(), GDEXTENSION_VARIANT_TYPE_INT);
+    if (pack_code.isErr() || pack_code.value() != 0) {
+        GodotApi::instance().object_destroy(packed_root);
+        return errorJson(500, "PackedScene.pack failed");
+    }
+    auto saver = singleton("ResourceSaver");
+    auto flags = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(0));
+    if (saver.isErr() || flags.isErr()) {
+        GodotApi::instance().object_destroy(packed_root);
+        return errorJson(500, "ResourceSaver is unavailable");
+    }
+    auto saved = callObject(saver.value(), "ResourceSaver", "save", 2983274697LL,
+                            {&packed_value.value(), &path.value(), &flags.value()});
+    GodotApi::instance().object_destroy(packed_root);
+    if (saved.isErr()) return errorJson(saved.error());
+    auto save_code = scalarFromVariant<int64_t>(saved.value(), GDEXTENSION_VARIANT_TYPE_INT);
+    if (save_code.isErr()) return errorJson(save_code.error());
+    if (save_code.value() != 0) {
+        // A 300-character filename reached ResourceSaver and came back as
+        // "Error 19": a 500 that says the server broke, with no next move
+        // and no name on the number. The engine's file-and-path errors are
+        // the caller's argument to fix, so they answer 400 (#535).
+        const auto engine_code = save_code.value();
+        const bool caller_path = ::didi::godot::isGodotPathError(engine_code);
+        return errorJson(caller_path ? 400 : 500,
+                         "ResourceSaver.save could not write " + scene_path + ": " +
+                             ::didi::godot::describeGodotError(engine_code) +
+                             (caller_path ? ". Check that scene_path is a writable res:// "
+                                            "path and that its name is not too long."
+                                          : ""));
+    }
+
+    // The file is on disk with a uid in its header. Whether the engine
+    // knows that uid is a separate question, and the answer is no whenever
+    // the editor filesystem happens to be scanning.
+    const auto uid_state = registerWrittenResourceUid(scene_path);
+    const auto uidFields = [&](json result) {
+        if (!uid_state.uid.empty()) result["uid"] = uid_state.uid;
+        result["uid_registered"] = uid_state.registered;
+        if (uid_state.deferred) {
+            result["uid_registration_deferred"] = true;
+            result["limitation"] =
+                "The scene is saved and carries its uid, but the editor had not indexed "
+                "it when this answered: it was still scanning, or still listing a folder "
+                "new to it. Anything loading a scene that references this one warns and "
+                "falls back to the text path until it has. Didi indexes it once the "
+                "editor has applied the scan.";
+        }
+        return result;
+    };
+
+    if (method == "scene.create") {
+        // Everything below this point runs after ResourceSaver.save returned
+        // Error 0, so the .tscn is already on disk. A bare error here told
+        // the caller the create failed; the retry with overwrite:false then
+        // hit 409 already exists and the agent concluded nothing had worked.
+        // Carry saved: true through every one of these failures.
+        const auto openFailure = [&](const Error& error) {
+            json failure = errorJson(error.code, "The scene file was written but could not be "
+                                                 "opened in the editor: " + error.message);
+            failure["error"]["data"] = {{"saved", true}, {"opened", false},
+                                        {"scene_path", scene_path}};
+            return failure;
+        };
+        // What was open before this call replaces it. `opened: true` said
+        // the new scene was open and nothing said the old one no longer
+        // was, so every later scene_* call answered about a different file
+        // with no field naming either one. Read before anything moves it.
+        auto previous_root = editedSceneRoot(editor);
+        const std::string previous_scene =
+            previous_root.isOk() ? editedScenePath(previous_root.value()) : std::string();
+        bool tab_stale = false;
+        if (target_exists.value()) {
+            auto replace_cache = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(4));
+            if (replace_cache.isErr()) return openFailure(replace_cache.error());
+            auto refreshed = callObject(loader.value(), "ResourceLoader", "load", 3358495409LL,
+                                        {&path.value(), &packed_hint.value(), &replace_cache.value()});
+            if (refreshed.isErr()) return openFailure(refreshed.error());
+            auto open_root = openSceneRootId(editor, scene_path);
+            if (open_root.isErr()) return openFailure(open_root.error());
+            tab_stale = open_root.value() != 0;
+        }
+        // A tab that holds the scene still has the tree from before the
+        // write. The open below makes it current, and the server rebuilds
+        // it from the file on a later request, through the reload every
+        // writer uses. Rebuilding it here first left the editor switching
+        // scenes for the rest of the frame on 4.5 and 4.6, so the open did
+        // nothing and a tab right of the current one never came to the
+        // front (#1079). A current tab stays current when it is rebuilt.
+        auto opened = open_and_verify();
+        if (opened.isErr()) return openFailure(opened.error());
+        json created = uidFields({{"status", "success"}, {"saved", true}, {"opened", true},
+                                  {"scene_path", scene_path}});
+        created["edited_scene_changed"] = previous_scene != scene_path;
+        created["previous_scene_file_path"] =
+            previous_scene.empty() ? json(nullptr) : json(previous_scene);
+        created["scene_file_path"] = scene_path;
+        if (tab_stale) created["scene_tab_stale"] = true;
+        return liveResult(created);
+    }
+    return liveResult(uidFields({{"status", "success"}, {"saved", true},
+                                 {"scene_path", scene_path},
+                                 {"source_node", params.value("target_node", "")}}));
+}
+
+
+json GodotBridge::bridgeEditorGetSelection(const std::string& /*method*/, const json& /*params*/, const std::string& /*session_kind*/, GDExtensionObjectPtr editor) {
+    // What the person has selected is the referent of "this node". Nothing
+    // else in the surface can answer it, and a second MCP client cannot ask
+    // at all, because only one may hold the editor route.
+    auto selection_value = callObject(editor, "EditorInterface", "get_selection", 2690272531LL);
+    if (selection_value.isErr()) {
+        return errorJson(selection_value.error());
+    }
+    auto selection = objectFromVariant(selection_value.value());
+    if (selection.isErr()) return errorJson(selection.error());
+    if (!selection.value()) {
+        return errorJson(500, "Godot returned no EditorSelection");
+    }
+
+    auto root_result = editedSceneRoot(editor);
+    if (root_result.isErr()) {
+        return errorJson(root_result.error());
+    }
+    auto root = root_result.value();
+
+    auto nodes_value = callObject(selection.value(), "EditorSelection", "get_selected_nodes",
+                                  2915620761LL);
+    if (nodes_value.isErr()) {
+        return errorJson(nodes_value.error());
+    }
+    auto size_value = callVariant(nodes_value.value(), "size");
+    if (size_value.isErr()) return errorJson(size_value.error());
+    auto size = scalarFromVariant<int64_t>(size_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+    if (size.isErr()) return errorJson(size.error());
+
+    // A selection is a handful of nodes, but it is engine-supplied and this
+    // runs on the main loop, so it is bounded like every other list.
+    constexpr int64_t kMaxSelected = 256;
+    const int64_t total = size.value();
+    const int64_t reported = std::min(total, kMaxSelected);
+
+    json selected = json::array();
+    for (int64_t index = 0; index < reported; ++index) {
+        auto position = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
+        if (position.isErr()) return errorJson(position.error());
+        auto node_value = callVariant(nodes_value.value(), "get", {&position.value()});
+        if (node_value.isErr()) return errorJson(node_value.error());
+        auto node = objectFromVariant(node_value.value());
+        if (node.isErr()) return errorJson(node.error());
+        // A selected node can be freed between the engine building the list
+        // and this reading it. Skipping is right: reporting a null path
+        // would be a node path that resolves to nothing.
+        if (!node.value()) continue;
+
+        auto path = logicalPathFromEditedRoot(root, node.value());
+        auto node_class = nodeString(node.value(), "get_class", 201670096LL);
+        auto node_name = nodeString(node.value(), "get_name", 2002593661LL);
+        // A node selected in another open scene is not addressable from the
+        // edited root, so it is counted and not named rather than reported
+        // with a path that does not resolve.
+        if (path.isErr()) continue;
+        json entry = {{"node_path", path.value()}};
+        if (node_class.isOk()) entry["class"] = node_class.value();
+        if (node_name.isOk()) entry["name"] = node_name.value();
+        selected.push_back(std::move(entry));
+    }
+
+    json selection_result = {{"status", "success"},
+                             {"selected", selected},
+                             {"count", selected.size()},
+                             {"selected_total", total},
+                             {"truncated", total > reported}};
+    addEditedSceneIdentity(selection_result, root);
+    return liveResult(selection_result);
+}
+
+
+json GodotBridge::bridgeEditorState(const std::string& method, const json& params, const std::string& /*session_kind*/, GDExtensionObjectPtr editor) {
+    auto root_result = editedSceneRoot(editor);
+    if (root_result.isErr()) return errorJson(root_result.error());
+    auto root = root_result.value();
+    if (method == "editor.getState") {
+        // The path the rest of the surface speaks, not Node.get_path().
+        //
+        // This is the resource a client reads to find out which scene is
+        // being edited, and it answered with the node's internal editor
+        // path: 364 characters of @EditorNode@20438/@Panel@14/... down to
+        // the SubViewport the editor parents an edited scene under. Every
+        // scene_* tool refuses that, so a caller that did the obvious thing
+        // and passed it on got a 404 blaming the node. Where Godot parents
+        // an edited scene is an implementation detail of the editor, and
+        // publishing it both leaked that and handed back a value that
+        // cannot be used (#502).
+        //
+        // logicalPathFromEditedRoot is the same function every scene answer
+        // already builds its paths with, so the resource and the tools now
+        // describe the same tree in the same vocabulary.
+        auto root_path = logicalPathFromEditedRoot(root, root);
+        if (root_path.isErr()) return errorJson(root_path.error());
+        // The editor's dirty state travels with its state, so the one
+        // reader that asks before deciding anything, didi_control_room,
+        // can show an amber light for a scene that is one "don't save"
+        // away from losing its changes (#557).
+        json state = {{"status", "online"}, {"editor_connected", true},
+                      {"active_scene_root", root_path.value()}};
+        // Whether this engine can draw. A headless editor is the only one a
+        // build machine, a container or an ssh session can run, and every
+        // tool whose answer is a picture fails on it for as long as it
+        // lives. The control room already knows how to report an engine
+        // limitation; it could not report this one because nothing told it
+        // (#676).
+        state["display_server"] = displayServerName().empty()
+                                      ? json(nullptr)
+                                      : json(displayServerName());
+        state["renders"] = engineCanRender();
+        state.update(unsavedScenesReport(editor));
+        return liveResult(state);
+    }
+    const std::string requested_root = params.value("root_path", "/root");
+    auto target = resolveNode(root, requested_root);
+    if (target.isErr()) return errorJson(target.error());
+    int max_depth = std::clamp(params.value("max_depth", 10), 0, 64);
+    auto logical_root = logicalPathFromEditedRoot(root, target.value());
+    if (logical_root.isErr()) return errorJson(logical_root.error());
+    auto inherited = inheritedSceneState(root);
+    if (inherited.isErr()) return errorJson(inherited.error());
+    HierarchyBudget budget;
+    auto hierarchy = buildHierarchy(target.value(), 0, max_depth, logical_root.value(), budget,
+                                    root, inherited.value());
+    if (hierarchy.isErr()) return errorJson(hierarchy.error());
+    if (hierarchy.value().is_null()) {
+        return errorJson(413, "The edited scene root alone exceeds the hierarchy response budget");
+    }
+    // The live walk reads names, classes and paths and nothing else, so the
+    // list of what it left out is the same on every call. It used to be
+    // derived from include_properties and friends, which meant asking for
+    // properties added "bulk_properties" to the list of things omitted, and
+    // declining them took it off while the properties stayed empty (#482).
+    json omitted = json::array({"bulk_properties", "signals", "scripts"});
+    json hierarchy_result = {{"root_path", params.value("root_path", "/root")},
+                             {"source", "live_scene_tree"}, {"scene_tree", hierarchy.value()},
+                             {"omitted_fields", omitted},
+                             {"node_count", budget.node_count},
+                             {"max_nodes", kMaxHierarchyNodes},
+                             {"max_response_bytes", kMaxHierarchyResponseBytes},
+                             {"message", "Use focused property/signal tools for fields omitted from hierarchy traversal."}};
+    if (budget.truncated) hierarchy_result["truncated"] = true;
+    // The base scene, once, at the top: the root is that scene's root
+    // rather than an instance of it, so it does not carry instance_of.
+    if (!inherited.value().base_scene.empty()) {
+        hierarchy_result["inherits"] = inherited.value().base_scene;
+    }
+    addEditedSceneIdentity(hierarchy_result, root);
+    return liveResult(hierarchy_result);
+}
+
+
+json GodotBridge::bridgeShaders(const std::string& method, const json& params, const std::string& /*session_kind*/, GDExtensionObjectPtr editor) {
 
     // The uniform PropertyInfo the engine hands back carries the hint a shader
     // author wrote, and the bridge read only name and type out of it, so a
@@ -15828,441 +15987,272 @@ json GodotBridge::execute(const std::string& method, const json& params,
         }
         return json{{"kind", "other"}, {"hint", hint.value()}, {"hint_string", hint_string}};
     };
-
-    if (method == "shader.listUniforms" || method == "shader.setUniform" ||
-        method == "shader.getVisualGraph") {
-        // One path to the material for all three, so a slot one of them accepts
-        // is never a slot another refuses.
-        const bool setting = method == "shader.setUniform";
-        const bool graphing = method == "shader.getVisualGraph";
-        const bool shape_ok = setting
-            ? (hasOnlyKeys(params, {"target_node", "property_name", "uniform_name", "value"}) &&
-               params.contains("uniform_name") && params["uniform_name"].is_string() &&
-               params.contains("value"))
-            : hasOnlyKeys(params, {"target_node", "property_name"});
-        if (!shape_ok || !params.contains("target_node") || !params["target_node"].is_string() ||
-            !params.contains("property_name") || !params["property_name"].is_string()) {
-            return bridgeError(400, setting ? "invalid_shader_set_uniform_request"
-                                            : (graphing ? "invalid_shader_get_visual_graph_request"
-                                                        : "invalid_shader_list_uniforms_request"));
-        }
-        if (graphing) {
-            for (const auto& bind : {
-                     std::make_tuple("VisualShader", "get_node_list", 2370592410LL),
-                     std::make_tuple("VisualShader", "get_node", 3784670312LL),
-                     std::make_tuple("VisualShader", "get_node_position", 2175036082LL),
-                     std::make_tuple("VisualShader", "get_node_connections", 1441964831LL)}) {
-                if (requireMethodBind(std::get<0>(bind), std::get<1>(bind), std::get<2>(bind)).isErr()) {
-                    return bridgeError(501, "required_bind_unavailable");
-                }
-            }
-        }
+    // One path to the material for all three, so a slot one of them accepts
+    // is never a slot another refuses.
+    const bool setting = method == "shader.setUniform";
+    const bool graphing = method == "shader.getVisualGraph";
+    const bool shape_ok = setting
+        ? (hasOnlyKeys(params, {"target_node", "property_name", "uniform_name", "value"}) &&
+           params.contains("uniform_name") && params["uniform_name"].is_string() &&
+           params.contains("value"))
+        : hasOnlyKeys(params, {"target_node", "property_name"});
+    if (!shape_ok || !params.contains("target_node") || !params["target_node"].is_string() ||
+        !params.contains("property_name") || !params["property_name"].is_string()) {
+        return bridgeError(400, setting ? "invalid_shader_set_uniform_request"
+                                        : (graphing ? "invalid_shader_get_visual_graph_request"
+                                                    : "invalid_shader_list_uniforms_request"));
+    }
+    if (graphing) {
         for (const auto& bind : {
-                 std::make_tuple("ShaderMaterial", "get_shader", 2078273437LL),
-                 std::make_tuple("Shader", "get_shader_uniform_list", 1230511656LL),
-                 std::make_tuple("Shader", "get_mode", 3392948163LL),
-                 std::make_tuple("ShaderMaterial", "get_shader_parameter", 2760726917LL)}) {
+                 std::make_tuple("VisualShader", "get_node_list", 2370592410LL),
+                 std::make_tuple("VisualShader", "get_node", 3784670312LL),
+                 std::make_tuple("VisualShader", "get_node_position", 2175036082LL),
+                 std::make_tuple("VisualShader", "get_node_connections", 1441964831LL)}) {
             if (requireMethodBind(std::get<0>(bind), std::get<1>(bind), std::get<2>(bind)).isErr()) {
                 return bridgeError(501, "required_bind_unavailable");
             }
         }
-        if (setting && preflightUndoManagerBindings().isErr()) {
+    }
+    for (const auto& bind : {
+             std::make_tuple("ShaderMaterial", "get_shader", 2078273437LL),
+             std::make_tuple("Shader", "get_shader_uniform_list", 1230511656LL),
+             std::make_tuple("Shader", "get_mode", 3392948163LL),
+             std::make_tuple("ShaderMaterial", "get_shader_parameter", 2760726917LL)}) {
+        if (requireMethodBind(std::get<0>(bind), std::get<1>(bind), std::get<2>(bind)).isErr()) {
             return bridgeError(501, "required_bind_unavailable");
         }
-        auto root = editedSceneRoot(editor);
-        if (root.isErr()) return errorJson(root.error());
-        const auto target_path = params["target_node"].get<std::string>();
-        const auto property = params["property_name"].get<std::string>();
-        auto node = resolveNode(root.value(), target_path);
-        // The resolver already says which path it could not find. The
-        // identifier said neither what was looked for nor what happened (#424).
-        if (node.isErr()) return errorJson(404, node.error().message);
+    }
+    if (setting && preflightUndoManagerBindings().isErr()) {
+        return bridgeError(501, "required_bind_unavailable");
+    }
+    auto root = editedSceneRoot(editor);
+    if (root.isErr()) return errorJson(root.error());
+    const auto target_path = params["target_node"].get<std::string>();
+    const auto property = params["property_name"].get<std::string>();
+    auto node = resolveNode(root.value(), target_path);
+    // The resolver already says which path it could not find. The
+    // identifier said neither what was looked for nor what happened (#424).
+    if (node.isErr()) return errorJson(404, node.error().message);
 
-        auto has_property = objectHasProperty(node.value(), property);
-        if (has_property.isErr()) return errorJson(has_property.error());
-        if (!has_property.value()) {
-            return errorJson(404, "Property not found on target node: " + property);
+    auto has_property = objectHasProperty(node.value(), property);
+    if (has_property.isErr()) return errorJson(has_property.error());
+    if (!has_property.value()) {
+        return errorJson(404, "Property not found on target node: " + property);
+    }
+    auto property_name = makeStringName(property);
+    if (property_name.isErr()) return errorJson(500, property_name.error().message);
+    auto slot = callObject(node.value(), "Object", "get", 2760726917LL, {&property_name.value()});
+    if (slot.isErr()) return errorJson(500, slot.error().message);
+    auto material = objectFromVariant(slot.value());
+    if (material.isErr()) return errorJson(500, material.error().message);
+    if (!material.value()) {
+        return errorJson(404, "Property \"" + property + "\" on " + target_path +
+                                  " holds nothing; there is no material to read");
+    }
+    auto is_shader_material = objectIsClass(material.value(), "ShaderMaterial");
+    if (is_shader_material.isErr()) return errorJson(500, is_shader_material.error().message);
+    if (!is_shader_material.value()) {
+        // A StandardMaterial3D has properties, not shader uniforms. Reading
+        // it here and reporting an empty uniform list would look like a
+        // shader with nothing to set.
+        auto actual = callObject(material.value(), "Object", "get_class", 201670096LL);
+        std::string actual_name = "an unrecognised type";
+        if (actual.isOk()) {
+            auto text = stringFromVariant(actual.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+            if (text.isOk()) actual_name = text.value();
         }
-        auto property_name = makeStringName(property);
-        if (property_name.isErr()) return errorJson(500, property_name.error().message);
-        auto slot = callObject(node.value(), "Object", "get", 2760726917LL, {&property_name.value()});
-        if (slot.isErr()) return errorJson(500, slot.error().message);
-        auto material = objectFromVariant(slot.value());
-        if (material.isErr()) return errorJson(500, material.error().message);
-        if (!material.value()) {
-            return errorJson(404, "Property \"" + property + "\" on " + target_path +
-                                      " holds nothing; there is no material to read");
+        return errorJson(409, "Property \"" + property + "\" on " + target_path + " holds " +
+                                  actual_name + " and not a ShaderMaterial",
+                         {{"code", "not_a_shader_material"}});
+    }
+
+    auto shader_value = callObject(material.value(), "ShaderMaterial", "get_shader", 2078273437LL);
+    if (shader_value.isErr()) return errorJson(500, shader_value.error().message);
+    auto shader = objectFromVariant(shader_value.value());
+    if (shader.isErr()) return errorJson(500, shader.error().message);
+    if (!shader.value()) {
+        return errorJson(409, "The ShaderMaterial on " + target_path + " has no shader assigned",
+                         {{"code", "no_shader_assigned"}});
+    }
+
+    json result = {{"target_node", target_path}, {"property_name", property}};
+    auto shader_path_name = makeStringName("resource_path");
+    if (shader_path_name.isOk()) {
+        auto shader_path = callObject(shader.value(), "Object", "get", 2760726917LL,
+                                      {&shader_path_name.value()});
+        if (shader_path.isOk()) {
+            auto text = stringFromVariant(shader_path.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+            result["shader_path"] = (text.isOk() && !text.value().empty())
+                                        ? json(text.value()) : json(nullptr);
         }
-        auto is_shader_material = objectIsClass(material.value(), "ShaderMaterial");
-        if (is_shader_material.isErr()) return errorJson(500, is_shader_material.error().message);
-        if (!is_shader_material.value()) {
-            // A StandardMaterial3D has properties, not shader uniforms. Reading
-            // it here and reporting an empty uniform list would look like a
-            // shader with nothing to set.
-            auto actual = callObject(material.value(), "Object", "get_class", 201670096LL);
-            std::string actual_name = "an unrecognised type";
-            if (actual.isOk()) {
-                auto text = stringFromVariant(actual.value(), GDEXTENSION_VARIANT_TYPE_STRING);
-                if (text.isOk()) actual_name = text.value();
-            }
-            return errorJson(409, "Property \"" + property + "\" on " + target_path + " holds " +
-                                      actual_name + " and not a ShaderMaterial",
-                             {{"code", "not_a_shader_material"}});
+    }
+    auto mode = callObject(shader.value(), "Shader", "get_mode", 3392948163LL);
+    if (mode.isOk()) {
+        auto mode_value = scalarFromVariant<int64_t>(mode.value(), GDEXTENSION_VARIANT_TYPE_INT);
+        if (mode_value.isOk()) {
+            // 0 spatial, 1 canvas_item, 2 particles, 3 sky, 4 fog. Named so
+            // a caller is not handed a bare number to look up.
+            static const char* kModes[] = {"spatial", "canvas_item", "particles", "sky", "fog"};
+            const auto index = mode_value.value();
+            result["shader_mode"] = (index >= 0 && index < 5) ? json(kModes[index])
+                                                              : json(nullptr);
         }
+    }
 
-        auto shader_value = callObject(material.value(), "ShaderMaterial", "get_shader", 2078273437LL);
-        if (shader_value.isErr()) return errorJson(500, shader_value.error().message);
-        auto shader = objectFromVariant(shader_value.value());
-        if (shader.isErr()) return errorJson(500, shader.error().message);
-        if (!shader.value()) {
-            return errorJson(409, "The ShaderMaterial on " + target_path + " has no shader assigned",
-                             {{"code", "no_shader_assigned"}});
+    if (graphing) {
+        auto is_visual = objectIsClass(shader.value(), "VisualShader");
+        if (is_visual.isErr()) return errorJson(500, is_visual.error().message);
+        if (!is_visual.value()) {
+            // A hand written .gdshader has code and no graph. Returning an
+            // empty node list would read as a graph with nothing in it.
+            return errorJson(409, "The shader on this material is written in code, not built as "
+                                  "a VisualShader graph, so it has no nodes to report",
+                             {{"code", "not_a_visual_shader"}});
         }
+        // The shader types a VisualShader can hold, in enum order. Named so
+        // a caller is not handed a bare number, and skipped entirely when a
+        // type holds nothing.
+        static const char* kGraphTypes[] = {"vertex", "fragment", "light", "start", "process",
+                                            "collide", "start_custom", "process_custom", "sky",
+                                            "fog"};
+        constexpr int64_t kMaxGraphNodes = 256;
+        constexpr int64_t kMaxGraphConnections = 512;
+        json types = json::array();
+        bool any_truncated = false;
+        for (int64_t type_index = 0; type_index < 10; ++type_index) {
+            auto type_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, type_index);
+            if (type_value.isErr()) return errorJson(500, type_value.error().message);
+            auto ids = callObject(shader.value(), "VisualShader", "get_node_list",
+                                  2370592410LL, {&type_value.value()});
+            if (ids.isErr()) continue;
+            auto id_count_value = callVariant(ids.value(), "size");
+            if (id_count_value.isErr()) continue;
+            auto id_count = scalarFromVariant<int64_t>(id_count_value.value(),
+                                                       GDEXTENSION_VARIANT_TYPE_INT);
+            if (id_count.isErr() || id_count.value() == 0) continue;
 
-        json result = {{"target_node", target_path}, {"property_name", property}};
-        auto shader_path_name = makeStringName("resource_path");
-        if (shader_path_name.isOk()) {
-            auto shader_path = callObject(shader.value(), "Object", "get", 2760726917LL,
-                                          {&shader_path_name.value()});
-            if (shader_path.isOk()) {
-                auto text = stringFromVariant(shader_path.value(), GDEXTENSION_VARIANT_TYPE_STRING);
-                result["shader_path"] = (text.isOk() && !text.value().empty())
-                                            ? json(text.value()) : json(nullptr);
-            }
-        }
-        auto mode = callObject(shader.value(), "Shader", "get_mode", 3392948163LL);
-        if (mode.isOk()) {
-            auto mode_value = scalarFromVariant<int64_t>(mode.value(), GDEXTENSION_VARIANT_TYPE_INT);
-            if (mode_value.isOk()) {
-                // 0 spatial, 1 canvas_item, 2 particles, 3 sky, 4 fog. Named so
-                // a caller is not handed a bare number to look up.
-                static const char* kModes[] = {"spatial", "canvas_item", "particles", "sky", "fog"};
-                const auto index = mode_value.value();
-                result["shader_mode"] = (index >= 0 && index < 5) ? json(kModes[index])
-                                                                  : json(nullptr);
-            }
-        }
+            json nodes = json::array();
+            const int64_t reported_nodes = std::min<int64_t>(id_count.value(), kMaxGraphNodes);
+            for (int64_t slot = 0; slot < reported_nodes; ++slot) {
+                auto slot_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, slot);
+                if (slot_value.isErr()) return errorJson(500, slot_value.error().message);
+                auto id_value = callVariant(ids.value(), "get", {&slot_value.value()});
+                if (id_value.isErr()) continue;
+                auto node_id = scalarFromVariant<int64_t>(id_value.value(),
+                                                          GDEXTENSION_VARIANT_TYPE_INT);
+                if (node_id.isErr()) continue;
+                auto graph_id = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, node_id.value());
+                if (graph_id.isErr()) return errorJson(500, graph_id.error().message);
 
-        if (graphing) {
-            auto is_visual = objectIsClass(shader.value(), "VisualShader");
-            if (is_visual.isErr()) return errorJson(500, is_visual.error().message);
-            if (!is_visual.value()) {
-                // A hand written .gdshader has code and no graph. Returning an
-                // empty node list would read as a graph with nothing in it.
-                return errorJson(409, "The shader on this material is written in code, not built as "
-                                      "a VisualShader graph, so it has no nodes to report",
-                                 {{"code", "not_a_visual_shader"}});
-            }
-            // The shader types a VisualShader can hold, in enum order. Named so
-            // a caller is not handed a bare number, and skipped entirely when a
-            // type holds nothing.
-            static const char* kGraphTypes[] = {"vertex", "fragment", "light", "start", "process",
-                                                "collide", "start_custom", "process_custom", "sky",
-                                                "fog"};
-            constexpr int64_t kMaxGraphNodes = 256;
-            constexpr int64_t kMaxGraphConnections = 512;
-            json types = json::array();
-            bool any_truncated = false;
-            for (int64_t type_index = 0; type_index < 10; ++type_index) {
-                auto type_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, type_index);
-                if (type_value.isErr()) return errorJson(500, type_value.error().message);
-                auto ids = callObject(shader.value(), "VisualShader", "get_node_list",
-                                      2370592410LL, {&type_value.value()});
-                if (ids.isErr()) continue;
-                auto id_count_value = callVariant(ids.value(), "size");
-                if (id_count_value.isErr()) continue;
-                auto id_count = scalarFromVariant<int64_t>(id_count_value.value(),
-                                                           GDEXTENSION_VARIANT_TYPE_INT);
-                if (id_count.isErr() || id_count.value() == 0) continue;
-
-                json nodes = json::array();
-                const int64_t reported_nodes = std::min<int64_t>(id_count.value(), kMaxGraphNodes);
-                for (int64_t slot = 0; slot < reported_nodes; ++slot) {
-                    auto slot_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, slot);
-                    if (slot_value.isErr()) return errorJson(500, slot_value.error().message);
-                    auto id_value = callVariant(ids.value(), "get", {&slot_value.value()});
-                    if (id_value.isErr()) continue;
-                    auto node_id = scalarFromVariant<int64_t>(id_value.value(),
-                                                              GDEXTENSION_VARIANT_TYPE_INT);
-                    if (node_id.isErr()) continue;
-                    auto graph_id = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, node_id.value());
-                    if (graph_id.isErr()) return errorJson(500, graph_id.error().message);
-
-                    json node_entry = {{"id", node_id.value()}};
-                    auto node_object_value = callObject(shader.value(), "VisualShader", "get_node",
-                                                        3784670312LL,
-                                                        {&type_value.value(), &graph_id.value()});
-                    if (node_object_value.isOk()) {
-                        auto node_object = objectFromVariant(node_object_value.value());
-                        if (node_object.isOk() && node_object.value()) {
-                            auto class_name = callObject(node_object.value(), "Object", "get_class",
-                                                         201670096LL);
-                            if (class_name.isOk()) {
-                                auto text = stringFromVariant(class_name.value(),
-                                                              GDEXTENSION_VARIANT_TYPE_STRING);
-                                if (text.isOk()) {
-                                    node_entry["class"] = boundUtf8(text.value(), 256).value;
-                                }
-                            }
-                        }
-                    }
-                    auto position = callObject(shader.value(), "VisualShader", "get_node_position",
-                                               2175036082LL, {&type_value.value(), &graph_id.value()});
-                    if (position.isOk()) {
-                        auto point = pointVariantToJson(position.value(), 2);
-                        if (point.isOk()) node_entry["position"] = point.value();
-                    }
-                    nodes.push_back(std::move(node_entry));
-                }
-
-                json links = json::array();
-                int64_t connection_count = 0;
-                auto connections = callObject(shader.value(), "VisualShader", "get_node_connections",
-                                              1441964831LL, {&type_value.value()});
-                if (connections.isOk()) {
-                    auto connection_size = callVariant(connections.value(), "size");
-                    if (connection_size.isOk()) {
-                        auto total = scalarFromVariant<int64_t>(connection_size.value(),
-                                                                 GDEXTENSION_VARIANT_TYPE_INT);
-                        if (total.isOk()) {
-                            connection_count = total.value();
-                            const int64_t reported =
-                                std::min<int64_t>(connection_count, kMaxGraphConnections);
-                            for (int64_t link = 0; link < reported; ++link) {
-                                auto link_index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, link);
-                                if (link_index.isErr()) break;
-                                auto entry = callVariant(connections.value(), "get",
-                                                          {&link_index.value()});
-                                if (entry.isErr()) continue;
-                                json link_entry = json::object();
-                                for (const auto* field : {"from_node", "from_port", "to_node",
-                                                          "to_port"}) {
-                                    auto field_key = makeString(field);
-                                    if (field_key.isErr()) continue;
-                                    auto field_value = callVariant(entry.value(), "get",
-                                                                    {&field_key.value()});
-                                    if (field_value.isErr()) continue;
-                                    auto number = scalarFromVariant<int64_t>(
-                                        field_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
-                                    if (number.isOk()) link_entry[field] = number.value();
-                                }
-                                if (!link_entry.empty()) links.push_back(std::move(link_entry));
+                json node_entry = {{"id", node_id.value()}};
+                auto node_object_value = callObject(shader.value(), "VisualShader", "get_node",
+                                                    3784670312LL,
+                                                    {&type_value.value(), &graph_id.value()});
+                if (node_object_value.isOk()) {
+                    auto node_object = objectFromVariant(node_object_value.value());
+                    if (node_object.isOk() && node_object.value()) {
+                        auto class_name = callObject(node_object.value(), "Object", "get_class",
+                                                     201670096LL);
+                        if (class_name.isOk()) {
+                            auto text = stringFromVariant(class_name.value(),
+                                                          GDEXTENSION_VARIANT_TYPE_STRING);
+                            if (text.isOk()) {
+                                node_entry["class"] = boundUtf8(text.value(), 256).value;
                             }
                         }
                     }
                 }
-
-                const bool truncated = id_count.value() > kMaxGraphNodes ||
-                                       connection_count > kMaxGraphConnections;
-                any_truncated = any_truncated || truncated;
-                types.push_back({{"type", kGraphTypes[type_index]},
-                                 {"nodes", std::move(nodes)},
-                                 {"node_count", id_count.value()},
-                                 {"connections", std::move(links)},
-                                 {"connection_count", connection_count},
-                                 {"truncated", truncated}});
-            }
-            result["shader_types"] = std::move(types);
-            result["truncated"] = any_truncated;
-            return liveResult(result);
-        }
-
-        auto groups = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(0));
-        if (groups.isErr()) return errorJson(500, groups.error().message);
-        auto uniforms = callObject(shader.value(), "Shader", "get_shader_uniform_list", 1230511656LL,
-                                   {&groups.value()});
-        if (uniforms.isErr()) return errorJson(500, uniforms.error().message);
-        auto size_value = callVariant(uniforms.value(), "size");
-        if (size_value.isErr()) return errorJson(500, size_value.error().message);
-        auto count = scalarFromVariant<int64_t>(size_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
-        if (count.isErr()) return errorJson(500, count.error().message);
-
-        if (setting) {
-            const auto requested_name = params["uniform_name"].get<std::string>();
-            // The shader list decides whether this uniform exists.
-            // set_shader_parameter accepts any name and does nothing with one
-            // the shader never declared, so a typo would otherwise come back as
-            // a write that worked.
-            auto name_key = makeString("name");
-            auto type_key = makeString("type");
-            auto class_key = makeString("class_name");
-            auto hint_key = makeString("hint");
-            auto hint_string_key = makeString("hint_string");
-            if (name_key.isErr() || type_key.isErr() || class_key.isErr() || hint_key.isErr() ||
-                hint_string_key.isErr()) {
-                return errorJson(500, "Failed to build uniform keys");
-            }
-            bool declared = false;
-            int64_t declared_type = 0;
-            std::string declared_class;
-            json declared_hint = json(nullptr);
-            for (int64_t index = 0; index < count.value() && !declared; ++index) {
-                auto index_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
-                if (index_value.isErr()) return errorJson(500, index_value.error().message);
-                auto entry = callVariant(uniforms.value(), "get", {&index_value.value()});
-                if (entry.isErr()) return errorJson(500, entry.error().message);
-                auto name_value = callVariant(entry.value(), "get", {&name_key.value()});
-                if (name_value.isErr()) return errorJson(500, name_value.error().message);
-                const auto name_type = GodotApi::instance().variant_get_type(name_value.value().ptr());
-                if (name_type != GDEXTENSION_VARIANT_TYPE_STRING &&
-                    name_type != GDEXTENSION_VARIANT_TYPE_STRING_NAME) {
-                    continue;
+                auto position = callObject(shader.value(), "VisualShader", "get_node_position",
+                                           2175036082LL, {&type_value.value(), &graph_id.value()});
+                if (position.isOk()) {
+                    auto point = pointVariantToJson(position.value(), 2);
+                    if (point.isOk()) node_entry["position"] = point.value();
                 }
-                auto name = stringFromVariant(name_value.value(), name_type);
-                if (name.isErr()) return errorJson(500, name.error().message);
-                if (name.value() != requested_name) continue;
-                declared = true;
-                auto type_value = callVariant(entry.value(), "get", {&type_key.value()});
-                if (type_value.isOk()) {
-                    auto value = scalarFromVariant<int64_t>(type_value.value(),
-                                                            GDEXTENSION_VARIANT_TYPE_INT);
-                    if (value.isOk()) declared_type = value.value();
-                }
-                auto class_value = callVariant(entry.value(), "get", {&class_key.value()});
-                if (class_value.isOk()) {
-                    const auto class_type =
-                        GodotApi::instance().variant_get_type(class_value.value().ptr());
-                    if (class_type == GDEXTENSION_VARIANT_TYPE_STRING ||
-                        class_type == GDEXTENSION_VARIANT_TYPE_STRING_NAME) {
-                        auto text = stringFromVariant(class_value.value(), class_type);
-                        if (text.isOk()) declared_class = text.value();
+                nodes.push_back(std::move(node_entry));
+            }
+
+            json links = json::array();
+            int64_t connection_count = 0;
+            auto connections = callObject(shader.value(), "VisualShader", "get_node_connections",
+                                          1441964831LL, {&type_value.value()});
+            if (connections.isOk()) {
+                auto connection_size = callVariant(connections.value(), "size");
+                if (connection_size.isOk()) {
+                    auto total = scalarFromVariant<int64_t>(connection_size.value(),
+                                                             GDEXTENSION_VARIANT_TYPE_INT);
+                    if (total.isOk()) {
+                        connection_count = total.value();
+                        const int64_t reported =
+                            std::min<int64_t>(connection_count, kMaxGraphConnections);
+                        for (int64_t link = 0; link < reported; ++link) {
+                            auto link_index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, link);
+                            if (link_index.isErr()) break;
+                            auto entry = callVariant(connections.value(), "get",
+                                                      {&link_index.value()});
+                            if (entry.isErr()) continue;
+                            json link_entry = json::object();
+                            for (const auto* field : {"from_node", "from_port", "to_node",
+                                                      "to_port"}) {
+                                auto field_key = makeString(field);
+                                if (field_key.isErr()) continue;
+                                auto field_value = callVariant(entry.value(), "get",
+                                                                {&field_key.value()});
+                                if (field_value.isErr()) continue;
+                                auto number = scalarFromVariant<int64_t>(
+                                    field_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+                                if (number.isOk()) link_entry[field] = number.value();
+                            }
+                            if (!link_entry.empty()) links.push_back(std::move(link_entry));
+                        }
                     }
                 }
-                declared_hint = readUniformHint(entry.value(), hint_key.value(),
-                                                hint_string_key.value());
-            }
-            if (!declared) {
-                return errorJson(404, "The shader declares no uniform named " + requested_name);
             }
 
-            // The same contract scene_set_property applies, so a caller learns
-            // one set of JSON spellings rather than two.
-            const auto uniform_type = static_cast<GDExtensionVariantType>(declared_type);
-            auto compatible = validateJsonForPropertyType(requested_name, params["value"], uniform_type);
-            if (compatible.isErr()) return errorJson(compatible.error());
-
-            // A value outside a declared hint_range is usually a slipped digit
-            // or a confusion between a normalised and an absolute scale, and
-            // this server already treats that class as worth refusing by name:
-            // audio.configureBus bounds volume_db for exactly this reason. The
-            // range a shader author wrote down is the same kind of statement.
-            // or_greater and or_less say the author meant a slider bound rather
-            // than a limit, and those are honoured.
-            if (declared_hint.is_object() && declared_hint.value("kind", "") == "range" &&
-                params["value"].is_number()) {
-                const double sent = params["value"].get<double>();
-                const double minimum = declared_hint.value("minimum", 0.0);
-                const double maximum = declared_hint.value("maximum", 0.0);
-                const bool under = sent < minimum && !declared_hint.value("or_less", false);
-                const bool over = sent > maximum && !declared_hint.value("or_greater", false);
-                if (under || over) {
-                    std::ostringstream refusal;
-                    refusal << "Uniform \"" << requested_name << "\" declares hint_range("
-                            << minimum << ", " << maximum << "); " << sent
-                            << " is outside it. Send a value from " << minimum << " to " << maximum
-                            << ".";
-                    return errorJson(400, refusal.str());
-                }
-            }
-            auto new_value = uniform_type == GDEXTENSION_VARIANT_TYPE_OBJECT
-                ? makeResourceForProperty(requested_name, params["value"], declared_class)
-                : makeJsonVariantForProperty(params["value"], uniform_type);
-            if (new_value.isErr()) return errorJson(new_value.error());
-
-            auto uniform_name = makeStringName(requested_name);
-            if (uniform_name.isErr()) return errorJson(500, uniform_name.error().message);
-            auto old_value = callObject(material.value(), "ShaderMaterial", "get_shader_parameter",
-                                        2760726917LL, {&uniform_name.value()});
-            if (old_value.isErr()) return errorJson(500, old_value.error().message);
-
-            // Undo goes through the shader_parameter/<name> property on the
-            // material, which is the one the scene file writes and the one the
-            // inspector edits, so undoing this is the undo a person expects.
-            auto stored_name = makeStringName("shader_parameter/" + requested_name);
-            if (stored_name.isErr()) return errorJson(500, stored_name.error().message);
-            auto manager = undoManager(editor);
-            if (manager.isErr()) return errorJson(manager.error());
-            auto material_value = makeObject(material.value());
-            if (material_value.isErr()) return errorJson(500, material_value.error().message);
-            auto action = createAction(manager.value(), "Didi: set shader uniform " + requested_name,
-                                       material.value());
-            if (action.isErr()) return errorJson(500, action.error().message);
-            auto do_property = callObject(manager.value(), "EditorUndoRedoManager", "add_do_property",
-                                          1017172818LL,
-                                          {&material_value.value(), &stored_name.value(),
-                                           &new_value.value()});
-            auto undo_property = callObject(manager.value(), "EditorUndoRedoManager", "add_undo_property",
-                                            1017172818LL,
-                                            {&material_value.value(), &stored_name.value(),
-                                             &old_value.value()});
-            if (do_property.isErr() || undo_property.isErr()) {
-                // Closed, so the next mutation does not merge into it (#1152).
-                abandonAction(manager.value());
-                return errorJson(500, (do_property.isErr() ? do_property : undo_property).error().message);
-            }
-            auto committed = commitAction(manager.value());
-            if (committed.isErr()) return errorJson(committed.error());
-
-            // Report what it now holds and not what was asked for, the same way
-            // scene_set_property does and for the same reason.
-            auto observed = callObject(material.value(), "ShaderMaterial", "get_shader_parameter",
-                                       2760726917LL, {&uniform_name.value()});
-            if (observed.isErr()) return errorJson(500, observed.error().message);
-            auto observed_json = variantToJson(observed.value(), 0, true);
-            auto old_json = variantToJson(old_value.value(), 0, true);
-            json old_payload = old_json.isOk() ? old_json.value() : json(nullptr);
-            if (isNilVariant(old_value.value())) {
-                // The undo entry above restores nil on purpose, which takes the
-                // override off again rather than pinning the default in its
-                // place. What gets reported is the value that was in effect,
-                // and for a uniform the material did not set that is the
-                // shader's declared default, read the same way the list reads
-                // it.
-                auto fallback = shaderParameterDefault(shader.value(), uniform_name.value());
-                if (fallback.isOk() && !isNilVariant(fallback.value())) {
-                    auto encoded = variantToJson(fallback.value(), 0, true);
-                    if (encoded.isOk()) old_payload = encoded.value();
-                }
-            }
-            json observed_payload = observed_json.isOk() ? observed_json.value() : json(nullptr);
-            // What was asked for, encoded the way it was actually sent to the
-            // engine. A colour may be spelled {r,g,b} with the alpha left off,
-            // which this tool's own schema documents, and comparing the
-            // observed four keys against the requested three reported every
-            // such write as one that did not land (#618).
-            auto requested_json = variantToJson(new_value.value(), 0, true);
-            const json& requested_payload =
-                requested_json.isOk() ? requested_json.value() : params["value"];
-            // The same disclosure every other open-scene mutator carries. The
-            // change is in the edited scene and its undo history, and is
-            // discarded the same way if the editor closes without saving, so
-            // the absence of scene_saved read as "this one did not need
-            // saving" (#623).
-            return liveSceneMutation({{"status", "success"},
-                                      {"target_node", target_path},
-                                      {"property_name", property},
-                                      {"uniform_name", requested_name},
-                                      {"type", godotVariantTypeName(static_cast<int>(declared_type))},
-                                      {"hint", declared_hint},
-                                      {"value", observed_payload},
-                                      {"requested_value", params["value"]},
-                                      {"old_value", old_payload},
-                                      {"applied", jsonValuesEquivalent(observed_payload, requested_payload)},
-                                      {"undo_redo_registered", true}});
+            const bool truncated = id_count.value() > kMaxGraphNodes ||
+                                   connection_count > kMaxGraphConnections;
+            any_truncated = any_truncated || truncated;
+            types.push_back({{"type", kGraphTypes[type_index]},
+                             {"nodes", std::move(nodes)},
+                             {"node_count", id_count.value()},
+                             {"connections", std::move(links)},
+                             {"connection_count", connection_count},
+                             {"truncated", truncated}});
         }
+        result["shader_types"] = std::move(types);
+        result["truncated"] = any_truncated;
+        return liveResult(result);
+    }
 
-        constexpr int64_t kMaxUniforms = 256;
-        const int64_t reported = std::min<int64_t>(count.value(), kMaxUniforms);
+    auto groups = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(0));
+    if (groups.isErr()) return errorJson(500, groups.error().message);
+    auto uniforms = callObject(shader.value(), "Shader", "get_shader_uniform_list", 1230511656LL,
+                               {&groups.value()});
+    if (uniforms.isErr()) return errorJson(500, uniforms.error().message);
+    auto size_value = callVariant(uniforms.value(), "size");
+    if (size_value.isErr()) return errorJson(500, size_value.error().message);
+    auto count = scalarFromVariant<int64_t>(size_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+    if (count.isErr()) return errorJson(500, count.error().message);
+
+    if (setting) {
+        const auto requested_name = params["uniform_name"].get<std::string>();
+        // The shader list decides whether this uniform exists.
+        // set_shader_parameter accepts any name and does nothing with one
+        // the shader never declared, so a typo would otherwise come back as
+        // a write that worked.
         auto name_key = makeString("name");
         auto type_key = makeString("type");
+        auto class_key = makeString("class_name");
         auto hint_key = makeString("hint");
         auto hint_string_key = makeString("hint_string");
-        if (name_key.isErr() || type_key.isErr() || hint_key.isErr() || hint_string_key.isErr()) {
+        if (name_key.isErr() || type_key.isErr() || class_key.isErr() || hint_key.isErr() ||
+            hint_string_key.isErr()) {
             return errorJson(500, "Failed to build uniform keys");
         }
-
-        json listed = json::array();
-        for (int64_t index = 0; index < reported; ++index) {
+        bool declared = false;
+        int64_t declared_type = 0;
+        std::string declared_class;
+        json declared_hint = json(nullptr);
+        for (int64_t index = 0; index < count.value() && !declared; ++index) {
             auto index_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
             if (index_value.isErr()) return errorJson(500, index_value.error().message);
             auto entry = callVariant(uniforms.value(), "get", {&index_value.value()});
@@ -16276,821 +16266,990 @@ json GodotBridge::execute(const std::string& method, const json& params,
             }
             auto name = stringFromVariant(name_value.value(), name_type);
             if (name.isErr()) return errorJson(500, name.error().message);
-
-            int64_t declared_type = 0;
+            if (name.value() != requested_name) continue;
+            declared = true;
             auto type_value = callVariant(entry.value(), "get", {&type_key.value()});
             if (type_value.isOk()) {
-                auto declared = scalarFromVariant<int64_t>(type_value.value(),
-                                                           GDEXTENSION_VARIANT_TYPE_INT);
-                if (declared.isOk()) declared_type = declared.value();
+                auto value = scalarFromVariant<int64_t>(type_value.value(),
+                                                        GDEXTENSION_VARIANT_TYPE_INT);
+                if (value.isOk()) declared_type = value.value();
             }
-
-            json uniform = {{"name", name.value()},
-                            {"type", godotVariantTypeName(static_cast<int>(declared_type))},
-                            {"hint", readUniformHint(entry.value(), hint_key.value(),
-                                                     hint_string_key.value())},
-                            {"settable", jsonTypeIsInsidePropertyContract(static_cast<int>(declared_type))}};
-
-            auto uniform_name = makeStringName(name.value());
-            if (uniform_name.isErr()) return errorJson(500, uniform_name.error().message);
-            auto current = callObject(material.value(), "ShaderMaterial", "get_shader_parameter",
-                                      2760726917LL, {&uniform_name.value()});
-            if (current.isErr()) return errorJson(500, current.error().message);
-            // The effective value: the material's override where it has one and
-            // the shader's own declared default otherwise.
-            //
-            // get_shader_parameter alone cannot supply that. In a running game
-            // on 4.5.1, 4.6.2 and 4.7.2 it answers nil for a uniform the
-            // material does not set, so the declared default was reported as no
-            // value at all. The shader keeps its defaults in the rendering
-            // server, and that is where they have to be read from.
-            //
-            // There is still deliberately no flag separating an override from a
-            // default. The same call that answers nil in a game answers with the
-            // default in a 4.7.2 editor, so nil is not evidence of anything and
-            // a flag built on it would be wrong in one context or the other.
-            if (isNilVariant(current.value())) {
-                auto fallback = shaderParameterDefault(shader.value(), uniform_name.value());
-                if (fallback.isOk()) current = std::move(fallback.value());
+            auto class_value = callVariant(entry.value(), "get", {&class_key.value()});
+            if (class_value.isOk()) {
+                const auto class_type =
+                    GodotApi::instance().variant_get_type(class_value.value().ptr());
+                if (class_type == GDEXTENSION_VARIANT_TYPE_STRING ||
+                    class_type == GDEXTENSION_VARIANT_TYPE_STRING_NAME) {
+                    auto text = stringFromVariant(class_value.value(), class_type);
+                    if (text.isOk()) declared_class = text.value();
+                }
             }
-            // Lenient: a uniform of a type this cannot encode is reported by
-            // name and type with a null value, rather than failing the whole
-            // read and leaving the caller with nothing.
-            auto encoded = variantToJson(current.value(), 0, true);
-            // A null value here is not a uniform without one. It is a value
-            // neither the material nor the rendering server could supply, which
-            // is what a session with no renderer looks like.
-            uniform["value"] = encoded.isOk() ? encoded.value() : json(nullptr);
-            listed.push_back(std::move(uniform));
+            declared_hint = readUniformHint(entry.value(), hint_key.value(),
+                                            hint_string_key.value());
+        }
+        if (!declared) {
+            return errorJson(404, "The shader declares no uniform named " + requested_name);
         }
 
-        result["uniforms"] = std::move(listed);
-        result["uniform_count"] = count.value();
-        result["truncated"] = count.value() > kMaxUniforms;
-        return liveResult(result);
+        // The same contract scene_set_property applies, so a caller learns
+        // one set of JSON spellings rather than two.
+        const auto uniform_type = static_cast<GDExtensionVariantType>(declared_type);
+        auto compatible = validateJsonForPropertyType(requested_name, params["value"], uniform_type);
+        if (compatible.isErr()) return errorJson(compatible.error());
+
+        // A value outside a declared hint_range is usually a slipped digit
+        // or a confusion between a normalised and an absolute scale, and
+        // this server already treats that class as worth refusing by name:
+        // audio.configureBus bounds volume_db for exactly this reason. The
+        // range a shader author wrote down is the same kind of statement.
+        // or_greater and or_less say the author meant a slider bound rather
+        // than a limit, and those are honoured.
+        if (declared_hint.is_object() && declared_hint.value("kind", "") == "range" &&
+            params["value"].is_number()) {
+            const double sent = params["value"].get<double>();
+            const double minimum = declared_hint.value("minimum", 0.0);
+            const double maximum = declared_hint.value("maximum", 0.0);
+            const bool under = sent < minimum && !declared_hint.value("or_less", false);
+            const bool over = sent > maximum && !declared_hint.value("or_greater", false);
+            if (under || over) {
+                std::ostringstream refusal;
+                refusal << "Uniform \"" << requested_name << "\" declares hint_range("
+                        << minimum << ", " << maximum << "); " << sent
+                        << " is outside it. Send a value from " << minimum << " to " << maximum
+                        << ".";
+                return errorJson(400, refusal.str());
+            }
+        }
+        auto new_value = uniform_type == GDEXTENSION_VARIANT_TYPE_OBJECT
+            ? makeResourceForProperty(requested_name, params["value"], declared_class)
+            : makeJsonVariantForProperty(params["value"], uniform_type);
+        if (new_value.isErr()) return errorJson(new_value.error());
+
+        auto uniform_name = makeStringName(requested_name);
+        if (uniform_name.isErr()) return errorJson(500, uniform_name.error().message);
+        auto old_value = callObject(material.value(), "ShaderMaterial", "get_shader_parameter",
+                                    2760726917LL, {&uniform_name.value()});
+        if (old_value.isErr()) return errorJson(500, old_value.error().message);
+
+        // Undo goes through the shader_parameter/<name> property on the
+        // material, which is the one the scene file writes and the one the
+        // inspector edits, so undoing this is the undo a person expects.
+        auto stored_name = makeStringName("shader_parameter/" + requested_name);
+        if (stored_name.isErr()) return errorJson(500, stored_name.error().message);
+        auto manager = undoManager(editor);
+        if (manager.isErr()) return errorJson(manager.error());
+        auto material_value = makeObject(material.value());
+        if (material_value.isErr()) return errorJson(500, material_value.error().message);
+        auto action = createAction(manager.value(), "Didi: set shader uniform " + requested_name,
+                                   material.value());
+        if (action.isErr()) return errorJson(500, action.error().message);
+        auto do_property = callObject(manager.value(), "EditorUndoRedoManager", "add_do_property",
+                                      1017172818LL,
+                                      {&material_value.value(), &stored_name.value(),
+                                       &new_value.value()});
+        auto undo_property = callObject(manager.value(), "EditorUndoRedoManager", "add_undo_property",
+                                        1017172818LL,
+                                        {&material_value.value(), &stored_name.value(),
+                                         &old_value.value()});
+        if (do_property.isErr() || undo_property.isErr()) {
+            // Closed, so the next mutation does not merge into it (#1152).
+            abandonAction(manager.value());
+            return errorJson(500, (do_property.isErr() ? do_property : undo_property).error().message);
+        }
+        auto committed = commitAction(manager.value());
+        if (committed.isErr()) return errorJson(committed.error());
+
+        // Report what it now holds and not what was asked for, the same way
+        // scene_set_property does and for the same reason.
+        auto observed = callObject(material.value(), "ShaderMaterial", "get_shader_parameter",
+                                   2760726917LL, {&uniform_name.value()});
+        if (observed.isErr()) return errorJson(500, observed.error().message);
+        auto observed_json = variantToJson(observed.value(), 0, true);
+        auto old_json = variantToJson(old_value.value(), 0, true);
+        json old_payload = old_json.isOk() ? old_json.value() : json(nullptr);
+        if (isNilVariant(old_value.value())) {
+            // The undo entry above restores nil on purpose, which takes the
+            // override off again rather than pinning the default in its
+            // place. What gets reported is the value that was in effect,
+            // and for a uniform the material did not set that is the
+            // shader's declared default, read the same way the list reads
+            // it.
+            auto fallback = shaderParameterDefault(shader.value(), uniform_name.value());
+            if (fallback.isOk() && !isNilVariant(fallback.value())) {
+                auto encoded = variantToJson(fallback.value(), 0, true);
+                if (encoded.isOk()) old_payload = encoded.value();
+            }
+        }
+        json observed_payload = observed_json.isOk() ? observed_json.value() : json(nullptr);
+        // What was asked for, encoded the way it was actually sent to the
+        // engine. A colour may be spelled {r,g,b} with the alpha left off,
+        // which this tool's own schema documents, and comparing the
+        // observed four keys against the requested three reported every
+        // such write as one that did not land (#618).
+        auto requested_json = variantToJson(new_value.value(), 0, true);
+        const json& requested_payload =
+            requested_json.isOk() ? requested_json.value() : params["value"];
+        // The same disclosure every other open-scene mutator carries. The
+        // change is in the edited scene and its undo history, and is
+        // discarded the same way if the editor closes without saving, so
+        // the absence of scene_saved read as "this one did not need
+        // saving" (#623).
+        return liveSceneMutation({{"status", "success"},
+                                  {"target_node", target_path},
+                                  {"property_name", property},
+                                  {"uniform_name", requested_name},
+                                  {"type", godotVariantTypeName(static_cast<int>(declared_type))},
+                                  {"hint", declared_hint},
+                                  {"value", observed_payload},
+                                  {"requested_value", params["value"]},
+                                  {"old_value", old_payload},
+                                  {"applied", jsonValuesEquivalent(observed_payload, requested_payload)},
+                                  {"undo_redo_registered", true}});
     }
 
-    if (method == "scene.getProperty" || method == "scene.setProperty") {
-        auto root = editedSceneRoot(editor);
-        if (root.isErr()) return errorJson(root.error());
-        return method == "scene.setProperty" ? setSceneProperties(editor, root.value(), params)
-                                             : getSceneProperties(root.value(), params);
+    constexpr int64_t kMaxUniforms = 256;
+    const int64_t reported = std::min<int64_t>(count.value(), kMaxUniforms);
+    auto name_key = makeString("name");
+    auto type_key = makeString("type");
+    auto hint_key = makeString("hint");
+    auto hint_string_key = makeString("hint_string");
+    if (name_key.isErr() || type_key.isErr() || hint_key.isErr() || hint_string_key.isErr()) {
+        return errorJson(500, "Failed to build uniform keys");
     }
 
-    if (method == "scene.instantiateNode") {
-        auto root = editedSceneRoot(editor);
-        if (root.isErr()) return errorJson(root.error());
-        auto parent = resolveNode(root.value(), params.value("parent_path", "/root"));
-        if (parent.isErr()) return errorJson(parent.error());
-        if (auto refused = refuseUnsavableEdit(root.value(), parent.value(),
-                                               params.value("parent_path", "/root"),
+    json listed = json::array();
+    for (int64_t index = 0; index < reported; ++index) {
+        auto index_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
+        if (index_value.isErr()) return errorJson(500, index_value.error().message);
+        auto entry = callVariant(uniforms.value(), "get", {&index_value.value()});
+        if (entry.isErr()) return errorJson(500, entry.error().message);
+        auto name_value = callVariant(entry.value(), "get", {&name_key.value()});
+        if (name_value.isErr()) return errorJson(500, name_value.error().message);
+        const auto name_type = GodotApi::instance().variant_get_type(name_value.value().ptr());
+        if (name_type != GDEXTENSION_VARIANT_TYPE_STRING &&
+            name_type != GDEXTENSION_VARIANT_TYPE_STRING_NAME) {
+            continue;
+        }
+        auto name = stringFromVariant(name_value.value(), name_type);
+        if (name.isErr()) return errorJson(500, name.error().message);
+
+        int64_t declared_type = 0;
+        auto type_value = callVariant(entry.value(), "get", {&type_key.value()});
+        if (type_value.isOk()) {
+            auto declared = scalarFromVariant<int64_t>(type_value.value(),
+                                                       GDEXTENSION_VARIANT_TYPE_INT);
+            if (declared.isOk()) declared_type = declared.value();
+        }
+
+        json uniform = {{"name", name.value()},
+                        {"type", godotVariantTypeName(static_cast<int>(declared_type))},
+                        {"hint", readUniformHint(entry.value(), hint_key.value(),
+                                                 hint_string_key.value())},
+                        {"settable", jsonTypeIsInsidePropertyContract(static_cast<int>(declared_type))}};
+
+        auto uniform_name = makeStringName(name.value());
+        if (uniform_name.isErr()) return errorJson(500, uniform_name.error().message);
+        auto current = callObject(material.value(), "ShaderMaterial", "get_shader_parameter",
+                                  2760726917LL, {&uniform_name.value()});
+        if (current.isErr()) return errorJson(500, current.error().message);
+        // The effective value: the material's override where it has one and
+        // the shader's own declared default otherwise.
+        //
+        // get_shader_parameter alone cannot supply that. In a running game
+        // on 4.5.1, 4.6.2 and 4.7.2 it answers nil for a uniform the
+        // material does not set, so the declared default was reported as no
+        // value at all. The shader keeps its defaults in the rendering
+        // server, and that is where they have to be read from.
+        //
+        // There is still deliberately no flag separating an override from a
+        // default. The same call that answers nil in a game answers with the
+        // default in a 4.7.2 editor, so nil is not evidence of anything and
+        // a flag built on it would be wrong in one context or the other.
+        if (isNilVariant(current.value())) {
+            auto fallback = shaderParameterDefault(shader.value(), uniform_name.value());
+            if (fallback.isOk()) current = std::move(fallback.value());
+        }
+        // Lenient: a uniform of a type this cannot encode is reported by
+        // name and type with a null value, rather than failing the whole
+        // read and leaving the caller with nothing.
+        auto encoded = variantToJson(current.value(), 0, true);
+        // A null value here is not a uniform without one. It is a value
+        // neither the material nor the rendering server could supply, which
+        // is what a session with no renderer looks like.
+        uniform["value"] = encoded.isOk() ? encoded.value() : json(nullptr);
+        listed.push_back(std::move(uniform));
+    }
+
+    result["uniforms"] = std::move(listed);
+    result["uniform_count"] = count.value();
+    result["truncated"] = count.value() > kMaxUniforms;
+    return liveResult(result);
+}
+
+
+json GodotBridge::bridgeSceneProperties(const std::string& method, const json& params, const std::string& /*session_kind*/, GDExtensionObjectPtr editor) {
+    auto root = editedSceneRoot(editor);
+    if (root.isErr()) return errorJson(root.error());
+    return method == "scene.setProperty" ? setSceneProperties(editor, root.value(), params)
+                                         : getSceneProperties(root.value(), params);
+}
+
+
+json GodotBridge::bridgeSceneInstantiateNode(const std::string& /*method*/, const json& params, const std::string& /*session_kind*/, GDExtensionObjectPtr editor) {
+    auto root = editedSceneRoot(editor);
+    if (root.isErr()) return errorJson(root.error());
+    auto parent = resolveNode(root.value(), params.value("parent_path", "/root"));
+    if (parent.isErr()) return errorJson(parent.error());
+    if (auto refused = refuseUnsavableEdit(root.value(), parent.value(),
+                                           params.value("parent_path", "/root"),
+                                           SceneEdit::AddChild)) {
+        return *refused;
+    }
+    const std::string instance_scene_path = params.value("scene_path", "");
+    std::string node_type = params.value("node_type", "");
+    // The tool handler refuses this too, but mutate_scene_tree with
+    // action: "instantiate" forwards straight here without passing through
+    // it. The mutation happens on this side, so the refusal belongs on
+    // this side as well (#471).
+    if (node_type.empty() && instance_scene_path.empty()) {
+        return errorJson(400,
+                         "Name what to instantiate: node_type for a built-in ClassDB "
+                         "type, or scene_path for a res:// .tscn to instance. There is "
+                         "no default, because adding a bare Node to the edited scene is "
+                         "not what an empty request means.");
+    }
+    GDExtensionObjectPtr node = nullptr;
+
+    if (!instance_scene_path.empty()) {
+        // Putting a packed scene in the tree is close to the most common
+        // single operation in Godot editing, and scene_pack_branch produced
+        // scenes nothing in the surface could then consume. The instance is
+        // made the way the editor makes one, so what is saved is an
+        // instance of the scene rather than a copy of its nodes.
+        auto valid_scene = validateResPath(instance_scene_path, ".tscn");
+        if (valid_scene.isErr()) {
+            return errorJson(valid_scene.error());
+        }
+        auto loader = singleton("ResourceLoader");
+        if (loader.isErr()) return errorJson(loader.error());
+        auto scene_path_value = makeString(instance_scene_path);
+        auto packed_hint = makeString("PackedScene");
+        auto cache_mode = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(1));
+        if (scene_path_value.isErr() || packed_hint.isErr() || cache_mode.isErr()) {
+            return errorJson(500, "Failed to construct scene resource arguments");
+        }
+        auto exists_value = callObject(loader.value(), "ResourceLoader", "exists", 4185558881LL,
+                                       {&scene_path_value.value(), &packed_hint.value()});
+        if (exists_value.isErr()) {
+            return errorJson(exists_value.error());
+        }
+        auto scene_exists = scalarFromVariant<GDExtensionBool>(exists_value.value(),
+                                                               GDEXTENSION_VARIANT_TYPE_BOOL);
+        if (scene_exists.isErr()) {
+            return errorJson(scene_exists.error());
+        }
+        if (!scene_exists.value()) {
+            return errorJson(404, "PackedScene not found: " + instance_scene_path);
+        }
+        if (auto refused = refuseInstanceCycle(root.value(), instance_scene_path)) return *refused;
+        auto resource = callObject(loader.value(), "ResourceLoader", "load", 3358495409LL,
+                                   {&scene_path_value.value(), &packed_hint.value(),
+                                    &cache_mode.value()});
+        if (resource.isErr()) return errorJson(resource.error());
+        auto packed = objectFromVariant(resource.value());
+        if (packed.isErr() || !packed.value()) {
+            return errorJson(422, "Resource is not a loadable PackedScene: " + instance_scene_path,
+                                 {{"code", "not_a_packed_scene"}});
+        }
+        auto packed_class = makeString("PackedScene");
+        auto class_value = packed_class.isOk()
+            ? callObject(packed.value(), "Object", "is_class", 3927539163LL,
+                         {&packed_class.value()})
+            : Result<VariantValue>(packed_class.error());
+        auto is_packed = class_value.isOk()
+            ? scalarFromVariant<GDExtensionBool>(class_value.value(),
+                                                 GDEXTENSION_VARIANT_TYPE_BOOL)
+            : Result<GDExtensionBool>(class_value.error());
+        if (is_packed.isErr() || !is_packed.value()) {
+            return is_packed.isErr()
+                ? errorJson(is_packed.error())
+                : errorJson(422, "Resource is not a PackedScene: " + instance_scene_path,
+                                 {{"code", "not_a_packed_scene"}});
+        }
+        // A scene whose root script or dependency is missing answers false
+        // here, and instantiating it anyway returns null and puts the reason
+        // in a console the caller cannot read.
+        auto can_value = callObject(packed.value(), "PackedScene", "can_instantiate",
+                                    36873697LL);
+        if (can_value.isErr()) return errorJson(can_value.error());
+        auto can_instantiate = scalarFromVariant<GDExtensionBool>(
+            can_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+        if (can_instantiate.isErr()) {
+            return errorJson(can_instantiate.error());
+        }
+        if (!can_instantiate.value()) {
+            return errorJson(422, "PackedScene cannot be instantiated, so something it depends "
+                                  "on is missing or failed to load: " + instance_scene_path,
+                             {{"code", "packed_scene_dependencies_missing"}});
+        }
+        // GEN_EDIT_STATE_INSTANCE, which is what the editor's own scene drop
+        // uses. It is the difference between a saved instance of the scene
+        // and a saved copy of the nodes that were in it.
+        auto edit_state = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(1));
+        if (edit_state.isErr()) return errorJson(edit_state.error());
+        auto instance = callObject(packed.value(), "PackedScene", "instantiate", 2628778455LL,
+                                   {&edit_state.value()});
+        if (instance.isErr()) return errorJson(instance.error());
+        auto instance_node = objectFromVariant(instance.value());
+        if (instance_node.isErr() || !instance_node.value()) {
+            return errorJson(500, "Godot returned no node for PackedScene: " + instance_scene_path);
+        }
+        node = instance_node.value();
+        // Report what was made, not what the caller happened to type in
+        // node_type, which this branch does not use.
+        auto instance_class = callObject(node, "Object", "get_class", 201670096LL);
+        auto instance_class_name = instance_class.isOk()
+            ? stringFromVariant(instance_class.value(), GDEXTENSION_VARIANT_TYPE_STRING)
+            : Result<std::string>(instance_class.error());
+        if (instance_class_name.isOk()) node_type = instance_class_name.value();
+    } else {
+        if (!engineHasClass(node_type)) {
+            return errorJson(400, "Godot ClassDB could not instantiate node type: " + node_type +
+                                      ". The engine has no class by that name.");
+        }
+        NativeName type_name(node_type);
+        node = constructObject(type_name.ptr());
+        if (!node) return errorJson(400, "Godot ClassDB could not instantiate node type: " + node_type);
+        auto node_class = makeString("Node");
+        auto is_node_variant = node_class.isOk()
+            ? callObject(node, "Object", "is_class", 3927539163LL, {&node_class.value()})
+            : Result<VariantValue>(node_class.error());
+        auto is_node = is_node_variant.isOk()
+            ? scalarFromVariant<GDExtensionBool>(is_node_variant.value(), GDEXTENSION_VARIANT_TYPE_BOOL)
+            : Result<GDExtensionBool>(is_node_variant.error());
+        if (is_node.isErr() || !is_node.value()) {
+            GodotApi::instance().object_destroy(node);
+            return is_node.isErr()
+                ? errorJson(is_node.error())
+                : errorJson(400, "Godot ClassDB type does not inherit Node: " + node_type);
+        }
+    }
+    if (!params.value("name", "").empty()) {
+        auto name = makeStringName(params.value("name", ""));
+        auto named = name.isOk() ? callObject(node, "Node", "set_name", 3304788590LL, {&name.value()})
+                                 : Result<VariantValue>(name.error());
+        if (named.isErr()) {
+            GodotApi::instance().object_destroy(node);
+            return errorJson(named.error());
+        }
+    }
+    json initial_properties = params.value("properties", json::object());
+    if (!initial_properties.is_object()) {
+        GodotApi::instance().object_destroy(node);
+        return errorJson(400, "properties must be a JSON object");
+    }
+    // What each initial property was set to, as the engine's own Variant,
+    // and what it held before, so the node can be read back once it is in
+    // the tree. scene_set_property has read its write back since it
+    // learned that a commit is not a change; this path never did, so a
+    // player created with a bus that does not exist reported success and
+    // was saved with no bus at all (vibe session nineteen).
+    struct InitialProperty {
+        std::string name;
+        json requested;
+        json written;
+        json before;
+        int hint{0};
+        std::string hint_string;
+    };
+    std::vector<InitialProperty> initial_written;
+    for (auto it = initial_properties.begin(); it != initial_properties.end(); ++it) {
+        auto has_property = objectHasProperty(node, it.key());
+        if (has_property.isErr() || !has_property.value()) {
+            GodotApi::instance().object_destroy(node);
+            return has_property.isErr()
+                ? errorJson(has_property.error())
+                : errorJson(404, "Property not found on new " + node_type + " node: " + it.key());
+        }
+        auto property_name = makeStringName(it.key());
+        if (property_name.isErr()) {
+            GodotApi::instance().object_destroy(node);
+            return errorJson(property_name.error());
+        }
+        auto current_value = callObject(node, "Object", "get", 2760726917LL, {&property_name.value()});
+        if (current_value.isErr()) {
+            GodotApi::instance().object_destroy(node);
+            return errorJson(current_value.error());
+        }
+        auto declared = findPropertyDescriptor(node, it.key());
+        auto property_type =
+            GodotApi::instance().variant_get_type(current_value.value().ptr());
+        std::string declared_class;
+        if (declared.isOk() && declared.value().has_value()) {
+            declared_class = declared.value()->class_name;
+            if (property_type == GDEXTENSION_VARIANT_TYPE_NIL &&
+                declared.value()->declared_type != GDEXTENSION_VARIANT_TYPE_NIL) {
+                property_type =
+                    static_cast<GDExtensionVariantType>(declared.value()->declared_type);
+            }
+        }
+        auto compatible = validateJsonForPropertyType(it.key(), it.value(), property_type);
+        if (compatible.isErr()) {
+            GodotApi::instance().object_destroy(node);
+            return errorJson(compatible.error());
+        }
+        auto property_value = property_type == GDEXTENSION_VARIANT_TYPE_OBJECT
+            ? makeResourceForProperty(it.key(), it.value(), declared_class)
+            : property_type == GDEXTENSION_VARIANT_TYPE_ARRAY
+            ? makeArrayForProperty(it.key(), it.value(), current_value.value())
+            : property_type == GDEXTENSION_VARIANT_TYPE_DICTIONARY
+            ? makeDictionaryForProperty(it.key(), it.value(), current_value.value())
+            : makeJsonVariantForProperty(it.value(), property_type);
+        if (property_value.isErr()) {
+            GodotApi::instance().object_destroy(node);
+            return errorJson(property_value.error());
+        }
+        auto set = callObject(node, "Object", "set", 3776071444LL,
+                              {&property_name.value(), &property_value.value()});
+        if (set.isErr()) {
+            GodotApi::instance().object_destroy(node);
+            return errorJson(set.error());
+        }
+        InitialProperty record;
+        record.name = it.key();
+        record.requested = it.value();
+        // Against the Variant that was sent, not the JSON it came from, for
+        // the reason scene_set_property gives: {r,g,b} comes back with four
+        // keys and a Vector2 in single precision.
+        auto written_json = variantToJson(property_value.value(), 0, true);
+        record.written = written_json.isOk() ? written_json.value() : it.value();
+        auto before_json = variantToJson(current_value.value());
+        record.before = before_json.isOk() ? before_json.value() : json();
+        if (declared.isOk() && declared.value().has_value()) {
+            record.hint = declared.value()->hint;
+            record.hint_string = declared.value()->hint_string;
+        }
+        initial_written.push_back(std::move(record));
+    }
+    auto manager = undoManager(editor);
+    if (manager.isErr()) { GodotApi::instance().object_destroy(node); return errorJson(manager.error()); }
+    auto child = makeObject(node);
+    auto readable = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(1));
+    auto internal = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(0));
+    auto owner = makeObject(root.value());
+    if (child.isErr() || readable.isErr() || internal.isErr() || owner.isErr()) {
+        GodotApi::instance().object_destroy(node);
+        return errorJson(500, "Failed to construct node transaction arguments");
+    }
+    auto logical_parent = logicalPathFromEditedRoot(root.value(), parent.value());
+    if (logical_parent.isErr()) {
+        GodotApi::instance().object_destroy(node);
+        return errorJson(logical_parent.error());
+    }
+    const std::string logical_name = params.value("name", "").empty() ? node_type : params.value("name", "");
+    auto preflight = preflightNodeUndoTransaction();
+    if (preflight.isErr()) {
+        GodotApi::instance().object_destroy(node);
+        return errorJson(preflight.error());
+    }
+    auto action = createAction(manager.value(),
+                               instance_scene_path.empty()
+                                   ? "Didi: instantiate " + node_type
+                                   : "Didi: instantiate " + instance_scene_path,
+                               root.value());
+    if (action.isErr()) { GodotApi::instance().object_destroy(node); return errorJson(action.error()); }
+    auto keep = managerReference(manager.value(), "add_do_reference", node);
+    auto add = managerMethod(manager.value(), "add_do_method", parent.value(), "add_child",
+                             {&child.value(), &readable.value(), &internal.value()});
+    auto own = managerMethod(manager.value(), "add_do_method", node, "set_owner", {&owner.value()});
+    auto remove = managerMethod(manager.value(), "add_undo_method", parent.value(), "remove_child", {&child.value()});
+    if (keep.isErr() || add.isErr() || own.isErr() || remove.isErr()) {
+        abandonAction(manager.value());
+        // add_do_reference hands the node to the undo history, which then
+        // owns it. Destroying it after that would double free when the
+        // history is cleared, so only clean up when the history never
+        // took it. Node is not RefCounted, so nothing else will.
+        if (keep.isErr()) GodotApi::instance().object_destroy(node);
+        return errorJson(500, "Failed to register instantiate UndoRedo transaction");
+    }
+    auto committed = commitAction(manager.value());
+    if (committed.isErr()) return errorJson(committed.error());
+    // Godot uniquifies names on insert: a second Enemy becomes Enemy2. The
+    // name was set before add_child, so the path built from it is a guess.
+    // Read the real one back now that the node is actually in the tree,
+    // otherwise the caller's next scene_set_property hits a sibling.
+    auto actual_path = logicalPathFromEditedRoot(root.value(), node);
+    json result = {{"status", "success"}, {"action", "instantiate_node"},
+                   {"node_type", node_type},
+                   {"node_path", actual_path.isOk()
+                                     ? actual_path.value()
+                                     : logical_parent.value() + "/" + logical_name},
+                   {"undo_redo_registered", true}};
+    // Read back now the node is in the tree, which is what the scene saves.
+    // Only a property that did not land is reported, in scene_set_property's
+    // words, so a call where every one landed costs nothing extra.
+    json not_applied = json::array();
+    for (const auto& record : initial_written) {
+        auto name = makeStringName(record.name);
+        if (name.isErr()) continue;
+        auto observed = callObject(node, "Object", "get", 2760726917LL, {&name.value()});
+        if (observed.isErr()) continue;
+        auto observed_json = variantToJson(observed.value());
+        if (observed_json.isErr() || jsonValuesEquivalent(observed_json.value(), record.written)) {
+            continue;
+        }
+        json entry = notAppliedReport(observed_json.value(), record.before, record.hint,
+                                      record.hint_string);
+        entry["property_name"] = record.name;
+        entry["requested_value"] = record.requested;
+        entry["value"] = observed_json.value();
+        not_applied.push_back(std::move(entry));
+    }
+    if (!not_applied.empty()) result["properties_not_applied"] = std::move(not_applied);
+    // Say when the engine did not use the name it was given.
+    //
+    // Godot forbids . : @ / % and " in a node name and substitutes rather
+    // than refusing, and it uniquifies a duplicate. Reporting the real path
+    // is the important half and was already right; what was missing was any
+    // field saying a substitution happened, so an agent that named a node
+    // after a class_name, a filename or a JSON key then built its next
+    // NodePath from the name it chose, and the 404 that followed had its
+    // reason four responses back (#710). An empty or absent name asks the
+    // engine to name the node, so it is not a substitution.
+    const std::string requested_name = params.value("name", "");
+    if (actual_path.isOk() && !requested_name.empty()) {
+        const auto slash = actual_path.value().find_last_of('/');
+        const std::string engine_name = slash == std::string::npos
+                                            ? actual_path.value()
+                                            : actual_path.value().substr(slash + 1);
+        result["node_name"] = engine_name;
+        if (engine_name != requested_name) {
+            result["requested_name"] = requested_name;
+            result["name_substituted"] = true;
+        }
+    }
+    // Which scene this is an instance of, so the caller can tell an
+    // instance apart from a node of the same class that merely looks like
+    // one in the tree.
+    if (!instance_scene_path.empty()) result["scene_path"] = instance_scene_path;
+    if (actual_path.isErr()) result["node_path_verified"] = false;
+    return liveSceneMutation(result);
+}
+
+
+json GodotBridge::bridgeSceneNodeEdits(const std::string& method, const json& params, const std::string& /*session_kind*/, GDExtensionObjectPtr editor) {
+    auto root = editedSceneRoot(editor);
+    if (root.isErr()) return errorJson(root.error());
+    auto node = resolveNode(root.value(), params.value("target_node", ""));
+    if (node.isErr()) return errorJson(node.error());
+    if (node.value() == root.value()) return errorJson(400, "Cannot mutate the edited scene root");
+    if (auto refused = refuseUnsavableEdit(root.value(), node.value(),
+                                           params.value("target_node", ""),
+                                           SceneEdit::Structure)) {
+        return *refused;
+    }
+    auto parent_variant = callObject(node.value(), "Node", "get_parent", 3160264692LL);
+    if (parent_variant.isErr()) return errorJson(parent_variant.error());
+    auto parent = objectFromVariant(parent_variant.value());
+    if (parent.isErr() || !parent.value()) return errorJson(400, "Cannot mutate the edited scene root");
+    auto include_internal = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(0));
+    if (include_internal.isErr()) return errorJson(include_internal.error());
+    auto old_index = callObject(node.value(), "Node", "get_index", 894402480LL, {&include_internal.value()});
+    if (old_index.isErr()) return errorJson(old_index.error());
+    // Where the node was, read before anything moves it, so the change
+    // journal can say what a removal or a reparent replaced (#1151).
+    json before_node = json::object();
+    if (auto path = logicalPathFromEditedRoot(root.value(), node.value()); path.isOk()) {
+        before_node["path"] = path.value();
+    }
+    if (auto path = logicalPathFromEditedRoot(root.value(), parent.value()); path.isOk()) {
+        before_node["parent"] = path.value();
+    }
+    if (auto index = scalarFromVariant<int64_t>(old_index.value(), GDEXTENSION_VARIANT_TYPE_INT); index.isOk()) {
+        before_node["index"] = index.value();
+    }
+    before_node["type"] = nodeClassName(node.value());
+    auto manager = undoManager(editor);
+    if (manager.isErr()) return errorJson(manager.error());
+    auto child = makeObject(node.value());
+    auto readable = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(1));
+    auto internal = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(0));
+    if (child.isErr() || readable.isErr() || internal.isErr()) return errorJson(500, "Failed to construct scene transaction arguments");
+
+    if (method == "scene.removeNode") {
+        auto preflight = preflightNodeUndoTransaction();
+        if (preflight.isErr()) return errorJson(preflight.error());
+        auto action = createAction(manager.value(), "Didi: remove node", root.value());
+        auto keep = managerReference(manager.value(), "add_undo_reference", node.value());
+        auto remove = managerMethod(manager.value(), "add_do_method", parent.value(), "remove_child", {&child.value()});
+        auto restore = managerMethod(manager.value(), "add_undo_method", parent.value(), "add_child",
+                                     {&child.value(), &readable.value(), &internal.value()});
+        auto restore_index = managerMethod(manager.value(), "add_undo_method", parent.value(), "move_child",
+                                           {&child.value(), &old_index.value()});
+        // Godot clears the owner of every node whose owner is no longer an
+        // ancestor when a branch leaves the tree, so the undo put the node
+        // back without its ownership and the next save would have dropped
+        // it, and every mutation after the undo now refuses it as not
+        // owned. The editor's own delete restores owners on undo, and so
+        // does this. Registered after add_child, because undo operations
+        // run in the order they were added and set_owner needs the node in
+        // the tree.
+        auto owned = collectNodesOwnedBy(root.value(), node.value());
+        auto owner_value = makeObject(root.value());
+        bool restore_owners = owned.isOk() && owner_value.isOk();
+        if (restore_owners) {
+            for (auto owned_node : owned.value()) {
+                auto restore_owner = managerMethod(manager.value(), "add_undo_method", owned_node,
+                                                   "set_owner", {&owner_value.value()});
+                if (restore_owner.isErr()) {
+                    restore_owners = false;
+                    break;
+                }
+            }
+        }
+        if (action.isErr() || keep.isErr() || remove.isErr() || restore_index.isErr() || restore.isErr() ||
+            !restore_owners) {
+            if (action.isOk()) abandonAction(manager.value());
+            return errorJson(500, "Failed to register remove UndoRedo transaction");
+        }
+        auto committed = commitAction(manager.value());
+        if (committed.isErr()) return errorJson(committed.error());
+        // Read after the commit: the path the call named no longer
+        // resolves. The answer used to be `action` alone, with nothing read
+        // after the change (#1019).
+        const std::string target = params.value("target_node", "");
+        if (resolveNode(root.value(), target).isOk()) {
+            return errorJson(500, "The remove was committed and " + target + " still resolves");
+        }
+        return liveSceneMutation({{"status", "success"}, {"action", "remove_node"}, {"exists", false},
+                                  {"before", std::move(before_node)},
+                                  {"undo_redo_registered", true}});
+    }
+
+    if (method == "scene.reparentNode") {
+        auto new_parent = resolveNode(root.value(), params.value("new_parent_path", ""));
+        if (new_parent.isErr()) return errorJson(new_parent.error());
+        if (auto refused = refuseUnsavableEdit(root.value(), new_parent.value(),
+                                               params.value("new_parent_path", ""),
                                                SceneEdit::AddChild)) {
             return *refused;
         }
-        const std::string instance_scene_path = params.value("scene_path", "");
-        std::string node_type = params.value("node_type", "");
-        // The tool handler refuses this too, but mutate_scene_tree with
-        // action: "instantiate" forwards straight here without passing through
-        // it. The mutation happens on this side, so the refusal belongs on
-        // this side as well (#471).
-        if (node_type.empty() && instance_scene_path.empty()) {
-            return errorJson(400,
-                             "Name what to instantiate: node_type for a built-in ClassDB "
-                             "type, or scene_path for a res:// .tscn to instance. There is "
-                             "no default, because adding a bare Node to the edited scene is "
-                             "not what an empty request means.");
+        if (new_parent.value() == node.value()) {
+            return errorJson(400, "Cannot reparent a node to itself");
         }
-        GDExtensionObjectPtr node = nullptr;
-
-        if (!instance_scene_path.empty()) {
-            // Putting a packed scene in the tree is close to the most common
-            // single operation in Godot editing, and scene_pack_branch produced
-            // scenes nothing in the surface could then consume. The instance is
-            // made the way the editor makes one, so what is saved is an
-            // instance of the scene rather than a copy of its nodes.
-            auto valid_scene = validateResPath(instance_scene_path, ".tscn");
-            if (valid_scene.isErr()) {
-                return errorJson(valid_scene.error());
-            }
-            auto loader = singleton("ResourceLoader");
-            if (loader.isErr()) return errorJson(loader.error());
-            auto scene_path_value = makeString(instance_scene_path);
-            auto packed_hint = makeString("PackedScene");
-            auto cache_mode = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(1));
-            if (scene_path_value.isErr() || packed_hint.isErr() || cache_mode.isErr()) {
-                return errorJson(500, "Failed to construct scene resource arguments");
-            }
-            auto exists_value = callObject(loader.value(), "ResourceLoader", "exists", 4185558881LL,
-                                           {&scene_path_value.value(), &packed_hint.value()});
-            if (exists_value.isErr()) {
-                return errorJson(exists_value.error());
-            }
-            auto scene_exists = scalarFromVariant<GDExtensionBool>(exists_value.value(),
-                                                                   GDEXTENSION_VARIANT_TYPE_BOOL);
-            if (scene_exists.isErr()) {
-                return errorJson(scene_exists.error());
-            }
-            if (!scene_exists.value()) {
-                return errorJson(404, "PackedScene not found: " + instance_scene_path);
-            }
-            if (auto refused = refuseInstanceCycle(root.value(), instance_scene_path)) return *refused;
-            auto resource = callObject(loader.value(), "ResourceLoader", "load", 3358495409LL,
-                                       {&scene_path_value.value(), &packed_hint.value(),
-                                        &cache_mode.value()});
-            if (resource.isErr()) return errorJson(resource.error());
-            auto packed = objectFromVariant(resource.value());
-            if (packed.isErr() || !packed.value()) {
-                return errorJson(422, "Resource is not a loadable PackedScene: " + instance_scene_path,
-                                     {{"code", "not_a_packed_scene"}});
-            }
-            auto packed_class = makeString("PackedScene");
-            auto class_value = packed_class.isOk()
-                ? callObject(packed.value(), "Object", "is_class", 3927539163LL,
-                             {&packed_class.value()})
-                : Result<VariantValue>(packed_class.error());
-            auto is_packed = class_value.isOk()
-                ? scalarFromVariant<GDExtensionBool>(class_value.value(),
-                                                     GDEXTENSION_VARIANT_TYPE_BOOL)
-                : Result<GDExtensionBool>(class_value.error());
-            if (is_packed.isErr() || !is_packed.value()) {
-                return is_packed.isErr()
-                    ? errorJson(is_packed.error())
-                    : errorJson(422, "Resource is not a PackedScene: " + instance_scene_path,
-                                     {{"code", "not_a_packed_scene"}});
-            }
-            // A scene whose root script or dependency is missing answers false
-            // here, and instantiating it anyway returns null and puts the reason
-            // in a console the caller cannot read.
-            auto can_value = callObject(packed.value(), "PackedScene", "can_instantiate",
-                                        36873697LL);
-            if (can_value.isErr()) return errorJson(can_value.error());
-            auto can_instantiate = scalarFromVariant<GDExtensionBool>(
-                can_value.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
-            if (can_instantiate.isErr()) {
-                return errorJson(can_instantiate.error());
-            }
-            if (!can_instantiate.value()) {
-                return errorJson(422, "PackedScene cannot be instantiated, so something it depends "
-                                      "on is missing or failed to load: " + instance_scene_path,
-                                 {{"code", "packed_scene_dependencies_missing"}});
-            }
-            // GEN_EDIT_STATE_INSTANCE, which is what the editor's own scene drop
-            // uses. It is the difference between a saved instance of the scene
-            // and a saved copy of the nodes that were in it.
-            auto edit_state = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(1));
-            if (edit_state.isErr()) return errorJson(edit_state.error());
-            auto instance = callObject(packed.value(), "PackedScene", "instantiate", 2628778455LL,
-                                       {&edit_state.value()});
-            if (instance.isErr()) return errorJson(instance.error());
-            auto instance_node = objectFromVariant(instance.value());
-            if (instance_node.isErr() || !instance_node.value()) {
-                return errorJson(500, "Godot returned no node for PackedScene: " + instance_scene_path);
-            }
-            node = instance_node.value();
-            // Report what was made, not what the caller happened to type in
-            // node_type, which this branch does not use.
-            auto instance_class = callObject(node, "Object", "get_class", 201670096LL);
-            auto instance_class_name = instance_class.isOk()
-                ? stringFromVariant(instance_class.value(), GDEXTENSION_VARIANT_TYPE_STRING)
-                : Result<std::string>(instance_class.error());
-            if (instance_class_name.isOk()) node_type = instance_class_name.value();
-        } else {
-            if (!engineHasClass(node_type)) {
-                return errorJson(400, "Godot ClassDB could not instantiate node type: " + node_type +
-                                          ". The engine has no class by that name.");
-            }
-            NativeName type_name(node_type);
-            node = constructObject(type_name.ptr());
-            if (!node) return errorJson(400, "Godot ClassDB could not instantiate node type: " + node_type);
-            auto node_class = makeString("Node");
-            auto is_node_variant = node_class.isOk()
-                ? callObject(node, "Object", "is_class", 3927539163LL, {&node_class.value()})
-                : Result<VariantValue>(node_class.error());
-            auto is_node = is_node_variant.isOk()
-                ? scalarFromVariant<GDExtensionBool>(is_node_variant.value(), GDEXTENSION_VARIANT_TYPE_BOOL)
-                : Result<GDExtensionBool>(is_node_variant.error());
-            if (is_node.isErr() || !is_node.value()) {
-                GodotApi::instance().object_destroy(node);
-                return is_node.isErr()
-                    ? errorJson(is_node.error())
-                    : errorJson(400, "Godot ClassDB type does not inherit Node: " + node_type);
-            }
+        auto new_parent_value = makeObject(new_parent.value());
+        auto old_parent_value = makeObject(parent.value());
+        auto keep_global = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL,
+                                      static_cast<GDExtensionBool>(params.value("keep_global_transform", true)));
+        if (new_parent_value.isErr() || old_parent_value.isErr() || keep_global.isErr()) {
+            return errorJson(500, "Failed to construct reparent transaction arguments");
         }
-        if (!params.value("name", "").empty()) {
-            auto name = makeStringName(params.value("name", ""));
-            auto named = name.isOk() ? callObject(node, "Node", "set_name", 3304788590LL, {&name.value()})
-                                     : Result<VariantValue>(name.error());
-            if (named.isErr()) {
-                GodotApi::instance().object_destroy(node);
-                return errorJson(named.error());
-            }
+        auto descendant_check = callObject(node.value(), "Node", "is_ancestor_of", 3093956946LL,
+                                           {&new_parent_value.value()});
+        if (descendant_check.isErr()) {
+            return errorJson(descendant_check.error());
         }
-        json initial_properties = params.value("properties", json::object());
-        if (!initial_properties.is_object()) {
-            GodotApi::instance().object_destroy(node);
-            return errorJson(400, "properties must be a JSON object");
+        auto new_parent_is_descendant = scalarFromVariant<GDExtensionBool>(
+            descendant_check.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+        if (new_parent_is_descendant.isErr()) {
+            return errorJson(new_parent_is_descendant.error());
         }
-        // What each initial property was set to, as the engine's own Variant,
-        // and what it held before, so the node can be read back once it is in
-        // the tree. scene_set_property has read its write back since it
-        // learned that a commit is not a change; this path never did, so a
-        // player created with a bus that does not exist reported success and
-        // was saved with no bus at all (vibe session nineteen).
-        struct InitialProperty {
-            std::string name;
-            json requested;
-            json written;
-            json before;
-            int hint{0};
-            std::string hint_string;
-        };
-        std::vector<InitialProperty> initial_written;
-        for (auto it = initial_properties.begin(); it != initial_properties.end(); ++it) {
-            auto has_property = objectHasProperty(node, it.key());
-            if (has_property.isErr() || !has_property.value()) {
-                GodotApi::instance().object_destroy(node);
-                return has_property.isErr()
-                    ? errorJson(has_property.error())
-                    : errorJson(404, "Property not found on new " + node_type + " node: " + it.key());
-            }
-            auto property_name = makeStringName(it.key());
-            if (property_name.isErr()) {
-                GodotApi::instance().object_destroy(node);
-                return errorJson(property_name.error());
-            }
-            auto current_value = callObject(node, "Object", "get", 2760726917LL, {&property_name.value()});
-            if (current_value.isErr()) {
-                GodotApi::instance().object_destroy(node);
-                return errorJson(current_value.error());
-            }
-            auto declared = findPropertyDescriptor(node, it.key());
-            auto property_type =
-                GodotApi::instance().variant_get_type(current_value.value().ptr());
-            std::string declared_class;
-            if (declared.isOk() && declared.value().has_value()) {
-                declared_class = declared.value()->class_name;
-                if (property_type == GDEXTENSION_VARIANT_TYPE_NIL &&
-                    declared.value()->declared_type != GDEXTENSION_VARIANT_TYPE_NIL) {
-                    property_type =
-                        static_cast<GDExtensionVariantType>(declared.value()->declared_type);
-                }
-            }
-            auto compatible = validateJsonForPropertyType(it.key(), it.value(), property_type);
-            if (compatible.isErr()) {
-                GodotApi::instance().object_destroy(node);
-                return errorJson(compatible.error());
-            }
-            auto property_value = property_type == GDEXTENSION_VARIANT_TYPE_OBJECT
-                ? makeResourceForProperty(it.key(), it.value(), declared_class)
-                : property_type == GDEXTENSION_VARIANT_TYPE_ARRAY
-                ? makeArrayForProperty(it.key(), it.value(), current_value.value())
-                : property_type == GDEXTENSION_VARIANT_TYPE_DICTIONARY
-                ? makeDictionaryForProperty(it.key(), it.value(), current_value.value())
-                : makeJsonVariantForProperty(it.value(), property_type);
-            if (property_value.isErr()) {
-                GodotApi::instance().object_destroy(node);
-                return errorJson(property_value.error());
-            }
-            auto set = callObject(node, "Object", "set", 3776071444LL,
-                                  {&property_name.value(), &property_value.value()});
-            if (set.isErr()) {
-                GodotApi::instance().object_destroy(node);
-                return errorJson(set.error());
-            }
-            InitialProperty record;
-            record.name = it.key();
-            record.requested = it.value();
-            // Against the Variant that was sent, not the JSON it came from, for
-            // the reason scene_set_property gives: {r,g,b} comes back with four
-            // keys and a Vector2 in single precision.
-            auto written_json = variantToJson(property_value.value(), 0, true);
-            record.written = written_json.isOk() ? written_json.value() : it.value();
-            auto before_json = variantToJson(current_value.value());
-            record.before = before_json.isOk() ? before_json.value() : json();
-            if (declared.isOk() && declared.value().has_value()) {
-                record.hint = declared.value()->hint;
-                record.hint_string = declared.value()->hint_string;
-            }
-            initial_written.push_back(std::move(record));
+        if (new_parent_is_descendant.value()) {
+            return errorJson(400, "Cannot reparent a node beneath one of its descendants");
         }
-        auto manager = undoManager(editor);
-        if (manager.isErr()) { GodotApi::instance().object_destroy(node); return errorJson(manager.error()); }
-        auto child = makeObject(node);
-        auto readable = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(1));
-        auto internal = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(0));
-        auto owner = makeObject(root.value());
-        if (child.isErr() || readable.isErr() || internal.isErr() || owner.isErr()) {
-            GodotApi::instance().object_destroy(node);
-            return errorJson(500, "Failed to construct node transaction arguments");
-        }
-        auto logical_parent = logicalPathFromEditedRoot(root.value(), parent.value());
-        if (logical_parent.isErr()) {
-            GodotApi::instance().object_destroy(node);
-            return errorJson(logical_parent.error());
-        }
-        const std::string logical_name = params.value("name", "").empty() ? node_type : params.value("name", "");
+        // Node.reparent adds the node without asking for a readable name,
+        // so a parent that already had a child of that name gave it one
+        // like @Node3D@20131. Setting the same name again once it has moved
+        // makes Godot pick a readable one, Twin2, as the editor's own
+        // reparent does, and setting it back on undo restores it (#1126).
+        auto original_name = nodeString(node.value(), "get_name", 2002593661LL);
+        if (original_name.isErr()) return errorJson(original_name.error());
+        auto name_value = makeStringName(original_name.value());
+        if (name_value.isErr()) return errorJson(name_value.error());
         auto preflight = preflightNodeUndoTransaction();
-        if (preflight.isErr()) {
-            GodotApi::instance().object_destroy(node);
-            return errorJson(preflight.error());
-        }
-        auto action = createAction(manager.value(),
-                                   instance_scene_path.empty()
-                                       ? "Didi: instantiate " + node_type
-                                       : "Didi: instantiate " + instance_scene_path,
-                                   root.value());
-        if (action.isErr()) { GodotApi::instance().object_destroy(node); return errorJson(action.error()); }
-        auto keep = managerReference(manager.value(), "add_do_reference", node);
-        auto add = managerMethod(manager.value(), "add_do_method", parent.value(), "add_child",
-                                 {&child.value(), &readable.value(), &internal.value()});
-        auto own = managerMethod(manager.value(), "add_do_method", node, "set_owner", {&owner.value()});
-        auto remove = managerMethod(manager.value(), "add_undo_method", parent.value(), "remove_child", {&child.value()});
-        if (keep.isErr() || add.isErr() || own.isErr() || remove.isErr()) {
+        if (preflight.isErr()) return errorJson(preflight.error());
+        auto action = createAction(manager.value(), "Didi: reparent node", root.value());
+        if (action.isErr()) return errorJson(action.error());
+        auto move = managerMethod(manager.value(), "add_do_method", node.value(), "reparent",
+                                  {&new_parent_value.value(), &keep_global.value()});
+        auto rename = managerMethod(manager.value(), "add_do_method", node.value(), "set_name",
+                                    {&name_value.value()});
+        auto restore = managerMethod(manager.value(), "add_undo_method", node.value(), "reparent",
+                                     {&old_parent_value.value(), &keep_global.value()});
+        auto restore_name = managerMethod(manager.value(), "add_undo_method", node.value(), "set_name",
+                                          {&name_value.value()});
+        auto restore_index = managerMethod(manager.value(), "add_undo_method", parent.value(), "move_child",
+                                           {&child.value(), &old_index.value()});
+        if (move.isErr() || rename.isErr() || restore.isErr() || restore_name.isErr() || restore_index.isErr()) {
             abandonAction(manager.value());
-            // add_do_reference hands the node to the undo history, which then
-            // owns it. Destroying it after that would double free when the
-            // history is cleared, so only clean up when the history never
-            // took it. Node is not RefCounted, so nothing else will.
-            if (keep.isErr()) GodotApi::instance().object_destroy(node);
-            return errorJson(500, "Failed to register instantiate UndoRedo transaction");
+            return errorJson(500, "Failed to register reparent UndoRedo transaction");
         }
         auto committed = commitAction(manager.value());
         if (committed.isErr()) return errorJson(committed.error());
-        // Godot uniquifies names on insert: a second Enemy becomes Enemy2. The
-        // name was set before add_child, so the path built from it is a guess.
-        // Read the real one back now that the node is actually in the tree,
-        // otherwise the caller's next scene_set_property hits a sibling.
-        auto actual_path = logicalPathFromEditedRoot(root.value(), node);
-        json result = {{"status", "success"}, {"action", "instantiate_node"},
-                       {"node_type", node_type},
-                       {"node_path", actual_path.isOk()
-                                         ? actual_path.value()
-                                         : logical_parent.value() + "/" + logical_name},
-                       {"undo_redo_registered", true}};
-        // Read back now the node is in the tree, which is what the scene saves.
-        // Only a property that did not land is reported, in scene_set_property's
-        // words, so a call where every one landed costs nothing extra.
-        json not_applied = json::array();
-        for (const auto& record : initial_written) {
-            auto name = makeStringName(record.name);
-            if (name.isErr()) continue;
-            auto observed = callObject(node, "Object", "get", 2760726917LL, {&name.value()});
-            if (observed.isErr()) continue;
-            auto observed_json = variantToJson(observed.value());
-            if (observed_json.isErr() || jsonValuesEquivalent(observed_json.value(), record.written)) {
-                continue;
-            }
-            json entry = notAppliedReport(observed_json.value(), record.before, record.hint,
-                                          record.hint_string);
-            entry["property_name"] = record.name;
-            entry["requested_value"] = record.requested;
-            entry["value"] = observed_json.value();
-            not_applied.push_back(std::move(entry));
+        // Where the node is now, read from the node after the commit. The
+        // answer used to be `action` alone, so the caller had to guess the
+        // new path to reach the node again (#1019).
+        auto moved_parent_value = callObject(node.value(), "Node", "get_parent", 3160264692LL);
+        auto moved_parent = moved_parent_value.isOk() ? objectFromVariant(moved_parent_value.value())
+                                                      : Result<GDExtensionObjectPtr>(moved_parent_value.error());
+        if (moved_parent.isErr() || moved_parent.value() != new_parent.value()) {
+            const std::string wanted_parent = params.value("new_parent_path", std::string());
+            return errorJson(500, "The reparent was committed and the node is not under " +
+                                      wanted_parent + " afterwards");
         }
-        if (!not_applied.empty()) result["properties_not_applied"] = std::move(not_applied);
-        // Say when the engine did not use the name it was given.
-        //
-        // Godot forbids . : @ / % and " in a node name and substitutes rather
-        // than refusing, and it uniquifies a duplicate. Reporting the real path
-        // is the important half and was already right; what was missing was any
-        // field saying a substitution happened, so an agent that named a node
-        // after a class_name, a filename or a JSON key then built its next
-        // NodePath from the name it chose, and the 404 that followed had its
-        // reason four responses back (#710). An empty or absent name asks the
-        // engine to name the node, so it is not a substitution.
-        const std::string requested_name = params.value("name", "");
-        if (actual_path.isOk() && !requested_name.empty()) {
-            const auto slash = actual_path.value().find_last_of('/');
-            const std::string engine_name = slash == std::string::npos
-                                                ? actual_path.value()
-                                                : actual_path.value().substr(slash + 1);
-            result["node_name"] = engine_name;
-            if (engine_name != requested_name) {
-                result["requested_name"] = requested_name;
+        auto moved_path = logicalPathFromEditedRoot(root.value(), node.value());
+        if (moved_path.isErr()) return errorJson(moved_path.error());
+        json result = {{"status", "success"}, {"action", "reparent_node"},
+                       {"node_path", moved_path.value()}, {"undo_redo_registered", true}};
+        before_node.erase("index");
+        before_node.erase("type");
+        result["before"] = std::move(before_node);
+        // In scene_instantiate_node's words, so a caller building its next
+        // path from the old name learns why it no longer resolves.
+        auto moved_name = nodeString(node.value(), "get_name", 2002593661LL);
+        if (moved_name.isOk()) {
+            result["node_name"] = moved_name.value();
+            if (moved_name.value() != original_name.value()) {
+                result["requested_name"] = original_name.value();
                 result["name_substituted"] = true;
             }
         }
-        // Which scene this is an instance of, so the caller can tell an
-        // instance apart from a node of the same class that merely looks like
-        // one in the tree.
-        if (!instance_scene_path.empty()) result["scene_path"] = instance_scene_path;
-        if (actual_path.isErr()) result["node_path_verified"] = false;
-        return liveSceneMutation(result);
+        return liveSceneMutation(std::move(result));
     }
 
-    if (method == "scene.removeNode" || method == "scene.duplicateNode" || method == "scene.reparentNode") {
-        auto root = editedSceneRoot(editor);
-        if (root.isErr()) return errorJson(root.error());
-        auto node = resolveNode(root.value(), params.value("target_node", ""));
-        if (node.isErr()) return errorJson(node.error());
-        if (node.value() == root.value()) return errorJson(400, "Cannot mutate the edited scene root");
-        if (auto refused = refuseUnsavableEdit(root.value(), node.value(),
-                                               params.value("target_node", ""),
-                                               SceneEdit::Structure)) {
-            return *refused;
-        }
-        auto parent_variant = callObject(node.value(), "Node", "get_parent", 3160264692LL);
-        if (parent_variant.isErr()) return errorJson(parent_variant.error());
-        auto parent = objectFromVariant(parent_variant.value());
-        if (parent.isErr() || !parent.value()) return errorJson(400, "Cannot mutate the edited scene root");
-        auto include_internal = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(0));
-        if (include_internal.isErr()) return errorJson(include_internal.error());
-        auto old_index = callObject(node.value(), "Node", "get_index", 894402480LL, {&include_internal.value()});
-        if (old_index.isErr()) return errorJson(old_index.error());
-        // Where the node was, read before anything moves it, so the change
-        // journal can say what a removal or a reparent replaced (#1151).
-        json before_node = json::object();
-        if (auto path = logicalPathFromEditedRoot(root.value(), node.value()); path.isOk()) {
-            before_node["path"] = path.value();
-        }
-        if (auto path = logicalPathFromEditedRoot(root.value(), parent.value()); path.isOk()) {
-            before_node["parent"] = path.value();
-        }
-        if (auto index = scalarFromVariant<int64_t>(old_index.value(), GDEXTENSION_VARIANT_TYPE_INT); index.isOk()) {
-            before_node["index"] = index.value();
-        }
-        before_node["type"] = nodeClassName(node.value());
-        auto manager = undoManager(editor);
-        if (manager.isErr()) return errorJson(manager.error());
-        auto child = makeObject(node.value());
-        auto readable = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(1));
-        auto internal = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(0));
-        if (child.isErr() || readable.isErr() || internal.isErr()) return errorJson(500, "Failed to construct scene transaction arguments");
-
-        if (method == "scene.removeNode") {
-            auto preflight = preflightNodeUndoTransaction();
-            if (preflight.isErr()) return errorJson(preflight.error());
-            auto action = createAction(manager.value(), "Didi: remove node", root.value());
-            auto keep = managerReference(manager.value(), "add_undo_reference", node.value());
-            auto remove = managerMethod(manager.value(), "add_do_method", parent.value(), "remove_child", {&child.value()});
-            auto restore = managerMethod(manager.value(), "add_undo_method", parent.value(), "add_child",
-                                         {&child.value(), &readable.value(), &internal.value()});
-            auto restore_index = managerMethod(manager.value(), "add_undo_method", parent.value(), "move_child",
-                                               {&child.value(), &old_index.value()});
-            // Godot clears the owner of every node whose owner is no longer an
-            // ancestor when a branch leaves the tree, so the undo put the node
-            // back without its ownership and the next save would have dropped
-            // it, and every mutation after the undo now refuses it as not
-            // owned. The editor's own delete restores owners on undo, and so
-            // does this. Registered after add_child, because undo operations
-            // run in the order they were added and set_owner needs the node in
-            // the tree.
-            auto owned = collectNodesOwnedBy(root.value(), node.value());
-            auto owner_value = makeObject(root.value());
-            bool restore_owners = owned.isOk() && owner_value.isOk();
-            if (restore_owners) {
-                for (auto owned_node : owned.value()) {
-                    auto restore_owner = managerMethod(manager.value(), "add_undo_method", owned_node,
-                                                       "set_owner", {&owner_value.value()});
-                    if (restore_owner.isErr()) {
-                        restore_owners = false;
-                        break;
-                    }
-                }
-            }
-            if (action.isErr() || keep.isErr() || remove.isErr() || restore_index.isErr() || restore.isErr() ||
-                !restore_owners) {
-                if (action.isOk()) abandonAction(manager.value());
-                return errorJson(500, "Failed to register remove UndoRedo transaction");
-            }
-            auto committed = commitAction(manager.value());
-            if (committed.isErr()) return errorJson(committed.error());
-            // Read after the commit: the path the call named no longer
-            // resolves. The answer used to be `action` alone, with nothing read
-            // after the change (#1019).
-            const std::string target = params.value("target_node", "");
-            if (resolveNode(root.value(), target).isOk()) {
-                return errorJson(500, "The remove was committed and " + target + " still resolves");
-            }
-            return liveSceneMutation({{"status", "success"}, {"action", "remove_node"}, {"exists", false},
-                                      {"before", std::move(before_node)},
-                                      {"undo_redo_registered", true}});
-        }
-
-        if (method == "scene.reparentNode") {
-            auto new_parent = resolveNode(root.value(), params.value("new_parent_path", ""));
-            if (new_parent.isErr()) return errorJson(new_parent.error());
-            if (auto refused = refuseUnsavableEdit(root.value(), new_parent.value(),
-                                                   params.value("new_parent_path", ""),
-                                                   SceneEdit::AddChild)) {
-                return *refused;
-            }
-            if (new_parent.value() == node.value()) {
-                return errorJson(400, "Cannot reparent a node to itself");
-            }
-            auto new_parent_value = makeObject(new_parent.value());
-            auto old_parent_value = makeObject(parent.value());
-            auto keep_global = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL,
-                                          static_cast<GDExtensionBool>(params.value("keep_global_transform", true)));
-            if (new_parent_value.isErr() || old_parent_value.isErr() || keep_global.isErr()) {
-                return errorJson(500, "Failed to construct reparent transaction arguments");
-            }
-            auto descendant_check = callObject(node.value(), "Node", "is_ancestor_of", 3093956946LL,
-                                               {&new_parent_value.value()});
-            if (descendant_check.isErr()) {
-                return errorJson(descendant_check.error());
-            }
-            auto new_parent_is_descendant = scalarFromVariant<GDExtensionBool>(
-                descendant_check.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
-            if (new_parent_is_descendant.isErr()) {
-                return errorJson(new_parent_is_descendant.error());
-            }
-            if (new_parent_is_descendant.value()) {
-                return errorJson(400, "Cannot reparent a node beneath one of its descendants");
-            }
-            // Node.reparent adds the node without asking for a readable name,
-            // so a parent that already had a child of that name gave it one
-            // like @Node3D@20131. Setting the same name again once it has moved
-            // makes Godot pick a readable one, Twin2, as the editor's own
-            // reparent does, and setting it back on undo restores it (#1126).
-            auto original_name = nodeString(node.value(), "get_name", 2002593661LL);
-            if (original_name.isErr()) return errorJson(original_name.error());
-            auto name_value = makeStringName(original_name.value());
-            if (name_value.isErr()) return errorJson(name_value.error());
-            auto preflight = preflightNodeUndoTransaction();
-            if (preflight.isErr()) return errorJson(preflight.error());
-            auto action = createAction(manager.value(), "Didi: reparent node", root.value());
-            if (action.isErr()) return errorJson(action.error());
-            auto move = managerMethod(manager.value(), "add_do_method", node.value(), "reparent",
-                                      {&new_parent_value.value(), &keep_global.value()});
-            auto rename = managerMethod(manager.value(), "add_do_method", node.value(), "set_name",
-                                        {&name_value.value()});
-            auto restore = managerMethod(manager.value(), "add_undo_method", node.value(), "reparent",
-                                         {&old_parent_value.value(), &keep_global.value()});
-            auto restore_name = managerMethod(manager.value(), "add_undo_method", node.value(), "set_name",
-                                              {&name_value.value()});
-            auto restore_index = managerMethod(manager.value(), "add_undo_method", parent.value(), "move_child",
-                                               {&child.value(), &old_index.value()});
-            if (move.isErr() || rename.isErr() || restore.isErr() || restore_name.isErr() || restore_index.isErr()) {
-                abandonAction(manager.value());
-                return errorJson(500, "Failed to register reparent UndoRedo transaction");
-            }
-            auto committed = commitAction(manager.value());
-            if (committed.isErr()) return errorJson(committed.error());
-            // Where the node is now, read from the node after the commit. The
-            // answer used to be `action` alone, so the caller had to guess the
-            // new path to reach the node again (#1019).
-            auto moved_parent_value = callObject(node.value(), "Node", "get_parent", 3160264692LL);
-            auto moved_parent = moved_parent_value.isOk() ? objectFromVariant(moved_parent_value.value())
-                                                          : Result<GDExtensionObjectPtr>(moved_parent_value.error());
-            if (moved_parent.isErr() || moved_parent.value() != new_parent.value()) {
-                const std::string wanted_parent = params.value("new_parent_path", std::string());
-                return errorJson(500, "The reparent was committed and the node is not under " +
-                                          wanted_parent + " afterwards");
-            }
-            auto moved_path = logicalPathFromEditedRoot(root.value(), node.value());
-            if (moved_path.isErr()) return errorJson(moved_path.error());
-            json result = {{"status", "success"}, {"action", "reparent_node"},
-                           {"node_path", moved_path.value()}, {"undo_redo_registered", true}};
-            before_node.erase("index");
-            before_node.erase("type");
-            result["before"] = std::move(before_node);
-            // In scene_instantiate_node's words, so a caller building its next
-            // path from the old name learns why it no longer resolves.
-            auto moved_name = nodeString(node.value(), "get_name", 2002593661LL);
-            if (moved_name.isOk()) {
-                result["node_name"] = moved_name.value();
-                if (moved_name.value() != original_name.value()) {
-                    result["requested_name"] = original_name.value();
-                    result["name_substituted"] = true;
-                }
-            }
-            return liveSceneMutation(std::move(result));
-        }
-
-        auto flags = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(15));
-        if (flags.isErr()) return errorJson(flags.error());
-        auto duplicated = callObject(node.value(), "Node", "duplicate", 3511555459LL, {&flags.value()});
-        if (duplicated.isErr()) return errorJson(duplicated.error());
-        auto duplicate_node = objectFromVariant(duplicated.value());
-        if (duplicate_node.isErr() || !duplicate_node.value()) return errorJson(500, "Godot failed to duplicate node");
-        auto source_name = nodeString(node.value(), "get_name", 2002593661LL);
-        if (source_name.isErr()) {
-            GodotApi::instance().object_destroy(duplicate_node.value());
-            return errorJson(source_name.error());
-        }
-        auto copy_name = makeStringName(source_name.value() + "Copy");
-        if (copy_name.isErr()) {
-            GodotApi::instance().object_destroy(duplicate_node.value());
-            return errorJson(copy_name.error());
-        }
-        auto named = callObject(duplicate_node.value(), "Node", "set_name", 3304788590LL, {&copy_name.value()});
-        if (named.isErr()) {
-            GodotApi::instance().object_destroy(duplicate_node.value());
-            return errorJson(named.error());
-        }
-        auto duplicate_name = nodeString(duplicate_node.value(), "get_name", 2002593661LL);
-        if (duplicate_name.isErr()) {
-            GodotApi::instance().object_destroy(duplicate_node.value());
-            return errorJson(duplicate_name.error());
-        }
-        auto logical_parent = logicalPathFromEditedRoot(root.value(), parent.value());
-        if (logical_parent.isErr()) {
-            GodotApi::instance().object_destroy(duplicate_node.value());
-            return errorJson(logical_parent.error());
-        }
-        auto duplicate_value = makeObject(duplicate_node.value());
-        auto owner = makeObject(root.value());
-        if (duplicate_value.isErr() || owner.isErr()) {
-            GodotApi::instance().object_destroy(duplicate_node.value());
-            return errorJson(500, "Failed to construct duplicate transaction arguments");
-        }
-        auto descendants_to_own =
-            collectDuplicateDescendantsToOwn(root.value(), node.value(), duplicate_node.value());
-        if (descendants_to_own.isErr()) {
-            GodotApi::instance().object_destroy(duplicate_node.value());
-            return errorJson(descendants_to_own.error());
-        }
-        auto preflight = preflightNodeUndoTransaction();
-        if (preflight.isErr()) {
-            GodotApi::instance().object_destroy(duplicate_node.value());
-            return errorJson(preflight.error());
-        }
-        auto action = createAction(manager.value(), "Didi: duplicate node", root.value());
-        if (action.isErr()) {
-            GodotApi::instance().object_destroy(duplicate_node.value());
-            return errorJson(action.error());
-        }
-        auto keep = managerReference(manager.value(), "add_do_reference", duplicate_node.value());
-        auto add = managerMethod(manager.value(), "add_do_method", parent.value(), "add_child",
-                                 {&duplicate_value.value(), &readable.value(), &internal.value()});
-        auto own = managerMethod(manager.value(), "add_do_method", duplicate_node.value(), "set_owner", {&owner.value()});
-        // The copy's root is not the whole copy. Godot leaves every duplicated
-        // descendant unowned and the packer keeps only what the edited root
-        // owns, so a branch duplicated here reached the file as a bare root
-        // and the children the editor was showing were gone (#659). Registered
-        // after add_child, because UndoRedo runs do operations in the order
-        // they were added and set_owner needs the node in the tree; that is
-        // the same ordering rule scene.removeNode states for its undo side.
-        bool owned_descendants = true;
-        for (auto descendant : descendants_to_own.value()) {
-            auto own_descendant =
-                managerMethod(manager.value(), "add_do_method", descendant, "set_owner", {&owner.value()});
-            if (own_descendant.isErr()) {
-                owned_descendants = false;
-                break;
-            }
-        }
-        auto remove = managerMethod(manager.value(), "add_undo_method", parent.value(), "remove_child", {&duplicate_value.value()});
-        if (keep.isErr() || add.isErr() || own.isErr() || !owned_descendants || remove.isErr()) {
-            abandonAction(manager.value());
-            if (keep.isErr()) GodotApi::instance().object_destroy(duplicate_node.value());
-            return errorJson(500, "Failed to register duplicate UndoRedo transaction");
-        }
-        auto committed = commitAction(manager.value());
-        if (committed.isErr()) return errorJson(committed.error());
-        // duplicate_name was read before add_child, so it is the requested name
-        // rather than the one Godot settled on. Read the path back from the tree.
-        auto duplicate_path = logicalPathFromEditedRoot(root.value(), duplicate_node.value());
-        json result = {{"status", "success"}, {"action", "duplicate_node"},
-                       {"duplicated_node",
-                        duplicate_path.isOk()
-                            ? duplicate_path.value()
-                            : logical_parent.value() + "/" + duplicate_name.value()},
-                       {"undo_redo_registered", true}};
-        if (duplicate_path.isErr()) result["node_path_verified"] = false;
-        return liveSceneMutation(result);
+    auto flags = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(15));
+    if (flags.isErr()) return errorJson(flags.error());
+    auto duplicated = callObject(node.value(), "Node", "duplicate", 3511555459LL, {&flags.value()});
+    if (duplicated.isErr()) return errorJson(duplicated.error());
+    auto duplicate_node = objectFromVariant(duplicated.value());
+    if (duplicate_node.isErr() || !duplicate_node.value()) return errorJson(500, "Godot failed to duplicate node");
+    auto source_name = nodeString(node.value(), "get_name", 2002593661LL);
+    if (source_name.isErr()) {
+        GodotApi::instance().object_destroy(duplicate_node.value());
+        return errorJson(source_name.error());
     }
+    auto copy_name = makeStringName(source_name.value() + "Copy");
+    if (copy_name.isErr()) {
+        GodotApi::instance().object_destroy(duplicate_node.value());
+        return errorJson(copy_name.error());
+    }
+    auto named = callObject(duplicate_node.value(), "Node", "set_name", 3304788590LL, {&copy_name.value()});
+    if (named.isErr()) {
+        GodotApi::instance().object_destroy(duplicate_node.value());
+        return errorJson(named.error());
+    }
+    auto duplicate_name = nodeString(duplicate_node.value(), "get_name", 2002593661LL);
+    if (duplicate_name.isErr()) {
+        GodotApi::instance().object_destroy(duplicate_node.value());
+        return errorJson(duplicate_name.error());
+    }
+    auto logical_parent = logicalPathFromEditedRoot(root.value(), parent.value());
+    if (logical_parent.isErr()) {
+        GodotApi::instance().object_destroy(duplicate_node.value());
+        return errorJson(logical_parent.error());
+    }
+    auto duplicate_value = makeObject(duplicate_node.value());
+    auto owner = makeObject(root.value());
+    if (duplicate_value.isErr() || owner.isErr()) {
+        GodotApi::instance().object_destroy(duplicate_node.value());
+        return errorJson(500, "Failed to construct duplicate transaction arguments");
+    }
+    auto descendants_to_own =
+        collectDuplicateDescendantsToOwn(root.value(), node.value(), duplicate_node.value());
+    if (descendants_to_own.isErr()) {
+        GodotApi::instance().object_destroy(duplicate_node.value());
+        return errorJson(descendants_to_own.error());
+    }
+    auto preflight = preflightNodeUndoTransaction();
+    if (preflight.isErr()) {
+        GodotApi::instance().object_destroy(duplicate_node.value());
+        return errorJson(preflight.error());
+    }
+    auto action = createAction(manager.value(), "Didi: duplicate node", root.value());
+    if (action.isErr()) {
+        GodotApi::instance().object_destroy(duplicate_node.value());
+        return errorJson(action.error());
+    }
+    auto keep = managerReference(manager.value(), "add_do_reference", duplicate_node.value());
+    auto add = managerMethod(manager.value(), "add_do_method", parent.value(), "add_child",
+                             {&duplicate_value.value(), &readable.value(), &internal.value()});
+    auto own = managerMethod(manager.value(), "add_do_method", duplicate_node.value(), "set_owner", {&owner.value()});
+    // The copy's root is not the whole copy. Godot leaves every duplicated
+    // descendant unowned and the packer keeps only what the edited root
+    // owns, so a branch duplicated here reached the file as a bare root
+    // and the children the editor was showing were gone (#659). Registered
+    // after add_child, because UndoRedo runs do operations in the order
+    // they were added and set_owner needs the node in the tree; that is
+    // the same ordering rule scene.removeNode states for its undo side.
+    bool owned_descendants = true;
+    for (auto descendant : descendants_to_own.value()) {
+        auto own_descendant =
+            managerMethod(manager.value(), "add_do_method", descendant, "set_owner", {&owner.value()});
+        if (own_descendant.isErr()) {
+            owned_descendants = false;
+            break;
+        }
+    }
+    auto remove = managerMethod(manager.value(), "add_undo_method", parent.value(), "remove_child", {&duplicate_value.value()});
+    if (keep.isErr() || add.isErr() || own.isErr() || !owned_descendants || remove.isErr()) {
+        abandonAction(manager.value());
+        if (keep.isErr()) GodotApi::instance().object_destroy(duplicate_node.value());
+        return errorJson(500, "Failed to register duplicate UndoRedo transaction");
+    }
+    auto committed = commitAction(manager.value());
+    if (committed.isErr()) return errorJson(committed.error());
+    // duplicate_name was read before add_child, so it is the requested name
+    // rather than the one Godot settled on. Read the path back from the tree.
+    auto duplicate_path = logicalPathFromEditedRoot(root.value(), duplicate_node.value());
+    json result = {{"status", "success"}, {"action", "duplicate_node"},
+                   {"duplicated_node",
+                    duplicate_path.isOk()
+                        ? duplicate_path.value()
+                        : logical_parent.value() + "/" + duplicate_name.value()},
+                   {"undo_redo_registered", true}};
+    if (duplicate_path.isErr()) result["node_path_verified"] = false;
+    return liveSceneMutation(result);
+}
+
+json GodotBridge::bridgeEditorUndoStatus(const std::string& /*method*/, const json& params, const std::string& /*session_kind*/, GDExtensionObjectPtr /*editor*/) {
+    return undoStatusAnswer(params.is_object() ? params : json::object());
+}
+
+json GodotBridge::bridgeEditorUndoRedo(const std::string& method, const json& params, const std::string& /*session_kind*/, GDExtensionObjectPtr editor) {
 
     if (method == "editor.undo" && params.is_object() && params.contains("expect")) {
         return undoReferencedAction(params);
     }
-    if (method == "editor.undoStatus") {
-        return undoStatusAnswer(params.is_object() ? params : json::object());
+    auto root = editedSceneRoot(editor);
+    auto manager = undoManager(editor);
+    if (root.isErr()) return errorJson(root.error());
+    if (manager.isErr()) return errorJson(manager.error());
+    auto root_value = makeObject(root.value());
+    auto history_id = callObject(manager.value(), "EditorUndoRedoManager", "get_object_history_id", 1107568780LL, {&root_value.value()});
+    if (history_id.isErr()) return errorJson(history_id.error());
+    auto undo_redo = historyUndoRedo(manager.value(), history_id.value());
+    if (undo_redo.isErr()) return errorJson(404, "No UndoRedo history exists for the edited scene");
+    const bool is_undo = method == "editor.undo";
+    // The editor's own command undoes the newer of the scene's history and
+    // the global one, so either having an action is enough to run it.
+    const auto has_action = [is_undo](GDExtensionObjectPtr history) -> Result<bool> {
+        auto available = callObject(history, "UndoRedo", is_undo ? "has_undo" : "has_redo", 36873697LL);
+        if (available.isErr()) return available.error();
+        auto flag = scalarFromVariant<GDExtensionBool>(available.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+        if (flag.isErr()) return flag.error();
+        return flag.value() != 0;
+    };
+    auto scene_has = has_action(undo_redo.value());
+    if (scene_has.isErr()) return errorJson(scene_has.error());
+    auto global_id = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(0));
+    auto global = global_id.isOk() ? historyUndoRedo(manager.value(), global_id.value())
+                                   : Result<GDExtensionObjectPtr>(global_id.error());
+    auto global_has = global.isOk() ? has_action(global.value()) : Result<bool>(false);
+    if (!scene_has.value() && !(global_has.isOk() && global_has.value())) {
+        return errorJson(409, is_undo ? "Nothing to undo" : "Nothing to redo",
+                         {{"code", "nothing_to_undo"}});
     }
-    if (method == "editor.undo" || method == "editor.redo") {
-        auto root = editedSceneRoot(editor);
-        auto manager = undoManager(editor);
-        if (root.isErr()) return errorJson(root.error());
-        if (manager.isErr()) return errorJson(manager.error());
-        auto root_value = makeObject(root.value());
-        auto history_id = callObject(manager.value(), "EditorUndoRedoManager", "get_object_history_id", 1107568780LL, {&root_value.value()});
-        if (history_id.isErr()) return errorJson(history_id.error());
-        auto undo_redo = historyUndoRedo(manager.value(), history_id.value());
-        if (undo_redo.isErr()) return errorJson(404, "No UndoRedo history exists for the edited scene");
-        const bool is_undo = method == "editor.undo";
-        // The editor's own command undoes the newer of the scene's history and
-        // the global one, so either having an action is enough to run it.
-        const auto has_action = [is_undo](GDExtensionObjectPtr history) -> Result<bool> {
-            auto available = callObject(history, "UndoRedo", is_undo ? "has_undo" : "has_redo", 36873697LL);
-            if (available.isErr()) return available.error();
-            auto flag = scalarFromVariant<GDExtensionBool>(available.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
-            if (flag.isErr()) return flag.error();
-            return flag.value() != 0;
-        };
-        auto scene_has = has_action(undo_redo.value());
-        if (scene_has.isErr()) return errorJson(scene_has.error());
-        auto global_id = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, static_cast<int64_t>(0));
-        auto global = global_id.isOk() ? historyUndoRedo(manager.value(), global_id.value())
-                                       : Result<GDExtensionObjectPtr>(global_id.error());
-        auto global_has = global.isOk() ? has_action(global.value()) : Result<bool>(false);
-        if (!scene_has.value() && !(global_has.isOk() && global_has.value())) {
-            return errorJson(409, is_undo ? "Nothing to undo" : "Nothing to redo",
-                             {{"code", "nothing_to_undo"}});
+    auto moved = runEditorHistoryCommand(editor, manager.value(), undo_redo.value(), is_undo);
+    if (moved.isErr()) return errorJson(moved.error());
+    if (moved.value() == HistoryMoved::None) {
+        return errorJson(409,
+                         std::string("The editor ran its own ") + (is_undo ? "Undo" : "Redo") +
+                             " and no history moved. Godot refuses to " +
+                             (is_undo ? "undo" : "redo") +
+                             " while a mouse button is held down in the editor.",
+                         {{"code", "editor_declined"}, {"retryable", true}});
+    }
+    // A step can land on the saved version as well as move off it, so
+    // the answer reads which (#1049).
+    json stepped = {{"status", "success"},
+                    {"action", is_undo ? "undo" : "redo"},
+                    {"history", moved.value() == HistoryMoved::Scene ? "scene" : "global"}};
+    reportEditedSceneSaved(stepped);
+    return liveResult(stepped);
+}
+
+
+json GodotBridge::bridgeEditorSaveScene(const std::string& /*method*/, const json& /*params*/, const std::string& /*session_kind*/, GDExtensionObjectPtr editor) {
+    // Where the engine's own output stands before the save, so anything it
+    // prints during one can be attributed to this call.
+    //
+    // Against a headless editor every save produces `ERROR: Parameter "t"
+    // is null` from the dummy rendering backend: the save path asks for a
+    // scene thumbnail and there is no renderer to make one. The scene does
+    // save, the tool reported `saved` and nothing else, and the error
+    // landed only in the editor's log, which nothing in the response
+    // pointed at (#683). The thumbnail step belongs to Godot's save and
+    // cannot be switched off from here, so what is reported is that the
+    // save completed with an engine diagnostic, and what it was.
+    const auto before = EditorHook::instance().engineOutput().nextSequence();
+    // The file, read around the save. save_scene answers OK for any open
+    // scene with a path, including one the editor then refuses to write
+    // behind a dialog (a cyclic instance, a missing dependency), so
+    // "saved" came from a return code that says nothing about the file
+    // (#1019). A write moves the modified time; one that did not is
+    // refused, and what was written is read back.
+    namespace fs = std::filesystem;
+    auto saving_root = editedSceneRoot(editor);
+    const std::string scene_path =
+        saving_root.isOk() && saving_root.value() ? editedScenePath(saving_root.value()) : std::string();
+    fs::path scene_file;
+    if (strings::startsWith(scene_path, "res://")) {
+        auto project_path = resolveGodotProjectPath();
+        if (project_path.isOk()) {
+            scene_file = didi::paths::projectPathFromUtf8(project_path.value()) /
+                         didi::paths::projectPathFromUtf8(scene_path.substr(6));
         }
-        auto moved = runEditorHistoryCommand(editor, manager.value(), undo_redo.value(), is_undo);
-        if (moved.isErr()) return errorJson(moved.error());
-        if (moved.value() == HistoryMoved::None) {
+    }
+    std::error_code before_error;
+    const auto written_before = scene_file.empty() ? fs::file_time_type{}
+                                                   : fs::last_write_time(scene_file, before_error);
+    const bool existed_before = !scene_file.empty() && !before_error;
+    auto saved = callObject(editor, "EditorInterface", "save_scene", 166280745LL);
+    if (saved.isErr()) return errorJson(saved.error());
+    auto code = scalarFromVariant<int64_t>(saved.value(), GDEXTENSION_VARIANT_TYPE_INT);
+    if (code.isErr()) return errorJson(code.error());
+    if (code.value() != 0) {
+        return errorJson(::didi::godot::isGodotPathError(code.value()) ? 400 : 500,
+                         "Godot save_scene failed with " +
+                             ::didi::godot::describeGodotError(code.value()));
+    }
+    json result = {{"status", "saved"}, {"scene_path", scene_path}};
+    if (!scene_file.empty()) {
+        std::error_code after_error;
+        const auto written_after = fs::last_write_time(scene_file, after_error);
+        std::error_code size_error;
+        const auto bytes = after_error ? std::uintmax_t{0} : fs::file_size(scene_file, size_error);
+        if (after_error || size_error || (existed_before && written_after == written_before)) {
             return errorJson(409,
-                             std::string("The editor ran its own ") + (is_undo ? "Undo" : "Redo") +
-                                 " and no history moved. Godot refuses to " +
-                                 (is_undo ? "undo" : "redo") +
-                                 " while a mouse button is held down in the editor.",
-                             {{"code", "editor_declined"}, {"retryable", true}});
+                             "The editor accepted the save and did not write " + scene_path +
+                                 ". It refuses a scene it cannot save behind a dialog of its "
+                                 "own, such as one that instances itself or names a missing "
+                                 "dependency; its reason is in the editor's output.",
+                             {{"code", "save_not_written"}, {"scene_path", scene_path}});
         }
-        // A step can land on the saved version as well as move off it, so
-        // the answer reads which (#1049).
-        json stepped = {{"status", "success"},
-                        {"action", is_undo ? "undo" : "redo"},
-                        {"history", moved.value() == HistoryMoved::Scene ? "scene" : "global"}};
-        reportEditedSceneSaved(stepped);
-        return liveResult(stepped);
+        result["file_bytes"] = static_cast<uint64_t>(bytes);
     }
-
-    if (method == "editor.saveScene") {
-        // Where the engine's own output stands before the save, so anything it
-        // prints during one can be attributed to this call.
-        //
-        // Against a headless editor every save produces `ERROR: Parameter "t"
-        // is null` from the dummy rendering backend: the save path asks for a
-        // scene thumbnail and there is no renderer to make one. The scene does
-        // save, the tool reported `saved` and nothing else, and the error
-        // landed only in the editor's log, which nothing in the response
-        // pointed at (#683). The thumbnail step belongs to Godot's save and
-        // cannot be switched off from here, so what is reported is that the
-        // save completed with an engine diagnostic, and what it was.
-        const auto before = EditorHook::instance().engineOutput().nextSequence();
-        // The file, read around the save. save_scene answers OK for any open
-        // scene with a path, including one the editor then refuses to write
-        // behind a dialog (a cyclic instance, a missing dependency), so
-        // "saved" came from a return code that says nothing about the file
-        // (#1019). A write moves the modified time; one that did not is
-        // refused, and what was written is read back.
-        namespace fs = std::filesystem;
-        auto saving_root = editedSceneRoot(editor);
-        const std::string scene_path =
-            saving_root.isOk() && saving_root.value() ? editedScenePath(saving_root.value()) : std::string();
-        fs::path scene_file;
-        if (strings::startsWith(scene_path, "res://")) {
-            auto project_path = resolveGodotProjectPath();
-            if (project_path.isOk()) {
-                scene_file = didi::paths::projectPathFromUtf8(project_path.value()) /
-                             didi::paths::projectPathFromUtf8(scene_path.substr(6));
-            }
+    reportEditedSceneSaved(result);
+    constexpr size_t kMaxSaveDiagnostics = 8;
+    auto during = EditorHook::instance().engineOutput().read(before, kMaxSaveDiagnostics,
+                                                             "error");
+    json diagnostics = json::array();
+    if (during.isOk()) {
+        const auto records = during.value().find("records");
+        if (records != during.value().end() && records->is_array()) {
+            for (const auto& record : *records) diagnostics.push_back(record);
         }
-        std::error_code before_error;
-        const auto written_before = scene_file.empty() ? fs::file_time_type{}
-                                                       : fs::last_write_time(scene_file, before_error);
-        const bool existed_before = !scene_file.empty() && !before_error;
-        auto saved = callObject(editor, "EditorInterface", "save_scene", 166280745LL);
-        if (saved.isErr()) return errorJson(saved.error());
-        auto code = scalarFromVariant<int64_t>(saved.value(), GDEXTENSION_VARIANT_TYPE_INT);
-        if (code.isErr()) return errorJson(code.error());
-        if (code.value() != 0) {
-            return errorJson(::didi::godot::isGodotPathError(code.value()) ? 400 : 500,
-                             "Godot save_scene failed with " +
-                                 ::didi::godot::describeGodotError(code.value()));
-        }
-        json result = {{"status", "saved"}, {"scene_path", scene_path}};
-        if (!scene_file.empty()) {
-            std::error_code after_error;
-            const auto written_after = fs::last_write_time(scene_file, after_error);
-            std::error_code size_error;
-            const auto bytes = after_error ? std::uintmax_t{0} : fs::file_size(scene_file, size_error);
-            if (after_error || size_error || (existed_before && written_after == written_before)) {
-                return errorJson(409,
-                                 "The editor accepted the save and did not write " + scene_path +
-                                     ". It refuses a scene it cannot save behind a dialog of its "
-                                     "own, such as one that instances itself or names a missing "
-                                     "dependency; its reason is in the editor's output.",
-                                 {{"code", "save_not_written"}, {"scene_path", scene_path}});
-            }
-            result["file_bytes"] = static_cast<uint64_t>(bytes);
-        }
-        reportEditedSceneSaved(result);
-        constexpr size_t kMaxSaveDiagnostics = 8;
-        auto during = EditorHook::instance().engineOutput().read(before, kMaxSaveDiagnostics,
-                                                                 "error");
-        json diagnostics = json::array();
-        if (during.isOk()) {
-            const auto records = during.value().find("records");
-            if (records != during.value().end() && records->is_array()) {
-                for (const auto& record : *records) diagnostics.push_back(record);
-            }
-        }
-        if (!diagnostics.empty()) {
-            result["engine_diagnostics"] = std::move(diagnostics);
-            result["engine_diagnostics_note"] =
-                engineCanRender()
-                    ? "The scene saved. The engine printed these while saving it."
-                    : "The scene saved. This editor is headless, so Godot's save path could not "
-                      "render the scene thumbnail and printed these; they are about the "
-                      "thumbnail, not about the scene.";
-        }
-        return liveResult(result);
     }
-
-    return errorJson(501, "No trustworthy live implementation for method: " + method);
+    if (!diagnostics.empty()) {
+        result["engine_diagnostics"] = std::move(diagnostics);
+        result["engine_diagnostics_note"] =
+            engineCanRender()
+                ? "The scene saved. The engine printed these while saving it."
+                : "The scene saved. This editor is headless, so Godot's save path could not "
+                  "render the scene thumbnail and printed these; they are about the "
+                  "thumbnail, not about the scene.";
+    }
+    return liveResult(result);
 }
 
 namespace {
