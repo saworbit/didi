@@ -184,6 +184,13 @@ struct ShaderHintRange {
 
 [[nodiscard]] std::optional<ShaderHintRange> parseShaderHintRange(const std::string& hint_string);
 
+// Whether shader code declares a uniform the engine lists once the shader
+// compiles: a plain `uniform` line, outside comments. A global or instance
+// uniform, and a sampler hinted as the screen, depth or normal-roughness
+// texture, are never in the list, so they do not count. A shader that has one
+// and lists none did not compile (#1300).
+[[nodiscard]] bool shaderDeclaresListedUniform(const std::string& code);
+
 // What a resource slot's declared type allows, and what it rules out.
 //
 // Godot puts a resource property's accepted types in its PropertyInfo as a

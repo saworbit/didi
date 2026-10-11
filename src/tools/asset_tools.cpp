@@ -1609,6 +1609,12 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
             "The attached engine has no class named " + resource_type +
             " and no project script declares it as a class_name, so the editor loads this file "
             "as a MissingResource that only keeps its data, and a game cannot load it at all.";
+    } else if (resource_type == "Shader" || resource_type == "VisualShader") {
+        // The code is written as given. Its errors used to surface only once a
+        // node drew it, attached to whichever call came next (#1299).
+        created["limitation"] =
+            "The shader's code was written as given and not compiled. shader_check_compile on " +
+            save_path + " compiles it and names any error's line.";
     }
     reportEditorCopy(created, editor_copy);
     return CallToolResult::successJson(std::move(created));

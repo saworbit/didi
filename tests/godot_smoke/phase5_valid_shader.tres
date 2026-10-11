@@ -1,0 +1,7 @@
+[gd_resource type="Shader" format=3]
+
+[resource]
+code = "shader_type canvas_item;
+uniform float glow = 1.0;
+void fragment() { COLOR = vec4(glow); }
+"
