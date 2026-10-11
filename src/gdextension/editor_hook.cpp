@@ -2449,13 +2449,9 @@ void EditorHook::cancelPendingCommands(const std::string& reason) {
     }
 }
 
-json EditorHook::executeOnMainThread(const std::string& method, const json& params) {
-    if (auto rejected = validateSessionKindForMethod(method, m_sessionKind);
-        rejected.has_value()) {
-        return std::move(*rejected);
-    }
-    DIDI_LOG_DEBUG("EDITOR_HOOK", "Executing command on Godot main thread: ", method);
-
+// The methods this hook hands to GodotBridge::execute. A test holds them
+// against the bridge's own table (#1255).
+const std::unordered_set<std::string>& EditorHook::liveBridgeMethods() {
     static const std::unordered_set<std::string> live_bridge_methods = {
         "editor.getState", "editor.getRecoveryState", "editor.getSelection", "scene.getHierarchy", "scene.instantiateNode",
         "scene.removeNode", "scene.reparentNode", "scene.setProperty",
@@ -2501,7 +2497,17 @@ json EditorHook::executeOnMainThread(const std::string& method, const json& para
         , "phase7SignalTest.configure"
 #endif
     };
-    if (live_bridge_methods.count(method)) {
+    return live_bridge_methods;
+}
+
+json EditorHook::executeOnMainThread(const std::string& method, const json& params) {
+    if (auto rejected = validateSessionKindForMethod(method, m_sessionKind);
+        rejected.has_value()) {
+        return std::move(*rejected);
+    }
+    DIDI_LOG_DEBUG("EDITOR_HOOK", "Executing command on Godot main thread: ", method);
+
+    if (liveBridgeMethods().count(method)) {
         // Spatial reads are editor-or-game by policy; everything else that is
         // not runtime.* is editor-only here.
         const bool game_admitted = method.rfind("runtime.", 0) == 0 ||
