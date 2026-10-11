@@ -17185,11 +17185,22 @@ Result<ViewportPixels> captureViewportObject(GDExtensionObjectPtr viewport_objec
         return Error::notFound("Viewport has no rendered texture in the current display mode");
     }
     if (texture_width.value() < kMinimumCaptureEdge || texture_height.value() < kMinimumCaptureEdge) {
-        return Error::notFound(
-            "Viewport '" + described_target + "' has no size on screen (" +
-            std::to_string(texture_width.value()) + "x" + std::to_string(texture_height.value()) +
-            "), so there is no frame to capture. For an editor viewport this means that main "
-            "screen is not the one selected; switch to it in the editor and call again.");
+        // An editor viewport has no size while its main screen is not the one
+        // showing, and the tool's own select_main_screen switches to it. The
+        // remedy the floor gave was to read the scene's paths, and no node was
+        // named (#1302).
+        const bool editor_viewport = described_target == "editor_2d" || described_target == "editor_3d";
+        json data = {{"code", "not_found"}, {"retryable", editor_viewport}};
+        if (editor_viewport) data["retry_with"] = {{"select_main_screen", true}};
+        return Error(404,
+                     "Viewport '" + described_target + "' has no size on screen (" +
+                         std::to_string(texture_width.value()) + "x" +
+                         std::to_string(texture_height.value()) +
+                         "), so there is no frame to capture." +
+                         (editor_viewport ? std::string(" Its main screen is not the one selected; "
+                                                        "select_main_screen: true switches to it.")
+                                          : std::string()),
+                     std::move(data));
     }
     const auto texture_size = image::checkedRgbaSize(texture_width.value(), texture_height.value());
     if (texture_size.isErr()) return texture_size.error();

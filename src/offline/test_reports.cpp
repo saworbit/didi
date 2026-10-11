@@ -470,6 +470,43 @@ Result<InstalledTestFramework> chooseTestFramework(const TestRunRequest& request
     return installed.front();
 }
 
+namespace {
+
+// The directories holding test scripts of this framework, as res:// paths:
+// a .gd that extends GutTest or GdUnitTestSuite. Addons, hidden folders and
+// Didi's own are skipped, and the walk is bounded.
+std::vector<std::string> testScriptDirectories(const fs::path& root, TestFramework framework) {
+    constexpr size_t kMaxFiles = 4000;
+    constexpr size_t kMaxDirectories = 8;
+    const std::string base = framework == TestFramework::gut ? "GutTest" : "GdUnitTestSuite";
+    std::set<std::string> directories;
+    std::error_code error;
+    size_t seen = 0;
+    fs::recursive_directory_iterator it(root, fs::directory_options::skip_permission_denied, error);
+    for (const fs::recursive_directory_iterator end; !error && it != end; it.increment(error)) {
+        const auto name = paths::projectPathToUtf8(it->path().filename());
+        if (it->is_directory(error)) {
+            if (!name.empty() && (name[0] == '.' || (it.depth() == 0 && name == "addons"))) {
+                it.disable_recursion_pending();
+            }
+            continue;
+        }
+        if (++seen > kMaxFiles || directories.size() >= kMaxDirectories) break;
+        if (it->path().extension() != ".gd") continue;
+        std::ifstream input(it->path(), std::ios::binary);
+        std::string head(2048, '\0');
+        input.read(head.data(), static_cast<std::streamsize>(head.size()));
+        head.resize(static_cast<size_t>(input.gcount()));
+        if (head.find("extends " + base) == std::string::npos) continue;
+        const auto relative = it->path().parent_path().lexically_relative(root);
+        const auto text = paths::projectPathToUtf8(relative);
+        directories.insert(text.empty() || text == "." ? "res://" : "res://" + text);
+    }
+    return {directories.begin(), directories.end()};
+}
+
+}  // namespace
+
 Result<std::vector<std::string>> resolveTestPaths(const TestRunRequest& request,
                                                   const InstalledTestFramework& framework,
                                                   const fs::path& root) {
@@ -492,11 +529,21 @@ Result<std::vector<std::string>> resolveTestPaths(const TestRunRequest& request,
         // GUT reads its own configuration, which names the directories.
         return std::vector<std::string>{};
     }
+    // Where the project does keep tests, so the refusal can say. GUT tests in
+    // res://tests were answered with a sentence and nothing to send (#1302).
+    const auto found = testScriptDirectories(root, framework.framework);
+    json extra = json::object();
+    std::string where;
+    if (!found.empty()) {
+        extra["retry_with"] = {{"paths", found}};
+        for (const auto& directory : found) where += (where.empty() ? "" : ", ") + directory;
+    }
     return refuse(400,
                   "There is no res://test" +
                       std::string(framework.framework == TestFramework::gut ? " and no .gutconfig.json" : "") +
-                      " to find tests in. Name the directories or files with paths.",
-                  "paths");
+                      " to find tests in. Name the directories or files with paths." +
+                      (where.empty() ? std::string() : " Test scripts are in " + where + "."),
+                  "paths", std::move(extra));
 }
 
 std::vector<std::string> testRunSeeds(const fs::path& project_root, const std::vector<std::string>& test_paths,

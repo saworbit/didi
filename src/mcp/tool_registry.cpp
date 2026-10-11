@@ -1826,31 +1826,70 @@ struct MisnamedArgument {
     std::string expected;
 };
 
-static std::optional<MisnamedArgument> misnamedArgument(const json& schema,
-                                                        const json& arguments) {
+// The one argument a call sent that the schema does not declare, if one.
+static std::optional<std::string> soleUnknownArgument(const json& schema, const json& arguments) {
     if (!schema.is_object() || !arguments.is_object()) return std::nullopt;
     const auto properties = schema.find("properties");
-    const auto required = schema.find("required");
-    if (properties == schema.end() || !properties->is_object() || required == schema.end() ||
-        !required->is_array()) {
-        return std::nullopt;
-    }
+    if (properties == schema.end() || !properties->is_object()) return std::nullopt;
     std::vector<std::string> unknown;
     for (auto it = arguments.begin(); it != arguments.end(); ++it) {
         if (!properties->contains(it.key())) unknown.push_back(it.key());
     }
+    if (unknown.size() != 1) return std::nullopt;
+    return unknown.front();
+}
+
+// Whether two argument names share their first or last word, the way
+// script_path and file_path share path and context_path and context_node
+// share context.
+static bool namesShareAWord(const std::string& a, const std::string& b) {
+    const auto first = [](const std::string& name) { return name.substr(0, name.find('_')); };
+    const auto last = [](const std::string& name) {
+        const auto underscore = name.rfind('_');
+        return underscore == std::string::npos ? name : name.substr(underscore + 1);
+    };
+    if (a.find('_') == std::string::npos || b.find('_') == std::string::npos) return false;
+    return first(a) == first(b) || last(a) == last(b);
+}
+
+static std::optional<MisnamedArgument> misnamedArgument(const json& schema,
+                                                        const json& arguments) {
+    const auto sent = soleUnknownArgument(schema, arguments);
+    if (!sent) return std::nullopt;
+    const auto& properties = schema["properties"];
+    const auto fits = [&](const std::string& expected) {
+        json moved = arguments;
+        moved[expected] = moved[*sent];
+        moved.erase(*sent);
+        return !validateAgainstSchema(schema, moved);
+    };
     std::vector<std::string> missing;
-    for (const auto& name : *required) {
-        if (name.is_string() && !arguments.contains(name.get<std::string>())) {
-            missing.push_back(name.get<std::string>());
+    const auto required = schema.find("required");
+    if (required != schema.end() && required->is_array()) {
+        for (const auto& name : *required) {
+            if (name.is_string() && !arguments.contains(name.get<std::string>())) {
+                missing.push_back(name.get<std::string>());
+            }
         }
     }
-    if (unknown.size() != 1 || missing.size() != 1) return std::nullopt;
-    json moved = arguments;
-    moved[missing.front()] = moved[unknown.front()];
-    moved.erase(unknown.front());
-    if (validateAgainstSchema(schema, moved)) return std::nullopt;
-    return MisnamedArgument{unknown.front(), missing.front()};
+    if (missing.size() == 1) {
+        if (!fits(missing.front())) return std::nullopt;
+        return MisnamedArgument{*sent, missing.front()};
+    }
+    if (!missing.empty()) return std::nullopt;
+    // Nothing required is missing, so the near miss is an optional argument:
+    // script_check_syntax takes file_path or source_text, and script_path, the
+    // name script_create uses for the same file, never got the fix as data
+    // (#1301). One not sent, sharing a word with the name that was, and only
+    // one of those.
+    std::optional<std::string> candidate;
+    for (auto it = properties.begin(); it != properties.end(); ++it) {
+        if (arguments.contains(it.key()) || !namesShareAWord(*sent, it.key())) continue;
+        if (candidate) return std::nullopt;
+        candidate = it.key();
+    }
+    if (!candidate || !fits(*candidate)) return std::nullopt;
+    return MisnamedArgument{*sent, *candidate};
 }
 
 // The caller has the value already, so a long one is not sent back to it.
@@ -1987,6 +2026,13 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
                 *invalid + " Send the value of '" + misnamed->sent + "' as '" +
                     misnamed->expected + "'.",
                 extra);
+        }
+        // The argument at fault is the one it sent. Left to the error floor,
+        // field came from the first argument name in "This tool accepts:", one
+        // the caller never sent (#1301).
+        if (const auto unknown = soleUnknownArgument(tool->inputSchema, arguments);
+            unknown && invalid->rfind("Unknown argument '", 0) == 0) {
+            return invalidArgumentsError(binding, *invalid, {{"argument", *unknown}});
         }
         return invalidArgumentsError(binding, *invalid);
     }

@@ -100,6 +100,9 @@ std::string argumentNamedIn(const std::string& message, const std::string& tool)
     const auto properties = definition->inputSchema.find("properties");
     if (properties == definition->inputSchema.end() || !properties->is_object()) return quoted;
     if (!quoted.empty() && properties->contains(quoted)) return quoted;
+    // An argument the tool does not take is not a field of it, and the words
+    // after it are the list of ones it does take (#1301).
+    if (startsWith(message, "Unknown argument '")) return {};
     static const std::regex word("[A-Za-z_][A-Za-z0-9_]*");
     for (auto it = std::sregex_iterator(message.begin(), message.end(), word);
          it != std::sregex_iterator(); ++it) {

@@ -10263,9 +10263,31 @@ static void test_a_misnamed_argument_is_refused_with_the_name_to_use() {
              {{"target_node", 7}, {"cells", cells}},
              {{"tilemap_path", "/root/TileMapLayer"}, {"cells", cells}, {"bogus", 1}}}) {
         const auto data = refusal("tilemap_set_cells", arguments)["data"];
-        ASSERT_TRUE(!data.contains("did_you_mean") && !data.contains("retry_with") &&
-                    !data.contains("argument"));
+        ASSERT_TRUE(!data.contains("did_you_mean") && !data.contains("retry_with"));
     }
+    // An unknown argument names itself, and never an argument it did not
+    // send: field came from the words of "This tool accepts:" (#1301).
+    const auto bogus = refusal("tilemap_set_cells",
+                               {{"tilemap_path", "/root/TileMapLayer"}, {"cells", cells}, {"bogus", 1}})["data"];
+    ASSERT_EQ(bogus["argument"], "bogus");
+    ASSERT_TRUE(!bogus.contains("field"));
+    const auto kind = refusal("runtime_attach_session", {{"session_id", "abc"}, {"kind", "editor"}})["data"];
+    ASSERT_EQ(kind["argument"], "kind");
+    ASSERT_TRUE(!kind.contains("did_you_mean"));
+    ASSERT_TRUE(!didi::mcp::remedyForRefusal(
+                     "invalid_arguments", 400,
+                     "Unknown argument 'kind'. This tool accepts: allow_foreign_project, session_id.",
+                     "runtime_attach_session", didi::json::object())
+                     .contains("field"));
+
+    // A near miss of an optional argument gets the fix as data too, where only
+    // a missing required one did: script_path is script_create's name for the
+    // file script_check_syntax calls file_path (#1301).
+    const auto script_path = refusal("script_check_syntax", {{"script_path", "res://a.gd"}})["data"];
+    ASSERT_EQ(script_path["did_you_mean"], "file_path");
+    ASSERT_EQ(script_path["retry_with"], didi::json({{"file_path", "res://a.gd"}}));
+    const auto context = refusal("eval_gdscript", {{"expression", "1"}, {"context_path", "/root/A"}})["data"];
+    ASSERT_EQ(context["did_you_mean"], "context_node");
 
     // A long value is named and not sent back: the caller already has it.
     const auto long_value =
