@@ -215,6 +215,13 @@ def rename_then_save(session: Session, project: Path, scene: str) -> None:
     session.call("signal_connect", {"emitter_node": "/root/Arena/Emitter", "signal_name": old,
                                     "target_node": "/root/Arena/Receiver", "target_method": "_on_pinged"})
     session.call("editor_save_scene", {})
+    # The #1288 fix refuses a rename whose new signal no script declares yet,
+    # with signal_not_declared and a next_call, because rebuilding the open
+    # tab would drop the connection. Declare it first, as the refusal says.
+    declared, _ = confirmed(session, "script_patch_method", {
+        "file_path": emitter, "method_name": new, "new_definition": f"signal {new}",
+        "symbol_type": "signal", "create_if_missing": True})
+    row("#1288 the new signal is declared first (control)", True, not error_of(declared))
     renamed, err = confirmed(session, "project_rename_references", {"target": old, "new_name": new})
     printed = [line.text for line in session.last_engine_lines]
     row("rename answered success (control)", True, not err)
@@ -234,7 +241,9 @@ def refusals(session: Session) -> None:
     session_id = (listing.get("handshake") or {}).get("session_id", "0" * 32) if isinstance(listing, dict) else "0" * 32
     refused, _ = session.call("runtime_attach_session", {"session_id": session_id, "kind": "editor"})
     data = error_of(refused).get("data", {})
-    row("#1301 an unknown argument is the field at fault", "kind", data.get("field"))
+    # An argument the tool does not take is named in argument, and field never
+    # names one the call could not send (#1301, #1336).
+    row("#1301 an unknown argument is named in argument", "kind", data.get("argument"))
     refused, _ = session.call("script_check_syntax", {"script_path": "res://vibe_missing.gd"})
     data = error_of(refused).get("data", {})
     row("#1301 script_path on script_check_syntax gets did_you_mean", "file_path", data.get("did_you_mean"))
