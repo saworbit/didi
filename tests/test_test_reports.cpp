@@ -348,6 +348,15 @@ void test_the_framework_is_the_one_the_project_has() {
     // Paths: res://test when there is one, GUT's own configuration when there
     // is not, and a refusal when there is neither.
     ASSERT_EQ(resolveTestPaths(any, only_gut.value(), project.root).error().data["field"], "paths");
+    ASSERT_TRUE(!resolveTestPaths(any, only_gut.value(), project.root).error().data.contains("retry_with"));
+    // Tests kept somewhere else are named, as the paths to send; an addon's
+    // own tests and a script that is not a test are not (#1302).
+    project.write("tests/test_game_state.gd", "extends GutTest\n");
+    project.write("tests/helpers.gd", "extends Node\n");
+    project.write("addons/gut/test/test_gut.gd", "extends GutTest\n");
+    const auto elsewhere = resolveTestPaths(any, only_gut.value(), project.root).error();
+    ASSERT_EQ(elsewhere.data["retry_with"]["paths"], didi::json::array({"res://tests"}));
+    ASSERT_TRUE(elsewhere.message.find("res://tests") != std::string::npos);
     project.write(".gutconfig.json", "{\"dirs\": [\"res://tests/unit\"]}");
     ASSERT_TRUE(resolveTestPaths(any, only_gut.value(), project.root).value().empty());
     project.write("test/test_a.gd", "extends GutTest\n");

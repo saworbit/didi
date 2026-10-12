@@ -123,10 +123,18 @@ Drop `argument` and merge `retry_with`:
  "retry_with": {"tilemap_path": "/root/Level/Tiles"}}
 ```
 
+A tool with nothing required, which takes one of several optional arguments,
+gets the same fix when the name sent shares its first or last word with exactly
+one argument the call did not send and moving the value makes the call valid:
+`script_path` for `script_check_syntax`'s `file_path`, `context_path` for
+`eval_gdscript`'s `context_node` (#1301).
+
 Nothing is offered when moving one value is not the whole fix: two names wrong,
-a value the right name would refuse, or nothing missing. A value over 1 KiB is
-not sent back, since the caller has it already, so `retry_with` is left out
-there and the other two stay (#784).
+or a value the right name would refuse. A value over 1 KiB is not sent back,
+since the caller has it already, so `retry_with` is left out there and the other
+two stay (#784). A single argument the tool does not take is named in `argument`
+either way, and `field` never names an argument the call did not send; it used
+to come from the list of accepted names in the message (#1301).
 
 A live-only tool called with no engine attached — the most common state a
 caller meets — answers `503` and names itself, says it needs a live Godot
