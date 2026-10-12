@@ -30,6 +30,7 @@
 #include "didi/common/atomic_write.hpp"
 #include "didi/tools/hierarchy_view.hpp"
 #include "didi/mcp/error_data.hpp"
+#include "didi/tools/game_launch.hpp"
 #include "didi/tools/editor_copy_refresh.hpp"
 #include "didi/runtime/managed_recovery.hpp"
 
@@ -10296,8 +10297,63 @@ static void test_a_misnamed_argument_is_refused_with_the_name_to_use() {
     ASSERT_TRUE(!long_value.contains("retry_with"));
 }
 
+// A router with no route selected that can list sessions, as after an editor
+// restart or a stopped game left the route quarantined.
+class ListingRouter final : public didi::runtime::IRuntimeSessionClient {
+public:
+    explicit ListingRouter(didi::json sessions) : m_sessions(std::move(sessions)) {}
+    bool connect(const std::string&, int) override { return true; }
+    void disconnect() override {}
+    bool isConnected() const override { return false; }
+    didi::Result<didi::json> sendRequest(const std::string&, const didi::json&, int) override {
+        return didi::Error::notConnected();
+    }
+    didi::Result<didi::json> listSessions(const std::optional<std::string>&) override {
+        return didi::json{{"sessions", m_sessions}};
+    }
+    didi::Result<didi::json> attachSession(const std::string&) override { return didi::json::object(); }
+    didi::Result<didi::json> detachSession() override { return didi::json::object(); }
+    std::optional<didi::runtime::SessionDescriptor> activeSession() const override { return std::nullopt; }
+    std::optional<didi::runtime::RuntimeRouteLease> acquireRouteLease() override { return std::nullopt; }
+    bool quarantineRoute(const didi::runtime::RuntimeRouteLease&) override { return false; }
+
+private:
+    didi::json m_sessions;
+};
+
+static void test_the_only_live_session_is_named_when_no_route_is_selected() {
+    // Every live call answered "call runtime_list_sessions" while the
+    // project's one editor sat there to attach (#1296). With one live session
+    // for this project the refusal names it; with two it cannot choose.
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    const auto project = didi::mcp::launchedProjectPath();
+    const didi::json editor = {{"session_id", "abc123"}, {"kind", "editor"}, {"pid", 4242},
+                               {"alive", true}, {"project_path", project}};
+    const didi::json elsewhere = {{"session_id", "zzz"}, {"kind", "editor"}, {"pid", 7},
+                                  {"alive", true}, {"project_path", project + "_other"}};
+    const didi::json dead = {{"session_id", "old"}, {"kind", "game"}, {"pid", 9},
+                             {"alive", false}, {"project_path", project}};
+    registry.setIpcClient(std::make_shared<ListingRouter>(didi::json::array({editor, elsewhere, dead})));
+    const auto named = registry.callTool("scene_get_hierarchy", didi::json::object());
+    ASSERT_TRUE(named.isError);
+    const auto data = didi::json::parse(named.content[0].text)["error"]["data"];
+    ASSERT_EQ(data["next_call"]["tool"], "runtime_attach_session");
+    ASSERT_EQ(data["next_call"]["arguments"]["session_id"], "abc123");
+
+    const didi::json second = {{"session_id", "def456"}, {"kind", "game"}, {"pid", 4343},
+                               {"alive", true}, {"project_path", project}};
+    registry.setIpcClient(std::make_shared<ListingRouter>(didi::json::array({editor, second})));
+    const auto ambiguous = registry.callTool("scene_get_hierarchy", didi::json::object());
+    const auto two = didi::json::parse(ambiguous.content[0].text)["error"]["data"];
+    ASSERT_TRUE(!two.contains("next_call") || two["next_call"]["tool"] != "runtime_attach_session");
+    registry.setIpcClient(nullptr);
+}
+
 struct RegisterToolTests {
     RegisterToolTests() {
+        registerTest("Tools.TheOnlyLiveSessionIsNamed",
+                     test_the_only_live_session_is_named_when_no_route_is_selected);
         registerTest("Tools.OfflineCapabilityIsDerived",
                      test_offline_capability_is_derived_not_listed);
         registerTest("Tools.PropertyTypeMismatchNamesTheValue",
