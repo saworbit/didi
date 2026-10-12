@@ -136,7 +136,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Fixed
 
-- `2026-10-12` The agent guide covers node slots and presets that ship the addon, and CONTRIBUTING names the typed setter step in a class reference refresh.
+- `2026-10-12` The agent guide covers node slots and presets that ship the addon, and CONTRIBUTING names the typed setter step in a class reference refresh. [PR #1356](https://github.com/saworbit/didi/pull/1356)
 - `2026-10-12` An editor ray or clearance query hits a `TileMapLayer` tile or `GridMap` cell placed after the editor started, as a game does. [#1308](https://github.com/saworbit/didi/issues/1308) · [PR #1354](https://github.com/saworbit/didi/pull/1354)
 - `2026-10-12` `resource_create` writes each element of `NavigationPolygon.outlines` and other typed-setter arrays as its packed type, not as numbers Godot loads as zeros. [#1294](https://github.com/saworbit/didi/issues/1294) · [PR #1351](https://github.com/saworbit/didi/pull/1351)
 - `2026-10-12` A blocking `runtime_launch` answers the game's pid from the session it published, or the spawned process, where it answered `pid: null`. [#1314](https://github.com/saworbit/didi/issues/1314) · [PR #1350](https://github.com/saworbit/didi/pull/1350)
