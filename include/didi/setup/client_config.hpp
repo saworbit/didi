@@ -119,11 +119,22 @@ struct IgnoreWrite {
     FileAction action{FileAction::Unchanged};
     std::filesystem::path file;
     std::vector<std::string> added;
+    // Rules the file's own last word on the path reverses, with that line.
+    // Left as the person wrote them, and named, because git commits the path.
+    std::vector<std::pair<std::string, int>> overridden;
 };
 Result<IgnoreWrite> writeIgnoreRules(const std::filesystem::path& project_root,
                                      const std::vector<std::string>& rules);
-// Whether the project's .gitignore has the rule, in any spelling it accepts.
-bool ignoresRule(const std::filesystem::path& project_root, const std::string& rule);
+// Whether git ignores the path a rule names, and where that answer came from.
+// git is asked when the project is in a work tree, so .git/info/exclude, a
+// global excludes file and a broader pattern count; otherwise .gitignore is
+// read the way git reads it, the last rule for the path deciding, so a later
+// `!.didi/` un-ignores it (#1346).
+struct IgnoreCheck {
+    bool ignored{false};
+    std::string detail;
+};
+IgnoreCheck checkIgnored(const std::filesystem::path& project_root, const std::string& rule);
 bool hasAgentGuide(const std::filesystem::path& file);
 
 }  // namespace didi::setup

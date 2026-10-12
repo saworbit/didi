@@ -162,9 +162,14 @@ a project `CLAUDE.md` that holds the block or imports a file that does, and for
 the others `AGENTS.md`. A guide Claude Code reaches only through an import
 outside the project is a warning, because Claude Code asks before loading an
 external import and never loads one that was declined (#1286). It also checks
-that `.gitignore` ignores `.didi/`. A missing or disabled addon fails; a build
-mismatch, no editor open, a client that cannot reach the guide, or `.didi/`
-not ignored is a warning.
+that git ignores `.didi/`. In a git work tree it asks git, so `.git/info/exclude`
+and a broader pattern count; otherwise it reads `.gitignore` the way git does,
+the last rule for the path deciding, and a later `!.didi/` is named by its line
+as un-ignoring it (#1346). Setup leaves such a line as the person wrote it and
+says so. Each export preset whose builds carry `addons/didi` and the extension
+library is a row of its own (#1347). A missing or disabled addon fails; a build
+mismatch, no editor open, a client that cannot reach the guide, `.didi/` not
+ignored, or a preset that ships the addon is a warning.
 
 The client configuration records absolute paths for one machine, which is why
 setup adds each file it writes to `.gitignore`. Keep `.mcp.json`,

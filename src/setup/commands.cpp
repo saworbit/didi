@@ -5,6 +5,7 @@
 #include "didi/common/project_path.hpp"
 #include "didi/mcp/mcp_protocol.hpp"
 #include "didi/offline/class_reference.hpp"
+#include "didi/offline/deep_domain_support.hpp"
 #include "didi/offline/test_runner.hpp"
 #include "didi/runtime/session_client.hpp"
 #include "didi/setup/addon_install.hpp"
@@ -17,6 +18,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <sstream>
 #include <thread>
 
 namespace didi::setup {
@@ -556,6 +558,17 @@ int runSetupCommand(const std::vector<std::string>& arguments) {
         std::vector<std::string> rules = {kStateIgnoreRule};
         for (const auto client : clients) rules.push_back(std::string("/") + clientSpec(client).config_file);
         auto ignored = writeIgnoreRules(root, rules);
+        if (ignored.isOk() && !ignored.value().overridden.empty()) {
+            // A person's own `!` line has the last word, and git commits what
+            // it names. Left as written, and said (#1346).
+            std::string which;
+            for (const auto& [rule, line] : ignored.value().overridden) {
+                which += (which.empty() ? "" : ", ") + rule + " (line " + std::to_string(line) + ")";
+            }
+            report.add("ignore-overridden", "Ignore rules", "warn",
+                       ".gitignore un-ignores " + which +
+                           ", so git commits it. Left as written; remove the line to keep it out.");
+        }
         if (ignored.isErr()) {
             report.add("ignore", "Ignore rules", "fail", ignored.error().message);
         } else if (ignored.value().added.empty()) {
@@ -725,12 +738,35 @@ int runDoctorCommand(const std::vector<std::string>& arguments) {
         }
     }
 
-    report.add("ignore", "Ignore rules", ignoresRule(root, kStateIgnoreRule) ? "ok" : "warn",
-               ignoresRule(root, kStateIgnoreRule)
-                   ? std::string(".gitignore ignores ") + kStateIgnoreRule
-                   : std::string(".gitignore does not ignore ") + kStateIgnoreRule +
-                         ", which holds the arguments of every change and crash stacks. Run didi setup, or "
-                         "add the line yourself.");
+    {
+        const auto state = checkIgnored(root, kStateIgnoreRule);
+        report.add("ignore", "Ignore rules", state.ignored ? "ok" : "warn",
+                   state.ignored ? state.detail
+                                 : state.detail + ". It holds the arguments of every change and "
+                                   "crash stacks. Run didi setup, or add the line yourself.");
+    }
+
+    // Each export preset whose builds carry the addon, which starts the session
+    // host in a shipped game. Presets made in the Export dialog have an empty
+    // exclude_filter (#1347).
+    if (std::ifstream presets_file(root / "export_presets.cfg", std::ios::binary); presets_file) {
+        std::ostringstream presets_text;
+        presets_text << presets_file.rdbuf();
+        const auto presets = offline::readExportPresets(presets_text.str());
+        if (!presets.malformed) {
+            for (const auto& preset : presets.presets) {
+                const auto name = preset.value("name", std::string());
+                const auto ships = preset.value("includes_didi_addon", json());
+                if (ships.is_null()) continue;
+                report.add("export:" + name, "Export preset " + name, ships == json(true) ? "warn" : "ok",
+                           ships == json(true)
+                               ? "builds carry addons/didi and its extension library, which starts Didi's "
+                                 "session host in the game. Add addons/didi/* to the preset's exclude_filter, "
+                                 "or keep it for a debug build run on this machine."
+                               : "builds leave out addons/didi");
+            }
+        }
+    }
 
     report.add("plugin", "Plugin enabled", pluginEnabled(root) ? "ok" : "fail",
                pluginEnabled(root) ? std::string(kPluginConfigPath) + " is in editor_plugins/enabled"

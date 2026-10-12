@@ -1191,13 +1191,26 @@ CallToolResult handleProjectExport(const json& args, std::shared_ptr<ipc::IIpcCl
                  {"engine_output", withoutTerminalEscapes(run.value().output)},
                  {"output_truncated", run.value().output_truncated}});
     }
-    return CallToolResult::successJson({
+    json exported = {
         {"success", true}, {"preset", preset}, {"mode", mode},
         {"output_path", asResPath(root.value(), output.value())},
         {"size_bytes", std::filesystem::file_size(output.value())},
         {"duration_seconds", run.value().duration_seconds}, {"output_truncated", run.value().output_truncated},
         {"execution_mode", "offline_fallback"}
-    });
+    };
+    // A preset made in the Export dialog, or by Didi before #1326, has an
+    // empty exclude_filter, and its build carries the addon and the library
+    // that starts the session host in the game (#1347). Said, not refused:
+    // a debug build run on this machine is a reason to keep it.
+    const auto ships = record.value().value("includes_didi_addon", json());
+    exported["includes_didi_addon"] = ships;
+    if (ships == json(true)) {
+        exported["didi_addon_note"] =
+            "Preset \"" + preset + "\" carries addons/didi and its extension library, which starts "
+            "Didi's session host in the game. Add addons/didi/* to its exclude_filter before shipping; "
+            "keep it only for a debug build run on this machine.";
+    }
+    return CallToolResult::successJson(std::move(exported));
 }
 
 CallToolResult handleGridmapExportMeshLibrary(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {

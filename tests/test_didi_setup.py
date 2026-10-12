@@ -378,6 +378,41 @@ class SetupOffline(SetupFixture):
         (self.project / "CLAUDE.md").write_text("@docs/guide.md\n", encoding="utf-8", newline="\n")
         self.assertEqual(self.steps(self.doctor_json(expect=0))["agent-guide:claude-code"]["state"], "ok")
 
+    def test_doctor_warns_about_a_preset_that_ships_the_addon(self):
+        # A preset made in the Export dialog has an empty exclude_filter, and
+        # its builds carry the addon and the library that starts the session
+        # host in a shipped game (#1347).
+        self.setup_json("--client", "claude-code")
+        presets = (
+            '[preset.0]\n\nname="Dialog"\nplatform="Linux"\nrunnable=false\n'
+            'export_filter="all_resources"\ninclude_filter=""\nexclude_filter=""\nexport_path=""\n\n'
+            '[preset.0.options]\n\ncustom_template/debug=""\n\n'
+            '[preset.1]\n\nname="Shipping"\nplatform="Linux"\nrunnable=false\n'
+            'export_filter="all_resources"\ninclude_filter=""\nexclude_filter="addons/didi/*"\nexport_path=""\n\n'
+            '[preset.1.options]\n\ncustom_template/debug=""\n')
+        (self.project / "export_presets.cfg").write_text(presets, encoding="utf-8", newline="\n")
+        steps = self.steps(self.doctor_json(expect=0))
+        self.assertEqual(steps["export:Dialog"]["state"], "warn", steps["export:Dialog"])
+        self.assertIn("exclude_filter", steps["export:Dialog"]["detail"])
+        self.assertEqual(steps["export:Shipping"]["state"], "ok", steps["export:Shipping"])
+
+    def test_doctor_reads_ignore_rules_the_way_git_does(self):
+        # doctor said ok for a .gitignore whose last word on .didi/ was a
+        # negation, though git commits it (#1346).
+        self.setup_json("--client", "claude-code")
+        env = dict(self.env)
+        self.env["GIT_CEILING_DIRECTORIES"] = str(self.root)
+        try:
+            (self.project / ".gitignore").write_text(".didi/\n!.didi/\n", encoding="utf-8", newline="\n")
+            step = self.steps(self.doctor_json(expect=0))["ignore"]
+            self.assertEqual(step["state"], "warn", step)
+            self.assertIn("line 2 un-ignores", step["detail"])
+            # setup leaves the person's line alone and says it does.
+            report = self.setup_json("--client", "claude-code")
+            self.assertEqual(self.steps(report)["ignore-overridden"]["state"], "warn")
+        finally:
+            self.env = env
+
     def test_a_file_it_cannot_reproduce_is_refused_and_left_alone(self):
         (self.project / ".vscode").mkdir()
         original = '{\n  // mine\n  "servers": {}\n}\n'

@@ -3671,6 +3671,9 @@ try {
     Assert-True ($phase5ById[527].result.isError -and $phase5ById[527].result.content[0].text -match "not a Shader") "A .tres holding a TileSet was not refused as not a Shader: $($phase5ById[527].result.content[0].text)"
     $phase5Export = Tool-Payload $phase5ById[505]
     Assert-True ($phase5Export.success -eq $true -and $phase5Export.size_bytes -gt 0) "Phase 5 pack export did not create a non-empty artifact."
+    # The fixture's preset was made the way the Export dialog makes one, with an
+    # empty exclude_filter, so the build carries the addon and says so (#1347).
+    Assert-True ($phase5Export.includes_didi_addon -eq $true -and $phase5Export.didi_addon_note -match "exclude_filter") "An export whose preset ships addons/didi did not say so: $($phase5ById[505].result.content[0].text)"
     $meshLibrary = Tool-Payload $phase5ById[506]
     Assert-True ($meshLibrary.success -eq $true -and $meshLibrary.item_count -eq 2) "MeshLibrary export did not preserve two deterministic items."
     Assert-True ((Tool-Payload $phase5ById[511]).handshake.status -eq "ok") "Phase 5 did not restore the editor route after offline subprocess work."
