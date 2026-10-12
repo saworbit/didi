@@ -209,6 +209,36 @@ std::string boundedSummaryError(const std::string& message) {
     return message.substr(0, cut) + "...";
 }
 
+uint64_t publishedSessionPid(const std::string& output) {
+    static constexpr std::string_view kLine = "Published authenticated runtime session at ";
+    const auto start = output.find(kLine);
+    if (start == std::string::npos) return 0;
+    const auto after = start + kLine.size();
+    const auto end = output.find_first_of(" \t\r\n", after);
+    auto endpoint = output.substr(after, (end == std::string::npos ? output.size() : end) - after);
+    const auto slash = endpoint.find_last_of("/\\");
+    if (slash != std::string::npos) endpoint.erase(0, slash + 1);
+    constexpr std::string_view kSocket = ".sock";
+    if (endpoint.size() > kSocket.size() &&
+        endpoint.compare(endpoint.size() - kSocket.size(), kSocket.size(), kSocket) == 0) {
+        endpoint.resize(endpoint.size() - kSocket.size());
+    }
+    if (endpoint.rfind("godot_didi_", 0) != 0) return 0;
+    // The pid is the next to last part, so a project key of any spelling
+    // cannot move it.
+    const auto last = endpoint.rfind('_');
+    if (last == std::string::npos || last == 0) return 0;
+    const auto before = endpoint.rfind('_', last - 1);
+    if (before == std::string::npos) return 0;
+    const auto digits = endpoint.substr(before + 1, last - before - 1);
+    if (digits.empty() || digits.size() > 19 ||
+        !std::all_of(digits.begin(), digits.end(),
+                     [](char c) { return std::isdigit(static_cast<unsigned char>(c)) != 0; })) {
+        return 0;
+    }
+    return std::stoull(digits);
+}
+
 std::string engineVersionFromOutput(const std::string& output) {
     // Found rather than assumed to be the first line: a wrapper or a warning
     // can print before the engine does.
@@ -595,6 +625,7 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
         result.summary = "Failed to spawn Godot process. Ensure 'godot' is in system PATH.";
         return result;
     }
+    result.spawned_pid = static_cast<uint64_t>(pi.dwProcessId);
 
     // A job with KILL_ON_JOB_CLOSE, because TerminateProcess on the timeout
     // path only kills what pi.hProcess points at. When Godot is resolved to a
@@ -947,6 +978,7 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
             std::chrono::steady_clock::now() - start_time).count();
         return result;
     }
+    result.spawned_pid = static_cast<uint64_t>(pid);
     int flags = fcntl(pipefd[0], F_GETFL, 0);
     fcntl(pipefd[0], F_SETFL, flags | O_NONBLOCK);
 
@@ -1000,6 +1032,7 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
     // sibling tools read it from. Empty when the process printed none, which is
     // a process that is not Godot.
     result.engine_version = engineVersionFromOutput(full_output);
+    result.published_pid = publishedSessionPid(full_output);
 
     // Parse output lines into structured logs.
     //

@@ -1433,6 +1433,7 @@ public:
     }
 
     bool isConnected() const override {
+        const_cast<RuntimeSessionClient*>(this)->releaseExitedRoutes();
         std::shared_ptr<ipc::IIpcClient> selected;
         {
             std::lock_guard<std::mutex> lock(m_mutex);
@@ -1583,6 +1584,7 @@ public:
     }
 
     std::optional<SessionDescriptor> activeSession() const override {
+        const_cast<RuntimeSessionClient*>(this)->releaseExitedRoutes();
         std::lock_guard<std::mutex> lock(m_mutex);
         if (const Route* route = findRouteLocked(m_selectedSessionId)) return route->descriptor;
         return std::nullopt;
@@ -1836,6 +1838,34 @@ private:
                 if (it->second.client && it->second.client->isConnected() &&
                     processInstanceState(descriptor.pid, descriptor.started_at_ms) !=
                         ProcessInstanceState::proven_stale) {
+                    ++it;
+                    continue;
+                }
+                if (m_selectedSessionId == it->first) m_selectedSessionId.clear();
+                released.push_back(std::move(it->second));
+                it = m_routes.erase(it);
+            }
+        }
+        for (auto& route : released) {
+            if (route.client) route.client->disconnect();
+        }
+    }
+
+    // A route whose process has exited, dropped before anything reads it or is
+    // sent on it. Its pipe handle stays open after the game exits, so a request
+    // on the selected route spent the whole public deadline reconnecting to a
+    // pipe that was gone, about 17 s, and the answer still named that game's
+    // engine (#1341). Only a process proven gone counts: one that cannot be
+    // asked keeps its route, and a dropped connection is left to the paths that
+    // handle it. One process query per route and no file read.
+    void releaseExitedRoutes() {
+        std::vector<Route> released;
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            for (auto it = m_routes.begin(); it != m_routes.end();) {
+                const auto& descriptor = it->second.descriptor;
+                if (processInstanceState(descriptor.pid, descriptor.started_at_ms) !=
+                    ProcessInstanceState::proven_stale) {
                     ++it;
                     continue;
                 }

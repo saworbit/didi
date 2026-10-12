@@ -5351,8 +5351,10 @@ static void test_resource_create_type_guard_keeps_the_reference_when_no_engine_a
         ASSERT_TRUE(!written.isError);
         const auto report = didi::json::parse(written.content[0].text);
         // Attached, and the bridge could not answer. Saying nothing here would
-        // read as the engine having agreed.
+        // read as the engine having agreed, and the reason is said (#1341).
         ASSERT_EQ(report["property_check"]["type_checked_against"], "api_reference");
+        ASSERT_TRUE(report["property_check"].value("engine_not_consulted", std::string()).find(
+                        "engine.classExists") != std::string::npos);
         ASSERT_TRUE(!report["property_check"].contains("type_unknown_to_attached_engine"));
     }
 
@@ -10340,6 +10342,15 @@ static void test_a_misnamed_argument_is_refused_with_the_name_to_use() {
     ASSERT_EQ(script_path["retry_with"], didi::json({{"file_path", "res://a.gd"}}));
     const auto context = refusal("eval_gdscript", {{"expression", "1"}, {"context_path", "/root/A"}})["data"];
     ASSERT_EQ(context["did_you_mean"], "context_node");
+    // A known argument the schema refuses is the field, not the expression
+    // that was fine (#1340). The sandbox's own words about the expression
+    // quote no argument, and still name it.
+    ASSERT_EQ(refusal("eval_gdscript", {{"expression", "1"}, {"context_node", 5}})["data"]["field"], "context_node");
+    ASSERT_EQ(refusal("eval_gdscript", {{"expression", "1"}, {"timeout_ms", 99999}})["data"]["field"], "timeout_ms");
+    ASSERT_EQ(didi::mcp::remedyForRefusal("invalid_arguments", 400,
+                                          "The expression calls 'queue_free', which the sandbox does not allow.",
+                                          "eval_gdscript", didi::json::object())["field"],
+              "expression");
 
     // A long value is named and not sent back: the caller already has it.
     const auto long_value =

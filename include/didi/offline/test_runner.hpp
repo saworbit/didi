@@ -44,6 +44,12 @@ std::string resolveGodotExecutable();
 // v4.5.1.stable.official" -- or empty when the output carries no banner.
 [[nodiscard]] std::string engineVersionFromOutput(const std::string& output);
 
+// The pid a game names in the session it publishes, read from its output. The
+// addon logs "Published authenticated runtime session at <endpoint>", and the
+// endpoint ends godot_didi_<project>_<pid>_<session>. Zero when the output has
+// no such line (#1314).
+[[nodiscard]] uint64_t publishedSessionPid(const std::string& output);
+
 #if defined(_WIN32)
 namespace detail {
 
@@ -187,6 +193,12 @@ struct TestSessionResult {
     // an ordinary run, where the process is gone by the time anyone reads this.
     uint64_t pid{0};
     bool detached{false};
+    // The process this call spawned, kept for a blocking run too, and the pid
+    // the game named in the session it published. Zero when unknown. Neither
+    // is published as it stands: runtime_launch says which one `pid` is
+    // (#1314).
+    uint64_t spawned_pid{0};
+    uint64_t published_pid{0};
 
     // The published spelling of kill_wait. Null for every run that did not wait
     // on a kill, which is every run that did not time out.

@@ -234,8 +234,14 @@ const std::map<std::string, Rule>& rules() {
                 return nextCall("project_set_input_action", json::object(),
                                 "The game's InputMap lacks the action; define it, then relaunch.");
             }
-            // The expression sandbox refuses the expression itself, in its own words.
-            if (r.tool == "eval_gdscript") return field("expression");
+            // The expression sandbox refuses the expression itself, in its own
+            // words. The schema check quotes the argument it refuses, which can
+            // be another one, and that one is the field (#1340).
+            if (r.tool == "eval_gdscript") {
+                const auto quoted = quotedArgument(r.message);
+                if (!quoted.empty() && argumentNamedIn(r.message, r.tool) == quoted) return field(quoted);
+                return field("expression");
+            }
             // A value of the wrong type names the property it was for, and the
             // argument that carries it is the value.
             if (startsWith(r.message, "Property \"") || startsWith(r.message, "Uniform \"")) {

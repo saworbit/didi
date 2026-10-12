@@ -618,6 +618,26 @@ CallToolResult handleExecuteTestSession(const json& args, std::shared_ptr<ipc::I
     } else if (detach) {
         result["session_published"] = false;
         result["game_session"] = nullptr;
+    } else {
+        // A blocking run's game has exited, or was ended, by the time this
+        // answers, and pid was null for every one (#1314). The game names its
+        // pid in the session endpoint it publishes, which the run captured.
+        // Without that there is only the process Didi started, which on
+        // Windows can be the console build's launcher, and summary says which.
+        std::string sentence = result.value("summary", std::string());
+        if (!sentence.empty() && sentence.back() != '.') sentence += '.';
+        if (!sentence.empty()) sentence += ' ';
+        if (session_res.published_pid != 0) {
+            result["pid"] = session_res.published_pid;
+            result["summary"] = sentence + "The game ran as process " +
+                                std::to_string(session_res.published_pid) +
+                                ", the pid in the session it published.";
+        } else if (session_res.spawned_pid != 0) {
+            result["pid"] = session_res.spawned_pid;
+            result["summary"] = sentence + "Process " + std::to_string(session_res.spawned_pid) +
+                                " is the one Didi started. The game published no session, so on "
+                                "Windows this can be the console build's launcher and not the game.";
+        }
     }
     // The same comparison the two tools that shell out to a discovered Godot
     // have made since #617. This one had no engine fields at all, so a project

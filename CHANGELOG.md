@@ -134,6 +134,9 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Fixed
 
+- `2026-10-12` A blocking `runtime_launch` answers the game's pid from the session it published, or the spawned process, where it answered `pid: null`. [#1314](https://github.com/saworbit/didi/issues/1314)
+- `2026-10-12` A session whose process has exited is dropped before a call uses it, so `resource_create` no longer waits about 17 s on a stopped game. [#1341](https://github.com/saworbit/didi/issues/1341)
+- `2026-10-12` An `eval_gdscript` refusal of `context_node`, `timeout_ms` or another argument names that argument in `field`, not `expression`. [#1340](https://github.com/saworbit/didi/issues/1340)
 - `2026-10-12` `shader_list_uniforms` asks the engine whether a shader compiles, so a VisualShader with only graph textures is no longer refused as not compiled. [#1345](https://github.com/saworbit/didi/issues/1345) · [PR #1349](https://github.com/saworbit/didi/pull/1349)
 - `2026-10-12` The live harness drives the `shader_not_compiled` refusal against a shader that does not compile, on every engine line. [#1343](https://github.com/saworbit/didi/issues/1343) · [PR #1349](https://github.com/saworbit/didi/pull/1349)
 - `2026-10-12` `didi doctor` asks git whether `.didi/` is ignored, so a later `!.didi/` line warns instead of reading as ok. [#1346](https://github.com/saworbit/didi/issues/1346) · [PR #1348](https://github.com/saworbit/didi/pull/1348)

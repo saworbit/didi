@@ -451,6 +451,90 @@ public:
     }
 };
 
+// A game that prints Didi's session line, or one that does not, and exits.
+class ScopedPublishingEngine {
+public:
+    explicit ScopedPublishingEngine(bool publishes) {
+        m_root = std::filesystem::temp_directory_path() /
+                 ("didi-publishing-runner-" +
+                  std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        std::filesystem::create_directories(m_root);
+#if defined(_WIN32)
+        m_path = m_root / "fake_engine.bat";
+        std::ofstream out(m_path, std::ios::binary);
+        out << "@echo off\r\n"
+               "echo Godot Engine v4.7.2.stable.official - https://godotengine.org\r\n";
+        if (publishes) {
+            out << "echo [GDEXT_IPC] Published authenticated runtime session at "
+                   "\\\\.\\pipe\\godot_didi_0f1e2d3c_32856_aaaabbbbccccddddeeeeffff00001111\r\n";
+        }
+#else
+        m_path = m_root / "fake_engine.sh";
+        std::ofstream out(m_path, std::ios::binary);
+        out << "#!/bin/sh\n"
+               "echo 'Godot Engine v4.7.2.stable.official - https://godotengine.org'\n";
+        if (publishes) {
+            out << "echo '[GDEXT_IPC] Published authenticated runtime session at "
+                   "/tmp/godot_didi_0f1e2d3c_32856_aaaabbbbcccc.sock'\n";
+        }
+        out.close();
+        std::filesystem::permissions(m_path, std::filesystem::perms::owner_all,
+                                     std::filesystem::perm_options::add);
+#endif
+    }
+
+    ~ScopedPublishingEngine() {
+        std::error_code ignored;
+        std::filesystem::remove_all(m_root, ignored);
+    }
+
+    std::string path() const { return m_path.string(); }
+
+private:
+    std::filesystem::path m_root;
+    std::filesystem::path m_path;
+};
+
+// A blocking launch answered pid: null though the game published a session
+// with its pid in it (#1314). The game's pid when it published one, the
+// process Didi started otherwise, and the summary says which.
+void test_a_blocking_launch_names_the_games_pid() {
+    using didi::offline::publishedSessionPid;
+    ASSERT_EQ(publishedSessionPid("[INFO ] [GDEXT_IPC] Published authenticated runtime session at "
+                                  "\\\\.\\pipe\\godot_didi_0f1e_32856_aaaabbbb\r\nnext line\n"),
+              32856u);
+    ASSERT_EQ(publishedSessionPid("Published authenticated runtime session at "
+                                  "/tmp/godot_didi_0f1e_4711_aaaabbbbcccc.sock\n"),
+              4711u);
+    ASSERT_EQ(publishedSessionPid("Godot Engine v4.7.2.stable.official\n"), 0u);
+    ASSERT_EQ(publishedSessionPid("Published authenticated runtime session at /tmp/other_0f1e_4711_a.sock\n"), 0u);
+    ASSERT_EQ(publishedSessionPid("Published authenticated runtime session at "
+                                  "\\\\.\\pipe\\godot_didi_0f1e_x2_aaaa\n"),
+              0u);
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    registry.setIpcClient(nullptr);
+    const auto launch = [&](bool publishes) {
+        ScopedPublishingEngine engine(publishes);
+        ScopedEnvironmentVariable godot_bin("GODOT_BIN");
+        godot_bin.set(engine.path());
+        const auto result = registry.callTool(
+            "runtime_launch", {{"scene_path", "res://none.tscn"}, {"timeout_seconds", 10}});
+        ASSERT_TRUE(!result.isError);
+        return didi::json::parse(result.content[0].text);
+    };
+    const auto published = launch(true);
+    ASSERT_EQ(published["pid"], 32856);
+    ASSERT_TRUE(published["summary"].get<std::string>().find(
+                    "process 32856, the pid in the session it published") != std::string::npos);
+    const auto unpublished = launch(false);
+    ASSERT_TRUE(unpublished["pid"].is_number_unsigned());
+    ASSERT_TRUE(unpublished["pid"].get<uint64_t>() != 32856u);
+    ASSERT_TRUE(unpublished["summary"].get<std::string>().find("is the one Didi started") !=
+                std::string::npos);
+}
+
 void test_detached_launch_selects_the_game_it_started() {
     // Break found running the live harness on #760. A detached launch waits for
     // the game to publish a session and reports it, but never selects it, so
@@ -545,6 +629,8 @@ struct RegisterTestRunnerTests {
     RegisterTestRunnerTests() {
         registerTest("RuntimeLaunch.CrashKeepsItsLocation",
                      test_a_crash_keeps_its_location_and_names_itself_in_the_summary);
+        registerTest("RuntimeLaunch.BlockingLaunchNamesTheGamesPid",
+                     test_a_blocking_launch_names_the_games_pid);
         registerTest("RuntimeLaunch.TimeoutSchema", test_runtime_launch_schema_bounds_timeout);
         registerTest("RuntimeLaunch.TimeoutValidation", test_runtime_launch_rejects_timeout_outside_public_range);
         registerTest("RuntimeLaunch.FixedFps", test_runtime_launch_fixed_fps);
