@@ -134,8 +134,8 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Fixed
 
-- `2026-10-12` `shader_list_uniforms` asks the engine whether a shader compiles, so a VisualShader with only graph textures is no longer refused as not compiled. [#1345](https://github.com/saworbit/didi/issues/1345)
-- `2026-10-12` The live harness drives the `shader_not_compiled` refusal against a shader that does not compile, on every engine line. [#1343](https://github.com/saworbit/didi/issues/1343)
+- `2026-10-12` `shader_list_uniforms` asks the engine whether a shader compiles, so a VisualShader with only graph textures is no longer refused as not compiled. [#1345](https://github.com/saworbit/didi/issues/1345) · [PR #1349](https://github.com/saworbit/didi/pull/1349)
+- `2026-10-12` The live harness drives the `shader_not_compiled` refusal against a shader that does not compile, on every engine line. [#1343](https://github.com/saworbit/didi/issues/1343) · [PR #1349](https://github.com/saworbit/didi/pull/1349)
 - `2026-10-12` `didi doctor` asks git whether `.didi/` is ignored, so a later `!.didi/` line warns instead of reading as ok. [#1346](https://github.com/saworbit/didi/issues/1346) · [PR #1348](https://github.com/saworbit/didi/pull/1348)
 - `2026-10-12` `didi doctor`, `project_list_export_presets` and `project_export` say when a preset's builds would ship `addons/didi`. [#1347](https://github.com/saworbit/didi/issues/1347) · [PR #1348](https://github.com/saworbit/didi/pull/1348)
 - `2026-10-12` The agent guide covers hidden-control rectangles, checking a written shader, Color settings and asserting no errors. [PR #1339](https://github.com/saworbit/didi/pull/1339)
