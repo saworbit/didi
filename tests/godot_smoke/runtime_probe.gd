@@ -6,6 +6,11 @@ var detached_probe: Node
 var stop_during_step := false
 var observed_pause := false
 var input_counter: int = 0
+# A variable with a getter, which eval_gdscript refuses because reading it
+# runs the getter; frame_counter above has none and is read (#1298).
+var guarded_counter: int:
+	get:
+		return frame_counter
 @onready var input_counter_node: Node = $InputCounter_0
 
 func _ready() -> void:

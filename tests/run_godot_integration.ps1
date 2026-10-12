@@ -820,6 +820,12 @@ try {
         (Tool-Request 2482 "eval_gdscript" @{ expression = "node.get('position')"; context_node = "/root/RuntimeRoot/Spatial/AnimTarget/MouseButtonProbe" }),
         (Tool-Request 2483 "eval_gdscript" @{ expression = "node.get('position')"; context_node = "/root/RuntimeRoot/Spatial/AnimTarget/MouseMotionProbe" }),
         (Tool-Request 2484 "eval_gdscript" @{ expression = "node.get('position')"; context_node = "/root/RuntimeRoot/Spatial/AnimTarget/MouseMotionDelta" }),
+        # A game's own state. A script variable with no getter is read from
+        # member storage; one with a getter, or a name the script does not
+        # declare, is refused, because reading it runs project code (#1298).
+        (Tool-Request 2576 "eval_gdscript" @{ expression = "node.get('frame_counter')"; context_node = "/root/RuntimeRoot" }),
+        (Tool-Request 2577 "eval_gdscript" @{ expression = "node.get('guarded_counter')"; context_node = "/root/RuntimeRoot" }),
+        (Tool-Request 2578 "eval_gdscript" @{ expression = "node.get('undeclared_counter')"; context_node = "/root/RuntimeRoot" }),
         # A game that pauses when its window loses focus can only be tested by
         # losing focus. window_focus tells the window and the main loop what a
         # real change tells them, says it was synthetic, and goes in a batch of
@@ -1571,6 +1577,10 @@ try {
     $mouseBatch = Tool-Payload $runtimeById[2480]
     Assert-True ($mouseBatch.outcome -eq "completed" -and $mouseBatch.delivery -eq "immediate" -and $mouseBatch.paused -eq $false -and $mouseBatch.queued_event_count -eq 0) "A batch on a running game was not reported as delivered at once: $($mouseBatch | ConvertTo-Json -Compress)"
     Assert-True ((@($mouseBatch.event_types) -join ",") -eq "mouse_motion,mouse_button,mouse_button") "mouse_motion was not accepted as an event kind: $(@($mouseBatch.event_types) -join ',')"
+    $scriptState = Tool-Payload $runtimeById[2576]
+    Assert-True ((-not $runtimeById[2576].result.isError) -and $scriptState.value_type -eq "int" -and $scriptState.value -gt 0) "A script variable with no getter was not read from the game: $($runtimeById[2576].result.content[0].text)"
+    Assert-True ($runtimeById[2577].result.isError -eq $true -and $runtimeById[2577].result.content[0].text -match "runtime_probe\.gd line \d+ declares" -and $runtimeById[2577].result.content[0].text -match "guarded_counter.{1,3} with a getter") "A script variable with a getter was read, or refused without naming its declaration: $($runtimeById[2577].result.content[0].text)"
+    Assert-True ($runtimeById[2578].result.isError -eq $true -and $runtimeById[2578].result.content[0].text -match "neither a native property nor a variable") "An undeclared name was read through the script: $($runtimeById[2578].result.content[0].text)"
     $clickAt = (Tool-Payload $runtimeById[2482]).value
     Assert-True ($clickAt.x -eq 40 -and $clickAt.y -eq 30) "An injected click did not land where it was aimed: $($clickAt | ConvertTo-Json -Compress)"
     $motionAt = (Tool-Payload $runtimeById[2483]).value

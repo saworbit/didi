@@ -1473,7 +1473,7 @@ Each invariant takes a `kind`:
 | kind | reads | bounds |
 | --- | --- | --- |
 | `performance_between` | `metric`, a Performance monitor name such as `TIME_FPS` | `minimum`, `maximum`, at least one |
-| `expression_between` | `expression` against an optional `context_node`, evaluating to a number or a boolean, such as `node.get("position").x`; native ClassDB properties only, a script's own variables are refused | `minimum`, `maximum`, at least one |
+| `expression_between` | `expression` against an optional `context_node`, evaluating to a number or a boolean, such as `node.get("position").x`; native properties, and script variables declared with no getter (#1298) | `minimum`, `maximum`, at least one |
 | `no_engine_errors` | error-level engine output since the watch began | none; any error violates it |
 
 `outcome` is `violated`, `held`, or `inconclusive`. The third is not a failure mode of the tool: an invariant that never produced a reading, because its context node was missing or its expression failed, is reported with zero readings and makes the run inconclusive. A condition nobody could measure is not a condition that stayed true.
@@ -1491,7 +1491,7 @@ Drives a running game for a bounded window and reports what happened. It holds o
 This is the pairing `runtime_inject_input` and `runtime_watch_invariants` cannot make between them. Injection presses a button and returns; watching samples every frame but presses nothing. A character that walks into a wall and stops responding is only visible to something doing both at frame rate, because from outside you see a position before the press and a position after it, never the second in between where nothing happened.
 
 - `actions` (`array`, required, 1 to 8). InputMap action names. Names must not repeat, and one action is down at a time.
-- `probes` (`array`, required, 1 to 4). Each takes an `expression` against an optional `context_node`, evaluating to a number or a boolean, through the same sandbox `runtime_watch_invariants` uses. `node` is the context node and a native ClassDB property is read with `node.get("name")`; a component of that read is a number, as in `node.get("position").x`. A bare `position.x` reads through an object and is refused, and so is a script's own variable, because reading one can run its getter; script state has to be exposed through a native property to be watched.
+- `probes` (`array`, required, 1 to 4). Each takes an `expression` against an optional `context_node`, evaluating to a number or a boolean, through the same sandbox `runtime_watch_invariants` uses. `node` is the context node, and a native property, or a script variable declared with no getter, is read with `node.get("name")`; a component of that read is a number, as in `node.get("position").x`. A bare `position.x` reads through an object and is refused, and so is a script's own variable, because reading one can run its getter; script state has to be exposed through a native property to be watched.
 - `duration_ms` (`integer`, default `5000`, 250 to 60000).
 - `action_hold_ms` (`integer`, default `250`, 16 to 10000). How long one action is held before the schedule moves on.
 - `stuck_ms` (`integer`, default `3000` or `duration_ms`, whichever is smaller; 100 to 60000). How long every probe must stay still for that to be reported. Must not exceed `duration_ms`; the default follows a short window down, so a caller who sets only `duration_ms` is not refused for a default they never chose.
@@ -1539,7 +1539,7 @@ Proves a behaviour in one call and returns the proof: a verdict, the values it r
 - `timeout_seconds` (`integer`, 5 to 300, default 60): the whole run, launch and stop included.
 - `request_id`: runs it as a job, like `project_export`.
 
-Expressions are the read-only sandbox `eval_gdscript` uses, evaluated against `context_node`: `node.get("position").y` reads a native property, and a script's own variables are refused.
+Expressions are the read-only sandbox `eval_gdscript` uses, evaluated against `context_node`: `node.get("position").y` reads a native property, and `node.get("score")` reads a script variable declared with no getter (#1298).
 
 **Frames are physics ticks.** The game runs with `--fixed-fps` set to the project's `physics/common/physics_ticks_per_second`, so one frame advances physics by exactly one tick on any machine. Without it, Godot runs as many ticks in a frame as that frame's wall-clock time covers, which is the round trip between calls rather than the game: 5 to 6 ticks for a 100 ms frame, measured on 4.5.1, 4.6.2 and 4.7.2. The game starts paused: the runner passes `-- --didi-start-paused`, and the game's bridge pauses the tree when the main loop starts, before its first physics frame, so the first `assert` reads the scene as `_ready` left it and frame 1 is the first frame the scenario steps. A press lands in the next frame the runner steps, and `game.fixed_fps` says the rate it ran at. `game.started_paused` and `game.frames_before_pause` say what happened, measured rather than assumed: `0` frames when the game started paused, and the engine's physics frame count at the runner's own pause when it could not, as with an addon older than this. Before #1208 a fixed rate ran the game as fast as the machine allows until the pause landed, anything from 1 to 2947 frames. A game a person starts is never started paused.
 
@@ -1852,7 +1852,7 @@ Accepted forms are literals; arrays and string-keyed dictionaries made only from
 
 - Globals with source-local numeric arguments only: `min`, `max`, `abs`, `clamp`, `snapped`, `Vector2`, `Vector3`, `Color`.
 - Exact direct `node` calls: `get_child_count()`, `get_path()`, `get_class()`, plus `is_class(<string>)`, `is_in_group(<string>)`, `has_method(<string>)`, and `has_meta(<string>)`.
-- `node.get(<string literal>)` only when ClassDB confirms an exact native scalar property; Didi prebinds the value before evaluation so script `_get`/getters cannot run.
+- `node.get(<string literal>)` when ClassDB confirms an exact native scalar property, or when the node's script, or a script it extends, declares the name as a class-level `var` with no `get` clause (#1298). Godot reads such a member from storage without running code: measured on 4.5.1, 4.6.2 and 4.7.2 with a plain `var`, a setter-only `var` and an `@export`. A getter, a name no script declares (which runs `_get`), a script that is not a GDScript, and a declaration this cannot read with certainty are refused `403`, naming the script and line. Didi prebinds the value before evaluation, so no project code runs.
 - String literals: `size()`, `is_empty()`, `find(<string>)`, `count(<string>)`, and bounded `repeat(<integer literal>)` (maximum produced string 512 KiB, then normal result bounds apply).
 - Source-local array literals: `size()`, `is_empty()`, `find(<scalar>)`, `count(<scalar>)`, `has(<scalar>)`.
 - Source-local dictionary literals: `size()`, `is_empty()`, `has(<string>)`.

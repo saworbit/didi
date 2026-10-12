@@ -175,6 +175,68 @@ bool isSafePreboundPropertyType(GDExtensionVariantType type) {
     }
 }
 
+// A script's own variable, read without running the project's code. Godot's
+// script instance answers a declared member with no getter from member
+// storage, before _get is tried; a getter, or a name no script declares, runs
+// code (measured on 4.5.1, 4.6.2 and 4.7.2). Nothing in the engine links a
+// variable to a named getter, so its declaration decides, in the node's
+// script and every script that one extends (#1298). Object.get_script is
+// 1214101251, Script.get_source_code and Resource.get_path 201670096,
+// Script.get_base_script 278624046 and Object.is_class 3927539163 on all
+// three lines.
+Result<VariantValue> readScriptVariable(GDExtensionObjectPtr node, VariantValue& property_name,
+                                        const std::string& name) {
+    const auto refused = [&](const std::string& why) {
+        return Error(403, "node.get reads native properties, and script variables declared with no "
+                          "getter. " + why);
+    };
+    auto script_value = callObject(node, "Object", "get_script", 1214101251LL);
+    if (script_value.isErr()) return script_value.error();
+    VariantValue held = std::move(script_value.value());
+    for (int depth = 0; depth < kMaxClassHierarchyDepth; ++depth) {
+        auto script = objectFromVariant(held);
+        if (script.isErr()) return script.error();
+        if (!script.value()) break;
+        auto path = nodeString(script.value(), "Resource", "get_path", 201670096LL,
+                               GDEXTENSION_VARIANT_TYPE_STRING);
+        const std::string where = path.isOk() && !path.value().empty() ? path.value() : "a built-in script";
+        auto gdscript_name = makeStringName("GDScript");
+        if (gdscript_name.isErr()) return gdscript_name.error();
+        auto is_gdscript = callObject(script.value(), "Object", "is_class", 3927539163LL,
+                                      {&gdscript_name.value()});
+        if (is_gdscript.isErr()) return is_gdscript.error();
+        auto flag = scalarFromVariant<GDExtensionBool>(is_gdscript.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+        if (flag.isErr()) return flag.error();
+        if (flag.value() == 0) {
+            return refused("\"" + name + "\" may come from " + where +
+                           ", which is not a GDScript, so its declaration cannot be read.");
+        }
+        auto source = nodeString(script.value(), "Script", "get_source_code", 201670096LL,
+                                 GDEXTENSION_VARIANT_TYPE_STRING);
+        if (source.isErr()) return source.error();
+        const auto verdict = runtime::scriptVariableRead(source.value(), name);
+        const auto at = where + " line " + std::to_string(verdict.line);
+        switch (verdict.read) {
+            case runtime::ScriptVariableRead::Plain:
+                return callObject(node, "Object", "get", 2760726917LL, {&property_name});
+            case runtime::ScriptVariableRead::HasGetter:
+                return refused(at + " declares \"" + name + "\" with a getter, and reading it would "
+                               "run that getter.");
+            case runtime::ScriptVariableRead::Unclear:
+                return refused(at + " declares \"" + name + "\" in a form this cannot read with "
+                               "certainty, so it is not read.");
+            case runtime::ScriptVariableRead::NotDeclared:
+                break;
+        }
+        auto base = callObject(script.value(), "Script", "get_base_script", 278624046LL);
+        if (base.isErr()) return base.error();
+        held = std::move(base.value());
+    }
+    return refused("\"" + name + "\" is neither a native property nor a variable the node's script "
+                   "declares, and reading an undeclared name runs the script's _get. Read a native "
+                   "property such as node.get(\"position\").x, or a variable the script declares.");
+}
+
 Result<void> prepareNativePropertyReads(const std::string& source,
                                         GDExtensionObjectPtr context_node,
                                         std::string& executable_source,
@@ -237,15 +299,12 @@ Result<void> prepareNativePropertyReads(const std::string& source,
             if (next_class.isErr()) return next_class.error();
             current_class = std::move(next_class);
         }
-        if (getter_name.empty()) {
-            return Error(403,
-                         "node.get reads native ClassDB properties only. A script's own variable is "
-                         "refused because reading it can run its getter; read a native property "
-                         "such as node.get(\"position\").x instead.");
-        }
-        auto property_value = callObject(class_db.value(), "ClassDB",
-                                         "class_get_property", 2498641674LL,
-                                         {&object_value.value(), &property_name.value()});
+        // No native getter: a script's own variable, read when nothing in its
+        // script chain gives it a getter (#1298).
+        auto property_value = getter_name.empty()
+            ? readScriptVariable(context_node, property_name.value(), read.property)
+            : callObject(class_db.value(), "ClassDB", "class_get_property", 2498641674LL,
+                         {&object_value.value(), &property_name.value()});
         if (property_value.isErr()) return property_value.error();
         const auto type = GodotApi::instance().variant_get_type(property_value.value().ptr());
         if (!isSafePreboundPropertyType(type)) {
