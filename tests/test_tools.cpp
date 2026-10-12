@@ -7128,21 +7128,36 @@ static void test_a_write_that_did_not_land_says_which_of_the_two_it_was() {
     ASSERT_EQ(rounded.at("outcome").get<std::string>(), std::string("unchanged"));
 }
 
-static void test_a_shader_that_declares_uniforms_and_lists_none_did_not_compile() {
-    // shader_list_uniforms answered an empty list for a shader that failed to
-    // compile, which reads as "no uniforms" (#1300). The code decides whether
-    // an empty list can be true.
-    using didi::godot::shaderDeclaresListedUniform;
-    ASSERT_TRUE(shaderDeclaresListedUniform("shader_type canvas_item;\nuniform float glow = 1.0\nvoid fragment() {}\n"));
-    ASSERT_TRUE(shaderDeclaresListedUniform("shader_type spatial;\n\tuniform vec4 tint : source_color;\n"));
-    ASSERT_TRUE(!shaderDeclaresListedUniform("shader_type canvas_item;\nvoid fragment() { COLOR = vec4(1.0); }\n"));
-    // Never listed, so never evidence.
-    ASSERT_TRUE(!shaderDeclaresListedUniform("shader_type spatial;\nglobal uniform vec4 wind;\ninstance uniform float seed;\n"));
-    ASSERT_TRUE(!shaderDeclaresListedUniform("shader_type canvas_item;\nuniform sampler2D screen : hint_screen_texture;\n"));
-    ASSERT_TRUE(!shaderDeclaresListedUniform("shader_type spatial;\nuniform sampler2D depth : hint_depth_texture, filter_nearest;\n"));
-    // Comments are not code.
-    ASSERT_TRUE(!shaderDeclaresListedUniform("shader_type canvas_item;\n// uniform float a;\n/* uniform float b;\nuniform float c; */\n"));
-    ASSERT_TRUE(shaderDeclaresListedUniform("shader_type canvas_item;\n/* note */ \nuniform float d; // trailing\n"));
+static void test_a_shader_compile_probe_is_the_code_plus_one_uniform() {
+    // shader_list_uniforms refused a VisualShader, a sampler with a default
+    // texture and a uniform behind #ifdef as not compiled, from a scan of the
+    // code (#1345). The engine compiles a copy with one uniform added, and
+    // lists it only when the code compiles.
+    using didi::godot::shaderCompileProbe;
+    const auto plain = shaderCompileProbe("shader_type canvas_item;\nvoid fragment() {}\n", "res://a.gdshader");
+    ASSERT_EQ(plain.uniform, std::string("didi_compile_probe"));
+    ASSERT_EQ(plain.code, std::string("shader_type canvas_item;\nvoid fragment() {}\n\nuniform float didi_compile_probe;\n"));
+    // A name the code already uses is not taken.
+    const auto taken = shaderCompileProbe("uniform float didi_compile_probe;\n", "");
+    ASSERT_EQ(taken.uniform, std::string("didi_compile_probe_"));
+
+    // The copy has no path, so a relative include resolves against res://.
+    // It is made absolute against the shader's folder, as Godot resolves it.
+    const auto include = [](const std::string& path) {
+        return shaderCompileProbe("shader_type spatial;\r\n  #include \"common.gdshaderinc\"\r\n"
+                                  "#include \"../inc/up.gdshaderinc\"\n#include \"res://abs.gdshaderinc\"\n",
+                                  path).code;
+    };
+    ASSERT_EQ(include("res://shaders/water.gdshader"),
+              std::string("shader_type spatial;\r\n  #include \"res://shaders/common.gdshaderinc\"\r\n"
+                          "#include \"res://shaders/../inc/up.gdshaderinc\"\n#include \"res://abs.gdshaderinc\"\n"
+                          "\nuniform float didi_compile_probe;\n"));
+    ASSERT_TRUE(include("res://water.gdshader").find("\"res://common.gdshaderinc\"") != std::string::npos);
+    // Embedded in a scene: the scene's folder.
+    ASSERT_TRUE(include("res://levels/one.tscn::Shader_x1y2").find("\"res://levels/common.gdshaderinc\"") !=
+                std::string::npos);
+    // A shader with no path is compiled where the original is: left alone.
+    ASSERT_TRUE(include("").find("#include \"common.gdshaderinc\"") != std::string::npos);
 }
 
 static void test_a_declared_hint_range_is_read_as_the_engine_spells_it() {
@@ -10548,8 +10563,8 @@ struct RegisterToolTests {
                      test_a_write_that_did_not_land_says_which_of_the_two_it_was);
         registerTest("Tools.ShaderHintRangeIsReadAsTheEngineSpellsIt",
                      test_a_declared_hint_range_is_read_as_the_engine_spells_it);
-        registerTest("Tools.AShaderThatListsNoUniformsDidNotCompile",
-                     test_a_shader_that_declares_uniforms_and_lists_none_did_not_compile);
+        registerTest("Tools.AShaderCompileProbeIsTheCodePlusOneUniform",
+                     test_a_shader_compile_probe_is_the_code_plus_one_uniform);
         registerTest("Tools.ResourceTypeHintIsAListOfClasses",
                      test_a_declared_resource_type_is_a_list_and_not_one_class_name);
         registerTest("Tools.ScriptToolsRefuseAFileTheEngineCannotRead",

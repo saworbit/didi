@@ -3948,36 +3948,50 @@ json notAppliedReport(const json& observed, const json& old_value, int hint,
     return report;
 }
 
-bool shaderDeclaresListedUniform(const std::string& code) {
-    std::string text;
-    text.reserve(code.size());
-    // Comments out, line breaks kept.
-    for (size_t at = 0; at < code.size(); ++at) {
-        if (code.compare(at, 2, "//") == 0) {
-            while (at < code.size() && code[at] != '\n') ++at;
-            if (at < code.size()) text += '\n';
-        } else if (code.compare(at, 2, "/*") == 0) {
-            const auto end = code.find("*/", at + 2);
-            for (size_t inner = at; inner < (end == std::string::npos ? code.size() : end); ++inner) {
-                if (code[inner] == '\n') text += '\n';
+ShaderCompileProbe shaderCompileProbe(const std::string& code, const std::string& shader_path) {
+    ShaderCompileProbe probe;
+    probe.uniform = "didi_compile_probe";
+    while (code.find(probe.uniform) != std::string::npos) probe.uniform += '_';
+
+    // The folder Godot resolves a relative include against, String::get_base_dir
+    // of the shader's path. A shader embedded in a scene carries the scene's
+    // path, so its includes resolve against the scene's folder.
+    std::string folder;
+    if (const auto scheme = shader_path.find("://"); scheme != std::string::npos) {
+        const auto rest = shader_path.substr(scheme + 3);
+        const auto slash = rest.find_last_of("/\\");
+        folder = shader_path.substr(0, scheme + 3) +
+                 (slash == std::string::npos ? std::string() : rest.substr(0, slash));
+    }
+    // String::is_absolute_path.
+    const auto absolute = [](const std::string& path) {
+        return path.front() == '/' || path.front() == '\\' || path.find(":/") != std::string::npos ||
+               path.find(":\\") != std::string::npos;
+    };
+    std::string out;
+    out.reserve(code.size() + 64);
+    size_t start = 0;
+    while (true) {
+        const auto end = code.find('\n', start);
+        auto line = code.substr(start, end == std::string::npos ? std::string::npos : end - start);
+        if (!folder.empty() && strings::startsWith(strings::trim(line), "#include")) {
+            const auto open = line.find('"');
+            const auto close = open == std::string::npos ? std::string::npos : line.find('"', open + 1);
+            if (close != std::string::npos && close > open + 1) {
+                const auto path = line.substr(open + 1, close - open - 1);
+                if (!absolute(path)) {
+                    line = line.substr(0, open + 1) + folder + (folder.back() == '/' ? "" : "/") + path +
+                           line.substr(close);
+                }
             }
-            if (end == std::string::npos) break;
-            at = end + 1;
-        } else {
-            text += code[at];
         }
+        out += line;
+        if (end == std::string::npos) break;
+        out += '\n';
+        start = end + 1;
     }
-    for (const auto& line : strings::split(text, '\n')) {
-        const auto trimmed = strings::trim(line);
-        if (!strings::startsWith(trimmed, "uniform ") && !strings::startsWith(trimmed, "uniform\t")) continue;
-        if (trimmed.find("hint_screen_texture") != std::string::npos ||
-            trimmed.find("hint_depth_texture") != std::string::npos ||
-            trimmed.find("hint_normal_roughness_texture") != std::string::npos) {
-            continue;
-        }
-        return true;
-    }
-    return false;
+    probe.code = out + "\nuniform float " + probe.uniform + ";\n";
+    return probe;
 }
 
 std::optional<ShaderHintRange> parseShaderHintRange(const std::string& hint_string) {
@@ -15754,6 +15768,69 @@ json GodotBridge::bridgeEditorState(const std::string& method, const json& param
 }
 
 
+namespace {
+
+// Whether a shader's code compiles, asked of the engine (#1345). A shader that
+// failed to compile lists no uniforms, and so does one that compiled with none
+// the engine lists: a VisualShader's graph textures and any sampler with a
+// default texture are left out of the list, and a uniform the preprocessor
+// turns off is never compiled. Reading the code for a uniform line refused all
+// three. A copy of the code with one uniform added tells them apart, since the
+// engine lists that uniform only when the whole code compiles, and the
+// compiler prints its lines during the call, so they land in the answer's
+// engine_diagnostics. No code is nothing to compile. Shader.set_code is
+// 83702148 on 4.5.1, 4.6.2 and 4.7.2.
+Result<bool> shaderCodeCompiles(GDExtensionObjectPtr shader, const std::string& shader_path) {
+    auto code_value = callObject(shader, "Shader", "get_code", 201670096LL);
+    if (code_value.isErr()) return code_value.error();
+    auto code = stringFromVariant(code_value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+    if (code.isErr()) return code.error();
+    if (strings::trim(code.value()).empty()) return true;
+    if (auto bind = requireMethodBind("Shader", "set_code", 83702148LL); bind.isErr()) return bind.error();
+
+    const auto probe = shaderCompileProbe(code.value(), shader_path);
+    NativeName shader_class("Shader");
+    auto copy = constructObject(shader_class.ptr());
+    if (!copy) return Error(501, "Godot ClassDB could not construct a Shader");
+    // The Variant holds the copy's only reference and frees it on the way out.
+    auto held = makeObject(copy);
+    if (held.isErr()) {
+        GodotApi::instance().object_destroy(copy);
+        return held.error();
+    }
+    auto text = makeString(probe.code);
+    if (text.isErr()) return text.error();
+    auto applied = callObject(copy, "Shader", "set_code", 83702148LL, {&text.value()});
+    if (applied.isErr()) return applied.error();
+    auto groups = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(0));
+    if (groups.isErr()) return groups.error();
+    auto uniforms = callObject(copy, "Shader", "get_shader_uniform_list", 1230511656LL, {&groups.value()});
+    if (uniforms.isErr()) return uniforms.error();
+    auto size_value = callVariant(uniforms.value(), "size");
+    if (size_value.isErr()) return size_value.error();
+    auto count = scalarFromVariant<int64_t>(size_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+    if (count.isErr()) return count.error();
+    auto name_key = makeString("name");
+    if (name_key.isErr()) return name_key.error();
+    for (int64_t index = 0; index < count.value(); ++index) {
+        auto index_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
+        if (index_value.isErr()) return index_value.error();
+        auto entry = callVariant(uniforms.value(), "get", {&index_value.value()});
+        if (entry.isErr()) return entry.error();
+        auto name_value = callVariant(entry.value(), "get", {&name_key.value()});
+        if (name_value.isErr()) continue;
+        const auto name_type = GodotApi::instance().variant_get_type(name_value.value().ptr());
+        if (name_type != GDEXTENSION_VARIANT_TYPE_STRING && name_type != GDEXTENSION_VARIANT_TYPE_STRING_NAME) {
+            continue;
+        }
+        auto name = stringFromVariant(name_value.value(), name_type);
+        if (name.isOk() && name.value() == probe.uniform) return true;
+    }
+    return false;
+}
+
+}  // namespace
+
 json GodotBridge::bridgeShaders(const std::string& method, const json& params, const std::string& /*session_kind*/, GDExtensionObjectPtr editor) {
 
     // The uniform PropertyInfo the engine hands back carries the hint a shader
@@ -16054,15 +16131,15 @@ json GodotBridge::bridgeShaders(const std::string& method, const json& params, c
     auto count = scalarFromVariant<int64_t>(size_value.value(), GDEXTENSION_VARIANT_TYPE_INT);
     if (count.isErr()) return errorJson(500, count.error().message);
     // A shader that failed to compile lists no uniforms, and an empty list
-    // read as "this shader has none" (#1300). Its code says otherwise.
+    // read as "this shader has none" (#1300). The engine is asked whether the
+    // code compiles.
     if (count.value() == 0) {
-        auto code_value = callObject(shader.value(), "Shader", "get_code", 201670096LL);
-        auto code = code_value.isOk() ? stringFromVariant(code_value.value(), GDEXTENSION_VARIANT_TYPE_STRING)
-                                      : Result<std::string>(code_value.error());
-        if (code.isOk() && shaderDeclaresListedUniform(code.value())) {
+        const auto path = result.value("shader_path", json(nullptr));
+        auto compiles = shaderCodeCompiles(shader.value(), path.is_string() ? path.get<std::string>() : "");
+        if (compiles.isOk() && !compiles.value()) {
             return errorJson(422,
-                             "The shader declares uniforms and the engine lists none, so it did not "
-                             "compile. engine_diagnostics carries the compiler's message; "
+                             "The shader's code does not compile, so the engine lists none of its "
+                             "uniforms. engine_diagnostics carries the compiler's message; "
                              "shader_check_compile names the line.",
                              {{"code", "shader_not_compiled"},
                               {"target_node", target_path},
