@@ -7906,7 +7906,9 @@ void applyPendingPhysicsShapes(int dimension, GDExtensionObjectPtr world) {
     const char* world_class = dimension == 2 ? "World2D" : "World3D";
     const char* params_class =
         dimension == 2 ? "PhysicsTestMotionParameters2D" : "PhysicsTestMotionParameters3D";
-    const int64_t test_hash = dimension == 2 ? 1699844009LL : 1944921792LL;
+    // long long, as the literals beside it in the bind list are: int64_t is
+    // long on Linux, and one initializer list cannot hold both tuples.
+    const long long test_hash = dimension == 2 ? 1699844009LL : 1944921792LL;
     for (const auto& bind : {std::make_tuple(world_class, "get_space", 2944877500LL),
                              std::make_tuple(server_class, "body_create", 529393457LL),
                              std::make_tuple(server_class, "body_set_space", 395945892LL),
