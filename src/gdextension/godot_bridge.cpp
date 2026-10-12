@@ -7890,6 +7890,57 @@ Result<json> pointVariantToJson(VariantValue& value, int dimension) {
 // scene sits in, that is the scene's own World2D and the shared World3D, which
 // is right in both dimensions and on 4.5.1, 4.6.2 and 4.7.2, where both binds
 // carry the same hash.
+// The editor keeps its physics servers inactive, so they never step, and a
+// body that joins a space before it has shapes keeps them on a list only a
+// step applies. A TileMapLayer's tiles and a GridMap's cells are built that
+// way, so a ray in the editor passed through a wall the game collided with
+// (#1308); a StaticBody2D gets its shapes first and was always found.
+// body_test_motion applies that list before it tests, and steps nothing, so a
+// throwaway body's test motion makes them queryable. Measured on 4.5.1, 4.6.2
+// and 4.7.2 in 2D and 3D. Best effort: a failure leaves the query as it was.
+// World.get_space is 2944877500, body_create 529393457, body_set_space
+// 395945892 and free_rid 2722037293 on both servers; body_test_motion is
+// 1699844009 in 2D and 1944921792 in 3D, on all three lines.
+void applyPendingPhysicsShapes(int dimension, GDExtensionObjectPtr world) {
+    const char* server_class = dimension == 2 ? "PhysicsServer2D" : "PhysicsServer3D";
+    const char* world_class = dimension == 2 ? "World2D" : "World3D";
+    const char* params_class =
+        dimension == 2 ? "PhysicsTestMotionParameters2D" : "PhysicsTestMotionParameters3D";
+    // long long, as the literals beside it in the bind list are: int64_t is
+    // long on Linux, and one initializer list cannot hold both tuples.
+    const long long test_hash = dimension == 2 ? 1699844009LL : 1944921792LL;
+    for (const auto& bind : {std::make_tuple(world_class, "get_space", 2944877500LL),
+                             std::make_tuple(server_class, "body_create", 529393457LL),
+                             std::make_tuple(server_class, "body_set_space", 395945892LL),
+                             std::make_tuple(server_class, "body_test_motion", test_hash),
+                             std::make_tuple(server_class, "free_rid", 2722037293LL)}) {
+        if (requireMethodBind(std::get<0>(bind), std::get<1>(bind), std::get<2>(bind)).isErr()) return;
+    }
+    auto server = singleton(server_class);
+    if (server.isErr()) return;
+    auto space = callObject(world, world_class, "get_space", 2944877500LL);
+    if (space.isErr()) return;
+    NativeName params_name(params_class);
+    if (!params_name.valid()) return;
+    auto params = constructObject(params_name.ptr());
+    if (!params) return;
+    // The Variant holds the parameters' only reference and frees them.
+    auto params_value = makeObject(params);
+    if (params_value.isErr()) {
+        GodotApi::instance().object_destroy(params);
+        return;
+    }
+    auto body = callObject(server.value(), server_class, "body_create", 529393457LL);
+    if (body.isErr()) return;
+    auto placed = callObject(server.value(), server_class, "body_set_space", 395945892LL,
+                             {&body.value(), &space.value()});
+    if (placed.isOk()) {
+        (void)callObject(server.value(), server_class, "body_test_motion", test_hash,
+                         {&body.value(), &params_value.value()});
+    }
+    (void)callObject(server.value(), server_class, "free_rid", 2722037293LL, {&body.value()});
+}
+
 Result<VariantValue> queriedWorld(int dimension, const std::string& session_kind) {
     const char* method = dimension == 2 ? "find_world_2d" : "find_world_3d";
     const int64_t hash = dimension == 2 ? 2339128592LL : 317588385LL;
@@ -7920,6 +7971,8 @@ Result<VariantValue> queriedWorld(int dimension, const std::string& session_kind
                                          : "The queried viewport has no World3D",
                      {{"code", "no_world"}});
     }
+    // A game's servers step, and apply their own list every physics frame.
+    if (session_kind == "editor") applyPendingPhysicsShapes(dimension, object.value());
     return std::move(world.value());
 }
 

@@ -1,0 +1,14 @@
+[gd_resource type="TileSet" load_steps=3 format=3]
+
+[sub_resource type="GradientTexture2D" id="probe_tile_texture"]
+width = 16
+height = 16
+
+[sub_resource type="TileSetAtlasSource" id="probe_tile_source"]
+texture = SubResource("probe_tile_texture")
+0:0/0 = 0
+0:0/0/physics_layer_0/polygon_0/points = PackedVector2Array(-8, -8, 8, -8, 8, 8, -8, 8)
+
+[resource]
+physics_layer_0/collision_layer = 1
+sources/0 = SubResource("probe_tile_source")

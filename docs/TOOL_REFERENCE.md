@@ -845,6 +845,8 @@ Query flags are fixed by the contract: bodies and areas are both hit, hit-from-i
 
 Which world is asked depends on the session. A game session uses its root viewport's, where the running scene lives. An editor session uses the edited scene's own, found with `Viewport.find_world_2d`/`find_world_3d` from the viewport the editor parents that scene into, so the bodies in the open scene are what the ray sees. `collider_path` is reported in the same `/root/<edited-scene-root>/Child` form every other editor answer uses, so it can be handed straight to a reader or a writer; a collider the edited scene does not own reports `null`.
 
+The editor keeps its physics servers switched off, so they never step. A body that joins a space before it has shapes keeps those shapes waiting for a step, and that is how a `TileMapLayer` builds its tiles and a `GridMap` its cells. A ray in an editor session passed through a wall the game collided with (#1308). Before an editor query, Didi runs `body_test_motion` on a throwaway body in the queried space. That applies the waiting shapes and steps nothing, so the edited scene's bodies do not move. This applies to every editor ray and sweep, `spatial_query_clearance` included.
+
 Errors: `400` malformed request, `404` no scene open in an editor session, `409` no world or direct space state, `501` missing bind. Read only; `dry_run` and `confirmation_token` are rejected.
 
 ### `nav_query_path` — Live (editor or game)
