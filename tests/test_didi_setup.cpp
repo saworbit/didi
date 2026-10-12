@@ -1,4 +1,5 @@
 #include "didi/offline/project_settings_file.hpp"
+#include "didi/offline/process_runner.hpp"
 #include "didi/setup/addon_install.hpp"
 #include "didi/setup/build_identity.hpp"
 #include "didi/setup/client_config.hpp"
@@ -403,36 +404,109 @@ void keeps_the_tables_a_person_adds_under_codex_didi() {
     ASSERT_EQ(readClientConfig(scratch.root(), Client::Codex).command, std::string("D:/new/didi.exe"));
 }
 
+// git does not look above this directory for a repository, so a scratch
+// project is not judged by whatever repository holds the temporary folder.
+// The home folder on the machine this was written on is one.
+class NoGitAbove {
+public:
+    explicit NoGitAbove(const std::filesystem::path& root) {
+        const auto ceiling = root.parent_path().string();
+#if defined(_WIN32)
+        _putenv_s("GIT_CEILING_DIRECTORIES", ceiling.c_str());
+#else
+        setenv("GIT_CEILING_DIRECTORIES", ceiling.c_str(), 1);
+#endif
+    }
+    ~NoGitAbove() {
+#if defined(_WIN32)
+        _putenv_s("GIT_CEILING_DIRECTORIES", "");
+#else
+        unsetenv("GIT_CEILING_DIRECTORIES");
+#endif
+    }
+};
+
+bool runGitIn(const std::filesystem::path& root, std::vector<std::string> arguments) {
+    didi::offline::ProcessRequest request;
+    request.executable = "git";
+    request.arguments = std::move(arguments);
+    request.working_directory = root;
+    auto run = didi::offline::runProcess(request);
+    return run.isOk() && run.value().exit_code == 0;
+}
+
 // Didi's state and the client files setup wrote stay out of a commit, and a
 // person's .gitignore is only ever appended to (#1307).
 void appends_ignore_rules_once() {
     Scratch scratch("ignore");
+    NoGitAbove walled(scratch.root());
     auto created = writeIgnoreRules(scratch.root(), {kStateIgnoreRule, "/.mcp.json"});
     ASSERT_TRUE(created.isOk());
     ASSERT_TRUE(created.value().action == FileAction::Created);
     ASSERT_EQ(created.value().added.size(), 2u);
     const auto first = scratch.read(".gitignore");
     ASSERT_TRUE(first.find(".didi/\n/.mcp.json\n") != std::string::npos);
-    ASSERT_TRUE(ignoresRule(scratch.root(), ".didi/"));
+    ASSERT_TRUE(checkIgnored(scratch.root(), ".didi/").ignored);
 
     // Again: nothing to add, nothing written.
     auto again = writeIgnoreRules(scratch.root(), {kStateIgnoreRule, "/.mcp.json"});
     ASSERT_TRUE(again.isOk() && again.value().action == FileAction::Unchanged);
     ASSERT_EQ(scratch.read(".gitignore"), first);
 
-    // Another spelling counts, and so does a person's negation; CRLF and the
-    // last line without a newline are kept as they were.
+    // Another spelling counts; CRLF and the last line without a newline are
+    // kept as they were. A person's negation is left alone and named (#1346).
     Scratch other("ignore-spellings");
+    NoGitAbove walled_other(other.root());
     other.write(".gitignore", "/.didi/*\r\n!/.mcp.json\r\n*.tmp");
     auto none = writeIgnoreRules(other.root(), {kStateIgnoreRule, "/.mcp.json"});
     ASSERT_TRUE(none.isOk() && none.value().action == FileAction::Unchanged);
+    ASSERT_EQ(none.value().overridden.size(), 1u);
+    ASSERT_EQ(none.value().overridden[0].first, "/.mcp.json");
+    ASSERT_EQ(none.value().overridden[0].second, 2);
     auto one = writeIgnoreRules(other.root(), {kStateIgnoreRule, "/.cursor/mcp.json"});
     ASSERT_TRUE(one.isOk() && one.value().action == FileAction::Updated);
     ASSERT_EQ(one.value().added, std::vector<std::string>{"/.cursor/mcp.json"});
     const auto text = other.read(".gitignore");
     ASSERT_EQ(text.rfind("/.didi/*\r\n!/.mcp.json\r\n*.tmp\r\n\r\n# ", 0), 0u);
     ASSERT_TRUE(text.find("/.cursor/mcp.json\r\n") != std::string::npos);
-    ASSERT_TRUE(!ignoresRule(Scratch("ignore-none").root(), ".didi/"));
+    Scratch empty("ignore-none");
+    NoGitAbove walled_empty(empty.root());
+    ASSERT_TRUE(!checkIgnored(empty.root(), ".didi/").ignored);
+}
+
+// doctor's question is what git will do, so the last rule for the path
+// decides and a later `!` un-ignores it; with a repository git is asked, so
+// .git/info/exclude counts (#1346).
+void checks_what_git_will_do_with_didi_state() {
+    Scratch scratch("ignore-check");
+    NoGitAbove walled(scratch.root());
+    const auto check = [&](const std::string& rules) {
+        scratch.write(".gitignore", rules);
+        return checkIgnored(scratch.root(), ".didi/");
+    };
+    ASSERT_TRUE(check(".didi/\n").ignored);
+    const auto negated = check("!.didi/\n");
+    ASSERT_TRUE(!negated.ignored);
+    ASSERT_TRUE(negated.detail.find("line 1 un-ignores") != std::string::npos);
+    const auto reversed = check(".didi/\n# keep the journal\n!/.didi/\n");
+    ASSERT_TRUE(!reversed.ignored);
+    ASSERT_TRUE(reversed.detail.find("line 3") != std::string::npos);
+    ASSERT_TRUE(check("!.didi/\n.didi/\n").ignored);
+
+    // In a repository, git answers: a rule in .git/info/exclude counts, and
+    // so does a broader pattern the file scan cannot read.
+    if (!runGitIn(scratch.root(), {"init", "-q"})) return;  // no git on this machine
+    scratch.write(".gitignore", "");
+    ASSERT_TRUE(!checkIgnored(scratch.root(), ".didi/").ignored);
+    scratch.write(".git/info/exclude", ".didi/\n");
+    const auto excluded = checkIgnored(scratch.root(), ".didi/");
+    ASSERT_TRUE(excluded.ignored);
+    ASSERT_TRUE(excluded.detail.find("info/exclude") != std::string::npos);
+    scratch.write(".git/info/exclude", "");
+    ASSERT_TRUE(check(".*\n").ignored);
+    const auto git_negated = check(".didi/\n!.didi/\n");
+    ASSERT_TRUE(!git_negated.ignored);
+    ASSERT_TRUE(git_negated.detail.find("line 2 un-ignores") != std::string::npos);
 }
 
 void merges_json_configs_without_reformatting_them() {
@@ -473,6 +547,7 @@ struct Registrar {
         registerTest("didi_setup.codex_keeps_a_persons_tables", keeps_the_tables_a_person_adds_under_codex_didi);
         registerTest("didi_setup.json_merge", merges_json_configs_without_reformatting_them);
         registerTest("didi_setup.ignore_rules", appends_ignore_rules_once);
+        registerTest("didi_setup.ignore_check", checks_what_git_will_do_with_didi_state);
     }
 } registrar;
 

@@ -2131,6 +2131,7 @@
               "detected": true,
               "export_filter": "all_resources",
               "export_path": "build/fixture.exe",
+              "includes_didi_addon": true,
               "index": 0,
               "name": "Fixture Windows",
               "platform": "Windows Desktop",

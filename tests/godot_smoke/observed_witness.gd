@@ -163,16 +163,34 @@ func export_preset(preset_name: String) -> Dictionary:
 			continue
 		count += 1
 		if config.get_value(section, "name", "") == preset_name:
+			var export_filter: String = config.get_value(section, "export_filter", "")
 			found = {
 				"detected": true,
 				"index": int(section.trim_prefix("preset.")),
 				"name": config.get_value(section, "name", ""),
 				"platform": config.get_value(section, "platform", ""),
 				"runnable": config.get_value(section, "runnable", false),
-				"export_filter": config.get_value(section, "export_filter", ""),
+				"export_filter": export_filter,
 				"export_path": config.get_value(section, "export_path", ""),
+				"includes_didi_addon": _ships_didi_addon(export_filter, config.get_value(section, "exclude_filter", "")),
 			}
 	return {"loaded": true, "preset_count": count, "preset": found}
+
+
+## Whether a preset's builds carry the addon, matched the way the exporter
+## matches exclude_filter: String.matchn against the path with and without
+## res:// (#1347). null for a filter that exports what a person picked.
+func _ships_didi_addon(export_filter: String, exclude_filter: String) -> Variant:
+	if export_filter != "" and export_filter != "all_resources":
+		return null
+	const EXTENSION := "addons/didi/didi.gdextension"
+	for raw in exclude_filter.split(","):
+		var pattern := raw.strip_edges()
+		if pattern == "":
+			continue
+		if EXTENSION.matchn(pattern) or ("res://" + EXTENSION).matchn(pattern):
+			return false
+	return true
 
 
 ## The flags of one connection, or -1 when the engine has no such connection.

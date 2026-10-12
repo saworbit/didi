@@ -302,6 +302,31 @@ void the_addon_ships_only_when_asked() {
                 std::string::npos);
 }
 
+// Whether a preset's builds carry the addon, read from its exclude_filter the
+// way Godot matches it: with and without res://, * crossing folders, case
+// ignored. Only all_resources is judged (#1347).
+void says_which_presets_ship_the_addon() {
+    const auto section = [](int index, const std::string& name, const std::string& filter,
+                            const std::string& exclude) {
+        return "[preset." + std::to_string(index) + "]\n\nname=\"" + name + "\"\nplatform=\"Linux\"\n"
+               "export_filter=\"" + filter + "\"\ninclude_filter=\"\"\nexclude_filter=\"" + exclude +
+               "\"\n\n[preset." + std::to_string(index) + ".options]\n\ncustom_template/debug=\"\"\n\n";
+    };
+    const auto file = didi::offline::readExportPresets(
+        section(0, "Dialog", "all_resources", "") +
+        section(1, "Didi", "all_resources", "addons/didi/*") +
+        section(2, "Docs only", "all_resources", "*.md, docs/*") +
+        section(3, "Prefixed", "all_resources", "res://Addons/*") +
+        section(4, "Picked", "scenes", ""));
+    ASSERT_TRUE(!file.malformed);
+    ASSERT_EQ(file.presets.size(), 5u);
+    ASSERT_EQ(file.presets[0]["includes_didi_addon"], json(true));
+    ASSERT_EQ(file.presets[1]["includes_didi_addon"], json(false));
+    ASSERT_EQ(file.presets[2]["includes_didi_addon"], json(true));
+    ASSERT_EQ(file.presets[3]["includes_didi_addon"], json(false));
+    ASSERT_TRUE(file.presets[4]["includes_didi_addon"].is_null());
+}
+
 void append_keeps_the_file() {
     auto& registry = didi::mcp::ToolRegistry::instance();
     registry.registerAllDefaultTools();
@@ -658,6 +683,7 @@ struct Register {
                      says_when_the_export_folder_is_missing);
         registerTest("ExportPresetAdd.TheAddonShipsOnlyWhenAsked", the_addon_ships_only_when_asked);
         registerTest("ExportPresetAdd.AppendKeepsTheFile", append_keeps_the_file);
+        registerTest("ExportPresetAdd.SaysWhichPresetsShipTheAddon", says_which_presets_ship_the_addon);
         registerTest("ExportPresetAdd.Refusals", refusals);
         registerTest("ExportPresetAdd.DryRunWritesNothing", dry_run_writes_nothing);
         registerTest("ExportPresetAdd.AnAttachedEditorIsMadeToReadTheFile",

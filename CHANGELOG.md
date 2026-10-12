@@ -134,6 +134,8 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Fixed
 
+- `2026-10-12` `didi doctor` asks git whether `.didi/` is ignored, so a later `!.didi/` line warns instead of reading as ok. [#1346](https://github.com/saworbit/didi/issues/1346)
+- `2026-10-12` `didi doctor`, `project_list_export_presets` and `project_export` say when a preset's builds would ship `addons/didi`. [#1347](https://github.com/saworbit/didi/issues/1347)
 - `2026-10-12` The agent guide covers hidden-control rectangles, checking a written shader, Color settings and asserting no errors. [PR #1339](https://github.com/saworbit/didi/pull/1339)
 - `2026-10-12` A local writer carries the `engine_diagnostics` the attached editor printed while it reloaded, rebuilt or indexed what the call wrote. [#1289](https://github.com/saworbit/didi/issues/1289) · [PR #1338](https://github.com/saworbit/didi/pull/1338)
 - `2026-10-12` A live call refused for want of a route names the project's one live session to attach, after a restart or a stopped game left none selected. [#1296](https://github.com/saworbit/didi/issues/1296) · [PR #1337](https://github.com/saworbit/didi/pull/1337)

@@ -11,6 +11,7 @@
 #include <optional>
 #include <filesystem>
 #include <set>
+#include <string_view>
 
 namespace didi::offline {
 
@@ -164,6 +165,52 @@ std::vector<DomainDiagnostic> parseGodotDiagnostics(const std::string& output, b
     return diagnostics;
 }
 
+namespace {
+
+// Godot's String::matchn: * is any run of characters, / included, and ? is
+// one, compared without case.
+bool wildcardMatch(std::string_view text, std::string_view pattern) {
+    size_t t = 0, p = 0, star = std::string_view::npos, mark = 0;
+    const auto lower = [](char c) { return static_cast<char>(std::tolower(static_cast<unsigned char>(c))); };
+    while (t < text.size()) {
+        if (p < pattern.size() && (pattern[p] == '?' || lower(pattern[p]) == lower(text[t]))) {
+            ++t;
+            ++p;
+        } else if (p < pattern.size() && pattern[p] == '*') {
+            star = p++;
+            mark = t;
+        } else if (star != std::string_view::npos) {
+            p = star + 1;
+            t = ++mark;
+        } else {
+            return false;
+        }
+    }
+    while (p < pattern.size() && pattern[p] == '*') ++p;
+    return p == pattern.size();
+}
+
+// Whether a build from this preset carries the addon's .gdextension, which is
+// what packs the library and, in a release build, copies it beside the
+// executable (#1291). Godot matches each exclude pattern against the path with
+// and without res:// (EditorExportPlatform::_edit_files_with_filter). Judged
+// only for "all_resources", the default and what the Export dialog writes; the
+// other modes export what a person picked, and nothing here can say.
+json presetShipsDidiAddon(const std::string& export_filter, const std::string& exclude_filter) {
+    if (!export_filter.empty() && export_filter != "all_resources") return nullptr;
+    constexpr std::string_view kExtension = "addons/didi/didi.gdextension";
+    for (const auto& raw : strings::split(exclude_filter, ',')) {
+        const auto pattern = strings::trim(raw);
+        if (pattern.empty()) continue;
+        if (wildcardMatch(kExtension, pattern) || wildcardMatch("res://" + std::string(kExtension), pattern)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+}  // namespace
+
 ExportPresetsFile readExportPresets(const std::string& contents) {
     // Matched against the section name the engine reads, not against the raw
     // line. `[ preset.0 ]` is the section preset.0, so an anchored whole-line
@@ -278,6 +325,9 @@ ExportPresetsFile readExportPresets(const std::string& contents) {
         canonical_section.push_back(digits == std::to_string(index));
     }
 
+    // Each preset's exclude_filter, read to judge whether its builds carry
+    // the addon rather than reported as it stands.
+    std::map<size_t, std::string> exclude_of;
     for (const auto& entry : scanned.entries) {
         // A key before any section at all is a file this cannot make sense of.
         // That is also where a swallowed `[preset.N]` header leaves the keys
@@ -301,6 +351,8 @@ ExportPresetsFile readExportPresets(const std::string& contents) {
         const std::string value = unquote(entry.value_text);
         if (key == "name" || key == "platform" || key == "export_filter" || key == "export_path") {
             presets[at->second][key] = value;
+        } else if (key == "exclude_filter") {
+            exclude_of[at->second] = value;
         } else if (key == "runnable") {
             // Anything the parser accepts here, read the way the engine reads
             // it. Comparing against the two words Godot's own writer emits was
@@ -313,6 +365,13 @@ ExportPresetsFile readExportPresets(const std::string& contents) {
             // whole file and is caught above (#842).
             presets[at->second][key] = config_file::booleanize(entry.value_text);
         }
+    }
+
+    for (size_t index = 0; index < presets.size(); ++index) {
+        const auto exclude = exclude_of.find(index);
+        presets[index]["includes_didi_addon"] = presetShipsDidiAddon(
+            presets[index].value("export_filter", std::string()),
+            exclude == exclude_of.end() ? std::string() : exclude->second);
     }
 
     // Godot 4.7 keeps the runnable flag out of the preset: a [runnable_presets]

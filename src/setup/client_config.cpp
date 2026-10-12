@@ -3,11 +3,14 @@
 #include "didi/common/atomic_write.hpp"
 #include "didi/common/json.hpp"
 #include "didi/common/project_path.hpp"
+#include "didi/offline/process_runner.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <optional>
 #include <regex>
 #include <set>
 #include <sstream>
@@ -700,6 +703,25 @@ std::string ignoreKey(std::string rule) {
     return rule;
 }
 
+// The last rule in a .gitignore body that names this key, and whether it is a
+// negation. Git takes the last match, so that rule is the file's answer.
+struct RuleLine {
+    int line{0};
+    bool negated{false};
+};
+
+std::optional<RuleLine> lastRuleFor(const std::string& body, const std::string& key) {
+    std::optional<RuleLine> last;
+    int number = 0;
+    for (const auto& line : lines(body)) {
+        ++number;
+        const auto trimmed = strings::trim(line);
+        if (trimmed.empty() || trimmed.front() == '#') continue;
+        if (ignoreKey(trimmed) == key) last = RuleLine{number, trimmed.front() == '!'};
+    }
+    return last;
+}
+
 std::set<std::string> ignoreKeys(const std::string& body) {
     std::set<std::string> keys;
     for (const auto& line : lines(body)) {
@@ -720,7 +742,12 @@ Result<IgnoreWrite> writeIgnoreRules(const std::filesystem::path& project_root,
     if (found.isErr()) return found.error();
     auto keys = ignoreKeys(found.value().body);
     for (const auto& rule : rules) {
-        if (keys.insert(ignoreKey(rule)).second) write.added.push_back(rule);
+        const auto key = ignoreKey(rule);
+        if (const auto last = lastRuleFor(found.value().body, key); last && last->negated) {
+            write.overridden.emplace_back(rule, last->line);
+            continue;
+        }
+        if (keys.insert(key).second) write.added.push_back(rule);
     }
     if (write.added.empty()) return write;
     std::string body = found.value().body;
@@ -735,10 +762,49 @@ Result<IgnoreWrite> writeIgnoreRules(const std::filesystem::path& project_root,
     return write;
 }
 
-bool ignoresRule(const std::filesystem::path& project_root, const std::string& rule) {
+IgnoreCheck checkIgnored(const std::filesystem::path& project_root, const std::string& rule) {
+    const auto key = ignoreKey(rule);
+    std::string path = strings::trim(rule);
+    if (!path.empty() && path.front() == '!') path.erase(0, 1);
+    if (!path.empty() && path.front() == '/') path.erase(0, 1);
     auto found = readText(project_root / ".gitignore");
-    if (found.isErr() || !found.value().exists) return false;
-    return ignoreKeys(found.value().body).count(ignoreKey(rule)) > 0;
+    const std::string body = found.isOk() && found.value().exists ? found.value().body : std::string();
+    const auto last = lastRuleFor(body, key);
+    const auto unignored = [&]() -> std::optional<IgnoreCheck> {
+        if (!last || !last->negated) return std::nullopt;
+        return IgnoreCheck{false, ".gitignore line " + std::to_string(last->line) + " un-ignores " + path};
+    };
+
+    const auto git = [&](std::vector<std::string> arguments) {
+        offline::ProcessRequest request;
+        request.executable = "git";
+        request.arguments = std::move(arguments);
+        request.working_directory = project_root;
+        request.timeout = std::chrono::milliseconds(10000);
+        return offline::runProcess(request);
+    };
+    auto inside = git({"rev-parse", "--is-inside-work-tree"});
+    if (inside.isOk() && !inside.value().timed_out && inside.value().exit_code == 0 &&
+        strings::trim(inside.value().output) == "true") {
+        auto checked = git({"check-ignore", "-v", "--no-index", "--", path});
+        if (checked.isOk() && !checked.value().timed_out) {
+            if (checked.value().exit_code == 0) {
+                // <source>:<line>:<pattern><TAB><path>
+                const auto source = strings::trim(checked.value().output.substr(
+                    0, checked.value().output.find('\t')));
+                return {true, "git ignores " + path + (source.empty() ? "" : " (" + source + ")")};
+            }
+            if (checked.value().exit_code == 1) {
+                if (auto negated = unignored()) return *negated;
+                return {false, "git does not ignore " + path};
+            }
+        }
+    }
+    // No git to ask: the file, read as git reads it.
+    if (auto negated = unignored()) return *negated;
+    if (!last) return {false, ".gitignore has no rule for " + path};
+    return {true, ".gitignore line " + std::to_string(last->line) + " ignores " + path +
+                      "; there is no git work tree here to ask"};
 }
 
 Result<FileAction> writeAgentsImport(const std::filesystem::path& file) {
