@@ -139,7 +139,10 @@ or a value the right name would refuse. A value over 1 KiB is not sent back,
 since the caller has it already, so `retry_with` is left out there and the other
 two stay (#784). A single argument the tool does not take is named in `argument`
 either way, and `field` never names an argument the call did not send; it used
-to come from the list of accepted names in the message (#1301).
+to come from the list of accepted names in the message (#1301). An
+`eval_gdscript` refusal of another argument, such as `context_node` or
+`timeout_ms`, names that argument in `field`; the sandbox's own refusals of the
+expression name `expression` (#1340).
 
 A live-only tool called with no engine attached — the most common state a
 caller meets — answers `503` and names itself, says it needs a live Godot
@@ -996,7 +999,7 @@ A type from another extension is not in the dump, so `allow_unknown_type: true` 
 
 **Which engine decides.** With a session attached, the type is checked against that engine's own `ClassDB` rather than against the pinned dump, and `property_check.type_checked_against` reads `attached_engine`. The two lists are not the same list: the dump is pinned at 4.7 and a 4.5.1 engine has 65 fewer classes, so `DrawableTexture2D` and `BlitMaterial` passed the old check and then made a file that engine refused to load outright. A type the attached engine does not have is refused naming that engine's version, and `allow_unknown_type: true` still writes it, adding `type_unknown_to_attached_engine: true` beside `checked: true` so the report does not read as agreement, and a `limitation` saying the editor loads the file as a `MissingResource` and a game cannot load it. An attached engine that *does* have a type the dump lacks settles it the other way: the file is written with `allowed_by: "attached_engine"` and the property names still unchecked.
 
-With no session attached, or with an extension older than the route, the pinned dump is the only list there is and decides as before; `type_checked_against` then reads `api_reference` when a session is attached, and is absent when none is.
+With no session attached, or with an extension older than the route, the pinned dump is the only list there is and decides as before; `type_checked_against` then reads `api_reference` when a session is attached, and is absent when none is. Beside `api_reference`, `engine_not_consulted` says why the engine was not asked or did not answer (#1341). A session whose process has exited is dropped before the call, rather than waited on for the full live deadline, about 17 seconds, and named as the attached engine.
 
 The result carries `property_check` with `checked` (whether the check ran at all), `api_version`, `not_declared_but_written` listing the storage-only names that were written unverified, and `written_as_declared_type` naming each property whose literal came from its declaration rather than from the shape of the JSON, so a correction is visible rather than silent. The last two are absent when there is nothing to report. With an editor attached it also carries `attached_engine_version` and `api_version_matches_attached_engine`: the dump is pinned to one engine line and CI covers three, so `checked: true` means verified against the dump rather than against the engine in front of you. `sub_resource_property_checks` carries the same per sub-resource id. Use `script_reflect_class` to see what a type declares.
 
@@ -1426,7 +1429,7 @@ Blocking is the default and is right for a test: run the project, see what it pr
 
 Nothing is captured. The game's output goes to the null device, because no one is left to drain a pipe once the call returns and a full one would block the game; `logs`, `errors` and `exit_code` are empty and `limitation` says so and points at `runtime_read_output`. `session_published` is the field to branch on: `false` means the process started and never published, which is a project without the Didi addon enabled, and the game is still running.
 
-The pid reported is the game's own, in `pid`, in `game_session.pid` and in the `summary` sentence. On Windows that is often not the process this tool started: Godot's console build, like a `godot.cmd` wrapper, launches the engine and waits on it, so the game is a grandchild with a pid of its own and the session it publishes is what identifies it. When no session is published there is no game pid to name, and `summary` says so: the number it gives is the process Didi spawned, which may be a launcher.
+The pid reported is the game's own, in `pid`, in `game_session.pid` and in the `summary` sentence. On Windows that is often not the process this tool started: Godot's console build, like a `godot.cmd` wrapper, launches the engine and waits on it, so the game is a grandchild with a pid of its own and the session it publishes is what identifies it. When no session is published there is no game pid to name, and `summary` says so: the number it gives is the process Didi spawned, which may be a launcher. A blocking launch names a pid the same way: the game's, read from the session endpoint it printed while it ran, or else the process Didi spawned, and `summary` says which. It used to answer `pid: null` (#1314).
 
 Godot is discovered newest-first unless `GODOT_BIN` says otherwise, so a detached game can be running a different engine line from the editor you are authoring in. `matches_attached_engine` says whether it is.
 

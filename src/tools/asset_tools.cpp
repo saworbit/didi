@@ -860,6 +860,8 @@ struct EngineTypeVerdict {
     bool answered = false;
     bool known = false;
     std::string engine_version;
+    // Why the engine was not asked, or did not answer, when it was not.
+    std::string not_consulted;
 };
 
 // Refuses property names the type does not have. Godot drops them silently on
@@ -900,6 +902,11 @@ Result<json> checkPropertiesAgainstType(
         if (!engine_verdict.has_value()) return report;
         report["type_checked_against"] =
             engine_verdict->answered ? "attached_engine" : "api_reference";
+        // The pinned reference deciding reads like a choice without the reason
+        // the engine was not the one (#1341).
+        if (!engine_verdict->answered && !engine_verdict->not_consulted.empty()) {
+            report["engine_not_consulted"] = engine_verdict->not_consulted;
+        }
         return report;
     };
     std::set<std::string> declared;
@@ -994,27 +1001,51 @@ Result<json> checkPropertiesAgainstType(
 // One round trip for every type in the call. project_audit_assets set the
 // precedent for an offline answer the live engine gets to correct; this is the
 // same move applied before the file is written rather than after.
-std::map<std::string, bool> askAttachedEngineForTypes(
-    const std::shared_ptr<ipc::IIpcClient>& ipc, const std::vector<std::string>& type_names) {
+struct EngineTypeAnswer {
     std::map<std::string, bool> known;
-    if (!ipc || !ipc->isConnected() || type_names.empty()) return known;
+    // Why the engine was not asked, or did not answer. Empty when it did.
+    std::string not_consulted;
+};
+
+EngineTypeAnswer askAttachedEngineForTypes(
+    const std::shared_ptr<ipc::IIpcClient>& ipc, const std::vector<std::string>& type_names) {
+    EngineTypeAnswer answer;
+    if (type_names.empty()) return answer;
+    // A session whose process has exited is no longer attached by the time
+    // this asks, so it is said here rather than waited on (#1341).
+    if (!ipc || !ipc->isConnected()) {
+        answer.not_consulted = "No session is attached, so the engine was not asked. "
+                               "runtime_attach_session attaches one.";
+        return answer;
+    }
     // The bridge's own cap, and it is the largest shape resource_create can
     // produce: one root type and the 64 sub_resources entries already allow,
     // with duplicates folded out. Falling back here would be the silent
     // reference check this route exists to replace.
-    if (type_names.size() > 65) return known;
+    if (type_names.size() > 65) {
+        answer.not_consulted = "The call names more types than one engine question carries, so the "
+                               "engine was not asked.";
+        return answer;
+    }
     auto response = ipc->sendRequest("engine.classExists", json{{"class_names", type_names}},
                                      ipc::kWaitForDefinitiveResponse);
-    if (response.isErr() || !response.value().is_object()) return known;
+    if (response.isErr()) {
+        answer.not_consulted = "The attached engine did not answer: " + response.error().message;
+        return answer;
+    }
     const auto& body = response.value();
-    if (!body.contains("classes") || !body["classes"].is_array()) return known;
+    if (!body.is_object() || !body.contains("classes") || !body["classes"].is_array()) {
+        answer.not_consulted = "The attached addon does not answer engine.classExists, so the engine "
+                               "was not asked.";
+        return answer;
+    }
     for (const auto& entry : body["classes"]) {
         if (!entry.is_object()) continue;
         const auto name = entry.value("name", std::string{});
         if (name.empty() || !entry.contains("exists") || !entry["exists"].is_boolean()) continue;
-        known[name] = entry["exists"].get<bool>();
+        answer.known[name] = entry["exists"].get<bool>();
     }
-    return known;
+    return answer;
 }
 
 struct SubResourceSpec {
@@ -1230,6 +1261,7 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
     const auto attached = sessions ? sessions->observableSession()
                                    : std::optional<runtime::SessionDescriptor>{};
     std::map<std::string, bool> engine_classes;
+    std::string engine_not_consulted;
     if (attached.has_value()) {
         std::vector<std::string> wanted{resource_type};
         for (const auto& sub : sub_resources) {
@@ -1238,7 +1270,9 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
                 wanted.push_back(sub.resource_type);
             }
         }
-        engine_classes = askAttachedEngineForTypes(ipc, wanted);
+        auto engine_answer = askAttachedEngineForTypes(ipc, wanted);
+        engine_classes = std::move(engine_answer.known);
+        engine_not_consulted = std::move(engine_answer.not_consulted);
     }
     const auto verdictFor = [&](const std::string& type_name) {
         std::optional<EngineTypeVerdict> verdict;
@@ -1248,6 +1282,11 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
         const auto found = engine_classes.find(type_name);
         answer.answered = found != engine_classes.end();
         answer.known = answer.answered && found->second;
+        if (!answer.answered) {
+            answer.not_consulted = engine_not_consulted.empty()
+                                       ? "The attached engine's answer did not name this type."
+                                       : engine_not_consulted;
+        }
         verdict = answer;
         return verdict;
     };

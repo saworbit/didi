@@ -3148,6 +3148,30 @@ void test_a_route_whose_engine_exited_does_not_fill_the_limit() {
     client->disconnect();
 }
 
+// A selected route whose game has exited. A request on it spent the whole
+// public deadline reconnecting to a pipe that was gone, about 17 s, and
+// resource_create's answer still named that game's engine (#1341). It is
+// dropped before anything reads it or is sent on it.
+void test_a_selected_route_whose_engine_exited_is_dropped_before_use() {
+    SessionDirectoryFixture fixture;
+    StandInEngine game;
+    const auto stopped = fixture.addForProcess("5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d", "game",
+                                               game.pid, game.started_at_ms);
+    auto client = fixture.client();
+    ASSERT_TRUE(client->attachSession(stopped.session_id).isOk());
+    ASSERT_TRUE(client->activeSession().has_value());
+
+    game.end();
+    ASSERT_FALSE(client->activeSession().has_value());
+    ASSERT_FALSE(client->observableSession().has_value());
+    ASSERT_FALSE(client->isConnected());
+    ASSERT_FALSE(client->acquireRouteLease().has_value());
+    ASSERT_TRUE(client->heldSessions().empty());
+    ASSERT_EQ(fixture.state->disconnects[stopped.endpoint], 1);
+
+    client->disconnect();
+}
+
 // An attach names its session, so its error is about that session. It used to
 // carry whatever the selection's engine was doing: attaching an editor that had
 // closed answered 404 with the incident of a game this caller had stopped
@@ -3191,6 +3215,8 @@ struct RegisterRuntimeRoutingTests {
     RegisterRuntimeRoutingTests() {
         registerTest("RuntimeRouting.EngineLivenessTriState",
                      test_engine_liveness_has_three_answers_and_not_two);
+        registerTest("RuntimeRouting.ExitedSelectedRouteIsDroppedBeforeUse",
+                     test_a_selected_route_whose_engine_exited_is_dropped_before_use);
         registerTest("RuntimeRouting.EngineCrashReportAttribution",
                      test_engine_crash_report_is_read_and_attributed);
         registerTest("RuntimeRouting.EngineIncidentGuidance",
