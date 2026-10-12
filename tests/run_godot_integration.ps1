@@ -2152,6 +2152,25 @@ try {
         (Tool-Request 2519 "scene_set_property" @{ target_node = "/root/MaterialRoot/Carved"; property_name = "mesh"; value = "res://probe_box_mesh.tres" }),
         (Tool-Request 2520 "scene_set_property" @{ target_node = "/root/MaterialRoot/Carved"; property_name = "mesh"; value = "res://probe_quad_mesh.tres" }),
         (Tool-Request 2521 "scene_close" @{ discard_unsaved = $true }),
+        # Whether a shader compiled, asked of the engine (#1343, #1345). One
+        # that fails lists no uniforms and is refused. One that compiles and
+        # lists none answers an empty list: a VisualShader whose only texture
+        # is in the graph, which the engine leaves out of the list, and a
+        # uniform the preprocessor turns off. A Node2D draws nothing, so the
+        # broken shader prints its compile errors and nothing else. A scene of
+        # its own, because the smoke scene's node counts are asserted elsewhere.
+        (Tool-Request 2535 "scene_create" @{ scene_path = "res://shader_cases.tscn"; root_type = "Node2D"; root_name = "ShaderCases"; overwrite = $true }),
+        (Tool-Request 2536 "scene_instantiate_node" @{ node_type = "Node2D"; parent_path = "/root/ShaderCases"; name = "Broken" }),
+        (Tool-Request 2537 "scene_instantiate_node" @{ node_type = "Node2D"; parent_path = "/root/ShaderCases"; name = "Textured" }),
+        (Tool-Request 2538 "scene_instantiate_node" @{ node_type = "Node2D"; parent_path = "/root/ShaderCases"; name = "Guarded" }),
+        (Tool-Request 2539 "scene_set_property" @{ target_node = "/root/ShaderCases/Broken"; property_name = "material"; value = "res://shader_cases/probe_broken_material.tres" }),
+        (Tool-Request 2540 "scene_set_property" @{ target_node = "/root/ShaderCases/Textured"; property_name = "material"; value = "res://shader_cases/probe_textured_visual_material.tres" }),
+        (Tool-Request 2541 "scene_set_property" @{ target_node = "/root/ShaderCases/Guarded"; property_name = "material"; value = "res://shader_cases/probe_guarded_material.tres" }),
+        (Tool-Request 2542 "shader_list_uniforms" @{ target_node = "/root/ShaderCases/Broken"; property_name = "material" }),
+        (Tool-Request 2543 "shader_list_uniforms" @{ target_node = "/root/ShaderCases/Textured"; property_name = "material" }),
+        (Tool-Request 2544 "shader_list_uniforms" @{ target_node = "/root/ShaderCases/Guarded"; property_name = "material" }),
+        (Tool-Request 2545 "shader_set_uniform" @{ target_node = "/root/ShaderCases/Broken"; property_name = "material"; uniform_name = "glow"; value = 0.5 }),
+        (Tool-Request 2546 "scene_close" @{ discard_unsaved = $true }),
         (Tool-Request 112 "scene_create" @{ scene_path = "res:////escape.tscn" }),
         # A nested path whose parent directory does not exist yet. ResourceSaver
         # cannot create it, so this used to come back as a bare Error 19 while
@@ -4796,6 +4815,21 @@ try {
     Assert-True ($byId[2520].result.isError -eq $true) "A QuadMesh was accepted into a mesh slot that excludes it."
     Assert-True ($byId[2520].result.content[0].text -match "excludes") "An excluded type was refused without saying it was excluded: $($byId[2520].result.content[0].text)"
     Assert-True ((Tool-Payload $byId[2521]).closed -eq $true) "Material probe scene could not be closed."
+    foreach ($shaderCaseId in 2535..2541) {
+        Assert-True (-not $byId[$shaderCaseId].result.isError) "Shader case request $shaderCaseId failed: $($byId[$shaderCaseId].result.content[0].text)"
+    }
+    $brokenText = ($byId[2542].result.content | Where-Object { $_.type -eq "text" } | Select-Object -First 1).text
+    Assert-True ($byId[2542].result.isError -eq $true) "A shader whose code does not compile listed its uniforms as none: $brokenText"
+    $brokenData = ($brokenText | ConvertFrom-Json).error.data
+    Assert-True ($brokenData.code -eq "shader_not_compiled" -and $brokenData.shader_path -eq "res://shader_cases/probe_broken_uniforms.gdshader" -and $brokenData.next_call.tool -eq "shader_check_compile" -and $brokenData.next_call.arguments.shader_path -eq "res://shader_cases/probe_broken_uniforms.gdshader") "A shader that does not compile was not refused with its path and the call that names the line: $brokenText"
+    Assert-True (@($brokenData.engine_diagnostics | Where-Object { $_.message -match "didi_undeclared_glow|Shader compilation failed" }).Count -ge 1) "The refusal did not carry the compiler's own message: $brokenText"
+    $texturedUniforms = Tool-Payload $byId[2543]
+    Assert-True ((-not $byId[2543].result.isError) -and $texturedUniforms.uniform_count -eq 0) "A VisualShader whose only texture is in its graph was refused as not compiled: $($byId[2543].result.content[0].text)"
+    $guardedUniforms = Tool-Payload $byId[2544]
+    Assert-True ((-not $byId[2544].result.isError) -and $guardedUniforms.uniform_count -eq 0) "A shader whose only uniform is behind #ifdef was refused as not compiled: $($byId[2544].result.content[0].text)"
+    $brokenSet = ($byId[2545].result.content | Where-Object { $_.type -eq "text" } | Select-Object -First 1).text
+    Assert-True ($byId[2545].result.isError -eq $true -and (($brokenSet | ConvertFrom-Json).error.data.code -eq "shader_not_compiled")) "A uniform write to a shader that does not compile was not refused as not compiled: $brokenSet"
+    Assert-True ((Tool-Payload $byId[2546]).closed -eq $true) "Shader case scene could not be closed."
     Assert-True ((Tool-Payload $byId[111]).closed -eq $true) "Smoke scene cleanup failed."
     Assert-True $byId[112].result.isError "Non-normalized res:// scene path was accepted."
     Assert-True ($byId[112].result.content[0].text -match "normalized") "Non-normalized path error was not actionable."
@@ -6176,6 +6210,8 @@ text = "Not a key"
         @{ Pattern = "corrupt_asset\.png|IHDR: CRC error|ERR_FILE_CORRUPT"; Cause = "request 2700 imports a PNG with a wrong CRC on every chunk" },
         @{ Pattern = 'Identifier "undeclared_name" not declared|Failed to load script "res://observed_broken\.gd"'; Cause = "the observed post-state block writes observed_broken.gd, which does not compile, on purpose, so script_create's has_errors cannot be a constant" },
         @{ Pattern = "didi_output_canary_warning"; Cause = "the runtime fixture prints a warning canary for runtime_read_output" },
+        @{ Pattern = "Shader compilation failed"; Where = "servers/rendering/"; Cause = "requests 2539 to 2545 give a Node2D shader_cases/probe_broken_material.tres, whose shader does not compile, then list and set its uniforms, and Didi compiles a copy of the code to ask" },
+        @{ Pattern = 'Parameter "version" is null'; Where = "renderer_rd/shader_rd\.h"; Cause = "requests 2539 to 2545 read a material whose shader does not compile, and the renderer asks that shader for a version it never built" },
         # Seen only on the software-rendered 4.5.1 runner, and there for any
         # scan the harness causes (#1002): a scene in a folder the editor does
         # not list can be indexed by nothing but a scan (#1004).

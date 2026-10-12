@@ -184,12 +184,16 @@ struct ShaderHintRange {
 
 [[nodiscard]] std::optional<ShaderHintRange> parseShaderHintRange(const std::string& hint_string);
 
-// Whether shader code declares a uniform the engine lists once the shader
-// compiles: a plain `uniform` line, outside comments. A global or instance
-// uniform, and a sampler hinted as the screen, depth or normal-roughness
-// texture, are never in the list, so they do not count. A shader that has one
-// and lists none did not compile (#1300).
-[[nodiscard]] bool shaderDeclaresListedUniform(const std::string& code);
+// What shader_list_uniforms compiles to learn whether a shader compiles: the
+// shader's code with one uniform added, which the engine lists only when the
+// whole code compiles. A relative #include is made absolute against the
+// shader's folder, since the copy has no path of its own (#1345).
+struct ShaderCompileProbe {
+    std::string code;
+    std::string uniform;
+};
+[[nodiscard]] ShaderCompileProbe shaderCompileProbe(const std::string& code,
+                                                    const std::string& shader_path);
 
 // What a resource slot's declared type allows, and what it rules out.
 //
