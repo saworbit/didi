@@ -4316,12 +4316,74 @@ json sharedWith(GDExtensionObjectPtr root, GDExtensionObjectPtr target,
 // One property's answer to a read: its value, and what its class declares
 // about it. `type` is the declared type, which is what a write is checked
 // against; a Variant-typed property says what it holds instead.
+// PROPERTY_HINT_NODE_TYPE, 34 on 4.5.1, 4.6.2 and 4.7.2: an Object slot that
+// holds a node, which is what `@export var target: Node2D` declares. Godot
+// saves it as a NodePath from the node that holds it (#1292).
+constexpr int kPropertyHintNodeType = 34;
+
+bool isNodeSlot(const PropertyDescriptor& descriptor) {
+    return descriptor.declared_type == GDEXTENSION_VARIANT_TYPE_OBJECT &&
+           descriptor.hint == kPropertyHintNodeType;
+}
+
+// A node slot's value as the inspector shows it and the scene file keeps it:
+// the path from the node that holds the slot. Nothing when it holds no node.
+// Node.get_path_to is 498846349 on all three lines.
+std::optional<json> nodeSlotToJson(const ResolvedProperty& resolved, VariantValue& value) {
+    if (!isNodeSlot(resolved.descriptor)) return std::nullopt;
+    if (GodotApi::instance().variant_get_type(value.ptr()) != GDEXTENSION_VARIANT_TYPE_OBJECT) {
+        return std::nullopt;
+    }
+    auto object = objectFromVariant(value);
+    if (object.isErr() || !object.value()) return std::nullopt;
+    auto is_node = objectIsClass(object.value(), "Node");
+    if (is_node.isErr() || !is_node.value()) return std::nullopt;
+    auto use_unique_path = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(0));
+    if (use_unique_path.isErr()) return std::nullopt;
+    auto path = callObject(resolved.holder, "Node", "get_path_to", 498846349LL,
+                           {&value, &use_unique_path.value()});
+    if (path.isErr()) return std::nullopt;
+    auto text = stringFromVariant(path.value(), GDEXTENSION_VARIANT_TYPE_NODE_PATH);
+    if (text.isErr()) return std::nullopt;
+    return json(text.value());
+}
+
+// Whether a node is the class a node slot names: a native class it is or
+// inherits, or a class_name its script, or a script that one extends,
+// declares. Object.is_class answers for native classes only. Object.get_script
+// is 1214101251, Script.get_global_name 2002593661 and Script.get_base_script
+// 278624046 on all three lines.
+Result<bool> nodeIsOfClass(GDExtensionObjectPtr node, const std::string& class_name) {
+    auto native = objectIsClass(node, class_name.c_str());
+    if (native.isErr()) return native.error();
+    if (native.value()) return true;
+    auto script_value = callObject(node, "Object", "get_script", 1214101251LL);
+    if (script_value.isErr()) return script_value.error();
+    VariantValue held = std::move(script_value.value());
+    for (int depth = 0; depth < 32; ++depth) {
+        auto script = objectFromVariant(held);
+        if (script.isErr() || !script.value()) return false;
+        auto name = callObject(script.value(), "Script", "get_global_name", 2002593661LL);
+        if (name.isOk()) {
+            auto text = stringFromVariant(name.value(), GDEXTENSION_VARIANT_TYPE_STRING_NAME);
+            if (text.isOk() && text.value() == class_name) return true;
+        }
+        auto base = callObject(script.value(), "Script", "get_base_script", 278624046LL);
+        if (base.isErr()) return false;
+        held = std::move(base.value());
+    }
+    return false;
+}
+
 Result<json> describeProperty(const ResolvedProperty& resolved, const std::string& path,
                               VariantValue& value) {
     const auto held = GodotApi::instance().variant_get_type(value.ptr());
     int type = resolved.descriptor.declared_type;
     if (type == GDEXTENSION_VARIANT_TYPE_NIL) type = held;
     auto encoded = variantToJson(value);
+    // A node reads as its path from the holder, the form a write takes and
+    // the scene file keeps (#1292).
+    if (auto slot = nodeSlotToJson(resolved, value)) encoded = *slot;
     if (encoded.isErr()) {
         return bridgeRefusal(400, "property_type_unsupported",
                              {{"property_name", path}, {"type", godotVariantTypeName(type)}},
@@ -4364,6 +4426,69 @@ struct PreparedWrite {
     // copy itself rather than through the node's path (#1245).
     bool into_copy{false};
 };
+
+// The node a node slot is given: a path from the node holding the slot, or an
+// absolute /root/... path, found in the edited scene and of the class the slot
+// names. A path was refused as not a resource path, and Godot itself drops a
+// NodePath written into the slot, or a node of another class, and leaves the
+// slot empty without a word, on 4.5.1, 4.6.2 and 4.7.2 (#1292).
+Result<VariantValue> makeNodeForSlot(GDExtensionObjectPtr root, const PreparedWrite& write,
+                                     const json& value) {
+    if (value.is_null()) return VariantValue{};
+    const auto& slot_class = write.resolved.descriptor.hint_string;
+    std::string path;
+    if (value.is_string()) {
+        path = value.get<std::string>();
+    } else if (value.is_object() && value.value("type", std::string()) == "NodePath" &&
+               value.contains("value") && value["value"].is_string()) {
+        path = value["value"].get<std::string>();
+    }
+    if (path.empty()) {
+        return Error::invalidArgument(
+            "Property \"" + write.property + "\" holds a " + slot_class +
+            " node. Send its path from " + write.target_path +
+            ", such as \"../Target\", or from the scene root, such as \"/root/Main/Target\", "
+            "or null to empty the slot.");
+    }
+    GDExtensionObjectPtr found = nullptr;
+    if (strings::startsWith(path, "/")) {
+        auto resolved = resolveNode(root, path);
+        if (resolved.isErr()) return resolved.error();
+        found = resolved.value();
+    } else {
+        auto node_path = makeNodePath(path);
+        if (node_path.isErr()) return node_path.error();
+        auto result = callObject(write.resolved.holder, "Node", "get_node_or_null", 2734337346LL,
+                                 {&node_path.value()});
+        if (result.isErr()) return result.error();
+        auto object = objectFromVariant(result.value());
+        if (object.isErr()) return object.error();
+        found = object.value();
+    }
+    if (!found) {
+        return Error::notFound("Property \"" + write.property + "\": there is no node at " + path +
+                               " from " + write.target_path + ".");
+    }
+    if (relativePathWithinEditedRoot(root, found).isErr()) {
+        return Error::invalidArgument("Property \"" + write.property + "\": " + path +
+                                      " is outside the edited scene, and a scene keeps a path to "
+                                      "its own nodes only.");
+    }
+    bool matches = strings::trim(slot_class).empty();
+    for (const auto& name : strings::split(slot_class, ',')) {
+        const auto wanted = strings::trim(name);
+        if (wanted.empty() || matches) continue;
+        auto is = nodeIsOfClass(found, wanted);
+        if (is.isErr()) return is.error();
+        matches = is.value();
+    }
+    if (!matches) {
+        return Error::invalidArgument("Property \"" + write.property + "\" takes a " + slot_class +
+                                      ", and " + path + " is a " + nodeClassName(found) +
+                                      ". Godot leaves the slot empty for a node of another class.");
+    }
+    return makeObject(found);
+}
 
 // Every check the write makes, short of making it. A dry run runs this too,
 // so a preview fails where the write would.
@@ -4432,6 +4557,14 @@ Result<PreparedWrite> prepareWrite(GDExtensionObjectPtr root, const std::string&
         property_type = static_cast<GDExtensionVariantType>(write.resolved.descriptor.declared_type);
     }
     const auto& value = item["value"];
+    if (property_type == GDEXTENSION_VARIANT_TYPE_OBJECT && isNodeSlot(write.resolved.descriptor)) {
+        auto node_value = makeNodeForSlot(root, write, value);
+        if (node_value.isErr()) return node_value.error();
+        write.requested = value;
+        write.old_value = std::move(old_value.value());
+        write.new_value = std::move(node_value.value());
+        return std::move(write);
+    }
     auto compatible = validateJsonForPropertyType(write.property, value, property_type);
     if (compatible.isErr()) return compatible.error();
     auto new_value = property_type == GDEXTENSION_VARIANT_TYPE_OBJECT
@@ -4676,14 +4809,17 @@ Result<json> observeWrite(PreparedWrite& write) {
     if (observed.isErr()) return observed.error();
     auto observed_json = variantToJson(observed.value());
     if (observed_json.isErr()) return observed_json.error();
+    if (auto slot = nodeSlotToJson(write.resolved, observed.value())) observed_json = *slot;
     auto old_json = variantToJson(write.old_value);
     if (old_json.isErr()) return old_json.error();
+    if (auto slot = nodeSlotToJson(write.resolved, write.old_value)) old_json = *slot;
     // Against the Variant that was actually sent, not the JSON it was built
     // from. A Color written as {r,g,b} -- the spelling the instructions
     // document -- comes back with four keys, and comparing four observed
     // against three requested reported a write that landed perfectly as one
     // that did not. #638 fixed exactly this for shader_set_uniform.
     auto requested_json = variantToJson(write.new_value, 0, true);
+    if (auto slot = nodeSlotToJson(write.resolved, write.new_value)) requested_json = *slot;
     const json& requested_payload = requested_json.isOk() ? requested_json.value() : write.requested;
     const bool applied = jsonValuesEquivalent(observed_json.value(), requested_payload);
     json result = {{"target_node", write.target_path}, {"property_name", write.property},

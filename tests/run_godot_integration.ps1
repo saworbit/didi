@@ -2171,6 +2171,22 @@ try {
         (Tool-Request 2544 "shader_list_uniforms" @{ target_node = "/root/ShaderCases/Guarded"; property_name = "material" }),
         (Tool-Request 2545 "shader_set_uniform" @{ target_node = "/root/ShaderCases/Broken"; property_name = "material"; uniform_name = "glow"; value = 0.5 }),
         (Tool-Request 2546 "scene_close" @{ discard_unsaved = $true }),
+        # A node slot: `@export var target: Node2D` holds a node, and Godot
+        # saves it as a NodePath from the node holding it. A path was refused
+        # as not a resource path, and a NodePath written into the slot leaves
+        # it empty (#1292). A scene of its own, for the same reason as above.
+        (Tool-Request 2547 "scene_create" @{ scene_path = "res://node_slot_cases.tscn"; root_type = "Node2D"; root_name = "NodeSlots"; overwrite = $true }),
+        (Tool-Request 2548 "scene_instantiate_node" @{ node_type = "Node"; parent_path = "/root/NodeSlots"; name = "Holder" }),
+        (Tool-Request 2549 "scene_instantiate_node" @{ node_type = "Node2D"; parent_path = "/root/NodeSlots"; name = "Point" }),
+        (Tool-Request 2550 "scene_instantiate_node" @{ node_type = "Node"; parent_path = "/root/NodeSlots"; name = "Plain" }),
+        (Tool-Request 2551 "script_attach_to_node" @{ target_node = "/root/NodeSlots/Holder"; script_path = "res://node_slot_holder.gd" }),
+        (Tool-Request 2552 "scene_set_property" @{ target_node = "/root/NodeSlots/Holder"; property_name = "target"; value = "../Point" }),
+        (Tool-Request 2553 "scene_get_property" @{ target_node = "/root/NodeSlots/Holder"; property_name = "target" }),
+        (Tool-Request 2554 "scene_set_property" @{ target_node = "/root/NodeSlots/Holder"; property_name = "target"; value = "../Plain" }),
+        (Tool-Request 2555 "scene_set_property" @{ target_node = "/root/NodeSlots/Holder"; property_name = "target"; value = "../Nowhere" }),
+        (Tool-Request 2556 "scene_set_property" @{ target_node = "/root/NodeSlots/Holder"; property_name = "target"; value = "/root/NodeSlots/Point" }),
+        (Tool-Request 2557 "editor_save_scene" @{}),
+        (Tool-Request 2558 "scene_close" @{ discard_unsaved = $true }),
         (Tool-Request 112 "scene_create" @{ scene_path = "res:////escape.tscn" }),
         # A nested path whose parent directory does not exist yet. ResourceSaver
         # cannot create it, so this used to come back as a bare Error 19 while
@@ -4830,6 +4846,20 @@ try {
     $brokenSet = ($byId[2545].result.content | Where-Object { $_.type -eq "text" } | Select-Object -First 1).text
     Assert-True ($byId[2545].result.isError -eq $true -and (($brokenSet | ConvertFrom-Json).error.data.code -eq "shader_not_compiled")) "A uniform write to a shader that does not compile was not refused as not compiled: $brokenSet"
     Assert-True ((Tool-Payload $byId[2546]).closed -eq $true) "Shader case scene could not be closed."
+    foreach ($slotCaseId in 2547..2551) {
+        Assert-True (-not $byId[$slotCaseId].result.isError) "Node slot request $slotCaseId failed: $($byId[$slotCaseId].result.content[0].text)"
+    }
+    $slotWrite = Tool-Payload $byId[2552]
+    Assert-True ((-not $byId[2552].result.isError) -and $slotWrite.value -eq "../Point" -and $slotWrite.applied -eq $true) "A node path was not written into a node slot: $($byId[2552].result.content[0].text)"
+    $slotRead = Tool-Payload $byId[2553]
+    Assert-True ($slotRead.value -eq "../Point" -and $slotRead.holds -eq "Node2D") "A node slot did not read back as the path from its holder: $($byId[2553].result.content[0].text)"
+    Assert-True ($byId[2554].result.isError -eq $true -and $byId[2554].result.content[0].text -match "takes a Node2D") "A node of another class was accepted into a node slot: $($byId[2554].result.content[0].text)"
+    Assert-True ($byId[2555].result.isError -eq $true -and $byId[2555].result.content[0].text -match "no node at") "A path to no node was accepted into a node slot: $($byId[2555].result.content[0].text)"
+    Assert-True ((Tool-Payload $byId[2556]).value -eq "../Point") "An absolute path did not land as the path from the holder: $($byId[2556].result.content[0].text)"
+    Assert-True (-not $byId[2557].result.isError) "The node slot scene could not be saved: $($byId[2557].result.content[0].text)"
+    $slotSceneText = Get-Content -LiteralPath (Join-Path $fixtureRoot "node_slot_cases.tscn") -Raw
+    Assert-True ($slotSceneText -match 'node_paths=PackedStringArray\("target"\)' -and $slotSceneText -match 'target = NodePath\("\.\./Point"\)') "The saved scene did not keep the node slot as Godot keeps one: $slotSceneText"
+    Assert-True ((Tool-Payload $byId[2558]).closed -eq $true) "Node slot scene could not be closed."
     Assert-True ((Tool-Payload $byId[111]).closed -eq $true) "Smoke scene cleanup failed."
     Assert-True $byId[112].result.isError "Non-normalized res:// scene path was accepted."
     Assert-True ($byId[112].result.content[0].text -match "normalized") "Non-normalized path error was not actionable."
