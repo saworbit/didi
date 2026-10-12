@@ -478,6 +478,15 @@ function Get-ObservedPostStateCases([string]$GameSessionId = "", [string]$Launch
                Agree "resource_type" $s.call.resource_type $s.witness.returned.class
                Agree "file_bytes" $s.call.file_bytes $s.length.returned }
            Expect = { param($s) Expect "indexed" $true $s.indexed.returned } },
+        # A nested array in a property the API dump calls a plain Array, whose
+        # hidden setter takes Array[PackedVector2Array]. Written as numbers,
+        # the engine loaded the outline as eight (0, 0) points (#1294).
+        @{ Tool = "resource_create"; Session = "editor"; Steps = @(
+            (Step "call" "resource_create" @{ save_path = "res://observed_nav.tres"; resource_type = "NavigationPolygon"; properties = @{ outlines = @(, @(-8, -8, 8, -8, 8, 8, -8, 8)) }; overwrite = $true }),
+            (Witness "witness" "load_fresh" @("res://observed_nav.tres", @("outlines"))))
+           Agree = { param($s) Agree "resource_type" $s.call.resource_type $s.witness.returned.class }
+           Expect = { param($s)
+               Expect "outlines" @(, @([pscustomobject]@{ x = -8; y = -8 }, [pscustomobject]@{ x = 8; y = -8 }, [pscustomobject]@{ x = 8; y = 8 }, [pscustomobject]@{ x = -8; y = 8 })) $s.witness.returned.properties.outlines } },
         # A class_name type, which the header cannot name: the engine makes a
         # Resource carrying the script, and named in the header it loaded as a
         # MissingResource while the answer named the class (#1125).

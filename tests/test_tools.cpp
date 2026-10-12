@@ -5332,6 +5332,44 @@ static void test_an_applied_change_that_was_not_protected_says_so_as_an_error() 
     std::filesystem::remove_all(container, ignored);
 }
 
+static void test_resource_create_writes_each_element_as_the_declared_packed_type() {
+    // NavigationPolygon.outlines is a plain Array in the API dump, and its
+    // hidden setter takes Array[PackedVector2Array]. A nested JSON array was
+    // written as an untyped array of numbers, which Godot 4.5.1, 4.6.2 and
+    // 4.7.2 all load as eight (0, 0) points (#1294).
+    ScopedToolProject project("resource-typed-elements");
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    const auto outline = didi::json::array({-8, -8, 8, -8, 8, 8, -8, 8});
+    const didi::json args = {
+        {"save_path", "res://nav.tres"},
+        {"resource_type", "NavigationPolygon"},
+        {"properties", didi::json::array({
+            {{"name", "vertices"}, {"value", {{"type", "PackedVector2Array"}, {"values", outline}}}},
+            {{"name", "polygons"}, {"value", didi::json::array({didi::json::array({0, 1, 2, 3})})}},
+            {{"name", "outlines"},
+             {"value", didi::json::array({outline, didi::json::array({{{"x", 1}, {"y", 2}}})})}}
+        })}
+    };
+    const auto result = registry.callTool("resource_create", args);
+    if (result.isError) throw std::runtime_error(result.content[0].text);
+    const auto tres = readToolTestFile("nav.tres");
+    ASSERT_TRUE(tres.find("polygons = [PackedInt32Array(0, 1, 2, 3)]") != std::string::npos);
+    ASSERT_TRUE(tres.find("outlines = [PackedVector2Array(-8, -8, 8, -8, 8, 8, -8, 8), "
+                          "PackedVector2Array(1, 2)]") != std::string::npos);
+    const auto report = didi::json::parse(result.content[0].text);
+    ASSERT_EQ(report["property_check"]["written_as_declared_type"]["outlines"],
+              "Array[PackedVector2Array]");
+
+    // An element that cannot be one is refused, naming the element type.
+    auto wrong = args;
+    wrong["save_path"] = "res://nav_wrong.tres";
+    wrong["properties"][2]["value"] = didi::json::array({"corner"});
+    const auto refused = registry.callTool("resource_create", wrong);
+    ASSERT_TRUE(refused.isError);
+    ASSERT_TRUE(refused.content[0].text.find("Array[PackedVector2Array]") != std::string::npos);
+}
+
 static void test_resource_create_type_guard_keeps_the_reference_when_no_engine_answers() {
     // Two ways for no engine to answer, and neither is the engine saying no.
     // An addon older than the route, and no session at all: both fall back to
@@ -10479,6 +10517,8 @@ struct RegisterToolTests {
                      test_resource_create_preserves_existing_file_without_overwrite);
     registerTest("resource_create type guard asks the attached engine",
                  test_resource_create_type_guard_asks_the_attached_engine);
+        registerTest("Tools.ResourceCreateWritesEachElementAsTheDeclaredPackedType",
+                     test_resource_create_writes_each_element_as_the_declared_packed_type);
     registerTest("resource_create type guard keeps the reference when no engine answers",
                  test_resource_create_type_guard_keeps_the_reference_when_no_engine_answers);
     registerTest("resource_create type guard lets the engine clear a type the dump lacks",

@@ -17,8 +17,14 @@ paid for on every build on every platform.
 Refresh it when the pinned Godot version moves:
 
     godot --headless --dump-extension-api --path .
+    godot --headless --script tools/typed_array_setters.gd -- --output typed_array_setters.json
     python tools/generate_class_reference.py --api extension_api.json \
+        --typed-setters typed_array_setters.json \
         --output resources/didi_class_reference.json
+
+The second file is the element type behind an untyped Array property whose
+setter takes a typed array, which the dump does not carry when the setter is
+hidden. resource_create writes each element as that type (#1294).
 """
 
 from __future__ import annotations
@@ -50,10 +56,13 @@ def method_signature(method: dict) -> dict:
     return entry
 
 
-def trim_class(entry: dict) -> dict:
+def trim_class(entry: dict, element_types: dict | None = None) -> dict:
     properties = {}
     for prop in entry.get("properties", []):
         detail = {"type": prop.get("type", "")}
+        element_type = (element_types or {}).get(prop["name"])
+        if element_type and detail["type"] == "Array":
+            detail["element_type"] = element_type
         # A property with no setter is read-only, which is worth knowing before
         # a caller tries scene_set_property on it.
         if "setter" not in prop or not prop["setter"]:
@@ -83,9 +92,13 @@ def trim_class(entry: dict) -> dict:
     return trimmed
 
 
-def build_reference(api: dict) -> dict:
+def build_reference(api: dict, typed_setters: dict | None = None) -> dict:
     header = api.get("header", {})
-    classes = {entry["name"]: trim_class(entry) for entry in api.get("classes", [])}
+    typed_setters = typed_setters or {}
+    classes = {
+        entry["name"]: trim_class(entry, typed_setters.get(entry["name"]))
+        for entry in api.get("classes", [])
+    }
     return {
         "schema": 1,
         # Recorded so a caller can see which Godot the reflection describes. The
@@ -100,10 +113,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--api", type=Path, required=True, help="path to extension_api.json")
     parser.add_argument("--output", type=Path, required=True, help="path to write the reference")
+    parser.add_argument("--typed-setters", type=Path,
+                        help="tools/typed_array_setters.gd output for the same engine")
     arguments = parser.parse_args()
 
     api = json.loads(arguments.api.read_text(encoding="utf-8"))
-    reference = build_reference(api)
+    typed_setters = (json.loads(arguments.typed_setters.read_text(encoding="utf-8"))
+                     if arguments.typed_setters else None)
+    reference = build_reference(api, typed_setters)
 
     arguments.output.parent.mkdir(parents=True, exist_ok=True)
     arguments.output.write_text(
