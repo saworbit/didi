@@ -194,8 +194,68 @@ void test_expression_policy_allows_math_on_source_local_vectors_and_colors() {
     }
 }
 
+void test_a_script_variable_is_read_only_when_nothing_runs() {
+    // Break caught: eval_gdscript and the tools on its sandbox refused every
+    // script variable, so a game's score or health could not be asserted
+    // (#1298). Godot reads a declared member with no getter from storage, and
+    // runs a getter, or _get for a name nobody declares.
+    using didi::runtime::ScriptVariableRead;
+    using didi::runtime::scriptVariableRead;
+    const std::string script =
+        "extends Node\n"
+        "var plain := 7\n"
+        "@export_range(0, 10, 1) var exported := 1\n"
+        "@onready var ready_node: Node = $Child\n"
+        "var with_inline: int:\n"
+        "\tget:\n"
+        "\t\treturn 5\n"
+        "var with_named := 1: get = _read_named\n"
+        "var setter_only: int = 3:\n"
+        "\tset(value):\n"
+        "\t\tsetter_only = value\n"
+        "var calls_get = get(\"plain\")  # an initializer, not a getter\n"
+        "var text := \"get: is text\"\n"
+        "static var shared := 2\n"
+        "var spans := {\n"
+        "\t\"a\": 1,\n"
+        "}\n"
+        "\"\"\"\n"
+        "var in_a_string := 1\n"
+        "\"\"\"\n"
+        "var twice := 1\n"
+        "var twice := 2\n"
+        "class Inner:\n"
+        "\tvar inner_only := 1\n"
+        "func _read_named() -> int:\n"
+        "\tvar local := 4\n"
+        "\treturn local\n";
+    const auto read = [&](const char* name) { return scriptVariableRead(script, name); };
+    ASSERT_TRUE(read("plain").read == ScriptVariableRead::Plain);
+    ASSERT_EQ(read("plain").line, 2);
+    ASSERT_TRUE(read("exported").read == ScriptVariableRead::Plain);
+    ASSERT_TRUE(read("ready_node").read == ScriptVariableRead::Plain);
+    ASSERT_TRUE(read("with_inline").read == ScriptVariableRead::HasGetter);
+    ASSERT_EQ(read("with_inline").line, 5);
+    ASSERT_TRUE(read("with_named").read == ScriptVariableRead::HasGetter);
+    ASSERT_TRUE(read("setter_only").read == ScriptVariableRead::Plain);
+    ASSERT_TRUE(read("calls_get").read == ScriptVariableRead::Plain);
+    ASSERT_TRUE(read("text").read == ScriptVariableRead::Plain);
+    ASSERT_TRUE(read("shared").read == ScriptVariableRead::Plain);
+    ASSERT_TRUE(read("spans").read == ScriptVariableRead::Unclear);
+    ASSERT_TRUE(read("in_a_string").read == ScriptVariableRead::NotDeclared);
+    ASSERT_TRUE(read("twice").read == ScriptVariableRead::Unclear);
+    ASSERT_TRUE(read("inner_only").read == ScriptVariableRead::NotDeclared);
+    ASSERT_TRUE(read("local").read == ScriptVariableRead::NotDeclared);
+    ASSERT_TRUE(read("nowhere").read == ScriptVariableRead::NotDeclared);
+    // CRLF reads the same.
+    ASSERT_TRUE(scriptVariableRead("var x: int:\r\n\tget:\r\n\t\treturn 1\r\n", "x").read ==
+                ScriptVariableRead::HasGetter);
+}
+
 struct RegisterExpressionSandboxTests {
     RegisterExpressionSandboxTests() {
+        registerTest("ExpressionSandbox.ScriptVariableReadOnlyWhenNothingRuns",
+                     test_a_script_variable_is_read_only_when_nothing_runs);
         registerTest("ExpressionSandbox.SourceLocalVectorMath",
                      test_expression_policy_allows_math_on_source_local_vectors_and_colors);
         registerTest("ExpressionSandbox.DocumentedVocabulary",

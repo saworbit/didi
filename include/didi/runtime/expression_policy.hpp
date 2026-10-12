@@ -30,6 +30,19 @@ struct DirectPropertyRead {
 
 Result<std::vector<DirectPropertyRead>> directPropertyReads(std::string_view source);
 
+// Whether a GDScript declares a variable at class level, and whether reading
+// it runs code. Godot answers a declared member with no getter from member
+// storage, before _get is tried, and runs a getter for one with one; nothing
+// in the engine links a variable to a named getter, so the declaration
+// decides (#1298). Unclear is a declaration this cannot read with certainty:
+// two of them, a line continuation, or an initializer that spans lines.
+enum class ScriptVariableRead { NotDeclared, Plain, HasGetter, Unclear };
+struct ScriptVariableVerdict {
+    ScriptVariableRead read{ScriptVariableRead::NotDeclared};
+    int line{0};
+};
+ScriptVariableVerdict scriptVariableRead(std::string_view source, std::string_view name);
+
 bool isValidUtf8(std::string_view text);
 
 } // namespace didi::runtime

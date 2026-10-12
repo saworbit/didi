@@ -1,5 +1,6 @@
 #include "didi/runtime/expression_policy.hpp"
 
+#include <cctype>
 #include <cstddef>
 #include <limits>
 #include <string>
@@ -730,6 +731,172 @@ Result<std::vector<DirectPropertyRead>> directPropertyReads(std::string_view sou
     auto scanned = scanExpression(source);
     if (scanned.isErr()) return scanned.error();
     return readsInTokens(scanned.value());
+}
+
+namespace {
+
+bool isWordCharacter(char character) {
+    return std::isalnum(static_cast<unsigned char>(character)) != 0 || character == '_';
+}
+
+// One line of GDScript with its strings blanked and its comment cut, so a
+// word inside either is never read as code. A triple-quoted string carries on
+// to the next line through `in_long`, which holds its quote character.
+std::string codeOfLine(std::string_view line, char& in_long) {
+    std::string code;
+    code.reserve(line.size());
+    size_t at = 0;
+    while (at < line.size()) {
+        if (in_long != 0) {
+            if (line.compare(at, 3, std::string(3, in_long)) == 0) {
+                in_long = 0;
+                code += "   ";
+                at += 3;
+            } else {
+                code += ' ';
+                ++at;
+            }
+            continue;
+        }
+        const char character = line[at];
+        if (character == '#') break;
+        if (character == '"' || character == '\'') {
+            if (line.compare(at, 3, std::string(3, character)) == 0) {
+                in_long = character;
+                code += "   ";
+                at += 3;
+                continue;
+            }
+            code += ' ';
+            ++at;
+            while (at < line.size() && line[at] != character) {
+                if (line[at] == '\\' && at + 1 < line.size()) {
+                    code += ' ';
+                    ++at;
+                }
+                code += ' ';
+                ++at;
+            }
+            if (at < line.size()) {
+                code += ' ';
+                ++at;
+            }
+            continue;
+        }
+        code += character;
+        ++at;
+    }
+    return code;
+}
+
+std::string_view trimmedView(std::string_view text) {
+    const auto first = text.find_first_not_of(" \t");
+    if (first == std::string_view::npos) return {};
+    const auto last = text.find_last_not_of(" \t");
+    return text.substr(first, last - first + 1);
+}
+
+// The word `get` followed by `=` or `:`, and not a method called on
+// something: `get = _read` and `get:` are getters, `node.get("x")` is not.
+bool namesAGetter(std::string_view code) {
+    for (size_t at = code.find("get"); at != std::string_view::npos; at = code.find("get", at + 1)) {
+        if (at > 0 && (isWordCharacter(code[at - 1]) || code[at - 1] == '.')) continue;
+        size_t after = at + 3;
+        if (after < code.size() && isWordCharacter(code[after])) continue;
+        while (after < code.size() && (code[after] == ' ' || code[after] == '\t')) ++after;
+        if (after < code.size() && (code[after] == '=' || code[after] == ':')) return true;
+    }
+    return false;
+}
+
+}  // namespace
+
+ScriptVariableVerdict scriptVariableRead(std::string_view source, std::string_view name) {
+    std::vector<std::string> code;
+    char in_long = 0;
+    size_t start = 0;
+    while (start <= source.size()) {
+        const auto end = source.find('\n', start);
+        auto line = source.substr(start, end == std::string_view::npos ? std::string_view::npos : end - start);
+        if (!line.empty() && line.back() == '\r') line.remove_suffix(1);
+        code.push_back(codeOfLine(line, in_long));
+        if (end == std::string_view::npos) break;
+        start = end + 1;
+    }
+
+    ScriptVariableVerdict verdict;
+    int declarations = 0;
+    for (size_t index = 0; index < code.size(); ++index) {
+        const std::string_view text = code[index];
+        // Class level only: an inner class or a function body is indented.
+        if (text.empty() || text.front() == ' ' || text.front() == '\t') continue;
+        size_t at = 0;
+        const auto skipSpaces = [&]() {
+            while (at < text.size() && (text[at] == ' ' || text[at] == '\t')) ++at;
+        };
+        const auto takeWord = [&]() {
+            const auto from = at;
+            while (at < text.size() && isWordCharacter(text[at])) ++at;
+            return text.substr(from, at - from);
+        };
+        bool readable = true;
+        while (at < text.size() && text[at] == '@') {
+            ++at;
+            takeWord();
+            if (at < text.size() && text[at] == '(') {
+                int depth = 0;
+                for (; at < text.size(); ++at) {
+                    if (text[at] == '(') ++depth;
+                    if (text[at] == ')' && --depth == 0) {
+                        ++at;
+                        break;
+                    }
+                }
+                if (depth != 0) readable = false;
+            }
+            skipSpaces();
+        }
+        if (!readable) continue;
+        auto word = takeWord();
+        if (word == "static") {
+            skipSpaces();
+            word = takeWord();
+        }
+        if (word != "var") continue;
+        skipSpaces();
+        if (takeWord() != name) continue;
+
+        ++declarations;
+        verdict.line = static_cast<int>(index) + 1;
+        const auto rest = trimmedView(text.substr(at));
+        int brackets = 0;
+        for (const char character : rest) {
+            if (character == '(' || character == '[' || character == '{') ++brackets;
+            if (character == ')' || character == ']' || character == '}') --brackets;
+        }
+        if ((!rest.empty() && rest.back() == '\\') || brackets != 0) {
+            verdict.read = ScriptVariableRead::Unclear;
+            continue;
+        }
+        bool getter = namesAGetter(rest);
+        // A property block: the indented lines under a declaration that ends
+        // with a colon. A setter alone runs nothing on a read.
+        if (!getter && !rest.empty() && rest.back() == ':') {
+            for (size_t next = index + 1; next < code.size(); ++next) {
+                const std::string_view below = code[next];
+                const auto body = trimmedView(below);
+                if (body.empty()) continue;
+                if (below.front() != ' ' && below.front() != '\t') break;
+                if (body.substr(0, 3) == "get" && (body.size() == 3 || !isWordCharacter(body[3]))) {
+                    getter = true;
+                    break;
+                }
+            }
+        }
+        verdict.read = getter ? ScriptVariableRead::HasGetter : ScriptVariableRead::Plain;
+    }
+    if (declarations > 1) verdict.read = ScriptVariableRead::Unclear;
+    return verdict;
 }
 
 } // namespace didi::runtime
