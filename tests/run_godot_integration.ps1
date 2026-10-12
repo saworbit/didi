@@ -2156,9 +2156,9 @@ try {
         # that fails lists no uniforms and is refused. One that compiles and
         # lists none answers an empty list: a VisualShader whose only texture
         # is in the graph, which the engine leaves out of the list, and a
-        # uniform the preprocessor turns off. A Node2D draws nothing, so the
-        # broken shader prints its compile errors and nothing else. A scene of
-        # its own, because the smoke scene's node counts are asserted elsewhere.
+        # uniform the preprocessor turns off. The engine lines the broken shader
+        # causes are in the gate's list with these requests. A scene of its
+        # own, because the smoke scene's node counts are asserted elsewhere.
         (Tool-Request 2535 "scene_create" @{ scene_path = "res://shader_cases.tscn"; root_type = "Node2D"; root_name = "ShaderCases"; overwrite = $true }),
         (Tool-Request 2536 "scene_instantiate_node" @{ node_type = "Node2D"; parent_path = "/root/ShaderCases"; name = "Broken" }),
         (Tool-Request 2537 "scene_instantiate_node" @{ node_type = "Node2D"; parent_path = "/root/ShaderCases"; name = "Textured" }),
