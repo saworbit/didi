@@ -134,6 +134,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Fixed
 
+- `2026-10-12` The agent guide covers hidden-control rectangles, checking a written shader, Color settings and asserting no errors. [PR #1339](https://github.com/saworbit/didi/pull/1339)
 - `2026-10-12` A local writer carries the `engine_diagnostics` the attached editor printed while it reloaded, rebuilt or indexed what the call wrote. [#1289](https://github.com/saworbit/didi/issues/1289) · [PR #1338](https://github.com/saworbit/didi/pull/1338)
 - `2026-10-12` A live call refused for want of a route names the project's one live session to attach, after a restart or a stopped game left none selected. [#1296](https://github.com/saworbit/didi/issues/1296) · [PR #1337](https://github.com/saworbit/didi/pull/1337)
 - `2026-10-12` An unknown argument is named in `argument` rather than a `field` it never sent, and a near miss of an optional argument gets `did_you_mean`. [#1301](https://github.com/saworbit/didi/issues/1301) · [PR #1336](https://github.com/saworbit/didi/pull/1336)

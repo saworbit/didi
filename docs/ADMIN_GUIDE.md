@@ -264,7 +264,9 @@ The change journal is one more file there, `.didi/journal.json`, beside
 
 Proof runs write two more folders there. `.didi/scenarios/` holds one record per
 `runtime_run_scenario` or `project_run_tests` name, the last run of that name,
-read as `godot://project/scenarios`, and a scenario's captures under
+read as `godot://project/scenarios`. A name belongs to the kind that recorded it
+first, and the other tool refuses it with `record_name_taken` rather than
+replacing the record. A scenario's captures are under
 `.didi/scenarios/<name>/`. `.didi/tests/<name>/<run>/` holds the JUnit report the
 test framework wrote for one run, in a directory of that run's own.
 
