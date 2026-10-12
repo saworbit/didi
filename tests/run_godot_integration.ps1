@@ -5833,6 +5833,23 @@ text = "Not a key"
         (Tool-Request 367 "scene_get_property" @{ target_node = "/root/RayProbe2D/Floor"; property_name = "position" }),
         (Tool-Request 368 "scene_open" @{ scene_path = "res://raycast_probe_3d.tscn" }),
         (Tool-Request 369 "physics_raycast_query" @{ from = @{ x = 0; y = 5; z = 0 }; to = @{ x = 0; y = -5; z = 0 } }),
+        # A TileMapLayer's tiles and a GridMap's cells join their space before
+        # their shapes do, and the editor never steps its physics, so a ray
+        # passed through them while the game collided (#1308). Built here, so
+        # the bodies are made after the editor started, as they are when a
+        # session paints a level.
+        (Tool-Request 2579 "scene_create" @{ scene_path = "res://tile_physics_cases.tscn"; root_type = "Node2D"; root_name = "TilePhysics"; overwrite = $true }),
+        (Tool-Request 2580 "scene_instantiate_node" @{ node_type = "TileMapLayer"; parent_path = "/root/TilePhysics"; name = "Walls" }),
+        (Tool-Request 2581 "scene_set_property" @{ target_node = "/root/TilePhysics/Walls"; property_name = "tile_set"; value = "res://physics_cases/probe_tile_physics.tres" }),
+        (Tool-Request 2582 "tilemap_set_cells" @{ tilemap_path = "/root/TilePhysics/Walls"; cells = @(@{ coords = @(5, 5); source_id = 0; atlas_coords = @(0, 0) }) }),
+        (Tool-Request 2583 "physics_raycast_query" @{ from = @{ x = 88; y = 0 }; to = @{ x = 88; y = 200 } }),
+        (Tool-Request 2584 "scene_close" @{ discard_unsaved = $true }),
+        (Tool-Request 2585 "scene_create" @{ scene_path = "res://grid_physics_cases.tscn"; root_type = "Node3D"; root_name = "GridPhysics"; overwrite = $true }),
+        (Tool-Request 2586 "scene_instantiate_node" @{ node_type = "GridMap"; parent_path = "/root/GridPhysics"; name = "Floor" }),
+        (Tool-Request 2587 "scene_set_property" @{ target_node = "/root/GridPhysics/Floor"; property_name = "mesh_library"; value = "res://physics_cases/probe_cell_physics.tres" }),
+        (Tool-Request 2588 "gridmap_set_cells" @{ gridmap_path = "/root/GridPhysics/Floor"; cells = @(@{ position = @(0, 0, 0); item = 0 }) }),
+        (Tool-Request 2589 "physics_raycast_query" @{ from = @{ x = 1; y = 5; z = 1 }; to = @{ x = 1; y = -5; z = 1 } }),
+        (Tool-Request 2590 "scene_close" @{ discard_unsaved = $true }),
         (Tool-Request 370 "scene_open" @{ scene_path = "res://main.tscn" })
     )
     $rawRayResponses = Invoke-Didi -Requests $rayRequests -Arguments @("--project", $fixtureRoot)
@@ -5862,6 +5879,13 @@ text = "Not a key"
     $ray3d = Tool-Payload $rayById[369]
     Assert-True ($ray3d.hit -eq $true -and $ray3d.collider_class -eq "StaticBody3D") "A 3D editor raycast missed a StaticBody3D standing in its path."
     Assert-True ($ray3d.collider_path -eq "/root/RayProbe3D/Block") "The 3D editor raycast answered with $($ray3d.collider_path), which is not a path the surface takes."
+    foreach ($tileCaseId in @(2579, 2580, 2581, 2582, 2584, 2585, 2586, 2587, 2588, 2590)) {
+        Assert-True (-not $rayById[$tileCaseId].result.isError) "Tile and cell physics request $tileCaseId failed: $($rayById[$tileCaseId].result.content[0].text)"
+    }
+    $tileRay = Tool-Payload $rayById[2583]
+    Assert-True ($tileRay.hit -eq $true -and $tileRay.collider_class -eq "TileMapLayer" -and [math]::Abs([double]$tileRay.position.y - 80) -lt 0.01) "An editor ray passed through a TileMapLayer tile painted after the editor started: $($rayById[2583].result.content[0].text)"
+    $cellRay = Tool-Payload $rayById[2589]
+    Assert-True ($cellRay.hit -eq $true -and $cellRay.collider_class -eq "GridMap" -and [math]::Abs([double]$cellRay.position.y - 1.5) -lt 0.01) "An editor ray passed through a GridMap cell placed after the editor started: $($rayById[2589].result.content[0].text)"
 
     # A reimport while the editor scans. reimport_files cannot find a file
     # while a scan runs, so an asset named then was skipped with "Can't find
