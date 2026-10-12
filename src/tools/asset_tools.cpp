@@ -417,6 +417,16 @@ Result<ExternalReference> resolveExternalReference(const json& value, const std:
     return reference;
 }
 
+// The packed array type a declared typedarray:: names as its element, or
+// empty when it names something else or nothing.
+std::string packedElementTypeOf(const std::string* declared_type) {
+    constexpr std::string_view kTyped = "typedarray::";
+    if (!declared_type || declared_type->rfind(kTyped.data(), 0) != 0) return {};
+    auto element = declared_type->substr(kTyped.size());
+    if (!namesType(element, kPackedArrayTypes, std::size(kPackedArrayTypes))) return {};
+    return element;
+}
+
 Result<std::string> tresNamedTypeLiteral(const json& value, const std::string& property,
                                          ReferenceScope* scope) {
     const auto name = value.at("type").get<std::string>();
@@ -606,11 +616,32 @@ Result<std::string> tresLiteral(const json& value, const std::string& property,
     if (value.is_number()) return value.dump();
     if (value.is_null()) return std::string("null");
     if (value.is_array()) {
+        // An array whose elements the reference types as a packed array. A
+        // plain JSON array there was written as an untyped array of numbers,
+        // and Godot converts that to a packed vector array as zeros, so
+        // NavigationPolygon's outlines loaded as eight (0, 0) points (#1294).
+        // Each element is written as the declared type instead.
+        const auto element_type = packedElementTypeOf(declared_type);
+        const auto render = [&](const json& element) -> Result<std::string> {
+            if (element_type.empty()) return tresLiteral(element, property, scope);
+            if (element.is_array()) {
+                return tresNamedTypeLiteral(json{{"type", element_type}, {"values", element}},
+                                            property, scope);
+            }
+            if (asksForANamedType(element) && element["type"] == element_type) {
+                return tresLiteral(element, property, scope);
+            }
+            return Error::invalidArgument(
+                "Property \"" + property + "\" is declared Array[" + element_type + "] by " +
+                offline::ClassReference::instance().apiVersion() + ", so each element is a " +
+                element_type + ". Send each as an array of its values, or as {\"type\": \"" +
+                element_type + "\", \"values\": [...]}.");
+        };
         std::ostringstream out;
         out << "[";
         bool first = true;
         for (const auto& element : value) {
-            auto rendered = tresLiteral(element, property, scope);
+            auto rendered = render(element);
             if (rendered.isErr()) return rendered.error();
             if (!first) out << ", ";
             first = false;
@@ -801,7 +832,14 @@ bool declaredPropertyNames(const std::string& resource_type, std::set<std::strin
                 // derived one, which was inserted first.
                 if (types && it.value().is_object() && it.value().contains("type") &&
                     it.value()["type"].is_string()) {
-                    types->emplace(it.key(), it.value()["type"].get<std::string>());
+                    auto type = it.value()["type"].get<std::string>();
+                    // An untyped Array whose setter takes a typed one: the
+                    // element type decides how each element is written (#1294).
+                    if (type == "Array" && it.value().contains("element_type") &&
+                        it.value()["element_type"].is_string()) {
+                        type = "typedarray::" + it.value()["element_type"].get<std::string>();
+                    }
+                    types->emplace(it.key(), std::move(type));
                 }
             }
         }
@@ -959,6 +997,13 @@ Result<json> checkPropertiesAgainstType(
                     if (guess && std::strcmp(guess, component->name) != 0) {
                         retyped[name] = component->name;
                     }
+                }
+                // A plain array element written as the declared packed type.
+                const auto element = packedElementTypeOf(&declaration->second);
+                if (!element.empty() && value.is_array() &&
+                    std::any_of(value.begin(), value.end(),
+                                [](const json& item) { return item.is_array(); })) {
+                    retyped[name] = "Array[" + element + "]";
                 }
             }
             continue;
