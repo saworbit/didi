@@ -57,6 +57,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Added
 
+- `2026-10-12` `scene_set_property` writes a node slot such as `@export var target: Node2D` from a node path, and reads it back as that path. [#1292](https://github.com/saworbit/didi/issues/1292) · [PR #1352](https://github.com/saworbit/didi/pull/1352)
 - `2026-10-10` `ui_hit_test` takes a game's window pixels with `space: "screen"`, and a game's hits carry `screen_rect`, so list, hit test and click share one space. [#1223](https://github.com/saworbit/didi/issues/1223) · [PR #1260](https://github.com/saworbit/didi/pull/1260)
 - `2026-10-10` `--text-copy once` leaves out the text that repeats `structuredContent`, for a host that reads it and cannot declare `didi/responseEconomy`. [#1238](https://github.com/saworbit/didi/issues/1238) · [PR #1259](https://github.com/saworbit/didi/pull/1259)
 - `2026-10-10` `runtime_read_profiler`'s verdict carries `slow_frames`: frames over twice the budget, the worst three each judged on its own parts. [#1230](https://github.com/saworbit/didi/issues/1230) · [PR #1258](https://github.com/saworbit/didi/pull/1258)
