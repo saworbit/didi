@@ -155,6 +155,8 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Fixed
 
+- `2026-10-14` Scenarios verify original game exit before reporting teardown complete, and Windows witnesses retain the original process. [#1020](https://github.com/saworbit/didi/issues/1020)
+
 - `2026-10-14` Observed-state comparisons allow bounded PowerShell startup on busy CI runners without skipping their assertions. [#1020](https://github.com/saworbit/didi/issues/1020) [PR #1416](https://github.com/saworbit/didi/pull/1416)
 
 - `2026-10-14` Refusal checks follow every bridge domain after file moves and retain the existing message and error-code rules. [#1255](https://github.com/saworbit/didi/issues/1255) [PR #1413](https://github.com/saworbit/didi/pull/1413)

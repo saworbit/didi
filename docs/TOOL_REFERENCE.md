@@ -1568,7 +1568,7 @@ The answer carries:
 - `steps`: each with its `outcome` (`done`, `held`, `failed`, `error`, `interrupted` or `not_run`), the frames it ran, `at_frame`, and what it read: `value` and `value_type` for an expression, `matched` for an output line, `capture` for a frame.
 - `assertions` (`total`, `held`, `failed`, `not_run`) and `frames`.
 - `game`: `pid`, `session_id`, `engine_version`, `build_id`, `fixed_fps`, `headless`.
-- `teardown`: `ok`, `stop_requested`, `session_gone`, `waited_ms`.
+- `teardown`: `ok`, `stop_requested`, `session_gone`, `waited_ms`. Completion requires session retirement and verified exit of the original process. If the session has retired but exit is not verified within ten seconds, the refusal names the PID and gives no attach/stop remedy through that retired session.
 - `files`: the SHA-256 of `project.godot`, the scene, the project's autoloads, and every script, scene and text resource they reach, read as the run started. `files_truncated` past 256. `stale` is `true` when one of them changed while the run was going.
 - `record`: where the run was written, or `null` with `record_error`.
 
