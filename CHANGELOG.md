@@ -109,7 +109,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 - `2026-09-23` A release archive can be installed and checked in one command. [PR #911](https://github.com/saworbit/didi/pull/911)
 
 ### Changed
-- `2026-10-14` TileMap and GridMap bridge handlers compile in one domain with the same cell validation, undo and readback paths. [#1255](https://github.com/saworbit/didi/issues/1255)
+- `2026-10-14` TileMap and GridMap bridge handlers compile in one domain with the same cell validation, undo and readback paths. [#1255](https://github.com/saworbit/didi/issues/1255) · [PR #1401](https://github.com/saworbit/didi/pull/1401)
 - `2026-10-14` Project settings, autoloads, input actions and UID bridge handlers compile in one domain with their existing save rollback. [#1255](https://github.com/saworbit/didi/issues/1255) · [PR #1400](https://github.com/saworbit/didi/pull/1400)
 - `2026-10-14` Audio bus bridge handlers compile in their own domain file with the existing layout snapshot and engine checks. [#1255](https://github.com/saworbit/didi/issues/1255) · [PR #1399](https://github.com/saworbit/didi/pull/1399)
 
