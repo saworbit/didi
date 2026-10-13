@@ -246,6 +246,26 @@ set(GDEXT_SOURCES
     src/gdextension/editor_hook.cpp
     src/gdextension/expression_sandbox.cpp
     src/gdextension/godot_bridge.cpp
+    src/gdextension/bridge_anim.cpp
+    src/gdextension/bridge_ui.cpp
+    src/gdextension/bridge_spatial.cpp
+    src/gdextension/bridge_audio.cpp
+    src/gdextension/bridge_project.cpp
+    src/gdextension/bridge_tiles.cpp
+    src/gdextension/bridge_camera.cpp
+    src/gdextension/bridge_signals.cpp
+    src/gdextension/bridge_editor.cpp
+    src/gdextension/bridge_groups.cpp
+    src/gdextension/bridge_resources.cpp
+    src/gdextension/bridge_performance.cpp
+    src/gdextension/bridge_scene_files.cpp
+    src/gdextension/bridge_node_edits.cpp
+    src/gdextension/bridge_history.cpp
+    src/gdextension/bridge_input.cpp
+    src/gdextension/bridge_ghosts.cpp
+    src/gdextension/bridge_capture.cpp
+    src/gdextension/bridge_shaders.cpp
+    src/gdextension/bridge_scene.cpp
     src/gdextension/godot_values.cpp
     src/gdextension/runtime_bridge.cpp
     src/gdextension/viewport_renderer.cpp
