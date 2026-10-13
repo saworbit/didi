@@ -19,6 +19,13 @@ class ManagedRecoveryAdversarial(live.ManagedRecoveryLive):
     test_local_rejection_does_not_require_restore = None
     test_failed_scene_reopen_cannot_be_bypassed_by_next_edit = None
     test_elastic_ingress_live_read_only_roundtrip = None
+    test_observed_editor_reload_project = None
+    test_observed_project_apply_changes = None
+    test_observed_runtime_checkpoint = None
+    test_observed_runtime_recover_editor = None
+    test_observed_runtime_restore_checkpoint = None
+    test_observed_runtime_run_scenario = None
+
 
     def source_digest(self):
         return {str(path.relative_to(self.source)): hashlib.sha256(path.read_bytes()).hexdigest()

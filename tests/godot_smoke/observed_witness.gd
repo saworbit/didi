@@ -465,3 +465,48 @@ func _plain(value: Variant) -> Variant:
 				return null
 			return value.resource_path if value is Resource else value.get_class()
 	return value
+
+
+## The engine's own process, independent of Didi's session descriptors (#1020).
+func process_id() -> int:
+	return OS.get_process_id()
+
+
+func scan_idle() -> bool:
+	var editor := Engine.get_singleton(&"EditorInterface")
+	return editor != null and not editor.get_resource_filesystem().is_scanning()
+
+
+## Bytes of a written file, read by Godot rather than the writer (#1020).
+func file_text(path: String) -> String:
+	return FileAccess.get_file_as_string(path)
+
+
+## Counts the checkpoint's actual copied files, not its manifest (#1020).
+func snapshot_files(directory: String) -> Dictionary:
+	var result := {"files": 0, "bytes": 0}
+	for name in DirAccess.get_files_at(directory):
+		var file := FileAccess.open(directory.path_join(name), FileAccess.READ)
+		if file == null:
+			return {"files": -1, "bytes": -1}
+		result.files += 1
+		result.bytes += file.get_length()
+	for name in DirAccess.get_directories_at(directory):
+		var child := snapshot_files(directory.path_join(name))
+		if child.files < 0:
+			return child
+		result.files += child.files
+		result.bytes += child.bytes
+	return result
+
+
+## A saved scene read by the restored engine with no old cached scene (#1020).
+func scene_nodes(path: String) -> Array:
+	var scene := ResourceLoader.load(path, "", ResourceLoader.CACHE_MODE_IGNORE) as PackedScene
+	if scene == null:
+		return []
+	var state := scene.get_state()
+	var names := []
+	for index in state.get_node_count():
+		names.append(String(state.get_node_name(index)))
+	return names

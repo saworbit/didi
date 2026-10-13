@@ -267,6 +267,71 @@ Build Queue item Q16 extends `runtime_read_profiler` with a verdict on what boun
 - `RenderingServer.is_on_render_thread`, asked from the main thread, answers false only with `--render-thread separate`, on all three lines. Nothing else says which mode a game runs in: the flag never reaches `OS.get_cmdline_args`, and when it is given `rendering/driver/threads/thread_model` is never defined, so `get_setting` answers its default. With a separate render thread (4.7.2), the main thread waits for it before the frame's first part, not inside the draw: the shader fixture's 87.6 ms frames spent 87.5 ms there and 0.06 ms in the draw.
 - A root viewport that was never measured reads exactly 0 from both getters. Switching measurement off keeps the last times it took, unchanged, so a nonzero reading says measurement was on at some point, not that it is on now.
 
+### Separate-render-thread fixture probe
+
+On 2026-10-13, each `tests/godot_smoke/perf_{cpu,gpu,physics}.tscn` fixture ran
+windowed with Forward+, a 60 Hz vsync budget and `--render-thread separate`.
+`runtime_read_profiler` measured a 2,000 ms window with five samples after the
+fixture reported ready. Each case used its own game process and session. These
+are observed medians in milliseconds on this machine, not portable timing targets.
+The 4.7.2 GPU row uses the fixed-build rerun saved with the probe evidence.
+
+| Godot | Fixture | Frame | Physics | Process | Outside | GPU | Bound |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
+| 4.5.1 | cpu | 30.749 | 0.027 | 30.093 | 0.565 | 0.005 | cpu |
+| 4.5.1 | gpu | 83.368 | 0.025 | 0.041 | 83.228 | 68.577 | gpu |
+| 4.5.1 | physics | 232.453 | 223.230 | 0.077 | 5.713 | 0.023 | physics |
+| 4.6.2 | cpu | 31.243 | 0.028 | 30.105 | 1.031 | 0.004 | cpu |
+| 4.6.2 | gpu | 69.611 | 0.028 | 0.049 | 69.464 | 68.623 | gpu |
+| 4.6.2 | physics | 212.538 | 207.319 | 0.077 | 4.479 | 0.026 | physics |
+| 4.7.2 | cpu | 116.736 | 0.028 | 30.084 | 86.523 | 0.004 | unknown |
+| 4.7.2 | gpu | 83.848 | 0.029 | 0.045 | 83.703 | 68.631 | gpu |
+| 4.7.2 | physics | 242.461 | 236.151 | 0.104 | 6.619 | 0.023 | physics |
+
+Every verdict names `render_thread: "separate"`. Known bounds have `medium`
+confidence. The 4.7.2 CPU case is `unknown` with `low` confidence: 30.2 ms of
+measured CPU work and 0.004 ms on the GPU do not account for the 116.7 ms frame.
+Its answer names the 86.5 ms main-thread wait for the separate render thread.
+The available frame marks and viewport GPU/CPU measurements do not place that
+wait inside the render thread. They cannot distinguish queue, sync or present
+pacing, so the verdict does not assign it to CPU work.
+
+The native replay test keeps the three worst individual frames returned by each
+of these nine reads. It checks both the median and `slow_frames` rules, including
+the CPU, GPU and physics outliers with long waits that remain `unknown`. In the
+main-thread model, outside time that accounts for most of a frame remains
+unplaced in both reports; in the separate model, measured GPU work can account
+for that wait. No private render-thread timing or guessed attribution was added.
+
+
+## GDScript rename backend follow-up (#1344)
+
+On 2026-10-13, owned editors on Godot 4.5.1, 4.6.2 and 4.7.2 answered
+`textDocument/prepareRename` and `textDocument/rename`. Seven initially parsing
+fixtures covered a signal declaration and emit, shadowing locals and parameters,
+comments and strings, typed and untyped foreign members, a name collision,
+an astral character before a use, and a disk change after the server indexed it.
+The client used LSP's default UTF-16 positions; no `positionEncoding` was advertised.
+The replies exposed these limits:
+
+| Check | Observed result |
+| --- | --- |
+| Declaration and direct emit | Renamed correctly on all three engines. |
+| Reference attribution | All three also rewrote prose comments, string literals and an untyped foreign member; the typed foreign member was left alone. Uncertain uses were not reported separately. |
+| Shadowing | 4.5.1 and 4.6.2 preserved locals and parameters. 4.7.2 renamed a shadowing local declaration without its uses. |
+| Name collision | All three returned an edit creating a duplicate signal. Checking the edited candidate reported a parse error. |
+| Unicode ranges | After an astral character, all three returned code-point offsets that selected the wrong text when decoded as UTF-16. |
+| Stale source | All three returned unversioned `changes` against the previously indexed text; applying the ranges to changed disk bytes selected unrelated source. |
+
+**Decision:** The tested backend is not safe for automatic symbol rewriting
+under [#1344](https://github.com/saworbit/didi/issues/1344)'s attribution contract.
+A future implementation must validate source identity and position encoding,
+reject declaration collisions, and reliably distinguish symbol uses from
+unattributed text before publishing edits. Candidate parsing alone cannot catch
+wrong edits that still parse. No rename tool or argument was added.
+[The issue records the live probe result](https://github.com/saworbit/didi/issues/1344#issuecomment-6135859115).
+Raw replies and fixtures remain in ignored `build/lsp-rename-1344/<version>-<run>/`.
+
 ## Red-team review
 
 - Rejected combined-shell false positive: the first 4.5.1 post-dump crash was hidden by the later command's `0`; per-engine reruns and exits replaced it.
@@ -281,10 +346,14 @@ Build Queue item Q16 extends `runtime_read_profiler` with a verdict on what boun
 
 ## Gate consequence
 
-Task 1 is complete as a feasibility gate. The four signal names -- `signal_list_connections`, `signal_connect`, `signal_disconnect`, `signal_emit` -- are delivered after the production-configuration extension passed the raw signal bridge trial on Godot 4.5.1, 4.6.2 and 4.7.2. `runtime_read_profiler`, `runtime_inject_input`, `physics_raycast_query`, `nav_query_path`, `anim_list_tracks` and `anim_play_track` followed once their own live trials on Godot 4.5.1, 4.6.2 and 4.7.2 passed. The other 8 names remain registered but unimplemented.
+Partial delivery was authorized after the original all-or-nothing gate.
+All 15 implementation-feasible Phase 7 tools are delivered and callable after
+live trials on Godot 4.5.1, 4.6.2 and 4.7.2. The three API-blocked names remain
+registered but unimplemented: `physics_simulate_step`, `nav_bake_mesh` and
+`runtime_get_call_stack`. The current canonical implementation is `119/122`,
+as the status block above records.
 
-Work can proceed only after a governance decision:
-
-- **A)** Authorize partial delivery of the 15 feasible tools, targeting 76/79 and retaining three honest unimplemented names.
-- **B)** Retain atomic 83/83 and wait for supported engine capabilities.
-- **C)** Explicitly approve and maintain engine changes or private adapters sufficient for all three exact blocked contracts. All three blockers must re-enter Task 1 and prove `GO` on Godot 4.5.1 and 4.7.2 before Task 2 may begin. Contract weakening requires a separate explicit contract amendment and is not implied by this option.
+[Build Queue Q11](BUILD_QUEUE.md#q11-godots-own-debugger-and-language-server)
+tracks the remaining call-stack feasibility check against the editor's Debug
+Adapter Protocol server. Until that gate records a supported implementation,
+the call-stack blocker and Phase 7 partial-delivery status stand.

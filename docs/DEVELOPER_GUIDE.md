@@ -47,6 +47,13 @@ ctest --test-dir build --output-on-failure
 
 ### Build options
 
+The build id combines the version, source commit, and configure timestamp.
+Each build reads the current Git HEAD, so a pull or checkout needs no separate
+reconfigure to refresh the commit. An unchanged id leaves the generated source
+untouched; a changed id recompiles one translation unit. Detached HEAD, packed
+refs, and linked worktrees use Git's own lookup. Without Git the commit is
+`nogit`, and the configure timestamp still distinguishes build trees.
+
 | Option | Default | Effect |
 | :--- | :--- | :--- |
 | `DIDI_ELASTIC_INGRESS` | `OFF` | Enables the explicitly requested `safe-v1` profile on three read-only tools; strict calls stay strict. See [Elastic Ingress](ELASTIC_INGRESS.md) for the contract and paired-build verification. |
@@ -613,7 +620,9 @@ Route the method from `EditorHook::executeOnMainThread` into a bounded implement
 
 A method the hook hands to `GodotBridge::execute` is named twice: in `EditorHook::liveBridgeMethods()`, and in the bridge's `methodTable()` with the function that serves it, as one that runs before the editor is looked up or after. `tests/test_bridge_methods.cpp` fails when the two differ.
 
-A tool that reads or writes a property of a node, or of a resource the node holds, goes through the typed object layer in `godot_bridge.cpp` rather than calling `Object.set` itself (Q7): `resolvePropertyPath` checks every step of a path against the property list, `prepareWrite` makes every check a write makes, the same ones a dry run makes, and `recordWrite` records it in the edited scene's UndoRedo history. What can be decided from strings, the path grammar, which file keeps a resource, the excluded writes and when two writes overlap, is in `src/gdextension/property_paths.cpp` and tested without an engine in `tests/test_property_paths.cpp`.
+Animation, UI, spatial, audio, project, tile, camera, signal, editor, group, resource, performance, scene-file, node-edit, history, input, ghost, capture, shader and scene-property implementations live in `src/gdextension/bridge_anim.cpp`, `src/gdextension/bridge_ui.cpp`, `src/gdextension/bridge_spatial.cpp`, `src/gdextension/bridge_audio.cpp`, `src/gdextension/bridge_project.cpp`, `src/gdextension/bridge_tiles.cpp`, `src/gdextension/bridge_camera.cpp`, `src/gdextension/bridge_signals.cpp`, `src/gdextension/bridge_editor.cpp`, `src/gdextension/bridge_groups.cpp`, `src/gdextension/bridge_resources.cpp`, `src/gdextension/bridge_performance.cpp`, `src/gdextension/bridge_scene_files.cpp`, `src/gdextension/bridge_node_edits.cpp`, `src/gdextension/bridge_history.cpp`, `src/gdextension/bridge_input.cpp`, `src/gdextension/bridge_ghosts.cpp`, `src/gdextension/bridge_capture.cpp`, `src/gdextension/bridge_shaders.cpp` and `src/gdextension/bridge_scene.cpp`. The dispatcher delegates to them through `src/gdextension/bridge_internal.hpp`, which declares the existing shared scene, refusal, undo and value-conversion helpers. Domain-local helpers remain private to their source file. The public bridge interface and method table do not change when a domain moves (#1255). The refusal checks discover `bridge_*.cpp` so each domain keeps the existing message and error-code checks.
+
+A tool that reads or writes a property of a node, or of a resource the node holds, goes through the typed object layer in `bridge_scene.cpp` rather than calling `Object.set` itself (Q7): `resolvePropertyPath` checks every step of a path against the property list, `prepareWrite` makes every check a write makes, the same ones a dry run makes, and `recordWrite` records it in the edited scene's UndoRedo history. What can be decided from strings, the path grammar, which file keeps a resource, the excluded writes and when two writes overlap, is in `src/gdextension/property_paths.cpp` and tested without an engine in `tests/test_property_paths.cpp`.
 
 ### 5. Test and document
 
@@ -622,13 +631,30 @@ A tool that reads or writes a property of a node, or of a resource the node hold
 - If the tool mutates, which is what gives it `dry_run`, give it an entry in
   `tests/observed_post_state.json`. Either list the answer fields it reads back
   after the write and add a case to `tests/observed_post_state.ps1` that reads
-  the same state through `tests/godot_smoke/observed_witness.gd`, or exempt it
+  the same state through `tests/godot_smoke/observed_witness.gd`, or bind an
+  external case with `case: {source, function}`. Python bindings name a
+  `Class.test_method` that calls `check_observed` with that tool's literal name;
+  PowerShell bindings name a function that calls `Assert-ObservedExternalFields`
+  for that tool. Each case must actually complete its independent comparison.
+  Nested fields use dotted paths, such as `last_checkpoint.bytes`. Or exempt it
   with the reason and the issue that tracks the gap. Only a tool that claims no
   state after its call is exempt for good, with `"permanent": true` and the
   reason in place of an issue. A field copied from the
   request or read before the write is not observed, whatever its name.
   `tests/test_observed_post_state.py` fails the build until the entry exists,
   and the live harness fails when an answer disagrees with the engine.
+  The managed cases run in `tests/test_managed_recovery_live.py` on every engine
+  line. Run one with `python -m unittest tests.test_managed_recovery_live.ManagedRecoveryLive.test_observed_runtime_checkpoint -v`
+  after setting `DIDI_TEST_BINARY` and `DIDI_RECOVERY_GODOT`. Process liveness
+  on Windows uses owned native handles and creation times: Godot's
+  `OS.is_process_running` only knows children created by that Godot process.
+  The PowerShell scenario fixture acknowledges a process captured while alive
+  and keeps its native handle through the comparison, including failed runs.
+  Scenario teardown waits for both session retirement and exit of the original
+  process, checked against the descriptor's creation time; retirement alone
+  can precede the end of Godot's shutdown. Missing captures and live games fail
+  the comparison, and `tests/test_scenario_process_witness.ps1` also exercises
+  a changed PID lookup and repeated cleanup before an engine is started.
 - Regenerate the [contract snapshots](#contract-snapshots), because a new tool
   changes `tools/list`. It also grows the full profile's bytes, so it may need
   a [budget](#tool-list-budgets-and-the-core-profile) raised first, in a pull

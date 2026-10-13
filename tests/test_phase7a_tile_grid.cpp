@@ -419,3 +419,110 @@ struct RegisterPhase7TileGridBehavior {
 
 } // namespace
 // TASK 4 TILE GRID BEHAVIOR END
+
+// #1322: one rectangle is a compact record, even when it touches 960 cells.
+static void test_rectangle_records_forward_once() {
+    using namespace didi::mcp;
+    const didi::json rect = {{"position", {{"x", -2}, {"y", 3}}},
+                              {"size", {{"x", 40}, {"y", 24}}}};
+    const didi::json args = {{"tilemap_path", "/root/Tiles"},
+        {"cells", {{{"rect", rect}, {"source_id", 0}, {"atlas_coords", {0, 0}}}}}};
+    auto client = std::make_shared<TileGridRecordingClient>();
+    const auto result = handleTilemapSetCells(resolveAliasBinding("tilemap_set_cells"), args, client);
+    ASSERT_TRUE(!result.isError);
+    ASSERT_EQ(client->requests, 1);
+    ASSERT_EQ(client->last_params["cells"].size(), 1);
+    ASSERT_EQ(client->last_params["cells"][0]["rect"]["position"], (didi::json{-2, 3}));
+    ASSERT_EQ(client->last_params["cells"][0]["rect"]["size"], (didi::json{40, 24}));
+    auto grid_client = std::make_shared<TileGridRecordingClient>();
+    const auto grid = handleGridmapSetCells(resolveAliasBinding("gridmap_set_cells"),
+        {{"gridmap_path", "/root/Grid"}, {"cells", {{{"rect", {
+            {"position", {{"x", 1}, {"y", 2}, {"z", 3}}},
+            {"size", {{"x", 4}, {"y", 5}, {"z", 6}}}}}, {"item", -1}}}}}, grid_client);
+    ASSERT_TRUE(!grid.isError);
+    ASSERT_EQ(grid_client->requests, 1);
+    ASSERT_EQ(grid_client->last_params["cells"][0]["rect"]["size"], (didi::json{4, 5, 6}));
+}
+
+static void test_rectangle_refusals_precede_dispatch() {
+    using namespace didi::mcp;
+    auto client = std::make_shared<TileGridRecordingClient>();
+    const auto binding = resolveAliasBinding("tilemap_set_cells");
+    const didi::json valid = {{"rect", {{"position", {0, 0}}, {"size", {64, 64}}}},
+                              {"source_id", 0}, {"atlas_coords", {0, 0}}};
+    for (const auto& records : std::vector<didi::json>{
+         didi::json{valid, tileSetRecord(100, 100)},
+         didi::json{{{"rect", {{"position", {1048576, 0}}, {"size", {2, 1}}}}, {"erase", true}}},
+         didi::json{{{"rect", {{"position", {0, 0}}, {"size", {0, 1}}}}, {"erase", true}}},
+         didi::json{{{"rect", {{"position", {0, 0}}, {"size", {1.5, 1}}}}, {"erase", true}}},
+         didi::json{{{"rect", {{"position", {0, 0}}, {"size", {UINT64_MAX, UINT64_MAX}}}}, {"erase", true}}}
+    }) {
+        const auto result = handleTilemapSetCells(binding, {{"tilemap_path", "/root/Tiles"}, {"cells", records}}, client);
+        ASSERT_TRUE(result.isError);
+        ASSERT_EQ(tileGridPayload(result)["error"]["code"], 400);
+        ASSERT_EQ(client->requests, 0);
+    }
+    const auto overlap = handleTilemapSetCells(binding,
+        {{"tilemap_path", "/root/Tiles"}, {"cells", {{{"rect", {{"position", {0, 0}}, {"size", {2, 2}}}}, {"erase", true}}, tileSetRecord(1, 1)}}}, client);
+    ASSERT_TRUE(overlap.isError);
+    ASSERT_EQ(tileGridPayload(overlap)["error"]["code"], 409);
+    ASSERT_EQ(client->requests, 0);
+}
+
+struct RegisterRectangleRecords {
+    RegisterRectangleRecords() {
+        registerTest("Phase7TileGrid.RectangleRecordsForwardOnce", test_rectangle_records_forward_once);
+        registerTest("Phase7TileGrid.RectangleRefusalsPrecedeDispatch", test_rectangle_refusals_precede_dispatch);
+    }
+} g_registerRectangleRecords;
+
+// #1322: dry_run must not bypass geometric/work preflight.
+static void test_rectangle_bounds_precede_preview() {
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    for (bool preview : {false, true}) {
+        const auto result = registry.callTool("tilemap_set_cells",
+            {{"tilemap_path", "/root/Tiles"}, {"dry_run", preview}, {"cells", {
+                {{"rect", {{"position", {0, 0}}, {"size", {{"x", 64}, {"y", 64}}}}}, {"erase", true}},
+                {{"position", {100, 100}}, {"erase", true}}}}});
+        ASSERT_TRUE(result.isError);
+        ASSERT_EQ(tileGridPayload(result)["error"]["code"], 400);
+        ASSERT_TRUE(tileGridPayload(result)["error"]["message"].get<std::string>().find("4096") != std::string::npos);
+        const auto box = registry.callTool("gridmap_set_cells",
+            {{"gridmap_path", "/root/Grid"}, {"dry_run", preview}, {"cells", {
+                {{"rect", {{"position", {1048576, 0, 0}}, {"size", {{"x", 2}, {"y", 1}, {"z", 1}}}}}, {"item", -1}}}}});
+        ASSERT_TRUE(box.isError);
+        ASSERT_EQ(tileGridPayload(box)["error"]["code"], 400);
+    }
+}
+struct RegisterRectanglePreview {
+    RegisterRectanglePreview() {
+        registerTest("Phase7TileGrid.RectangleBoundsPrecedePreview", test_rectangle_bounds_precede_preview);
+    }
+} g_registerRectanglePreview;
+
+#include "didi/common/cell_records.hpp"
+// #1322: malformed raw IPC records must not be amplified by rectangle expansion.
+static void test_rectangle_payload_is_checked_before_expansion() {
+    const didi::json rect = {{"position", {0, 0}}, {"size", {64, 64}}};
+    for (const auto& record : std::vector<didi::json>{
+        {{"rect", rect}, {"source_id", std::string(1024, 'x')}, {"atlas_coords", {0, 0}}},
+        {{"rect", rect}, {"erase", true}, {"unknown", didi::json::array({didi::json::object()})}},
+        {{"rect", rect}, {"source_id", 0}, {"atlas_coords", "not a tuple"}}
+    }) {
+        auto prepared = didi::cells::prepare(didi::json::array({record}), 2);
+        ASSERT_TRUE(prepared.isErr());
+        ASSERT_EQ(prepared.error().code, 400);
+    }
+    const auto grid = didi::cells::prepare(
+        didi::json::array({{{"rect", {{"position", {0, 0, 0}}, {"size", {16, 16, 16}}}},
+                           {"item", std::string(1024, 'x')}}}), 3);
+    ASSERT_TRUE(grid.isErr());
+    ASSERT_EQ(grid.error().code, 400);
+}
+struct RegisterRectanglePayload {
+    RegisterRectanglePayload() {
+        registerTest("Phase7TileGrid.RectanglePayloadCheckedBeforeExpansion",
+                     test_rectangle_payload_is_checked_before_expansion);
+    }
+} g_registerRectanglePayload;

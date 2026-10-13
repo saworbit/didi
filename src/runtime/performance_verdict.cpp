@@ -77,12 +77,16 @@ bool fasterOnTop(const FrameTiming& a, const FrameTiming& b) { return a.frame_ms
 
 // One slow frame, judged on its own parts by the rule the verdict applies to
 // the medians.
-json slowFrame(const FrameTiming& frame, bool gpu_measured) {
+json slowFrame(const FrameTiming& frame, bool gpu_measured, bool separate_render_thread) {
     const double cpu = frame.physics_ms + frame.process_ms + frame.render_cpu_ms;
     const double gpu = gpu_measured && frame.drawn ? frame.gpu_ms : 0.0;
     const char* cpu_side = frame.physics_ms >= frame.process_ms + frame.render_cpu_ms ? "physics" : "cpu";
     const char* bound = "unknown";
-    if (gpu > 0.0) {
+    if (!separate_render_thread && frame.outside_ms > std::max(cpu, gpu) &&
+        frame.outside_ms >= frame.frame_ms * kExplainsFrame) {
+        // Time before the main-thread frame is not measured CPU or GPU work.
+        bound = "unknown";
+    } else if (gpu > 0.0) {
         if (std::max(cpu, gpu) >= frame.frame_ms * kExplainsSome) {
             if (gpu >= cpu) {
                 bound = gpu / std::max(cpu, 0.001) >= kLeadRatio ? "gpu" : "contested";
@@ -116,7 +120,9 @@ json slowFrames(const FrameTimingLog& log, const FrameBudget& budget, bool gpu_m
     for (const auto& frame : slowest) {
         if (frame.frame_ms <= threshold) break;
         ++over;
-        if (worst.size() < kSlowFramesDescribed) worst.push_back(slowFrame(frame, gpu_measured));
+        if (worst.size() < kSlowFramesDescribed) {
+            worst.push_back(slowFrame(frame, gpu_measured, budget.separate_render_thread));
+        }
     }
     json slow = {{"threshold_ms", rounded(threshold)}, {"count", over}, {"worst", std::move(worst)}};
     // Every frame kept aside was over, so more may have been.
@@ -384,7 +390,7 @@ json judgePerformance(const FrameTimingLog& log, const FrameBudget& budget) {
     } else if (explained >= kExplainsSome) {
         confidence = "medium";
     }
-    // Probed on one engine line only, in a mode Godot calls experimental.
+    // A separate render thread overlaps the parts rather than timing them in sequence.
     if (separate && std::string(confidence) == "high") confidence = "medium";
 
     const std::string of_frame = " of a " + ms(F) + " ms frame";

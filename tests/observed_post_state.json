@@ -89,8 +89,14 @@
       "witness": "The property the redone action set, through observed_witness.gd"
     },
     "editor_reload_project": {
-      "exempt": "Nothing in the live harness drives it: a scan in the middle of the run meets the files earlier blocks wrote behind the editor, and the engine prints errors about them on 4.5 and 4.6 (#1002). tools/vibe/probes/reload_project_new_folder.py compares scan_applied with the editor's index instead.",
-      "issue": 1020
+      "observed": [
+        "scan_applied"
+      ],
+      "witness": "EditorFileSystem.get_file_type through observed_witness.gd, before and after a new folder scan",
+      "case": {
+        "source": "test_managed_recovery_live.py",
+        "function": "ManagedRecoveryLive.test_observed_editor_reload_project"
+      }
     },
     "editor_save_scene": {
       "observed": [
@@ -124,8 +130,14 @@
       "witness": "export_presets.cfg parsed by Godot's ConfigFile through observed_witness.gd"
     },
     "project_apply_changes": {
-      "exempt": "Its verification runs in a git worktree of the fixture, and by the observed block the fixture holds uncommitted changes git cannot carry into one, so the call is refused before it writes. The editor copy block drives it earlier, and no case compares its answer with the files it wrote.",
-      "issue": 1020
+      "observed": [
+        "editor_copies_reloaded"
+      ],
+      "witness": "The held script methods and FileAccess bytes through observed_witness.gd",
+      "case": {
+        "source": "observed_external.ps1",
+        "function": "Assert-ProjectApplyObservedState"
+      }
     },
     "project_export": {
       "observed": [
@@ -177,8 +189,15 @@
       "witness": "FileAccess length and the class ResourceLoader loads with CACHE_MODE_IGNORE, through observed_witness.gd"
     },
     "runtime_checkpoint": {
-      "exempt": "Managed mode only, which the live harness does not start; tests/test_managed_recovery_live.py drives it without comparing the answer with the engine.",
-      "issue": 1020
+      "observed": [
+        "last_checkpoint.files",
+        "last_checkpoint.bytes"
+      ],
+      "witness": "DirAccess and FileAccess inventory of the actual copied checkpoint files through observed_witness.gd",
+      "case": {
+        "source": "test_managed_recovery_live.py",
+        "function": "ManagedRecoveryLive.test_observed_runtime_checkpoint"
+      }
     },
     "runtime_explore_scene": {
       "observed": [
@@ -199,16 +218,36 @@
       "witness": "the launched game's own OS.get_process_id(), read with eval_gdscript through the session the launch selected"
     },
     "runtime_recover_editor": {
-      "exempt": "Managed mode only, which the live harness does not start; tests/test_managed_recovery_live.py drives it without comparing the answer with the engine.",
-      "issue": 1020
+      "observed": [
+        "editor_pid",
+        "editor_running"
+      ],
+      "witness": "The recovered engine OS.get_process_id, and native Windows process handles with job ownership and creation times",
+      "case": {
+        "source": "test_managed_recovery_live.py",
+        "function": "ManagedRecoveryLive.test_observed_runtime_recover_editor"
+      }
     },
     "runtime_restore_checkpoint": {
-      "exempt": "Managed mode only, which the live harness does not start; tests/test_managed_recovery_live.py drives it without comparing the answer with the engine.",
-      "issue": 1020
+      "observed": [
+        "editor_pid",
+        "editor_running"
+      ],
+      "witness": "The restored engine OS.get_process_id, native owned process handles, fresh PackedScene load and disk bytes",
+      "case": {
+        "source": "test_managed_recovery_live.py",
+        "function": "ManagedRecoveryLive.test_observed_runtime_restore_checkpoint"
+      }
     },
     "runtime_run_scenario": {
-      "exempt": "Starts and stops a game of its own, so the conformance cases have no session to witness it in; tests/scenario_runner.ps1 compares its verdict with the controller it ran and its teardown with runtime_list_sessions.",
-      "issue": 1020
+      "observed": [
+        "teardown.session_gone"
+      ],
+      "witness": "Native Windows process handles for game.pid, independent of session discovery, with a live owned editor control",
+      "case": {
+        "source": "observed_external.ps1",
+        "function": "Assert-ScenarioObservedTeardown"
+      }
     },
     "runtime_set_paused": {
       "observed": [
@@ -223,7 +262,7 @@
       "witness": "runtime_get_tree's paused"
     },
     "runtime_stop": {
-      "exempt": "The game answers before it exits, because quitting first can end the process before the answer is written, so the answer holds no state after the stop. shutdown_requested and exit_code describe the request. The stop block checks the exit itself. Decided in #1020.",
+      "exempt": "The game answers before it exits, because quitting first can end the process before the answer is written, so the answer holds no state after the stop. shutdown_requested and exit_code describe the request. The stop block checks the exit itself.",
       "permanent": true
     },
     "runtime_watch_invariants": {
@@ -239,7 +278,7 @@
       "witness": "Node.is_in_group through observed_witness.gd"
     },
     "scene_call_method": {
-      "exempt": "Runs a project method whose effects only the project knows, and claims no state after it. returned is the method's own return value, taken from the call, so there is no post-state to read back and nothing an echo could copy. Decided in #1020.",
+      "exempt": "Runs a project method whose effects only the project knows, and claims no state after it. returned is the method's own return value, taken from the call, so there is no post-state to read back and nothing an echo could copy.",
       "permanent": true
     },
     "scene_close": {
@@ -352,7 +391,7 @@
       "witness": "Object.get_signal_connection_list through observed_witness.gd"
     },
     "signal_emit": {
-      "exempt": "Runs the project's connected methods, whose effects only the project knows, and claims no state after the emit. emitted and connection_count describe the emit itself, not a state to read back. Decided in #1020.",
+      "exempt": "Runs the project's connected methods, whose effects only the project knows, and claims no state after the emit. emitted and connection_count describe the emit itself, not a state to read back.",
       "permanent": true
     },
     "tilemap_set_cells": {

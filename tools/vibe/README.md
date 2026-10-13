@@ -16,7 +16,7 @@ twice.
 
 | File | What it does |
 | :--- | :--- |
-| `mcp_client.py` | stdio JSON-RPC client. `Session` for a live process (tokens, attachments survive), `batch()` for one-shot probing. |
+| `mcp_client.py` | stdio JSON-RPC client. `Session` for a live process (tokens, attachments survive), `batch()` for one-shot probing. `Session.close()` drains and closes the pipes, reaps the child, and retains stderr for later reads. |
 | `sandbox.py` | Writes a throwaway Godot project — root, one child, one script — and optionally installs the built addon and opens the editor. |
 | `probe.py` | Command line: list tools, print a schema, run one call or a file of calls. |
 | `probes/*.json` | Saved probe sequences. Each one is the reproduction for findings already filed. |

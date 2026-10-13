@@ -171,17 +171,20 @@ if (-not $fixtureRoot.StartsWith($buildRoot + [IO.Path]::DirectorySeparatorChar,
 # extension copy can still be locked; see remove_test_directory.ps1.
 . (Join-Path $PSScriptRoot 'remove_test_directory.ps1')
 . (Join-Path $PSScriptRoot 'observed_post_state.ps1')
+. (Join-Path $PSScriptRoot 'observed_external.ps1')
 . (Join-Path $PSScriptRoot 'bounded_reads.ps1')
 . (Join-Path $PSScriptRoot 'refusal_remedies.ps1')
 . (Join-Path $PSScriptRoot 'follow_ups.ps1')
 . (Join-Path $PSScriptRoot 'phase7_success.ps1')
 . (Join-Path $PSScriptRoot 'scene_tab_reload.ps1')
 . (Join-Path $PSScriptRoot 'typed_object_layer.ps1')
+. (Join-Path $PSScriptRoot 'rectangle_cell_fills.ps1')
 . (Join-Path $PSScriptRoot 'change_journal.ps1')
 . (Join-Path $PSScriptRoot 'reimport_job.ps1')
 . (Join-Path $PSScriptRoot 'scenario_runner.ps1')
 . (Join-Path $PSScriptRoot 'test_runner.ps1')
 . (Join-Path $PSScriptRoot 'performance_verdicts.ps1')
+. (Join-Path $PSScriptRoot 'profiler_shutdown.ps1')
 . (Join-Path $PSScriptRoot 'ui_screen_space.ps1')
 Remove-TestDirectory -Path $fixtureRoot
 # Only what the fixture tracks. The Python suites run the server against
@@ -266,6 +269,7 @@ $env:DIDI_LOG_LEVEL = "INFO"
 # command left behind.
 & (Join-Path $PSScriptRoot "test_engine_crash_classifier.ps1")
 & (Join-Path $PSScriptRoot "test_observed_agreement.ps1")
+& (Join-Path $PSScriptRoot "test_scenario_process_witness.ps1")
 & (Join-Path $PSScriptRoot "test_engine_crash_artifacts.ps1")
 
 function Test-EngineWorkerCrash($EngineProcess) {
@@ -2180,6 +2184,13 @@ try {
         (Tool-Request 2543 "shader_list_uniforms" @{ target_node = "/root/ShaderCases/Textured"; property_name = "material" }),
         (Tool-Request 2544 "shader_list_uniforms" @{ target_node = "/root/ShaderCases/Guarded"; property_name = "material" }),
         (Tool-Request 2545 "shader_set_uniform" @{ target_node = "/root/ShaderCases/Broken"; property_name = "material"; uniform_name = "glow"; value = 0.5 }),
+        # A Shader.new() with no code has no engine shader to list (#1358).
+        # Both calls must answer without the engine's null-shader error; the
+        # output gate below deliberately grants these requests no exception.
+        (Tool-Request 7400 "scene_instantiate_node" @{ node_type = "Node2D"; parent_path = "/root/ShaderCases"; name = "Empty" }),
+        (Tool-Request 7401 "scene_set_property" @{ target_node = "/root/ShaderCases/Empty"; property_name = "material"; value = "res://shader_cases/probe_empty_material.tres" }),
+        (Tool-Request 7402 "shader_list_uniforms" @{ target_node = "/root/ShaderCases/Empty"; property_name = "material" }),
+        (Tool-Request 7403 "shader_set_uniform" @{ target_node = "/root/ShaderCases/Empty"; property_name = "material"; uniform_name = "glow"; value = 0.5 }),
         (Tool-Request 2546 "scene_close" @{ discard_unsaved = $true }),
         # A node slot: `@export var target: Node2D` holds a node, and Godot
         # saves it as a NodePath from the node holding it. A path was refused
@@ -3484,6 +3495,7 @@ try {
     $copyHold = { param($id, $path) Tool-Request $id "scene_call_method" @{ target_node = $copyWitness; method_name = "hold"; arguments = @($path) } }
     $copyRead = { param($id, $path) Tool-Request $id "scene_call_method" @{ target_node = $copyWitness; method_name = "held_copy"; arguments = @($path) } }
     $copySceneText = "[gd_scene load_steps=2 format=3]`n`n[ext_resource type=`"Script`" path=`"$copyScript`" id=`"1`"]`n`n[node name=`"CopyProbe`" type=`"Node`"]`nscript = ExtResource(`"1`")`n`n[connection signal=`"ready`" from=`".`" to=`".`" method=`"probe_copy_handler`"]`n"
+    $copyDeltaText = "extends Node`n`nfunc delta():`n`treturn 4`n`nfunc probe_copy_handler():`n`tpass`n"
     $copyRequests = @(
         (@{ jsonrpc = "2.0"; id = 2710; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
         (Tool-Request 2711 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
@@ -3495,9 +3507,10 @@ try {
         (Tool-Request 2717 "script_patch_method" @{ file_path = $copyScript; method_name = "gamma"; new_definition = "func gamma():`n`treturn 3"; create_if_missing = $true }),
         (& $copyRead 2718 $copyScript),
         (Tool-Request 2719 "project_apply_changes" @{ changes = @(
-            @{ path = $copyScript; content = "extends Node`n`nfunc delta():`n`treturn 4`n`nfunc probe_copy_handler():`n`tpass`n" },
+            @{ path = $copyScript; content = $copyDeltaText },
             @{ path = $copyScene; content = $copySceneText }) }),
         (& $copyRead 2720 $copyScript),
+        (Tool-Request 2736 "scene_call_method" @{ target_node = $copyWitness; method_name = "file_text"; arguments = @($copyScript) }),
         (& $copyHold 2721 $copyScene),
         (Tool-Request 2722 "project_rename_references" @{ target = "probe_copy_handler"; new_name = "probe_copy_renamed" }),
         (& $copyRead 2723 $copyScene),
@@ -3552,6 +3565,8 @@ try {
     Assert-True ($copiesApplied.applied -eq $true -and @($copiesApplied.editor_copies_reloaded) -contains $copyScript -and @($copiesApplied.editor_copies_reloaded) -notcontains $copyScene) "project_apply_changes did not reload exactly the one file the editor held: $($copiesApplied | ConvertTo-Json -Depth 6 -Compress)"
     $heldAfterApply = & $copyHeld 2720
     Assert-True (@($heldAfterApply.methods) -contains "delta" -and @($heldAfterApply.methods) -notcontains "beta") "After project_apply_changes, the editor's copy of the script still had the old code: $($heldAfterApply | ConvertTo-Json -Depth 6 -Compress)"
+
+    Assert-ProjectApplyObservedState $copiesApplied $heldAfterApply $copyScript $copyDeltaText (Tool-Payload $copyById[2736]).returned
 
     $copiesRenamed = Tool-Payload $copyById[2722]
     Assert-True (@($copiesRenamed.editor_copies_reloaded) -contains $copyScene) "project_rename_references rewrote a scene the editor holds and did not reload the editor's copy: $($copiesRenamed | ConvertTo-Json -Depth 6 -Compress)"
@@ -4855,6 +4870,14 @@ try {
     Assert-True ((-not $byId[2544].result.isError) -and $guardedUniforms.uniform_count -eq 0) "A shader whose only uniform is behind #ifdef was refused as not compiled: $($byId[2544].result.content[0].text)"
     $brokenSet = ($byId[2545].result.content | Where-Object { $_.type -eq "text" } | Select-Object -First 1).text
     Assert-True ($byId[2545].result.isError -eq $true -and (($brokenSet | ConvertFrom-Json).error.data.code -eq "shader_not_compiled")) "A uniform write to a shader that does not compile was not refused as not compiled: $brokenSet"
+    foreach ($emptyCaseId in 7400..7401) {
+        Assert-True (-not $byId[$emptyCaseId].result.isError) "Empty shader setup $emptyCaseId failed: $($byId[$emptyCaseId].result.content[0].text)"
+    }
+    $emptyUniforms = Tool-Payload $byId[7402]
+    Assert-True ((-not $byId[7402].result.isError) -and $emptyUniforms.uniform_count -eq 0 -and @($emptyUniforms.uniforms).Count -eq 0 -and $emptyUniforms.truncated -eq $false) "A Shader with no code did not list zero uniforms: $($byId[7402].result.content[0].text)"
+    $emptySet = ($byId[7403].result.content | Where-Object { $_.type -eq "text" } | Select-Object -First 1).text
+    Assert-True ($byId[7403].result.isError -eq $true -and ($emptySet | ConvertFrom-Json).error.code -eq 404 -and $emptySet -match "declares no uniform named glow") "A uniform write to a Shader with no code was not refused as undeclared: $emptySet"
+    Assert-True (@($emptyUniforms.engine_diagnostics | Where-Object { $null -ne $_ }).Count -eq 0 -and @((($emptySet | ConvertFrom-Json).error.data.engine_diagnostics) | Where-Object { $null -ne $_ }).Count -eq 0) "An empty shader list or write carried an engine diagnostic."
     Assert-True ((Tool-Payload $byId[2546]).closed -eq $true) "Shader case scene could not be closed."
     foreach ($slotCaseId in 2547..2551) {
         Assert-True (-not $byId[$slotCaseId].result.isError) "Node slot request $slotCaseId failed: $($byId[$slotCaseId].result.content[0].text)"
@@ -5519,21 +5542,43 @@ try {
     $toneWriter.Flush()
     [System.IO.File]::WriteAllBytes($loopTone, $toneStream.ToArray())
     $toneWriter.Dispose()
+    # Keep evidence after the half-second track ends: detached launch can attach
+    # after autoplay has already finished (#1359). Only actual playback sets
+    # started, and only the player's finished signal sets finished.
+    $loopMusicScript = @'
+extends AudioStreamPlayer
+
+var playback_started := false
+var playback_finished := false
+
+
+func _ready() -> void:
+    playback_started = playing
+    finished.connect(func(): playback_finished = true)
+
+
+func _process(_delta: float) -> void:
+    playback_started = playback_started or playing
+'@
+    [System.IO.File]::WriteAllText((Join-Path $fixtureRoot "loop_music.gd"), $loopMusicScript)
     # The scene the game plays: the track on a player that starts by itself.
     [System.IO.File]::WriteAllText((Join-Path $fixtureRoot "loop_music.tscn"),
-        "[gd_scene load_steps=2 format=3]`n`n[ext_resource type=`"AudioStream`" path=`"res://loop_track.ogg`" id=`"1`"]`n`n" +
+        "[gd_scene load_steps=3 format=3]`n`n[ext_resource type=`"AudioStream`" path=`"res://loop_track.ogg`" id=`"1`"]`n" +
+        "[ext_resource type=`"Script`" path=`"res://loop_music.gd`" id=`"2`"]`n`n" +
         "[node name=`"LoopMusic`" type=`"Node`"]`n`n[node name=`"Music`" type=`"AudioStreamPlayer`" parent=`".`"]`n" +
-        "stream = ExtResource(`"1`")`nautoplay = true`n")
+        "stream = ExtResource(`"1`")`nautoplay = true`nscript = ExtResource(`"2`")`n")
 
     # The game, launched on that scene and asked whether the track is still
     # playing once it has had time to end three times over. The profiler read
     # is the wait: it samples for as long as it is told to and answers after.
+    # Read both snapshots after it, so the control covers late observation on
+    # every run without depending on how quickly runtime_launch attaches.
     function Invoke-LoopMusicGame([int]$BaseId) {
         $gameRequests = @(
             (@{ jsonrpc = "2.0"; id = $BaseId; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
             (Tool-Request ($BaseId + 1) "runtime_launch" @{ scene_path = "res://loop_music.tscn"; timeout_seconds = 30; headless = $true; detach = $true }),
-            (Tool-Request ($BaseId + 2) "eval_gdscript" @{ expression = 'node.get("playing")'; context_node = "/root/LoopMusic/Music" }),
             (Tool-Request ($BaseId + 3) "runtime_read_profiler" @{ duration_ms = 1600; sample_count = 2 }),
+            (Tool-Request ($BaseId + 2) "eval_gdscript" @{ expression = '{"started": node.get("playback_started"), "finished": node.get("playback_finished")}'; context_node = "/root/LoopMusic/Music" }),
             (Tool-Request ($BaseId + 4) "eval_gdscript" @{ expression = 'node.get("playing")'; context_node = "/root/LoopMusic/Music" }),
             (Tool-Request ($BaseId + 5) "runtime_stop" @{ exit_code = 0 })
         )
@@ -5561,7 +5606,8 @@ try {
     # The control, and the failing workflow itself: as the surface leaves it,
     # the track plays and then stops.
     $controlGame = Invoke-LoopMusicGame 6010
-    Assert-True ((Tool-Payload $controlGame[6012]).value -eq $true) "The control game's track was not playing at attach: $($controlGame[6012].result.content[0].text)"
+    $controlPlayback = (Tool-Payload $controlGame[6012]).value
+    Assert-True ($controlPlayback.started -eq $true -and $controlPlayback.finished -eq $true) "The control game's track did not start and finish naturally: $($controlGame[6012].result.content[0].text)"
     Assert-True ((Tool-Payload $controlGame[6014]).value -eq $false) "The control game's track was still playing after its end, so the loop check below proves nothing."
 
     $loopWav = @{ asset_path = "res://loop_tone.wav" }
@@ -5617,7 +5663,7 @@ try {
 
     # And the game that stopped now loops.
     $loopingGame = Invoke-LoopMusicGame 6040
-    Assert-True ((Tool-Payload $loopingGame[6042]).value -eq $true) "The looping game's track was not playing at attach: $($loopingGame[6042].result.content[0].text)"
+    Assert-True ((Tool-Payload $loopingGame[6042]).value.started -eq $true) "The looping game's track never started: $($loopingGame[6042].result.content[0].text)"
     Assert-True ((Tool-Payload $loopingGame[6044]).value -eq $true) "The track still stopped at its end after asset_configure_import set loop."
 
     # What a localised menu says, asked of a game (#988). A Control translates
@@ -5964,6 +6010,8 @@ text = "Not a key"
     # Q7 in docs/BUILD_QUEUE.md. Its fixture scene is its own, and it leaves
     # main.tscn open as it found it.
     Invoke-TypedObjectLayerBlock -EditorSession $editorSession -FixtureRoot $fixtureRoot
+    Invoke-RectangleCellFillsBlock -EditorSession $editorSession -FixtureRoot $fixtureRoot
+    Invoke-NodeArraySlotsBlock -EditorSession $editorSession -FixtureRoot $fixtureRoot
 
     # Q15 in docs/BUILD_QUEUE.md. Its fixture scene is its own, and it leaves
     # main.tscn open as it found it.
@@ -5975,6 +6023,9 @@ text = "Not a key"
 
     # Q9 part 2. Its own project, with a stand-in for GUT's runner.
     Invoke-TestRunnerBlock -BuildRoot $buildRoot
+
+    # #1234. Its own game quits once a long profiler read owns the timer.
+    Invoke-ProfilerShutdownBlock -FixtureRoot $fixtureRoot
 
     # Q16 in docs/BUILD_QUEUE.md. It starts and stops windowed games of its own
     # beside the harness's headless one.

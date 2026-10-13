@@ -10,6 +10,7 @@ CMakeFiles/
 cmake_install.cmake
 Makefile
 *.cmake
+!/cmake/*.cmake
 !CMakeLists.txt
 
 # Python Test & Validation Caches

@@ -1,0 +1,6 @@
+[gd_resource type="ShaderMaterial" load_steps=2 format=3]
+
+[sub_resource type="Shader" id="Shader_empty"]
+
+[resource]
+shader = SubResource("Shader_empty")

@@ -37,9 +37,20 @@ class ManagedRecoveryLive(unittest.TestCase):
         shutil.copytree(addon, self.source / 'addons' / 'didi')
         (self.source / 'project.godot').write_text('config_version=5\n[application]\nconfig/name="Recovery acceptance"\nrun/main_scene="res://main.tscn"\n[rendering]\nrenderer/rendering_method="gl_compatibility"\n[editor_plugins]\nenabled=PackedStringArray("res://addons/didi/plugin.cfg")\n')
         (self.source / 'main.tscn').write_text('[gd_scene format=3]\n[node name="Root" type="Node"]\n')
+        if self._testMethodName.startswith('test_observed_'):
+            self._observed_checked = set()
+            self.addCleanup(self.assert_observation_executed)
+            shutil.copyfile(Path(__file__).parent / 'godot_smoke' / 'observed_witness.gd', self.source / 'observed_witness.gd')
+            if self._testMethodName == 'test_observed_runtime_run_scenario':
+                shutil.copytree(Path(__file__).parent / 'godot_smoke/scenario_runner', self.source / 'scenario_runner')
+                counter = self.source / 'scenario_runner/frame_counter.gd'
+                counter.write_text(counter.read_text(encoding='utf-8') + '\nfunc _ready() -> void:\n\tvar file := FileAccess.open("res://.didi/observed_process.json", FileAccess.WRITE)\n\tfile.store_string(JSON.stringify({"pid": OS.get_process_id()}))\n', encoding='utf-8')
+            (self.source / 'main.tscn').write_text('[gd_scene load_steps=2 format=3]\n[ext_resource type="Script" path="res://observed_witness.gd" id="1"]\n[node name="Root" type="Node"]\nscript=ExtResource("1")\n', encoding='utf-8')
         self.original = (self.source / 'main.tscn').read_bytes()
         env = os.environ.copy()
         env['DIDI_SESSION_DIR'] = str(self.root / 'sessions')
+        if self._testMethodName.startswith('test_observed_'):
+            env['GODOT_BIN'] = os.environ['DIDI_RECOVERY_GODOT']
         Path(env['DIDI_SESSION_DIR']).mkdir()
         self.stderr = open(self.root / 'host.log', 'w')
         self.host = subprocess.Popen([str(self.binary), '--project', str(self.source), '--managed-editor', os.environ['DIDI_RECOVERY_GODOT'], '--recovery-workspace', str(self.workspace), '--yolo'], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.stderr, text=True, encoding='utf-8', env=env, start_new_session=os.name != 'nt')
@@ -168,7 +179,7 @@ class ManagedRecoveryLive(unittest.TestCase):
         # lost against two, so the console build turned four passing tests into
         # four teardown errors (#678). Waiting is the honest answer; the
         # deadline is what keeps a real leak a failure rather than a hang.
-        deadline = time.monotonic() + 60
+        deadline = time.monotonic() + (20 if self._testMethodName.startswith('test_observed_') else 60)
         while True:
             try:
                 self.temp.cleanup()
@@ -186,7 +197,7 @@ class ManagedRecoveryLive(unittest.TestCase):
             self.host.stdin.flush()
         except (BrokenPipeError, OSError) as error:
             raise AssertionError(f'Host input failed: {error}\n{self._diagnostics()}') from error
-        deadline = time.monotonic() + 60
+        deadline = time.monotonic() + (20 if self._testMethodName.startswith('test_observed_') else 60)
         while True:
             try:
                 line = self.lines.get(timeout=max(0, deadline - time.monotonic()))
@@ -294,6 +305,224 @@ class ManagedRecoveryLive(unittest.TestCase):
         _, stopped = self.tool('runtime_recovery_status')
         self.assertEqual(stopped['pid'], restored['pid'])
         self.assertEqual((self.source / 'main.tscn').read_bytes(), self.original)
+
+    def witness(self, method, *arguments):
+        result, payload = self.tool('scene_call_method', target_node='/root/Root', method_name=method, arguments=list(arguments))
+        self.assertFalse(result['isError'], payload)
+        self.assertFalse(payload.get('engine_diagnostics'), payload)
+        return payload['returned']
+
+    def open_observed_scene(self):
+        result, payload = self.tool('scene_open', scene_path='res://main.tscn')
+        self.assertFalse(result['isError'], payload)
+
+    def owned_process(self, pid):
+        # Holding the process object and its creation time avoids PID reuse.
+        # Every editor is a descendant of the host's kill-on-close job.
+        if os.name != 'nt':
+            self.skipTest('Observed lifecycle ownership uses Windows process handles')
+        import ctypes
+        from ctypes import wintypes
+        kernel = self._kernel
+        kernel.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+        kernel.OpenProcess.restype = wintypes.HANDLE
+        kernel.GetProcessTimes.argtypes = (wintypes.HANDLE,) + (ctypes.POINTER(wintypes.FILETIME),) * 4
+        kernel.IsProcessInJob.argtypes = (wintypes.HANDLE, wintypes.HANDLE, ctypes.POINTER(wintypes.BOOL))
+        kernel.WaitForSingleObject.argtypes = (wintypes.HANDLE, wintypes.DWORD)
+        handle = kernel.OpenProcess(0x1000 | 0x100000, False, pid)
+        self.assertTrue(handle, f'Cannot open owned process {pid}')
+        self.addCleanup(kernel.CloseHandle, handle)
+        owned = wintypes.BOOL()
+        self.assertTrue(kernel.IsProcessInJob(handle, self._job, ctypes.byref(owned)))
+        self.assertTrue(owned.value, f'Process {pid} is outside this test job')
+        times = [wintypes.FILETIME() for _ in range(4)]
+        self.assertTrue(kernel.GetProcessTimes(handle, *(ctypes.byref(t) for t in times)))
+        created = (times[0].dwHighDateTime << 32) | times[0].dwLowDateTime
+        self.assertGreater(created, 0)
+        return handle, created
+
+    def owned_running(self, process):
+        result = self._kernel.WaitForSingleObject(process[0], 0)
+        self.assertIn(result, (0, 258), 'The owned process query failed')
+        return result == 258
+
+    def assert_owned_gone(self, process):
+        self.assertEqual(self._kernel.WaitForSingleObject(process[0], 5000), 0, 'The previous owned process is still running')
+
+    def assert_observation_executed(self):
+        tool = self._testMethodName.removeprefix('test_observed_')
+        self.assertIn(tool, self._observed_checked, f'{tool} independent observation never executed')
+        print(f'Observed external case completed: {tool}')
+
+    def check_observed(self, tool, payload, witness):
+        try:
+            from observed_case_registry import assert_observed, field_value
+        except ImportError:
+            from tests.observed_case_registry import assert_observed, field_value
+        self.assertFalse(payload.get('engine_diagnostics'), payload)
+        assert_observed(self, tool, payload, witness)
+        # Each real witness must reject a wrong answer, rather than agreeing
+        # vacuously. The actual tool response and actual witness remain intact.
+        self._observed_checked.add(tool)
+        import copy
+        registry = json.loads((Path(__file__).parent / 'observed_post_state.json').read_text())['tools'][tool]
+        for field in registry['observed']:
+            wrong = copy.deepcopy(payload)
+            target = wrong
+            parts = field.split('.')
+            for part in parts[:-1]:
+                target = target[part]
+            value = field_value(payload, field)
+            target[parts[-1]] = not value if isinstance(value, bool) else value + ['res://wrong_observed_file.gd'] if isinstance(value, list) else value + 1
+            with self.assertRaises(AssertionError, msg=f'{tool}.{field} did not reject a mutation'):
+                assert_observed(self, tool, wrong, witness)
+
+    def test_observed_editor_reload_project(self):
+        self.open_observed_scene()
+        project = self.workspace / 'project'
+        resource = 'res://observed_new_folder/new_shape.tres'
+        self.assertFalse(self.witness('indexed', resource))
+        (project / 'observed_new_folder').mkdir()
+        (project / 'observed_new_folder/new_shape.tres').write_text('[gd_resource type="BoxShape3D" format=3]\n[resource]\nsize=Vector3(2,3,4)\n', encoding='utf-8')
+        result, payload = self.tool('editor_reload_project')
+        self.assertFalse(result['isError'], payload)
+        indexed = self.witness('indexed', resource)
+        self.assertTrue(indexed, 'The scan did not discover a new folder')
+        idle = self.witness('scan_idle')
+        self.assertTrue(idle, 'The scan was still running when reload answered')
+        self.check_observed('editor_reload_project', payload, {'scan_applied': indexed and idle})
+
+    def test_observed_runtime_checkpoint(self):
+        self.open_observed_scene()
+        result, payload = self.tool('runtime_checkpoint')
+        self.assertFalse(result['isError'], payload)
+        point = payload['last_checkpoint']['id']
+        folder = self.workspace / 'checkpoints' / point / 'files'
+        self.assertTrue(folder.is_dir())
+        inventory = self.witness('snapshot_files', str(folder))
+        self.assertGreater(inventory['files'], 0)
+        self.assertGreater(inventory['bytes'], 0)
+        self.check_observed('runtime_checkpoint', payload, {'last_checkpoint': inventory})
+
+    def test_observed_runtime_recover_editor(self):
+        self.open_observed_scene()
+        _, before = self.tool('runtime_recovery_status')
+        self.assertEqual(before['editor_pid'], self.witness('process_id'))
+        editor = self.owned_process(before['editor_pid'])
+        launcher = self.owned_process(before['pid'])
+        self.kill_editor(before['editor_pid'])
+        self.assert_owned_gone(editor)
+        self.assert_owned_gone(launcher)
+        result, payload = self.tool('runtime_recover_editor')
+        self.assertFalse(result['isError'], payload)
+        self.assertNotEqual(payload['editor_pid'], before['editor_pid'])
+        fresh = self.owned_process(payload['editor_pid'])
+        self.assertNotEqual(fresh[1], editor[1])
+        engine_pid = self.witness('process_id')
+        running = self.owned_running(self.owned_process(payload['pid']))
+        self.check_observed('runtime_recover_editor', payload, {'editor_pid': engine_pid, 'editor_running': running})
+
+    def test_observed_runtime_restore_checkpoint(self):
+        self.open_observed_scene()
+        _, checkpoint = self.tool('runtime_checkpoint')
+        before = self.owned_process(checkpoint['editor_pid'])
+        point = checkpoint['last_checkpoint']['id']
+        file = self.workspace / 'project/main.tscn'
+        file.write_bytes(self.original + b'\n[node name="Discarded" type="Node" parent="."]\n')
+        result, payload = self.tool('runtime_restore_checkpoint', checkpoint_id=point)
+        self.assertFalse(result['isError'], payload)
+        self.assert_owned_gone(before)
+        fresh = self.owned_process(payload['editor_pid'])
+        self.assertNotEqual(fresh[1], before[1])
+        self.assertEqual(file.read_bytes(), self.original)
+        preserved = Path(payload['last_operation']['preserved_workspace'])
+        self.assertIn(b'Discarded', (preserved / 'main.tscn').read_bytes())
+        self.open_observed_scene()
+        self.assertEqual(self.witness('scene_nodes', 'res://main.tscn'), ['Root'])
+        self.check_observed('runtime_restore_checkpoint', payload,
+                            {'editor_pid': self.witness('process_id'), 'editor_running': self.owned_running(self.owned_process(payload['pid']))})
+
+    def assert_powershell_observation(self, case, data):
+        path = self.root / ('observed-' + case + '.json')
+        path.write_text(json.dumps(data), encoding='utf-8')
+        # Cold PowerShell startup on a busy runner can exceed five seconds.
+        # Keep the comparison bounded by the observed cases' twenty-second wait.
+        checked = subprocess.run(['powershell', '-NoProfile', '-File', str(Path(__file__).parent / 'run_observed_external.ps1'), '-Case', case, '-InputPath', str(path)], capture_output=True, text=True, timeout=20)
+        self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
+
+    def test_observed_project_apply_changes(self):
+        self.open_observed_scene()
+        project = self.workspace / 'project'
+        resource = 'res://apply_observed.gd'
+        (project / 'apply_observed.gd').write_text('extends Node\nfunc beta():\n\treturn 2\n', encoding='utf-8')
+        self.assertTrue(self.witness('hold', resource))
+        (project / '.gitignore').write_text('.godot/\n.didi/\n.worktrees/\n', encoding='utf-8')
+        # Keep configured identity. A fresh CI runner needs a fallback only
+        # for this disposable commit, without changing any Git config file.
+        for args in (['init', '--quiet'], ['add', '.'], ['-c', 'core.autocrlf=false', 'commit', '--quiet', '-m', 'Observed apply fixture']):
+            identity = []
+            if 'commit' in args:
+                for key, fallback in [('user.name', 'didi'), ('user.email', 'didi@example.invalid')]:
+                    configured = subprocess.run(['git', 'config', '--get', key], cwd=project, capture_output=True, text=True, timeout=5)
+                    self.assertIn(configured.returncode, (0, 1), configured.stderr)
+                    if not configured.stdout.strip():
+                        identity.extend(['-c', key + '=' + fallback])
+            done = subprocess.run(['git'] + identity + args, cwd=project, capture_output=True, text=True, timeout=5)
+            self.assertEqual(done.returncode, 0, done.stderr)
+        expected = 'extends Node\nfunc delta():\n\treturn 4\n'
+        result, payload = self.tool('project_apply_changes', changes=[{'path': resource, 'content': expected}], timeout_seconds=15)
+        self.assertFalse(result['isError'], payload)
+        held = self.witness('held_copy', resource)
+        text = self.witness('file_text', resource)
+        self.assert_powershell_observation('Apply', {'answer': payload, 'held': held, 'path': resource, 'expected': expected, 'file_text': text})
+        current = 'delta' in held['methods'] and 'beta' not in held['methods']
+        self.check_observed('project_apply_changes', payload, {'editor_copies_reloaded': [resource] if current else []})
+
+    def test_observed_runtime_run_scenario(self):
+        self.open_observed_scene()
+        editor_pid = self.witness('process_id')
+        editor = self.owned_process(editor_pid)
+        # The game records its own PID before stepping. Hold its native
+        # process object while alive, including creation time and job identity,
+        # so teardown reads the same process even if its PID is later reused.
+        record = self.workspace / 'project/.didi/observed_process.json'
+        record.parent.mkdir(exist_ok=True)
+        captured = queue.Queue()
+        cancelled = threading.Event()
+        def capture_game():
+            deadline = time.monotonic() + 18
+            while not cancelled.is_set() and time.monotonic() < deadline:
+                try:
+                    pid = json.loads(record.read_text())['pid']
+                    captured.put((pid, self.owned_process(pid)))
+                    return
+                except (FileNotFoundError, json.JSONDecodeError):
+                    cancelled.wait(.01)
+                except BaseException as error:
+                    captured.put(error)
+                    return
+        reader = threading.Thread(target=capture_game, daemon=True)
+        reader.start()
+        try:
+            result, payload = self.tool('runtime_run_scenario', name='observed_teardown', scene_path='res://scenario_runner/frame_counter.tscn', timeout_seconds=15, steps=[
+                {'kind': 'wait', 'frames': 1},
+                {'kind': 'assert', 'expression': "node.get('position').x", 'context_node': '/root/FrameCounter', 'minimum': 1, 'maximum': 1}])
+            self.assertFalse(result['isError'], payload)
+            identity = captured.get(timeout=2)
+            if isinstance(identity, BaseException):
+                raise identity
+            game_pid, game = identity
+            self.assertEqual(payload['game']['pid'], game_pid, 'The answer did not name the game that recorded its own PID')
+            game_running = self.owned_running(game)
+            editor_running = self.owned_running(editor)
+        finally:
+            cancelled.set()
+            reader.join(timeout=2)
+            self.assertFalse(reader.is_alive(), 'The game identity reader did not stop')
+        self.assertEqual(editor_pid, self.witness('process_id'))
+        self.assertEqual(editor[1], self.owned_process(editor_pid)[1])
+        self.assert_powershell_observation('Scenario', {'answer': payload, 'game_running': game_running, 'editor_running': editor_running})
+        self.check_observed('runtime_run_scenario', payload, {'teardown': {'session_gone': not game_running}})
 
     def test_elastic_ingress_live_read_only_roundtrip(self):
         tools = self.request('tools/list', {})['tools']
