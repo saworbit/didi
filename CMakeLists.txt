@@ -203,6 +203,7 @@ set(CORE_SOURCES
     src/gdextension/undo_ledger.cpp
     src/offline/gdscript_diagnostics.cpp
     src/offline/resource_indexer.cpp
+    src/offline/resource_uid.cpp
     src/offline/audio_bus_layout.cpp
     src/offline/blackboard.cpp
     src/offline/import_health.cpp

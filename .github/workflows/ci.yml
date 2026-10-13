@@ -765,6 +765,18 @@ jobs:
           $env:PYTHONPATH = Join-Path $PWD 'tests'
           python -m unittest tests.test_didi_setup.SetupLive -v
 
+      - name: Verify locally created resource UIDs load in Godot
+        shell: pwsh
+        env:
+          GODOT_VERSION: ${{ matrix.godot-version }}
+        run: |
+          $godot = Get-ChildItem -Path godot-bin -Filter "Godot_v${env:GODOT_VERSION}-stable_win64.exe" |
+                   Select-Object -First 1
+          if (-not $godot) { throw "Godot native executable not found under godot-bin" }
+          $env:DIDI_TEST_BINARY = (Resolve-Path build/didi.exe).Path
+          $env:DIDI_UID_GODOT = $godot.FullName
+          python -m unittest tests.test_resource_uid_live -v
+
       # tests/contract_snapshots/live-<line>.json: the listings once an editor
       # on this line is attached, and the answers to the read-only calls in
       # calls.json against tests/contract_fixture (Q3). It runs whenever the
