@@ -411,7 +411,7 @@ jobs:
           # The load-bearing assertion is that no tool argument can turn
           # confirmations off. An agent able to authorise its own bypass would
           # make the confirmation system decorative.
-          "$DIDI_SCHEMA_PYTHON" -m unittest tests.test_yolo_mode tests.test_stdio_process -v
+          "$DIDI_SCHEMA_PYTHON" -m unittest tests.test_yolo_mode tests.test_stdio_process tests.test_vibe_mcp_client -v
 
       - name: Verify the Control Room page and its MCP Apps contract
         shell: bash
