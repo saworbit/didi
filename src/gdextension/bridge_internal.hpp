@@ -145,4 +145,15 @@ bool pathWithin(const std::filesystem::path& root, const std::filesystem::path& 
 bool engineHasClass(const std::string& name);
 bool unsavedScenesBindAvailable();
 
+// Which history the editor's own Undo or Redo moved. The editor picks the
+// newer of the edited scene's history and the global one, as Ctrl+Z does.
+enum class HistoryMoved { None, Scene, Global };
+Result<std::vector<GDExtensionObjectPtr>> childNodes(GDExtensionObjectPtr node);
+Result<void> preflightNodeUndoTransaction();
+Result<void> managerReference(GDExtensionObjectPtr manager, const char* operation, GDExtensionObjectPtr object);
+Result<GDExtensionObjectPtr> historyUndoRedo(GDExtensionObjectPtr manager, VariantValue& history_id);
+Result<HistoryMoved> runEditorHistoryCommand(GDExtensionObjectPtr editor, GDExtensionObjectPtr manager, GDExtensionObjectPtr scene_undo_redo, bool undo);
+json undoStatusAnswer(const json& params);
+json undoReferencedAction(const json& params);
+
 } // namespace didi::godot::bridge_internal
