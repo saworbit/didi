@@ -125,4 +125,7 @@ json unsavedScenesReport(GDExtensionObjectPtr editor);
 const std::string& displayServerName();
 bool engineCanRender();
 
+Result<std::string> relativePathWithinEditedRoot(GDExtensionObjectPtr root, GDExtensionObjectPtr node);
+std::string sceneStatePathWithinEditedRoot(const std::string& state_path);
+
 } // namespace didi::godot::bridge_internal
