@@ -128,4 +128,16 @@ bool engineCanRender();
 Result<std::string> relativePathWithinEditedRoot(GDExtensionObjectPtr root, GDExtensionObjectPtr node);
 std::string sceneStatePathWithinEditedRoot(const std::string& state_path);
 
+struct AttachableScript {
+    VariantValue script;
+    GDExtensionObjectPtr object{nullptr};
+    std::string base_type;
+};
+
+Result<AttachableScript> loadAttachableScript(GDExtensionObjectPtr node, const std::string& script_path);
+bool resourceFileExists(const std::string& path);
+std::string resourcePathOf(GDExtensionObjectPtr resource);
+Result<uint64_t> openSceneRootId(GDExtensionObjectPtr editor, const std::string& path);
+std::string editedScenePath(GDExtensionObjectPtr root);
+
 } // namespace didi::godot::bridge_internal
