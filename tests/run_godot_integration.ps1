@@ -2183,6 +2183,13 @@ try {
         (Tool-Request 2543 "shader_list_uniforms" @{ target_node = "/root/ShaderCases/Textured"; property_name = "material" }),
         (Tool-Request 2544 "shader_list_uniforms" @{ target_node = "/root/ShaderCases/Guarded"; property_name = "material" }),
         (Tool-Request 2545 "shader_set_uniform" @{ target_node = "/root/ShaderCases/Broken"; property_name = "material"; uniform_name = "glow"; value = 0.5 }),
+        # A Shader.new() with no code has no engine shader to list (#1358).
+        # Both calls must answer without the engine's null-shader error; the
+        # output gate below deliberately grants these requests no exception.
+        (Tool-Request 7400 "scene_instantiate_node" @{ node_type = "Node2D"; parent_path = "/root/ShaderCases"; name = "Empty" }),
+        (Tool-Request 7401 "scene_set_property" @{ target_node = "/root/ShaderCases/Empty"; property_name = "material"; value = "res://shader_cases/probe_empty_material.tres" }),
+        (Tool-Request 7402 "shader_list_uniforms" @{ target_node = "/root/ShaderCases/Empty"; property_name = "material" }),
+        (Tool-Request 7403 "shader_set_uniform" @{ target_node = "/root/ShaderCases/Empty"; property_name = "material"; uniform_name = "glow"; value = 0.5 }),
         (Tool-Request 2546 "scene_close" @{ discard_unsaved = $true }),
         # A node slot: `@export var target: Node2D` holds a node, and Godot
         # saves it as a NodePath from the node holding it. A path was refused
@@ -4862,6 +4869,14 @@ try {
     Assert-True ((-not $byId[2544].result.isError) -and $guardedUniforms.uniform_count -eq 0) "A shader whose only uniform is behind #ifdef was refused as not compiled: $($byId[2544].result.content[0].text)"
     $brokenSet = ($byId[2545].result.content | Where-Object { $_.type -eq "text" } | Select-Object -First 1).text
     Assert-True ($byId[2545].result.isError -eq $true -and (($brokenSet | ConvertFrom-Json).error.data.code -eq "shader_not_compiled")) "A uniform write to a shader that does not compile was not refused as not compiled: $brokenSet"
+    foreach ($emptyCaseId in 7400..7401) {
+        Assert-True (-not $byId[$emptyCaseId].result.isError) "Empty shader setup $emptyCaseId failed: $($byId[$emptyCaseId].result.content[0].text)"
+    }
+    $emptyUniforms = Tool-Payload $byId[7402]
+    Assert-True ((-not $byId[7402].result.isError) -and $emptyUniforms.uniform_count -eq 0 -and @($emptyUniforms.uniforms).Count -eq 0 -and $emptyUniforms.truncated -eq $false) "A Shader with no code did not list zero uniforms: $($byId[7402].result.content[0].text)"
+    $emptySet = ($byId[7403].result.content | Where-Object { $_.type -eq "text" } | Select-Object -First 1).text
+    Assert-True ($byId[7403].result.isError -eq $true -and ($emptySet | ConvertFrom-Json).error.code -eq 404 -and $emptySet -match "declares no uniform named glow") "A uniform write to a Shader with no code was not refused as undeclared: $emptySet"
+    Assert-True (@($emptyUniforms.engine_diagnostics | Where-Object { $null -ne $_ }).Count -eq 0 -and @((($emptySet | ConvertFrom-Json).error.data.engine_diagnostics) | Where-Object { $null -ne $_ }).Count -eq 0) "An empty shader list or write carried an engine diagnostic."
     Assert-True ((Tool-Payload $byId[2546]).closed -eq $true) "Shader case scene could not be closed."
     foreach ($slotCaseId in 2547..2551) {
         Assert-True (-not $byId[$slotCaseId].result.isError) "Node slot request $slotCaseId failed: $($byId[$slotCaseId].result.content[0].text)"
@@ -5995,6 +6010,7 @@ text = "Not a key"
     # main.tscn open as it found it.
     Invoke-TypedObjectLayerBlock -EditorSession $editorSession -FixtureRoot $fixtureRoot
     Invoke-RectangleCellFillsBlock -EditorSession $editorSession -FixtureRoot $fixtureRoot
+    Invoke-NodeArraySlotsBlock -EditorSession $editorSession -FixtureRoot $fixtureRoot
 
     # Q15 in docs/BUILD_QUEUE.md. Its fixture scene is its own, and it leaves
     # main.tscn open as it found it.
