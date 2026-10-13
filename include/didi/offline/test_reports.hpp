@@ -12,7 +12,7 @@
 // whose output names a script that failed to load cannot pass either.
 //
 // Everything here is pure: what to run, how to read what it wrote, and what
-// that means. src/tools/test_tools.cpp starts the process.
+// that means. src/tools/deep_domain_tools.cpp starts the process.
 
 #include "didi/common/json.hpp"
 #include "didi/common/types.hpp"
@@ -94,8 +94,8 @@ void pruneTestRuns(const std::filesystem::path& name_directory, const std::strin
 
 // The files a run names, for the record of what a pass was true for: every
 // .gd file under the paths it was given, or for GUT, under the dirs its
-// .gutconfig.json names when none were. GUT merges that file with its command
-// line, so for GUT the file itself and the tests it lists are named too: a run
+// .gutconfig.json names when none were. Explicit paths disable that file, so
+// only a configured GUT run names the file and the tests it lists: a run
 // that only the configuration selected recorded project.godot alone, and its
 // pass stayed fresh after its test changed (#1246).
 std::vector<std::string> testRunSeeds(const std::filesystem::path& project_root,

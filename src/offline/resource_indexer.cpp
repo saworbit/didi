@@ -1,4 +1,5 @@
 #include "didi/offline/resource_indexer.hpp"
+#include "didi/offline/resource_uid.hpp"
 #include "didi/common/logger.hpp"
 #include "didi/common/project_path.hpp"
 #include <fstream>
@@ -68,16 +69,20 @@ std::string extractUidFromImportMetadata(const fs::path& file_path) {
 }
 
 std::string extractUidFromPath(const fs::path& file_path) {
+    auto extension = file_path.extension().string();
+    foldAsciiLower(extension);
+    if (extension != ".tscn" && extension != ".tres") return extractUidSidecar(file_path);
     std::ifstream file(file_path);
-    static const std::regex uid_regex(R"re(uid="(uid:\/\/[^"]+)")re");
     if (file.is_open()) {
         std::string line;
+        std::string header;
         int count = 0;
         while (std::getline(file, line) && count++ < 10) {
-            std::smatch match;
-            if (std::regex_search(line, match, uid_regex) && match.size() > 1) {
-                const auto uid = match[1].str();
-                if (isValidUid(uid)) return uid;
+            header += line + '\n';
+            const auto facts = inspectTextResourceUidHeader(header);
+            if (facts.complete) {
+                if (isValidUid(facts.uid)) return facts.uid;
+                break;
             }
         }
     }

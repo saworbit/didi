@@ -13,6 +13,7 @@
 #include "didi/offline/class_reference.hpp"
 #include "didi/common/project_path.hpp"
 #include "didi/common/atomic_write.hpp"
+#include "didi/offline/resource_uid.hpp"
 #include "didi/common/engine_version.hpp"
 #include "didi/runtime/session_client.hpp"
 #include "didi/runtime/audio_requests.hpp"
@@ -1539,15 +1540,16 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
     // (#546, #551).
     const std::string reported_path = paths::resourcePathOf(target_p);
 
+    // Hold identity selection, replace, and read-back as one file operation.
+    // A second creator either sees the existing file or preserves its UID.
+    auto file_lock = offline::lockProjectFile(fs::current_path(), reported_path.substr(6));
+    if (file_lock.isErr()) return CallToolResult::fromError(file_lock.error());
     try {
         std::error_code probe_error;
         if (fs::exists(target_p, probe_error) && !probe_error && !overwrite) {
             return CallToolResult::errorJson(
                 409, "Resource already exists; pass overwrite: true to replace it: " + reported_path,
                 {{"code", "already_exists"}, {"retry_with", {{"overwrite", true}}}});
-        }
-        if (target_p.has_parent_path()) {
-            fs::create_directories(target_p.parent_path());
         }
     } catch (const std::exception& e) {
         return CallToolResult::errorJson(400, std::string("Path resolution error: ") + e.what());
@@ -1618,13 +1620,15 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
     }
 
     std::ostringstream out;
+    auto uid = offline::resourceUidForWrite(target_p);
+    if (uid.isErr()) return CallToolResult::fromError(uid.error());
     const size_t load_steps = scope.externals.size() + sub_resources.size() + 1;
     out << "[gd_resource type=\"" << header_type << "\"";
     if (script_class) out << " script_class=\"" << script_class->name << "\"";
     // Godot writes load_steps only when there is more than the resource itself,
     // and omitting it where it is 1 is what the editor's own files look like.
     if (load_steps > 1) out << " load_steps=" << load_steps;
-    out << " format=3]\n";
+    out << " format=3 uid=\"" << uid.value() << "\"]\n";
     json externals_written = json::array();
     for (const auto& reference : scope.externals) {
         out << "\n[ext_resource type=\"" << reference.type << "\"";
@@ -1635,6 +1639,11 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
     }
     out << sub_blocks.str() << body.str();
 
+    try {
+        if (target_p.has_parent_path()) fs::create_directories(target_p.parent_path());
+    } catch (const std::exception& e) {
+        return CallToolResult::errorJson(400, std::string("Path resolution error: ") + e.what());
+    }
     auto written = files::writeFileAtomically(target_p, out.str());
     offline::ResourceIndexer::invalidateSharedIndex();
     if (written.isErr()) {
@@ -1655,6 +1664,9 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
                      " and could not read a resource header back from it, so it cannot say "
                      "what the file holds.");
     }
+    const auto stored_uid = offline::inspectTextResourceUidHeader(stored).uid;
+    if (stored_uid.empty()) return CallToolResult::errorJson(500, "Could not read the written resource UID back from disk");
+    file_lock.value().reset();
     // An editor that has this file loaded keeps its own copy, and nothing an
     // unattended editor does re-reads it: not editor_reload_project, not the
     // editor's own filesystem scan. So every live reader went on answering from
@@ -1671,6 +1683,7 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
         {"status", "created_offline"},
         {"save_path", reported_path},
         {"resource_type", stored_script_class.empty() ? stored_type : stored_script_class},
+        {"uid", stored_uid},
         {"file_bytes", stored.size()},
         // In file order, because that is the order Godot applies them in and
         // the caller has no other way to see what it got.

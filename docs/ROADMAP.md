@@ -128,7 +128,7 @@ Phase 5 adds six canonical tools across diagnostics, delivery, 3D asset pipeline
 - `gridmap_export_mesh_library` deterministically converts direct scene children to verified MeshLibrary items with optional trimesh collision and navigation data.
 - `ui_hit_test` performs bounded live Control traversal with transformed points, visibility/clipping, mouse filters, canvas layers, effective z-index, and draw order without injecting input.
 
-The shared process runner caps combined output at 1 MiB, kills child process groups on timeout, and avoids command-shell parsing. Native tests cover schemas, containment, redaction, argument quoting, and real Godot 4.5 shader diagnostics. The disposable Godot 4.5.1 integration harness verifies valid/invalid shaders, pack export, two-item MeshLibrary generation, offline-to-live route restoration, and both default and ignored-control hit ordering.
+The shared process runner caps combined output at 1 MiB on complete UTF-8 character boundaries, kills child process groups on timeout, and avoids command-shell parsing. Native tests cover schemas, containment, redaction, argument quoting, and real Godot 4.5 shader diagnostics. The disposable Godot 4.5.1 integration harness verifies valid/invalid shaders, pack export, two-item MeshLibrary generation, offline-to-live route restoration, and both default and ignored-control hit ordering.
 
 ---
 

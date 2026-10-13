@@ -46,6 +46,8 @@ namespace {
 namespace fs = std::filesystem;
 using didi::runtime::ManagedProcess;
 
+const std::string utf8Output = "A\xc2\xa2\xe9\x9b\xaa\xf0\x9f\x98\x80Z";
+
 std::vector<std::string> processArguments() {
     std::vector<std::string> args;
 #if defined(_WIN32)
@@ -69,6 +71,18 @@ struct ChildFixture {
         auto args = processArguments();
         if (args.size() < 3 || args[1] != "--didi-managed-child")
             return;
+        if (args[2] == "output_utf8" || args[2] == "output_utf8_chunks") {
+            for (const char byte : utf8Output) {
+                std::cout.put(byte);
+                if (args[2] == "output_utf8_chunks") {
+                    std::cout.flush();
+                    std::this_thread::sleep_for(std::chrono::milliseconds(15));
+                }
+            }
+            std::cout.flush();
+        }
+        if (args[2] == "output_ascii")
+            std::cout << "abcdefghijklmnop" << std::flush;
         if (args[2] == "hold")
             std::this_thread::sleep_for(std::chrono::seconds(30));
         // Long enough that outliving the reap deadline is the only way this
@@ -447,6 +461,50 @@ void reapsOwnedChildWhenTheHostDiesAbnormally() {
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     CHECK_PROCESS(!processAlive(grandchild));
 #endif
+}
+
+static didi::offline::ProcessResult capturedChild(const std::string& mode, size_t limit) {
+    didi::offline::ProcessRequest request;
+    request.executable = selfPath().string();
+    request.arguments = {"--didi-managed-child", mode};
+    request.working_directory = fs::current_path();
+    request.timeout = std::chrono::seconds(5);
+    request.max_output_bytes = limit;
+    auto outcome = didi::offline::runProcess(request);
+    CHECK_PROCESS(outcome.isOk());
+    CHECK_PROCESS(outcome.value().exit_code == 37);
+    CHECK_PROCESS(!outcome.value().timed_out);
+    return outcome.value();
+}
+
+static void cappedOutputEndsAtACompleteUtf8Character() {
+    // Caps inside each two-, three-, and four-byte character must keep only
+    // the complete prefix. A complete character exactly at the cap stays.
+    const size_t prefixBytes[] = {1, 1, 3, 3, 3, 6, 6, 6, 6, 10, 11, 11};
+    for (size_t limit = 1; limit <= 12; ++limit) {
+        const auto result = capturedChild("output_utf8", limit);
+        CHECK_PROCESS(!didi::json({{"output", result.output}}).dump().empty());
+        CHECK_PROCESS(result.output == utf8Output.substr(0, prefixBytes[limit - 1]));
+        CHECK_PROCESS(result.output_truncated == (limit < utf8Output.size()));
+    }
+}
+
+static void outputChunksKeepCompleteUtf8Characters() {
+    const auto result = capturedChild("output_utf8_chunks", utf8Output.size());
+    CHECK_PROCESS(result.output == utf8Output);
+    CHECK_PROCESS(!result.output_truncated);
+    CHECK_PROCESS(!didi::json({{"output", result.output}}).dump().empty());
+    // Later chunks cannot fill the space freed by dropping an incomplete
+    // character at the cap, or the retained output ceases to be a prefix.
+    const auto capped = capturedChild("output_utf8_chunks", 5);
+    CHECK_PROCESS(capped.output == utf8Output.substr(0, 3));
+    CHECK_PROCESS(capped.output_truncated);
+}
+
+static void asciiOutputRetainsTheFullByteCap() {
+    const auto result = capturedChild("output_ascii", 8);
+    CHECK_PROCESS(result.output == "abcdefgh");
+    CHECK_PROCESS(result.output_truncated);
 }
 
 static void offlineRunnerDoesNotHandChildrenTheServerStdin() {
@@ -886,6 +944,12 @@ struct RegisterManagedProcess {
                      offlineRunnerDoesNotHandChildrenTheServerStdin);
         registerTest("ProcessRunner.TimeoutKillsTheWholeProcessTree",
                      offlineRunnerTimeoutKillsTheWholeProcessTree);
+        registerTest("ProcessRunner.CappedOutputEndsAtCompleteUtf8Character",
+                     cappedOutputEndsAtACompleteUtf8Character);
+        registerTest("ProcessRunner.OutputChunksKeepCompleteUtf8Characters",
+                     outputChunksKeepCompleteUtf8Characters);
+        registerTest("ProcessRunner.AsciiOutputRetainsTheFullByteCap",
+                     asciiOutputRetainsTheFullByteCap);
         registerTest("TestRunner.TimeoutKillsTheWholeProcessTree",
                      testSessionTimeoutKillsTheWholeProcessTree);
 #if defined(_WIN32)
