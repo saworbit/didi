@@ -117,10 +117,21 @@ def main() -> int:
                         help="tools/typed_array_setters.gd output for the same engine")
     arguments = parser.parse_args()
 
+    probe_step = (
+        "Run godot --headless --script tools/typed_array_setters.gd -- "
+        "--output typed_array_setters.json for the same engine, then pass "
+        "--typed-setters typed_array_setters.json."
+    )
+    if arguments.typed_setters is None:
+        parser.error("--typed-setters is required. " + probe_step)
+
     api = json.loads(arguments.api.read_text(encoding="utf-8"))
-    typed_setters = (json.loads(arguments.typed_setters.read_text(encoding="utf-8"))
-                     if arguments.typed_setters else None)
+    typed_setters = json.loads(arguments.typed_setters.read_text(encoding="utf-8"))
     reference = build_reference(api, typed_setters)
+    if not any(prop.get("element_type")
+               for entry in reference["classes"].values()
+               for prop in entry["properties"].values()):
+        parser.error("The reference has no typed-setter element types. " + probe_step)
 
     arguments.output.parent.mkdir(parents=True, exist_ok=True)
     arguments.output.write_text(
