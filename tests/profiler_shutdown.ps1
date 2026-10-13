@@ -35,7 +35,7 @@ function Invoke-ProfilerShutdownBlock {
         $deadline = [DateTime]::UtcNow.AddSeconds(10)
         while ([DateTime]::UtcNow -lt $deadline -and -not $game.HasExited) {
             $sessions = Tool-Payload (Send-DidiSession $server (Tool-Request 8501 "runtime_list_sessions" @{ project_path = $FixtureRoot }) 10)
-            $published = @($sessions.sessions | Where-Object { $_.kind -eq "game" -and $_.alive -and $previousIds -notcontains $_.session_id -and $_.started_at_ms -ge $launchedAt }) | Select-Object -First 1
+            $published = @($sessions.sessions | Where-Object { $_.kind -eq "game" -and $_.alive -and $_.pid -eq $game.Id -and $previousIds -notcontains $_.session_id -and $_.started_at_ms -ge $launchedAt }) | Select-Object -First 1
             if ($null -ne $published) { break }
             Start-Sleep -Milliseconds 100
         }
