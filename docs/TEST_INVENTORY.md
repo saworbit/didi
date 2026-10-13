@@ -10,7 +10,7 @@ Every number here is derived from the suites themselves rather than written down
 
 | Measure | Count |
 | --- | ---: |
-| Automated tests | **1787** |
+| Automated tests | **1795** |
 | Live-harness assertions | 1696 |
 
 The badge in the [README](../README.md) shows the automated test total. Harness assertions are counted separately because they are assertions inside one live scenario, not independently runnable cases; adding them together would flatter the number.
@@ -114,7 +114,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 
 ## Python contract suites (`tests/test_*.py`)
 
-**609 tests.** Derived from `test_*` methods on every `unittest.TestCase` subclass, read with `ast`.
+**617 tests.** Derived from `test_*` methods on every `unittest.TestCase` subclass, read with `ast`.
 
 | File | Tests |
 | --- | ---: |
@@ -152,11 +152,12 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `test_refusal_codes.py` | 13 |
 | `test_refusal_remedies.py` | 5 |
 | `test_resource_uid_live.py` | 2 |
-| `test_stdio_process.py` | 2 |
+| `test_stdio_process.py` | 3 |
 | `test_test_inventory.py` | 27 |
 | `test_tool_output_schema_contract.py` | 5 |
 | `test_tool_profiles.py` | 7 |
 | `test_vendored_versions.py` | 23 |
+| `test_vibe_mcp_client.py` | 7 |
 | `test_yolo_mode.py` | 10 |
 
 ## Live Godot harness (`tests/*.ps1`)

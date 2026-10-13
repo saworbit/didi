@@ -23,19 +23,12 @@ sys.stdin.readline()
 
 
 class ProbeSessionCleanup(unittest.TestCase):
-    @staticmethod
-    def cleanup_child(child):
-        if all(pipe.closed for pipe in (child.stdin, child.stdout, child.stderr)):
-            child.wait(timeout=2)
-        else:
-            stop(child)
-
     def launch(self, source):
         original = subprocess.Popen
 
         def child(_argv, **options):
             self.child = original([sys.executable, "-u", "-c", source], **options)
-            self.addCleanup(self.cleanup_child, self.child)
+            self.addCleanup(stop, self.child)
             return self.child
 
         return patch("tools.vibe.mcp_client.subprocess.Popen", side_effect=child)
