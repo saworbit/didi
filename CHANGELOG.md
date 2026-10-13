@@ -109,7 +109,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 - `2026-09-23` A release archive can be installed and checked in one command. [PR #911](https://github.com/saworbit/didi/pull/911)
 
 ### Changed
-- `2026-10-14` Input event construction, dispatch and paused queues compile together with existing preflight and release checks. [#1255](https://github.com/saworbit/didi/issues/1255)
+- `2026-10-14` Input event construction, dispatch and paused queues compile together with existing preflight and release checks. [#1255](https://github.com/saworbit/didi/issues/1255) · [PR #1410](https://github.com/saworbit/didi/pull/1410)
 - `2026-10-14` Node edits, undo, redo and scene saving compile in their domains with existing owner restoration and history checks. [#1255](https://github.com/saworbit/didi/issues/1255) · [PR #1409](https://github.com/saworbit/didi/pull/1409)
 - `2026-10-14` Scene create, open, close and branch packing compile together with existing save, ownership and dirty-state checks. [#1255](https://github.com/saworbit/didi/issues/1255) · [PR #1408](https://github.com/saworbit/didi/pull/1408)
 - `2026-10-14` Performance monitors and frame timing compile together with their existing measurement ownership and shutdown checks. [#1255](https://github.com/saworbit/didi/issues/1255) · [PR #1407](https://github.com/saworbit/didi/pull/1407)
