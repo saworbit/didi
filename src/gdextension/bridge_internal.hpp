@@ -6,6 +6,7 @@
 #include "didi/gdextension/godot_values.hpp"
 #include <optional>
 #include <filesystem>
+#include <functional>
 #include <set>
 #include <initializer_list>
 #include <string_view>
@@ -94,6 +95,11 @@ Result<VariantValue> makeVector3i(int64_t x, int64_t y, int64_t z);
 Result<json> integerVectorToJson(VariantValue& value, int dimensions);
 
 Error bridgeRefusal(int code, const std::string& identifier);
+Error bridgeRefusal(int code, const std::string& identifier, json data, const std::string& detail);
+Error errorOfResponse(const json& response);
+bool holdsFreedObject(VariantValue& value);
+Result<bool> packedSceneExists(const std::string& scene_path);
+std::optional<json> refuseAnimationLibrarySlot(GDExtensionObjectPtr node, const std::string& property);
 #if defined(DIDI_PHASE7_SIGNAL_TEST_SEAMS)
 bool takePhase7SignalTestSeam(std::string_view expected);
 #endif
@@ -167,5 +173,12 @@ Result<bool> objectHasProperty(GDExtensionObjectPtr object, const std::string& p
 Result<VariantValue> makeResourceForProperty(const std::string& property_name, const json& value, const std::string& expected_class);
 bool isNilVariant(VariantValue& value);
 bool jsonTypeIsInsidePropertyContract(int godot_type);
+
+Result<VariantValue> makeArrayForProperty(const std::string& property_name, const json& value,
+    VariantValue& current, const std::function<Result<VariantValue>(const std::string&,
+        const json&, const std::string&)>& object_builder = {});
+Result<VariantValue> makeDictionaryForProperty(const std::string& property_name, const json& value, VariantValue& current);
+Result<std::string> relativePathWithinEditedRoot(GDExtensionObjectPtr root, GDExtensionObjectPtr node);
+std::optional<json> refuseInstanceCycle(GDExtensionObjectPtr root, const std::string& scene_path);
 
 } // namespace didi::godot::bridge_internal
