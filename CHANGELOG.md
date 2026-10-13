@@ -110,6 +110,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Changed
 
+- `2026-10-13` Six remaining mutation tools compare reported state with independent witnesses in CI, including fixtures without Git identity. [#1020](https://github.com/saworbit/didi/issues/1020) [#1371](https://github.com/saworbit/didi/pull/1371)
 - `2026-10-11` The live harness compares `asset_reimport`'s `announced` with the `.import` files on disk, so six mutating tools are left unchecked, not seven. [#1020](https://github.com/saworbit/didi/issues/1020) · [PR #1283](https://github.com/saworbit/didi/pull/1283)
 - `2026-10-11` The GDExtension sources share one definition of their Godot value wrappers and error answers, and a test fails on a new copy. [#1255](https://github.com/saworbit/didi/issues/1255) · [PR #1284](https://github.com/saworbit/didi/pull/1284)
 - `2026-10-11` `GodotBridge::execute` serves its methods from one table, and a test fails when the table and the editor hook's routed methods differ. [#1255](https://github.com/saworbit/didi/issues/1255) · [PR #1282](https://github.com/saworbit/didi/pull/1282)
@@ -141,6 +142,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 - `2026-10-14` Builds refresh the source commit in their identity without reconfigure or needless recompilation. [#1373](https://github.com/saworbit/didi/issues/1373) [PR #1391](https://github.com/saworbit/didi/pull/1391)
 - `2026-10-14` Created resources carry Godot-format UIDs, and overwrites preserve the file's existing identity. [#1382](https://github.com/saworbit/didi/issues/1382) [PR #1395](https://github.com/saworbit/didi/pull/1395)
 - `2026-10-14` Resource UID maps read the root header instead of assigning a reference's UID to the containing file. [#1393](https://github.com/saworbit/didi/issues/1393) [PR #1395](https://github.com/saworbit/didi/pull/1395)
+- `2026-10-13` Local file writers retain engine diagnostics from refused refreshes and restoring the previous scene tab. [#1289](https://github.com/saworbit/didi/issues/1289) [#1369](https://github.com/saworbit/didi/pull/1369)
 - `2026-10-13` Class reference refreshes refuse missing or unusable typed-setter probe output before replacing the reference. [#1360](https://github.com/saworbit/didi/issues/1360) · [PR #1362](https://github.com/saworbit/didi/pull/1362)
 - `2026-10-13` Profiler slow frames follow the window verdict's render-thread wait rule, with replay evidence from all three engine lines. [#1231](https://github.com/saworbit/didi/issues/1231) [#1368](https://github.com/saworbit/didi/pull/1368)
 - `2026-10-13` Focused GUT runs ignore the project config; timeout answers show bounded progress without file hashes. [#1375](https://github.com/saworbit/didi/issues/1375) [PR #1389](https://github.com/saworbit/didi/pull/1389)
