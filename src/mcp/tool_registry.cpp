@@ -18,6 +18,7 @@
 #include "didi/common/scene_node_path.hpp"
 #include "didi/tools/resolved_tool_binding.hpp"
 #include "didi/mcp/phase7_schemas.hpp"
+#include "didi/common/cell_records.hpp"
 #include "didi/mcp/schema_validation.hpp"
 #include "didi/mcp/response_economy.hpp"
 #include "didi/offline/deep_domain_support.hpp"
@@ -2083,6 +2084,19 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
             return invalidArgumentsError(binding, *invalid, {{"argument", *unknown}});
         }
         return invalidArgumentsError(binding, *invalid);
+    }
+    // Rectangle work bounds and overlap are cross-field rules, so the
+    // schema cannot enforce them. Run the shared preparation before the
+    // mutation gate as well: a dry run must reject an impossible fill.
+    if (binding.canonical_name == "tilemap_set_cells" ||
+        binding.canonical_name == "gridmap_set_cells") {
+        auto prepared = cells::prepare(arguments["cells"],
+                                       binding.canonical_name == "tilemap_set_cells" ? 2 : 3);
+        if (prepared.isErr()) {
+            auto error = prepared.error();
+            error.data = {{"field", "cells"}, {"retryable", false}};
+            return CallToolResult::fromError(error);
+        }
     }
     // `fields` is the registry's argument, not the handler's: the schema has
     // just checked it against the sections, the handler answers in full, and

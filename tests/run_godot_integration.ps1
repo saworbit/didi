@@ -177,6 +177,7 @@ if (-not $fixtureRoot.StartsWith($buildRoot + [IO.Path]::DirectorySeparatorChar,
 . (Join-Path $PSScriptRoot 'phase7_success.ps1')
 . (Join-Path $PSScriptRoot 'scene_tab_reload.ps1')
 . (Join-Path $PSScriptRoot 'typed_object_layer.ps1')
+. (Join-Path $PSScriptRoot 'rectangle_cell_fills.ps1')
 . (Join-Path $PSScriptRoot 'change_journal.ps1')
 . (Join-Path $PSScriptRoot 'reimport_job.ps1')
 . (Join-Path $PSScriptRoot 'scenario_runner.ps1')
@@ -5964,6 +5965,7 @@ text = "Not a key"
     # Q7 in docs/BUILD_QUEUE.md. Its fixture scene is its own, and it leaves
     # main.tscn open as it found it.
     Invoke-TypedObjectLayerBlock -EditorSession $editorSession -FixtureRoot $fixtureRoot
+    Invoke-RectangleCellFillsBlock -EditorSession $editorSession -FixtureRoot $fixtureRoot
 
     # Q15 in docs/BUILD_QUEUE.md. Its fixture scene is its own, and it leaves
     # main.tscn open as it found it.
