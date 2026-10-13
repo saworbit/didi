@@ -74,4 +74,7 @@ json physicsRaycastBatch(const json& params, const std::string& session_kind);
 json physicsRaycast(const json& params, const std::string& session_kind);
 json navQueryPath(const json& params, const std::string& session_kind);
 
+std::string busLayoutPathFrom(const std::optional<std::string>& setting);
+std::string busLayoutMovedSentence(const std::string& editor_path, const std::string& project_path);
+
 } // namespace didi::godot::bridge_internal
