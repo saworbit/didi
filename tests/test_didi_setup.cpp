@@ -509,6 +509,31 @@ void checks_what_git_will_do_with_didi_state() {
     ASSERT_TRUE(git_negated.detail.find("line 2 un-ignores") != std::string::npos);
 }
 
+void ignore_rules_do_not_hide_tracked_state_or_client_files() {
+    Scratch scratch("ignore-tracked");
+    NoGitAbove walled(scratch.root());
+    if (!runGitIn(scratch.root(), {"init", "-q"})) return;
+    scratch.write(".didi/journal.jsonl", "{}\n");
+    scratch.write(".didi/crash.txt", "stack\n");
+    scratch.write(".mcp.json", "{}\n");
+    ASSERT_TRUE(runGitIn(scratch.root(), {"add", "--", ".didi/", ".mcp.json"}));
+    scratch.write(".gitignore", ".didi/\n/.mcp.json\n");
+    const auto state = checkIgnored(scratch.root(), ".didi/");
+    ASSERT_TRUE(!state.ignored);
+    ASSERT_TRUE(state.detail.find("2 tracked") != std::string::npos);
+    ASSERT_TRUE(state.detail.find("git rm -r --cached") != std::string::npos);
+    const auto client = checkIgnored(scratch.root(), "/.mcp.json");
+    ASSERT_TRUE(!client.ignored);
+    ASSERT_TRUE(client.detail.find("1 tracked") != std::string::npos);
+    // A check names the remedy; it never removes anything from the index.
+    ASSERT_TRUE(runGitIn(scratch.root(), {"ls-files", "--error-unmatch", "--",
+                                        ".didi/journal.jsonl", ".didi/crash.txt", ".mcp.json"}));
+    ASSERT_TRUE(runGitIn(scratch.root(), {"rm", "-r", "--cached", "--", ".didi/", ".mcp.json"}));
+    ASSERT_TRUE(checkIgnored(scratch.root(), ".didi/").ignored);
+    ASSERT_TRUE(checkIgnored(scratch.root(), "/.mcp.json").ignored);
+    ASSERT_TRUE(std::filesystem::exists(scratch.root() / ".didi/journal.jsonl"));
+}
+
 void merges_json_configs_without_reformatting_them() {
     Scratch scratch("json");
     scratch.write(".cursor/mcp.json", "{\n\t\"mcpServers\": {\n\t\t\"z\": {\"command\": \"z\"}\n\t}\n}\n");
@@ -548,6 +573,7 @@ struct Registrar {
         registerTest("didi_setup.json_merge", merges_json_configs_without_reformatting_them);
         registerTest("didi_setup.ignore_rules", appends_ignore_rules_once);
         registerTest("didi_setup.ignore_check", checks_what_git_will_do_with_didi_state);
+        registerTest("didi_setup.ignore_tracked", ignore_rules_do_not_hide_tracked_state_or_client_files);
     }
 } registrar;
 

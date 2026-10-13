@@ -241,6 +241,44 @@ class SetupOffline(SetupFixture):
         self.assertEqual(step["state"], "warn", step)
         self.assertIn(".didi/", step["detail"])
 
+    @unittest.skipUnless(shutil.which("git"), "Git is required")
+    def test_setup_and_doctor_warn_about_already_tracked_state_and_client_files(self):
+        self.env["GIT_CEILING_DIRECTORIES"] = str(self.root)
+
+        def git(*arguments):
+            result = subprocess.run(["git", *arguments], cwd=self.project, env=self.env,
+                                    capture_output=True, timeout=10)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return result.stdout
+
+        git("init", "-q")
+        (self.project / ".didi").mkdir()
+        (self.project / ".didi/journal.jsonl").write_text("{}\n", encoding="utf-8")
+        (self.project / ".didi/crash.txt").write_text("stack\n", encoding="utf-8")
+        (self.project / ".mcp.json").write_text("{}\n", encoding="utf-8")
+        git("add", "--", ".didi/", ".mcp.json")
+        git("-c", "user.name=Setup Test", "-c", "user.email=setup@example.invalid",
+            "-c", "commit.gpgsign=false", "-c", f"core.hooksPath={self.root / 'hooks'}",
+            "commit", "-m", "Track local files")
+        tracked = git("ls-files", "-z")
+        setup = self.steps(self.setup_json("--client", "claude-code"))
+        for name, count in ((".didi/", 2), (".mcp.json", 1)):
+            step = setup["ignore-tracked:" + name]
+            self.assertEqual(step["state"], "warn", step)
+            self.assertEqual(step["tracked_count"], count, step)
+            self.assertIn("git rm", step["untrack_command"])
+        doctor = self.steps(self.doctor_json(expect=0))
+        for key, count in (("ignore", 2), ("ignore-client:claude-code", 1)):
+            self.assertEqual(doctor[key]["state"], "warn", doctor[key])
+            self.assertEqual(doctor[key]["tracked_count"], count)
+        self.assertEqual(git("ls-files", "-z"), tracked)
+        self.assertTrue((self.project / ".didi/journal.jsonl").is_file())
+        git("rm", "-r", "--cached", "--", ".didi/", ".mcp.json")
+        clean = self.steps(self.doctor_json(expect=0))
+        self.assertEqual(clean["ignore"]["state"], "ok", clean["ignore"])
+        self.assertEqual(clean["ignore-client:claude-code"]["state"], "ok")
+        self.assertTrue((self.project / ".didi/journal.jsonl").is_file())
+
     def test_a_rerun_changes_nothing(self):
         self.setup_json("--client", "all")
         before = tree_digest(self.project)
