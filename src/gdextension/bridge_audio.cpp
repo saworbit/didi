@@ -7,6 +7,11 @@
 namespace didi::godot {
 using namespace bridge_internal;
 
+// The audio reads answer an editor or a game, and a game has no
+// EditorInterface, so they run before the lookup below. Behind it every
+// game request failed on "Can't retrieve singleton 'EditorInterface'
+// outside of editor" and audio_list_buses fell back to reading the file
+// (vibe session nineteen).
 json GodotBridge::bridgeAudioListBuses(const std::string& /*method*/, const json& /*params*/, const std::string& /*session_kind*/) {
     // Every method hash below is identical on Godot 4.5.1, 4.6.2 and 4.7.2,
     // checked by dumping extension_api.json from each, so this needs no

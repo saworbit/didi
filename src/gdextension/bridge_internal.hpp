@@ -84,4 +84,10 @@ Result<VariantValue> makeJsonVariant(const json& value, int depth = 0);
 Result<VariantValue> makeJsonVariantForProperty(const json& value, GDExtensionVariantType type);
 bool settingTakesTypedValue(GDExtensionVariantType held);
 
+json wrongNodeTypeError(const std::string& identifier, const std::string& path,
+                        GDExtensionObjectPtr object);
+Result<VariantValue> makeVector2i(int64_t x, int64_t y);
+Result<VariantValue> makeVector3i(int64_t x, int64_t y, int64_t z);
+Result<json> integerVectorToJson(VariantValue& value, int dimensions);
+
 } // namespace didi::godot::bridge_internal
