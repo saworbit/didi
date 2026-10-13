@@ -5534,21 +5534,43 @@ try {
     $toneWriter.Flush()
     [System.IO.File]::WriteAllBytes($loopTone, $toneStream.ToArray())
     $toneWriter.Dispose()
+    # Keep evidence after the half-second track ends: detached launch can attach
+    # after autoplay has already finished (#1359). Only actual playback sets
+    # started, and only the player's finished signal sets finished.
+    $loopMusicScript = @'
+extends AudioStreamPlayer
+
+var playback_started := false
+var playback_finished := false
+
+
+func _ready() -> void:
+    playback_started = playing
+    finished.connect(func(): playback_finished = true)
+
+
+func _process(_delta: float) -> void:
+    playback_started = playback_started or playing
+'@
+    [System.IO.File]::WriteAllText((Join-Path $fixtureRoot "loop_music.gd"), $loopMusicScript)
     # The scene the game plays: the track on a player that starts by itself.
     [System.IO.File]::WriteAllText((Join-Path $fixtureRoot "loop_music.tscn"),
-        "[gd_scene load_steps=2 format=3]`n`n[ext_resource type=`"AudioStream`" path=`"res://loop_track.ogg`" id=`"1`"]`n`n" +
+        "[gd_scene load_steps=3 format=3]`n`n[ext_resource type=`"AudioStream`" path=`"res://loop_track.ogg`" id=`"1`"]`n" +
+        "[ext_resource type=`"Script`" path=`"res://loop_music.gd`" id=`"2`"]`n`n" +
         "[node name=`"LoopMusic`" type=`"Node`"]`n`n[node name=`"Music`" type=`"AudioStreamPlayer`" parent=`".`"]`n" +
-        "stream = ExtResource(`"1`")`nautoplay = true`n")
+        "stream = ExtResource(`"1`")`nautoplay = true`nscript = ExtResource(`"2`")`n")
 
     # The game, launched on that scene and asked whether the track is still
     # playing once it has had time to end three times over. The profiler read
     # is the wait: it samples for as long as it is told to and answers after.
+    # Read both snapshots after it, so the control covers late observation on
+    # every run without depending on how quickly runtime_launch attaches.
     function Invoke-LoopMusicGame([int]$BaseId) {
         $gameRequests = @(
             (@{ jsonrpc = "2.0"; id = $BaseId; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
             (Tool-Request ($BaseId + 1) "runtime_launch" @{ scene_path = "res://loop_music.tscn"; timeout_seconds = 30; headless = $true; detach = $true }),
-            (Tool-Request ($BaseId + 2) "eval_gdscript" @{ expression = 'node.get("playing")'; context_node = "/root/LoopMusic/Music" }),
             (Tool-Request ($BaseId + 3) "runtime_read_profiler" @{ duration_ms = 1600; sample_count = 2 }),
+            (Tool-Request ($BaseId + 2) "eval_gdscript" @{ expression = '{"started": node.get("playback_started"), "finished": node.get("playback_finished")}'; context_node = "/root/LoopMusic/Music" }),
             (Tool-Request ($BaseId + 4) "eval_gdscript" @{ expression = 'node.get("playing")'; context_node = "/root/LoopMusic/Music" }),
             (Tool-Request ($BaseId + 5) "runtime_stop" @{ exit_code = 0 })
         )
@@ -5576,7 +5598,8 @@ try {
     # The control, and the failing workflow itself: as the surface leaves it,
     # the track plays and then stops.
     $controlGame = Invoke-LoopMusicGame 6010
-    Assert-True ((Tool-Payload $controlGame[6012]).value -eq $true) "The control game's track was not playing at attach: $($controlGame[6012].result.content[0].text)"
+    $controlPlayback = (Tool-Payload $controlGame[6012]).value
+    Assert-True ($controlPlayback.started -eq $true -and $controlPlayback.finished -eq $true) "The control game's track did not start and finish naturally: $($controlGame[6012].result.content[0].text)"
     Assert-True ((Tool-Payload $controlGame[6014]).value -eq $false) "The control game's track was still playing after its end, so the loop check below proves nothing."
 
     $loopWav = @{ asset_path = "res://loop_tone.wav" }
@@ -5632,7 +5655,7 @@ try {
 
     # And the game that stopped now loops.
     $loopingGame = Invoke-LoopMusicGame 6040
-    Assert-True ((Tool-Payload $loopingGame[6042]).value -eq $true) "The looping game's track was not playing at attach: $($loopingGame[6042].result.content[0].text)"
+    Assert-True ((Tool-Payload $loopingGame[6042]).value.started -eq $true) "The looping game's track never started: $($loopingGame[6042].result.content[0].text)"
     Assert-True ((Tool-Payload $loopingGame[6044]).value -eq $true) "The track still stopped at its end after asset_configure_import set loop."
 
     # What a localised menu says, asked of a game (#988). A Control translates
