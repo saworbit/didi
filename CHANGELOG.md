@@ -136,11 +136,13 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Fixed
 
+
 - `2026-10-14` Probe sessions close their pipes, reap shutdown or failed startup, retain stderr, and tolerate repeated cleanup. [#1394](https://github.com/saworbit/didi/issues/1394) [PR #1396](https://github.com/saworbit/didi/pull/1396)
 - `2026-10-14` Setup and doctor warn when Git still tracks Didi state or client files despite ignore rules, and name the untrack command. [#1376](https://github.com/saworbit/didi/issues/1376) [PR #1392](https://github.com/saworbit/didi/pull/1392)
 - `2026-10-14` Builds refresh the source commit in their identity without reconfigure or needless recompilation. [#1373](https://github.com/saworbit/didi/issues/1373) [PR #1391](https://github.com/saworbit/didi/pull/1391)
 - `2026-10-14` Created resources carry Godot-format UIDs, and overwrites preserve the file's existing identity. [#1382](https://github.com/saworbit/didi/issues/1382) [PR #1395](https://github.com/saworbit/didi/pull/1395)
 - `2026-10-14` Resource UID maps read the root header instead of assigning a reference's UID to the containing file. [#1393](https://github.com/saworbit/didi/issues/1393) [PR #1395](https://github.com/saworbit/didi/pull/1395)
+- `2026-10-13` Class reference refreshes refuse missing or unusable typed-setter probe output before replacing the reference. [#1360](https://github.com/saworbit/didi/issues/1360) · [PR #1362](https://github.com/saworbit/didi/pull/1362)
 - `2026-10-13` Focused GUT runs ignore the project config; timeout answers show bounded progress without file hashes. [#1375](https://github.com/saworbit/didi/issues/1375) [PR #1389](https://github.com/saworbit/didi/pull/1389)
 - `2026-10-13` Capped subprocess output drops an incomplete UTF-8 character instead of throwing while reporting the run. [#1388](https://github.com/saworbit/didi/issues/1388) [PR #1390](https://github.com/saworbit/didi/pull/1390)
 - `2026-10-13` Modern hosts can use an explicit runtime attach without request metadata; a lost session is refused instead of returning a synthetic frame. [#1374](https://github.com/saworbit/didi/issues/1374) [PR #1377](https://github.com/saworbit/didi/pull/1377)
