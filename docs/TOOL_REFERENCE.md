@@ -1908,7 +1908,7 @@ Successful JSON results also carry `structuredContent` alongside the existing te
 
 ## 12. Phase 5 deep domains
 
-All Phase 5 subprocess tools launch an executable with an argv array, never through a command shell. Combined stdout/stderr is capped at 1 MiB, output reports truncation, deadlines terminate the child process group, and paths are confined to the current project. Godot-backed operations use `GODOT_BIN` when set or normal Godot discovery; C# diagnostics require `dotnet` on `PATH`.
+All Phase 5 subprocess tools launch an executable with an argv array, never through a command shell. Combined stdout/stderr is capped at 1 MiB on complete UTF-8 character boundaries, output reports truncation, deadlines terminate the child process group, and paths are confined to the current project. Godot-backed operations use `GODOT_BIN` when set or normal Godot discovery; C# diagnostics require `dotnet` on `PATH`.
 
 A Godot that cannot be started, because nothing is at the path or the file there is not an executable, is refused `503` with `data.code: "engine_unavailable"`, `engine_executable` and `restart_with: "GODOT_BIN set to a Godot executable"` by `shader_check_compile`, `project_export` and `gridmap_export_mesh_library`. That is the code `script_check_syntax` uses for the same fault. A failure of the helper environment itself is still a `500`.
 
