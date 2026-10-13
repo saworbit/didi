@@ -104,8 +104,8 @@ json refreshParams(const std::vector<std::string>& paths, size_t start, size_t e
 constexpr size_t kMaxRefreshDiagnostics = 16;
 
 void collectDiagnostics(EditorCopyRefresh& refresh, const Result<json>& answer) {
-    if (answer.isErr() || !answer.value().is_object()) return;
-    const auto& body = answer.value();
+    const auto& body = answer.isErr() ? answer.error().data : answer.value();
+    if (!body.is_object()) return;
     const auto found = body.find("engine_diagnostics");
     if (found != body.end() && found->is_array()) {
         for (const auto& line : *found) {
@@ -129,8 +129,8 @@ void reportDiagnostics(json& payload, const EditorCopyRefresh& refresh) {
         payload["engine_diagnostics_omitted"] = refresh.engine_diagnostics_omitted;
     }
     payload["engine_diagnostics_note"] =
-        "The attached editor printed these ERROR or WARNING lines while it reloaded, rebuilt or "
-        "indexed the files this call wrote. They are the engine's own words; what the call did "
+        "The attached editor printed these ERROR or WARNING lines while this call reloaded, rebuilt "
+        "or indexed files, or restored the edited scene. They are the engine's own words; what the call did "
         "is the rest of this answer.";
 }
 
@@ -227,6 +227,7 @@ EditorCopyRefresh refreshEditorCopies(const std::shared_ptr<ipc::IIpcClient>& ip
                         ? Result<json>(Error(409, "it was never saved, so it has no path to open"))
                         : ipc->sendRequest("scene.open", {{"scene_path", restore.scene}},
                                            kRefreshTimeoutMs);
+        collectDiagnostics(refresh, back);
         if (back.isErr()) {
             refresh.failed.push_back(
                 {{"path", restore.rebuilt},
@@ -355,6 +356,7 @@ std::optional<Error> refuseDroppedConnections(const std::shared_ptr<ipc::IIpcCli
 }
 
 void reportEditorCopy(json& payload, const EditorCopyRefresh& refresh) {
+    reportDiagnostics(payload, refresh);
     if (!refresh.answered) return;
     payload["editor_copy_reloaded"] = !refresh.reloaded.empty();
     if (!refresh.index_pending.empty()) payload["editor_index_pending"] = true;
@@ -369,16 +371,15 @@ void reportEditorCopy(json& payload, const EditorCopyRefresh& refresh) {
         }
     }
     if (!refresh.failed.empty()) payload["editor_copy_error"] = refresh.failed.front()["reason"];
-    reportDiagnostics(payload, refresh);
 }
 
 void reportEditorCopies(json& payload, const EditorCopyRefresh& refresh) {
+    reportDiagnostics(payload, refresh);
     if (!refresh.answered) return;
     payload["editor_copies_reloaded"] = refresh.reloaded;
     payload["editor_scenes_reloaded"] = refresh.scenes_reloaded;
     if (!refresh.index_pending.empty()) payload["editor_index_pending"] = refresh.index_pending;
     if (!refresh.failed.empty()) payload["editor_copy_errors"] = refresh.failed;
-    reportDiagnostics(payload, refresh);
 }
 
 } // namespace didi::mcp
