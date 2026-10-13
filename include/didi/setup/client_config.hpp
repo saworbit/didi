@@ -129,10 +129,14 @@ Result<IgnoreWrite> writeIgnoreRules(const std::filesystem::path& project_root,
 // git is asked when the project is in a work tree, so .git/info/exclude, a
 // global excludes file and a broader pattern count; otherwise .gitignore is
 // read the way git reads it, the last rule for the path deciding, so a later
-// `!.didi/` un-ignores it (#1346).
+// `!.didi/` un-ignores it (#1346). An ignore rule does not remove tracked
+// files: those are counted from the index and keep ignored false (#1376).
 struct IgnoreCheck {
     bool ignored{false};
     std::string detail;
+    size_t tracked_count{0};
+    bool tracked_count_truncated{false};
+    std::string untrack_command;
 };
 IgnoreCheck checkIgnored(const std::filesystem::path& project_root, const std::string& rule);
 bool hasAgentGuide(const std::filesystem::path& file);

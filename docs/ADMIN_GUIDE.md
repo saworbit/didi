@@ -135,7 +135,9 @@ What `setup` does, in order, and what stops it:
    and each client file names this machine's paths. A rule already there in
    another spelling (`/.didi`, `.didi/*`), or negated with `!`, counts as
    present, and nothing already in the file changes. A file git already tracks
-   stays tracked until `git rm --cached` removes it.
+   stays tracked until `git rm --cached` removes it. Setup counts tracked state
+   and client files and warns with the command to run from the project root to remove them from the index,
+   followed by a commit. It never runs that command or deletes those files.
 7. Writes the agent guide between `<!-- BEGIN didi -->` and `<!-- END didi -->`
    into `AGENTS.md`. When Claude Code is named and the project has no
    `CLAUDE.md`, `.claude/CLAUDE.md` or `CLAUDE.local.md` of its own, it also
@@ -162,7 +164,10 @@ a project `CLAUDE.md` that holds the block or imports a file that does, and for
 the others `AGENTS.md`. A guide Claude Code reaches only through an import
 outside the project is a warning, because Claude Code asks before loading an
 external import and never loads one that was declined (#1286). It also checks
-that git ignores `.didi/`. In a git work tree it asks git, so `.git/info/exclude`
+that git ignores `.didi/` and each existing client file. In a git work tree it
+counts tracked files before checking ignore rules; a tracked path warns with
+`tracked_count`, `tracked_count_truncated`, and `untrack_command` in JSON. A
+truncated count is a lower bound. It asks git, so `.git/info/exclude`
 and a broader pattern count; otherwise it reads `.gitignore` the way git does,
 the last rule for the path deciding, and a later `!.didi/` is named by its line
 as un-ignoring it (#1346). Setup leaves such a line as the person wrote it and
