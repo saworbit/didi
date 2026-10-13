@@ -5,6 +5,7 @@
 // those rules or add another write path.
 #include "didi/gdextension/godot_values.hpp"
 #include <optional>
+#include <filesystem>
 #include <set>
 #include <initializer_list>
 #include <string_view>
@@ -139,5 +140,9 @@ bool resourceFileExists(const std::string& path);
 std::string resourcePathOf(GDExtensionObjectPtr resource);
 Result<uint64_t> openSceneRootId(GDExtensionObjectPtr editor, const std::string& path);
 std::string editedScenePath(GDExtensionObjectPtr root);
+
+bool pathWithin(const std::filesystem::path& root, const std::filesystem::path& candidate);
+bool engineHasClass(const std::string& name);
+bool unsavedScenesBindAvailable();
 
 } // namespace didi::godot::bridge_internal
