@@ -277,7 +277,7 @@ void test_each_framework_is_given_its_own_options() {
     const auto gut_arguments = didi::offline::testCommandArguments(
         gut(), {"res://test/unit", "res://test/test_one.gd", "res://test/it"}, "res://.didi/tests/t/results.xml");
     const std::vector<std::string> gut_expected = {
-        "-s", "res://addons/gut/gut_cmdln.gd", "-gexit", "-gdir=res://test/unit,res://test/it",
+        "-s", "res://addons/gut/gut_cmdln.gd", "-gexit", "-gconfig=", "-gdir=res://test/unit,res://test/it",
         "-ginclude_subdirs", "-gtest=res://test/test_one.gd", "-gjunit_xml_file=res://.didi/tests/t/results.xml"};
     ASSERT_EQ(gut_arguments, gut_expected);
     // No paths: GUT reads .gutconfig.json for them.
@@ -345,8 +345,8 @@ void test_the_framework_is_the_one_the_project_has() {
     wants_gdunit.framework = TestFramework::gdunit4;
     ASSERT_EQ(chooseTestFramework(wants_gdunit, detectTestFrameworks(project.root)).error().code, 404);
 
-    // Paths: res://test when there is one, GUT's own configuration when there
-    // is not, and a refusal when there is neither.
+    // GUT's own configuration when there is one, otherwise res://test, and a
+    // refusal when there is neither. Explicit paths always select the run.
     ASSERT_EQ(resolveTestPaths(any, only_gut.value(), project.root).error().data["field"], "paths");
     ASSERT_TRUE(!resolveTestPaths(any, only_gut.value(), project.root).error().data.contains("retry_with"));
     // Tests kept somewhere else are named, as the paths to send; an addon's
@@ -360,7 +360,7 @@ void test_the_framework_is_the_one_the_project_has() {
     project.write(".gutconfig.json", "{\"dirs\": [\"res://tests/unit\"]}");
     ASSERT_TRUE(resolveTestPaths(any, only_gut.value(), project.root).value().empty());
     project.write("test/test_a.gd", "extends GutTest\n");
-    ASSERT_EQ(resolveTestPaths(any, only_gut.value(), project.root).value(), std::vector<std::string>{"res://test"});
+    ASSERT_TRUE(resolveTestPaths(any, only_gut.value(), project.root).value().empty());
     didi::offline::TestRunRequest named;
     named.paths = {"res://test/test_a.gd", "res://nowhere"};
     ASSERT_EQ(resolveTestPaths(named, only_gut.value(), project.root).error().code, 404);
@@ -403,10 +403,9 @@ void test_a_gut_configured_run_records_what_the_configuration_selects() {
     const std::vector<std::string> everything = {"res://.gutconfig.json", "res://spec/test_configured.gd",
                                                  "res://unit/test_unit.gd"};
     ASSERT_EQ(configured, everything);
-    // Paths given replace the file's dirs, and its tests still run.
+    // Explicit paths ignore the config, including the tests it names.
     const auto named = testRunSeeds(project.root, {"res://test"}, TestFramework::gut);
-    const std::vector<std::string> named_and_listed = {"res://.gutconfig.json", "res://spec/test_configured.gd",
-                                                       "res://test/test_named.gd"};
+    const std::vector<std::string> named_and_listed = {"res://test/test_named.gd"};
     ASSERT_EQ(named, named_and_listed);
     // GdUnit4 reads no .gutconfig.json.
     const auto gdunit_seeds = testRunSeeds(project.root, {"res://test"}, TestFramework::gdunit4);
@@ -421,6 +420,32 @@ void test_a_gut_configured_run_records_what_the_configuration_selects() {
     const auto changed = didi::runtime::changedScenarioFiles(project.root, recorded.files);
     ASSERT_EQ(changed.size(), 1u);
     ASSERT_EQ(changed[0].path, "res://spec/test_configured.gd");
+}
+
+void test_a_timeout_reports_observed_scripts_with_bounded_plain_output() {
+    auto timed_out = facts(gut(), 1, std::nullopt,
+        "\x1b[4mres://test/test_first.gd\x1b[0m\n"
+        "- test_one\n"
+        "\x1b[4mres://test/test_last.gd.Inner\x1b[0m\n"
+        "- test_wait\n" + std::string(7000, 'x'));
+    timed_out.timed_out = true;
+    const auto report = didi::offline::judgeTestRun(timed_out).report;
+    ASSERT_EQ(report["reason"], "timeout");
+    ASSERT_EQ(report["progress"]["scripts_started"], 2);
+    ASSERT_EQ(report["progress"]["last_script"], "res://test/test_last.gd");
+    ASSERT_TRUE(report["output_tail"].get<std::string>().size() <= 512);
+    ASSERT_TRUE(report["output_tail"].get<std::string>().find('\x1b') == std::string::npos);
+}
+
+void test_timeout_output_remains_valid_utf8_at_the_byte_limit() {
+    std::string output;
+    for (int i = 0; i < 171; ++i) output += "\xe9\x9b\xaa";
+    output += "x";
+    auto timed_out = facts(gut(), 1, std::nullopt, std::move(output));
+    timed_out.timed_out = true;
+    const auto report = didi::offline::judgeTestRun(timed_out).report;
+    ASSERT_TRUE(report["output_tail"].get<std::string>().size() <= 512);
+    ASSERT_TRUE(!report.dump().empty());
 }
 
 // A report over the limit is refused, and only the limit and one byte of it is
@@ -533,6 +558,10 @@ struct RegisterTestReportTests {
         registerTest("TestReports.ToolRunsProjectCode", test_the_tool_runs_project_code_and_says_so);
         registerTest("TestReports.GutConfigurationIsRecorded",
                      test_a_gut_configured_run_records_what_the_configuration_selects);
+        registerTest("TestReports.TimeoutReportsBoundedProgress",
+                     test_a_timeout_reports_observed_scripts_with_bounded_plain_output);
+        registerTest("TestReports.TimeoutByteLimitKeepsUtf8",
+                     test_timeout_output_remains_valid_utf8_at_the_byte_limit);
         registerTest("TestReports.OversizedReportReadToTheLimit",
                      test_an_oversized_report_is_read_no_further_than_the_limit);
         registerTest("TestReports.RunsOfOneNameKeepTheirOwnReports",

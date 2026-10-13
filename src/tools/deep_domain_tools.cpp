@@ -830,6 +830,12 @@ CallToolResult handleProjectRunTests(const json& args, std::shared_ptr<ipc::IIpc
                                std::chrono::system_clock::now().time_since_epoch())
                                .count());
     if (verdict.verdict == "pass") return CallToolResult::successJson(report);
+    if (facts.timed_out) {
+        // Keep full provenance in the record, but a timeout answer needs the
+        // observed progress rather than every script's hash.
+        report.erase("files");
+        report.erase("files_truncated");
+    }
     report["error"] = testRunError(verdict, request.value().timeout_seconds);
     auto result = CallToolResult::successJson(report);
     result.isError = true;
