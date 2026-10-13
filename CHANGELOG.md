@@ -136,6 +136,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Fixed
 
+- `2026-10-13` Profiler slow-frame reports use the same render-thread wait rule as the window verdict, with separate-thread fixture evidence on all three engine lines. [#1231](https://github.com/saworbit/didi/issues/1231)
 - `2026-10-13` SECURITY records why administrator bypass and non-strict branch checks are retained, and states the limits they leave. [#806](https://github.com/saworbit/didi/issues/806) · [PR #1363](https://github.com/saworbit/didi/pull/1363)
 - `2026-10-12` The agent guide covers node slots and presets that ship the addon, and CONTRIBUTING names the typed setter step in a class reference refresh. [PR #1356](https://github.com/saworbit/didi/pull/1356)
 - `2026-10-12` An editor ray or clearance query hits a `TileMapLayer` tile or `GridMap` cell placed after the editor started, as a game does. [#1308](https://github.com/saworbit/didi/issues/1308) · [PR #1354](https://github.com/saworbit/didi/pull/1354)

@@ -292,7 +292,73 @@ void test_a_separate_render_thread_is_waited_for_outside_the_frame() {
                                  kVsync60);
     ASSERT_EQ(bound(safe), std::string("unknown"));
     ASSERT_TRUE(!safe.contains("render_thread"));
+    ASSERT_EQ(safe["slow_frames"]["worst"][0]["bound"], "unknown");
     ASSERT_TRUE(frameBudget({true, 1, 60.0, 0, true}).separate_render_thread);
+}
+
+void test_probed_separate_frames_keep_their_attribution() {
+    // Individual frames returned by runtime_read_profiler on 2026-10-13,
+    // windowed Forward+ at 60 Hz with --render-thread separate. Long waits
+    // remain unknown when the measured work cannot account for the frame.
+    struct Probe {
+        FrameTiming frame;
+        double frame_ms;
+        const char* expected;
+    };
+    const Probe probes[] = {
+        // Godot 4.5.1, cpu fixture.
+        {timing(0.03, 30.089, 0.079, 542.862, 0.045, 0.005, 8), 573.06, "unknown"},
+        {timing(0.028, 30.092, 0.07, 433.516, 0.048, 0.004, 8), 463.706, "unknown"},
+        {timing(0.03, 30.096, 0.065, 403.04, 0.051, 0.005, 8), 433.231, "unknown"},
+        // Godot 4.5.1, gpu fixture.
+        {timing(0.027, 0.039, 0.05, 176.768, 0.064, 68.642, 8), 176.884, "unknown"},
+        {timing(0.029, 0.041, 0.06, 116.509, 0.064, 68.574, 7), 116.639, "gpu"},
+        {timing(0.026, 0.04, 0.057, 108.276, 0.057, 68.229, 6), 108.399, "gpu"},
+        // Godot 4.5.1, physics fixture.
+        {timing(249.042, 0.077, 0.068, 79.687, 0.651, 0.023, 8), 328.874, "physics"},
+        {timing(240.518, 0.086, 0.078, 73.937, 0.744, 0.023, 8), 314.619, "physics"},
+        {timing(222.409, 0.077, 0.064, 84.568, 0.498, 0.023, 8), 307.118, "physics"},
+        // Godot 4.6.2, cpu fixture.
+        {timing(0.03, 30.093, 0.078, 444.9, 0.046, 0.004, 8), 475.101, "unknown"},
+        {timing(0.034, 30.105, 0.072, 427.91, 0.049, 0.004, 8), 458.121, "unknown"},
+        {timing(0.035, 30.093, 0.074, 373.617, 0.052, 0.004, 8), 403.819, "unknown"},
+        // Godot 4.6.2, gpu fixture.
+        {timing(0.028, 0.043, 0.054, 180.062, 0.096, 68.626, 8), 180.187, "unknown"},
+        {timing(0.025, 0.054, 0.056, 116.587, 0.075, 68.62, 6), 116.722, "gpu"},
+        {timing(0.029, 0.045, 0.064, 99.815, 0.065, 68.13, 6), 99.953, "gpu"},
+        // Godot 4.6.2, physics fixture.
+        {timing(261.16, 0.187, 0.073, 693.421, 0.56, 0.025, 8), 954.841, "unknown"},
+        {timing(210.885, 0.072, 0.064, 4.321, 0.562, 0.028, 8), 215.342, "physics"},
+        {timing(210.203, 0.076, 0.067, 4.637, 0.641, 0.026, 8), 214.983, "physics"},
+        // Godot 4.7.2, cpu fixture.
+        {timing(0.029, 30.086, 0.073, 144.934, 0.102, 0.004, 8), 175.122, "unknown"},
+        {timing(0.028, 30.069, 0.064, 127.74, 0.044, 0.004, 8), 157.901, "unknown"},
+        {timing(0.028, 30.07, 0.066, 121.688, 0.045, 0.003, 8), 151.852, "unknown"},
+        // Godot 4.7.2, gpu fixture.
+        {timing(0.027, 0.039, 0.054, 186.881, 0.062, 68.62, 8), 187.001, "unknown"},
+        {timing(0.029, 0.047, 0.059, 186.279, 0.084, 68.689, 8), 186.414, "unknown"},
+        {timing(0.033, 0.047, 0.075, 141.351, 0.067, 68.628, 8), 141.506, "gpu"},
+        // Godot 4.7.2, physics fixture.
+        {timing(272.164, 0.133, 0.09, 412.468, 0.627, 0.027, 8), 684.855, "unknown"},
+        {timing(253.03, 0.097, 0.069, 6.106, 0.557, 0.021, 8), 259.302, "physics"},
+        {timing(237.34, 0.121, 0.08, 7.266, 0.759, 0.025, 8), 244.807, "physics"},
+    };
+    FrameBudget separate = kVsync60;
+    separate.separate_render_thread = true;
+    for (auto probe : probes) {
+        probe.frame.frame_ms = probe.frame_ms;
+        const auto verdict = judgePerformance(repeated(probe.frame, 12), separate);
+        ASSERT_EQ(bound(verdict), std::string(probe.expected));
+        ASSERT_EQ(verdict["render_thread"], "separate");
+        ASSERT_EQ(verdict["slow_frames"]["worst"][0]["bound"], probe.expected);
+        if (std::string(probe.expected) == "unknown") {
+            ASSERT_EQ(verdict["confidence"], "low");
+            ASSERT_TRUE(verdict["next"].get<std::string>().find("separate render thread") !=
+                        std::string::npos);
+        } else {
+            ASSERT_EQ(verdict["confidence"], "medium");
+        }
+    }
 }
 
 void test_too_few_frames_decide_nothing() {
@@ -457,6 +523,8 @@ struct RegisterPerformanceVerdict {
         registerTest("performance_verdict.outside_time", test_time_before_the_frame_is_not_given_to_any_part);
         registerTest("performance_verdict.separate_render_thread",
                      test_a_separate_render_thread_is_waited_for_outside_the_frame);
+        registerTest("performance_verdict.probed_separate_frames",
+                     test_probed_separate_frames_keep_their_attribution);
         registerTest("performance_verdict.too_few_frames", test_too_few_frames_decide_nothing);
         registerTest("performance_verdict.one_hitch", test_one_hitch_does_not_decide_the_window);
         registerTest("performance_verdict.stride_keeps_the_hitch", test_a_hitch_the_stride_drops_is_still_named);
