@@ -3,6 +3,7 @@
 #include "didi/tools/visual_test_lab_path.hpp"
 
 #include "didi/offline/gdscript_diagnostics.hpp"
+#include "didi/offline/class_reference.hpp"
 #include "didi/mcp/change_journal.hpp"
 #include "didi/mcp/error_data.hpp"
 #include "didi/mcp/follow_ups.hpp"
@@ -1910,6 +1911,60 @@ static std::optional<MisnamedArgument> misnamedArgument(const json& schema,
 // The caller has the value already, so a long one is not sent back to it.
 constexpr size_t kMaxEchoedArgumentBytes = 1024;
 
+// A string is still refused. Its exact enum spelling can supply the value to
+// send next, before the schema's oneOf refusal loses the offending event.
+static std::optional<CallToolResult> namedKeyRefusal(const ResolvedToolBinding& binding,
+                                                    const json& arguments) {
+    if (binding.canonical_name != "project_set_input_action" &&
+        binding.canonical_name != "runtime_inject_input") return std::nullopt;
+    if (!arguments.is_object() || !arguments.contains("events") ||
+        !arguments["events"].is_array()) return std::nullopt;
+    const auto& reference = offline::ClassReference::instance();
+    const auto* globals = reference.find("@GlobalScope");
+    const json* keys = nullptr;
+    if (globals && globals->contains("enums") && (*globals)["enums"].is_object() &&
+        (*globals)["enums"].contains("Key") && (*globals)["enums"]["Key"].is_object()) {
+        keys = &(*globals)["enums"]["Key"];
+    }
+    const auto& events = arguments["events"];
+    for (size_t index = 0; index < events.size(); ++index) {
+        const auto& event = events[index];
+        if (!event.is_object() || !event.contains("type") || event["type"] != "key") continue;
+        for (const auto* field : {"keycode", "physical_keycode"}) {
+            if (!event.contains(field) || !event[field].is_string()) continue;
+            const auto& sent = event[field].get_ref<const std::string&>();
+            const auto constant = sent.rfind("KEY_", 0) == 0 ? sent : "KEY_" + sent;
+            json data = {{"argument", "events[" + std::to_string(index) + "]." + field},
+                         {"event_index", index}, {"field", "events"}};
+            std::string message = "Argument 'events' entry " + std::to_string(index) + ": " +
+                field + " takes a Godot Key enum integer, not a string.";
+            const auto value = keys ? keys->find(constant) : json::const_iterator{};
+            if (keys && value != keys->end() && value->is_number_integer() &&
+                value->get<int64_t>() > 0) {
+                data["expected_value"] = *value;
+                data["api_version"] = reference.apiVersion();
+                // Keep the full batch's order and other fields. Truncating it
+                // to the bad event would silently omit the caller's other work.
+                if (events.dump().size() <= kMaxEchoedArgumentBytes) {
+                    json corrected = events;
+                    corrected[index][field] = *value;
+                    data["retry_with"] = {{"events", std::move(corrected)}};
+                }
+                message += " Send " + value->dump() + ", from the pinned " +
+                           reference.apiVersion() + " Key enum.";
+            }
+            if (!data.contains("retry_with")) {
+                data["next_call"] = {
+                    {"tool", "script_reflect_class"},
+                    {"arguments", {{"class_name", "@GlobalScope"}, {"fields", {"enums"}}}},
+                    {"reason", "Read the pinned Key enum and send its integer in this event."}};
+            }
+            return invalidArgumentsError(binding, message, data);
+        }
+    }
+    return std::nullopt;
+}
+
 // signal_connect and signal_disconnect call the emitter emitter_node and the
 // receiver target_node. signal_list_connections and signal_emit called their
 // emitter target_node, so the spelling the siblings insist on was refused here
@@ -2068,6 +2123,7 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
     // handler comes through this function, including the dry-run preview and a
     // confirmed mutation, so nothing gets a second door (#397).
     if (auto invalid = validateAgainstSchema(tool->inputSchema, arguments)) {
+        if (auto refused = namedKeyRefusal(binding, arguments)) return *refused;
         // The schema's enum can only list the seven platforms. The tool knows
         // which one "HTML5" or "Linux/X11" meant, and that answer, with its
         // did_you_mean and retry_with, never reached a caller because this

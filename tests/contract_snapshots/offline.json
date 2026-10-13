@@ -7291,7 +7291,7 @@
                         "type": "integer"
                       },
                       "keycode": {
-                        "description": "A Godot Key enum value, not an ASCII code or a character. Space is 32, Escape is 4194305, A is 65, F1 is 4194332; script_reflect_class on Key lists them all.",
+                        "description": "A Godot Key enum value, not an ASCII code or a character. Space is 32, Escape is 4194305, A is 65, F1 is 4194332; script_reflect_class on @GlobalScope lists the Key enum.",
                         "maximum": 4294967295,
                         "minimum": 1,
                         "type": "integer"

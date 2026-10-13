@@ -10426,6 +10426,73 @@ static void test_a_misnamed_argument_is_refused_with_the_name_to_use() {
     ASSERT_TRUE(!long_value.contains("retry_with"));
 }
 
+static void test_input_key_names_are_refused_with_the_integer_to_send() {
+    // Without the enum remedy a caller must guess a non-ASCII keycode. Refuse
+    // the whole batch before routing, and preserve every other event on retry.
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    for (const auto* tool : {"project_set_input_action", "runtime_inject_input"}) {
+        for (const auto* field : {"keycode", "physical_keycode"}) {
+            for (const auto& named : std::vector<std::pair<std::string, int>>{
+                     {"KEY_W", 87}, {"W", 87}, {"KEY_ESCAPE", 4194305}, {"ESCAPE", 4194305}}) {
+                didi::json first = {{"type", "key"}, {"keycode", 65}};
+                didi::json second = {{"type", "key"}, {field, named.first}};
+                didi::json args = {{"events", didi::json::array({first, second})}};
+                if (std::string(tool) == "project_set_input_action") args["action"] = "key_name_probe";
+                else {
+                    args["events"][0]["pressed"] = true;
+                    args["events"][1]["pressed"] = true;
+                }
+                const auto before = args;
+                const auto result = registry.callTool(tool, args);
+                ASSERT_TRUE(result.isError);
+                const auto error = didi::json::parse(result.content.front().text)["error"];
+                ASSERT_EQ(error["code"], 400);
+                const auto data = error["data"];
+                ASSERT_EQ(data["event_index"], 1);
+                ASSERT_EQ(data["argument"], std::string("events[1].") + field);
+                ASSERT_EQ(data["retry_with"]["events"][1][field], named.second);
+                ASSERT_EQ(data["retry_with"]["events"][0], args["events"][0]);
+                ASSERT_EQ(args, before);
+                auto retried = args;
+                retried.update(data["retry_with"]);
+                const auto next = registry.callTool(tool, retried);
+                ASSERT_TRUE(next.content.front().text.find("invalid_arguments") == std::string::npos);
+            }
+        }
+        for (const auto* unknown : {"w", "87", "Escape", "KEY_NO_SUCH_KEY", "KEY_NONE"}) {
+            didi::json event = {{"type", "key"}, {"keycode", unknown}};
+            didi::json args = {{"events", didi::json::array({event})}};
+            if (std::string(tool) == "project_set_input_action") args["action"] = "key_name_probe";
+            else args["events"][0]["pressed"] = true;
+            const auto result = registry.callTool(tool, args);
+            ASSERT_TRUE(result.isError);
+            const auto data = didi::json::parse(result.content.front().text)["error"]["data"];
+            ASSERT_TRUE(!data.contains("retry_with"));
+            ASSERT_EQ(data["next_call"]["tool"], "script_reflect_class");
+            ASSERT_EQ(data["next_call"]["arguments"]["class_name"], "@GlobalScope");
+        }
+    }
+    // A large retry would repeat the batch into the model's context. Keep the
+    // correction and its location while withholding the full echo.
+    didi::json large_events = didi::json::array();
+    for (int index = 0; index < 31; ++index) {
+        large_events.push_back({{"type", "key"}, {"keycode", 65}, {"pressed", true}});
+    }
+    large_events.push_back({{"type", "key"}, {"keycode", "KEY_ESCAPE"}, {"pressed", true}});
+    const auto large = registry.callTool("runtime_inject_input", {{"events", large_events}});
+    ASSERT_TRUE(large.isError);
+    const auto large_data = didi::json::parse(large.content.front().text)["error"]["data"];
+    ASSERT_EQ(large_data["event_index"], 31);
+    ASSERT_EQ(large_data["expected_value"], 4194305);
+    ASSERT_TRUE(!large_data.contains("retry_with"));
+    ASSERT_TRUE(large.content.front().text.size() < 1024);
+    const auto reflected = registry.callTool("script_reflect_class", {{"class_name", "@GlobalScope"}});
+    ASSERT_TRUE(!reflected.isError);
+    const auto enums = didi::json::parse(reflected.content.front().text)["enums"];
+    ASSERT_EQ(enums["Key"]["KEY_ESCAPE"], 4194305);
+}
+
 // A router with no route selected that can list sessions, as after an editor
 // restart or a stopped game left the route quarantined.
 class ListingRouter final : public didi::runtime::IRuntimeSessionClient {
@@ -10882,6 +10949,8 @@ struct RegisterToolTests {
                      test_project_audit_names_a_connection_to_a_method_nothing_declares);
         registerTest("Tools.MisnamedArgumentCarriesTheFix",
                      test_a_misnamed_argument_is_refused_with_the_name_to_use);
+        registerTest("Tools.InputKeyNameCarriesTheInteger",
+                     test_input_key_names_are_refused_with_the_integer_to_send);
         registerTest("Resources.DefaultRegistration", test_resource_registry);
         registerTest("Prompts.DefaultRegistration", test_prompt_registry);
     }

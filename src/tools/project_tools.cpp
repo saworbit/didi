@@ -682,8 +682,8 @@ void ToolRegistry::registerProjectTools() {
                                           {"description",
                                            "A Godot Key enum value, not an ASCII code or a "
                                            "character. Space is 32, Escape is 4194305, A is 65, "
-                                           "F1 is 4194332; script_reflect_class on Key lists "
-                                           "them all."}}},
+                                           "F1 is 4194332; script_reflect_class on @GlobalScope "
+                                           "lists the Key enum."}}},
                              {"physical_keycode", {{"type", "integer"}, {"minimum", 1},
                                                    {"maximum", 4294967295},
                                                    {"description",
