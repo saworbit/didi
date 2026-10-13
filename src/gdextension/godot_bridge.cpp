@@ -6576,8 +6576,17 @@ json GodotBridge::bridgeShaders(const std::string& method, const json& params, c
 
     auto groups = makeScalar(GDEXTENSION_VARIANT_TYPE_BOOL, static_cast<GDExtensionBool>(0));
     if (groups.isErr()) return errorJson(500, groups.error().message);
-    auto uniforms = callObject(shader.value(), "Shader", "get_shader_uniform_list", 1230511656LL,
-                               {&groups.value()});
+    auto code_value = callObject(shader.value(), "Shader", "get_code", 201670096LL);
+    if (code_value.isErr()) return errorJson(500, code_value.error().message);
+    auto code = stringFromVariant(code_value.value(), GDEXTENSION_VARIANT_TYPE_STRING);
+    if (code.isErr()) return errorJson(500, code.error().message);
+    // Shader.new() has no rendering-server shader until code is assigned.
+    // Asking it for uniforms prints the engine's null-shader error (#1358).
+    // An empty code string declares none, for reads and writes alike.
+    auto uniforms = code.value().empty()
+                        ? makeJsonVariant(json::array())
+                        : callObject(shader.value(), "Shader", "get_shader_uniform_list", 1230511656LL,
+                                     {&groups.value()});
     if (uniforms.isErr()) return errorJson(500, uniforms.error().message);
     auto size_value = callVariant(uniforms.value(), "size");
     if (size_value.isErr()) return errorJson(500, size_value.error().message);
