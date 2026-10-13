@@ -128,6 +128,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 - `2026-10-14` Raycast, clearance, frustum and navigation bridge queries compile in a spatial domain file with their existing engine checks. [#1255](https://github.com/saworbit/didi/issues/1255) · [PR #1398](https://github.com/saworbit/didi/pull/1398)
 - `2026-10-14` UI control listing and hit testing compile in their own bridge file while preserving geometry and hit ordering. [#1255](https://github.com/saworbit/didi/issues/1255) [PR #1398](https://github.com/saworbit/didi/pull/1398)
 - `2026-10-14` Animation bridge handlers compile in their own file and share the existing scene and undo helpers through a private header. [#1255](https://github.com/saworbit/didi/issues/1255) [PR #1398](https://github.com/saworbit/didi/pull/1398)
+- `2026-10-13` Six remaining mutation tools compare reported state with independent witnesses in CI, including fixtures without Git identity. [#1020](https://github.com/saworbit/didi/issues/1020) [#1371](https://github.com/saworbit/didi/pull/1371)
 - `2026-10-11` The live harness compares `asset_reimport`'s `announced` with the `.import` files on disk, so six mutating tools are left unchecked, not seven. [#1020](https://github.com/saworbit/didi/issues/1020) · [PR #1283](https://github.com/saworbit/didi/pull/1283)
 - `2026-10-11` The GDExtension sources share one definition of their Godot value wrappers and error answers, and a test fails on a new copy. [#1255](https://github.com/saworbit/didi/issues/1255) · [PR #1284](https://github.com/saworbit/didi/pull/1284)
 - `2026-10-11` `GodotBridge::execute` serves its methods from one table, and a test fails when the table and the editor hook's routed methods differ. [#1255](https://github.com/saworbit/didi/issues/1255) · [PR #1282](https://github.com/saworbit/didi/pull/1282)
@@ -154,12 +155,14 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Fixed
 
+- `2026-10-14` Refusal checks follow every bridge domain after file moves and retain the existing message and error-code rules. [#1255](https://github.com/saworbit/didi/issues/1255) [PR #1413](https://github.com/saworbit/didi/pull/1413)
 
 - `2026-10-14` Probe sessions close their pipes, reap shutdown or failed startup, retain stderr, and tolerate repeated cleanup. [#1394](https://github.com/saworbit/didi/issues/1394) [PR #1396](https://github.com/saworbit/didi/pull/1396)
 - `2026-10-14` Setup and doctor warn when Git still tracks Didi state or client files despite ignore rules, and name the untrack command. [#1376](https://github.com/saworbit/didi/issues/1376) [PR #1392](https://github.com/saworbit/didi/pull/1392)
 - `2026-10-14` Builds refresh the source commit in their identity without reconfigure or needless recompilation. [#1373](https://github.com/saworbit/didi/issues/1373) [PR #1391](https://github.com/saworbit/didi/pull/1391)
 - `2026-10-14` Created resources carry Godot-format UIDs, and overwrites preserve the file's existing identity. [#1382](https://github.com/saworbit/didi/issues/1382) [PR #1395](https://github.com/saworbit/didi/pull/1395)
 - `2026-10-14` Resource UID maps read the root header instead of assigning a reference's UID to the containing file. [#1393](https://github.com/saworbit/didi/issues/1393) [PR #1395](https://github.com/saworbit/didi/pull/1395)
+- `2026-10-13` Local file writers retain engine diagnostics from refused refreshes and restoring the previous scene tab. [#1289](https://github.com/saworbit/didi/issues/1289) [#1369](https://github.com/saworbit/didi/pull/1369)
 - `2026-10-13` Class reference refreshes refuse missing or unusable typed-setter probe output before replacing the reference. [#1360](https://github.com/saworbit/didi/issues/1360) · [PR #1362](https://github.com/saworbit/didi/pull/1362)
 - `2026-10-13` Focused GUT runs ignore the project config; timeout answers show bounded progress without file hashes. [#1375](https://github.com/saworbit/didi/issues/1375) [PR #1389](https://github.com/saworbit/didi/pull/1389)
 - `2026-10-13` Capped subprocess output drops an incomplete UTF-8 character instead of throwing while reporting the run. [#1388](https://github.com/saworbit/didi/issues/1388) [PR #1390](https://github.com/saworbit/didi/pull/1390)

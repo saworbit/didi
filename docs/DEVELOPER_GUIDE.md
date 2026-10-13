@@ -631,13 +631,23 @@ A tool that reads or writes a property of a node, or of a resource the node hold
 - If the tool mutates, which is what gives it `dry_run`, give it an entry in
   `tests/observed_post_state.json`. Either list the answer fields it reads back
   after the write and add a case to `tests/observed_post_state.ps1` that reads
-  the same state through `tests/godot_smoke/observed_witness.gd`, or exempt it
+  the same state through `tests/godot_smoke/observed_witness.gd`, or bind an
+  external case with `case: {source, function}`. Python bindings name a
+  `Class.test_method` that calls `check_observed` with that tool's literal name;
+  PowerShell bindings name a function that calls `Assert-ObservedExternalFields`
+  for that tool. Each case must actually complete its independent comparison.
+  Nested fields use dotted paths, such as `last_checkpoint.bytes`. Or exempt it
   with the reason and the issue that tracks the gap. Only a tool that claims no
   state after its call is exempt for good, with `"permanent": true` and the
   reason in place of an issue. A field copied from the
   request or read before the write is not observed, whatever its name.
   `tests/test_observed_post_state.py` fails the build until the entry exists,
   and the live harness fails when an answer disagrees with the engine.
+  The managed cases run in `tests/test_managed_recovery_live.py` on every engine
+  line. Run one with `python -m unittest tests.test_managed_recovery_live.ManagedRecoveryLive.test_observed_runtime_checkpoint -v`
+  after setting `DIDI_TEST_BINARY` and `DIDI_RECOVERY_GODOT`. Process liveness
+  on Windows uses owned native handles and creation times: Godot's
+  `OS.is_process_running` only knows children created by that Godot process.
 - Regenerate the [contract snapshots](#contract-snapshots), because a new tool
   changes `tools/list`. It also grows the full profile's bytes, so it may need
   a [budget](#tool-list-budgets-and-the-core-profile) raised first, in a pull

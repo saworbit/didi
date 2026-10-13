@@ -10,8 +10,8 @@ Every number here is derived from the suites themselves rather than written down
 
 | Measure | Count |
 | --- | ---: |
-| Automated tests | **1800** |
-| Live-harness assertions | 1721 |
+| Automated tests | **1814** |
+| Live-harness assertions | 1706 |
 
 The badge in the [README](../README.md) shows the automated test total. Harness assertions are counted separately because they are assertions inside one live scenario, not independently runnable cases; adding them together would flatter the number.
 
@@ -114,7 +114,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 
 ## Python contract suites (`tests/test_*.py`)
 
-**622 tests.** Derived from `test_*` methods on every `unittest.TestCase` subclass, read with `ast`.
+**636 tests.** Derived from `test_*` methods on every `unittest.TestCase` subclass, read with `ast`.
 
 | File | Tests |
 | --- | ---: |
@@ -143,9 +143,9 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `test_initialize_instructions.py` | 5 |
 | `test_managed_recovery.py` | 3 |
 | `test_managed_recovery_adversarial.py` | 3 |
-| `test_managed_recovery_live.py` | 4 |
+| `test_managed_recovery_live.py` | 10 |
 | `test_mcp_wire_contract.py` | 15 |
-| `test_observed_post_state.py` | 4 |
+| `test_observed_post_state.py` | 12 |
 | `test_phase7_plan_ownership.py` | 10 |
 | `test_phase7_schema_contract.py` | 6 |
 | `test_phase7_signal_admission.py` | 3 |
@@ -163,25 +163,26 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 
 ## Live Godot harness (`tests/*.ps1`)
 
-**1721 assertions.** Derived from `Assert-True` call sites. The harness is one long live scenario rather than a set of named cases, so this counts assertions and says so.
+**1706 assertions.** Derived from `Assert-True` call sites. The harness is one long live scenario rather than a set of named cases, so this counts assertions and says so.
 
 | File | Assertions |
 | --- | ---: |
 | `bounded_reads.ps1` | 4 |
 | `change_journal.ps1` | 20 |
 | `follow_ups.ps1` | 2 |
-| `observed_post_state.ps1` | 15 |
+| `observed_external.ps1` | 7 |
+| `observed_post_state.ps1` | 16 |
 | `performance_verdicts.ps1` | 14 |
 | `phase7_success.ps1` | 2 |
 | `profiler_shutdown.ps1` | 9 |
 | `rectangle_cell_fills.ps1` | 19 |
 | `refusal_remedies.ps1` | 3 |
 | `reimport_job.ps1` | 19 |
-| `run_godot_integration.ps1` | 1462 |
-| `scenario_runner.ps1` | 29 |
+| `run_godot_integration.ps1` | 1458 |
+| `scenario_runner.ps1` | 31 |
 | `scene_tab_reload.ps1` | 36 |
 | `test_runner.ps1` | 15 |
-| `typed_object_layer.ps1` | 63 |
+| `typed_object_layer.ps1` | 42 |
 | `ui_screen_space.ps1` | 9 |
 
 ## What is not counted here

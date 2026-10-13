@@ -99,8 +99,8 @@ independently.
 
 **How:** Define the shape once, as the fields a mutation answer uses for what it
 read back; `scene_set_property`'s `value`, `applied` and `not_applied` are the
-model. Put the test in `tests/run_godot_integration.ps1` so it runs on all three
-engine lines. A tool that writes files is checked by loading its output in the
+model. Put the test in `tests/run_godot_integration.ps1`, or bind an executable
+case in the managed live suite, so it runs on all three engine lines. A tool that writes files is checked by loading its output in the
 editor with `CACHE_MODE_IGNORE`. An exemption list names any tool that cannot be
 checked yet and why, and every exemption is a finding to fix, not a place to
 stay. The one exception is a tool that claims no state after its call, which is

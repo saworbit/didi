@@ -4622,9 +4622,14 @@ public:
             return created;
         }
         if (method == "scene.open") {
-            if (refuse_open) return didi::Error(500, "Godot did not activate the requested scene");
+            if (refuse_open) {
+                return didi::Error(500, "Godot did not activate the requested scene",
+                                   {{"engine_diagnostics", restore_engine_lines}});
+            }
             current = params.value("scene_path", std::string());
-            return didi::json{{"status", "success"}, {"opened", true}, {"scene_path", current}};
+            didi::json body = {{"status", "success"}, {"opened", true}, {"scene_path", current}};
+            if (!restore_engine_lines.empty()) body["engine_diagnostics"] = restore_engine_lines;
+            return body;
         }
         if (method == "editor.openScenes" && knows_open_scenes) {
             ++open_scene_requests;
@@ -4637,7 +4642,10 @@ public:
         }
         if (method != "resource.refreshCached") return didi::Error(404, "Unknown method: " + method);
         ++requests;
-        if (requests > answer_requests) return didi::Error(504, "no answer");
+        if (requests > answer_requests) {
+            return didi::Error(504, "no answer", {{"engine_diagnostics", engine_lines},
+                                                 {"engine_diagnostics_omitted", size_t{3}}});
+        }
         refresh_params.push_back(params);
         const bool discard = params.value("discard_unsaved", false);
         bool rebuilt_one = false;
@@ -4690,6 +4698,7 @@ public:
     std::set<std::string> held;
     std::set<std::string> broken;
     didi::json engine_lines = didi::json::array();
+    didi::json restore_engine_lines = didi::json::array();
     // Files the bridge says it still does not list after the scan it waited
     // for (#1177).
     std::set<std::string> unlisted;
@@ -4820,6 +4829,21 @@ static void test_a_local_writer_reports_what_the_editor_printed() {
     didi::json none = didi::json::object();
     didi::mcp::reportEditorCopies(none, didi::mcp::refreshEditorCopies(quiet, {"res://a.tres"}));
     ASSERT_TRUE(!none.contains("engine_diagnostics"));
+
+    // A failed first refresh has no observed copy state, but its diagnostics
+    // still belong to the writer's answer, for both single and batch writers.
+    editor->answer_requests = 0;
+    const auto refused = didi::mcp::refreshEditorCopies(editor, {"res://a.tres"});
+    ASSERT_TRUE(!refused.answered);
+    didi::json single = didi::json::object(), batch = didi::json::object();
+    didi::mcp::reportEditorCopy(single, refused);
+    didi::mcp::reportEditorCopies(batch, refused);
+    for (const auto& payload : {single, batch}) {
+        ASSERT_EQ(payload["engine_diagnostics"], editor->engine_lines);
+        ASSERT_EQ(payload["engine_diagnostics_omitted"], 3);
+        ASSERT_TRUE(!payload.contains("editor_copy_reloaded"));
+        ASSERT_TRUE(!payload.contains("editor_copies_reloaded"));
+    }
 }
 
 static void test_a_rename_reloads_the_editor_copies_it_rewrote() {
@@ -5168,6 +5192,8 @@ static void test_a_rebuild_that_moves_the_edited_scene_is_switched_back() {
     editor->open = {"res://a.tscn", "res://b.tscn", "res://c.tscn"};
     editor->current = "res://c.tscn";
     editor->stays_current = {"res://a.tscn", "res://b.tscn"};
+    editor->restore_engine_lines = didi::json::array(
+        {{{"level", "warning"}, {"message", "Restored scene warning."}}});
     const auto refresh =
         didi::mcp::refreshEditorCopies(editor, {"res://a.tscn", "res://b.tscn"}, true);
     ASSERT_EQ(refresh.scenes_reloaded.size(), 2u);
@@ -5175,6 +5201,7 @@ static void test_a_rebuild_that_moves_the_edited_scene_is_switched_back() {
     ASSERT_EQ(editor->current, "res://c.tscn");
     ASSERT_EQ(std::count(editor->methods.begin(), editor->methods.end(), "scene.open"), 1);
     ASSERT_EQ(editor->methods.back(), "scene.open");
+    ASSERT_EQ(refresh.engine_diagnostics, editor->restore_engine_lines);
 
     // A switch back the editor refuses is named with the way out.
     auto refusing = std::make_shared<EditorCopyClient>();
@@ -5182,9 +5209,11 @@ static void test_a_rebuild_that_moves_the_edited_scene_is_switched_back() {
     refusing->current = "res://c.tscn";
     refusing->stays_current = {"res://a.tscn"};
     refusing->refuse_open = true;
+    refusing->restore_engine_lines = editor->restore_engine_lines;
     const auto stuck = didi::mcp::refreshEditorCopies(refusing, {"res://a.tscn"}, true);
     ASSERT_EQ(stuck.scenes_reloaded, std::vector<std::string>{"res://a.tscn"});
     ASSERT_EQ(stuck.failed.size(), 1u);
+    ASSERT_EQ(stuck.engine_diagnostics, refusing->restore_engine_lines);
     ASSERT_EQ(stuck.failed[0]["path"], "res://a.tscn");
     const auto reason = stuck.failed[0]["reason"].get<std::string>();
     ASSERT_TRUE(reason.find("res://c.tscn") != std::string::npos);
