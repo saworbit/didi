@@ -246,6 +246,7 @@ set(GDEXT_SOURCES
     src/gdextension/editor_hook.cpp
     src/gdextension/expression_sandbox.cpp
     src/gdextension/godot_bridge.cpp
+    src/gdextension/bridge_anim.cpp
     src/gdextension/godot_values.cpp
     src/gdextension/runtime_bridge.cpp
     src/gdextension/viewport_renderer.cpp
