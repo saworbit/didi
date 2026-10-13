@@ -182,6 +182,7 @@ if (-not $fixtureRoot.StartsWith($buildRoot + [IO.Path]::DirectorySeparatorChar,
 . (Join-Path $PSScriptRoot 'scenario_runner.ps1')
 . (Join-Path $PSScriptRoot 'test_runner.ps1')
 . (Join-Path $PSScriptRoot 'performance_verdicts.ps1')
+. (Join-Path $PSScriptRoot 'profiler_shutdown.ps1')
 . (Join-Path $PSScriptRoot 'ui_screen_space.ps1')
 Remove-TestDirectory -Path $fixtureRoot
 # Only what the fixture tracks. The Python suites run the server against
@@ -5999,6 +6000,9 @@ text = "Not a key"
 
     # Q9 part 2. Its own project, with a stand-in for GUT's runner.
     Invoke-TestRunnerBlock -BuildRoot $buildRoot
+
+    # #1234. Its own game quits once a long profiler read owns the timer.
+    Invoke-ProfilerShutdownBlock -FixtureRoot $fixtureRoot
 
     # Q16 in docs/BUILD_QUEUE.md. It starts and stops windowed games of its own
     # beside the harness's headless one.
