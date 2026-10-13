@@ -109,6 +109,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 - `2026-09-23` A release archive can be installed and checked in one command. [PR #911](https://github.com/saworbit/didi/pull/911)
 
 ### Changed
+- `2026-10-14` Local CI uses the refreshed Ubuntu 24.04 image while keeping its base pinned by digest. [PR #1361](https://github.com/saworbit/didi/pull/1361)
 - `2026-10-14` Scene properties and instantiation compile with their typed preflight, shared-resource copy and undo checks. [#1255](https://github.com/saworbit/didi/issues/1255) · [PR #1413](https://github.com/saworbit/didi/pull/1413)
 - `2026-10-14` Shader inspection, uniform writes and compilation probes compile together with existing validation and undo checks. [#1255](https://github.com/saworbit/didi/issues/1255) · [PR #1412](https://github.com/saworbit/didi/pull/1412)
 - `2026-10-14` Ghost previews and viewport captures compile in their domains with existing RID cleanup and material restoration. [#1255](https://github.com/saworbit/didi/issues/1255) · [PR #1411](https://github.com/saworbit/didi/pull/1411)
