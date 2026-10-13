@@ -488,7 +488,7 @@ jobs:
           # in the same pull request, so a reviewer sees it as a diff rather
           # than a client finding it (Q3). The same module holds calls.json to
           # every read-only tool; the live answers are checked in the Godot job.
-          "$DIDI_PYTHON" -m unittest tests.test_contract_snapshots -v
+          "$DIDI_PYTHON" -m unittest tests.test_contract_snapshots tests.test_generate_class_reference -v
 
       - name: Verify each tool profile stays within its byte budget
         shell: bash
