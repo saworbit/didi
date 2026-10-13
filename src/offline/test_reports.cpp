@@ -358,7 +358,7 @@ json scriptsThatDidNotLoad(const std::string& output) {
     return listed;
 }
 
-std::string tail(const std::string& output, size_t lines_wanted) {
+std::string tail(const std::string& output, size_t lines_wanted, size_t max_bytes = 4000) {
     size_t count = 0;
     size_t at = output.size();
     while (at > 0 && count < lines_wanted) {
@@ -368,8 +368,54 @@ std::string tail(const std::string& output, size_t lines_wanted) {
         ++count;
     }
     auto text = output.substr(at == 0 ? 0 : at + 1);
-    if (text.size() > 4000) text = text.substr(text.size() - 4000);
+    if (text.size() > max_bytes) {
+        size_t start = text.size() - max_bytes;
+        while (start < text.size() && (static_cast<unsigned char>(text[start]) & 0xc0) == 0x80) ++start;
+        text = text.substr(start);
+    }
     return text;
+}
+
+std::string plainConsoleOutput(const std::string& output) {
+    std::string plain;
+    plain.reserve(output.size());
+    for (size_t at = 0; at < output.size();) {
+        const auto byte = static_cast<unsigned char>(output[at]);
+        if (byte == 0x1b) {
+            ++at;
+            if (at < output.size() && output[at] == '[') {
+                ++at;
+                while (at < output.size()) {
+                    const auto control = static_cast<unsigned char>(output[at++]);
+                    if (control >= 0x40 && control <= 0x7e) break;
+                }
+            }
+            continue;
+        }
+        if (byte >= 0x20 || byte == '\n' || byte == '\r' || byte == '\t') {
+            plain.push_back(output[at]);
+        }
+        ++at;
+    }
+    return plain;
+}
+
+json gutScriptProgress(const std::string& output, bool truncated) {
+    static const std::regex heading(R"(^\s*(res://.+\.gd)(?:\.[A-Za-z_][A-Za-z_0-9.]*)?\s*$)");
+    std::set<std::string> scripts;
+    std::string last;
+    std::istringstream lines(output);
+    std::string line;
+    while (std::getline(lines, line)) {
+        if (line.size() > 1200) continue;
+        std::smatch match;
+        if (!std::regex_match(line, match, heading) || match[1].length() > 1024) continue;
+        last = match[1].str();
+        scripts.insert(last);
+    }
+    return {{"scripts_started", scripts.size()},
+            {"last_script", last.empty() ? json(nullptr) : json(last)},
+            {"output_truncated", truncated}};
 }
 
 }  // namespace
@@ -524,11 +570,11 @@ Result<std::vector<std::string>> resolveTestPaths(const TestRunRequest& request,
         }
         return request.paths;
     }
-    if (fs::is_directory(root / "test", error)) return std::vector<std::string>{"res://test"};
     if (framework.framework == TestFramework::gut && fs::is_regular_file(root / ".gutconfig.json", error)) {
         // GUT reads its own configuration, which names the directories.
         return std::vector<std::string>{};
     }
+    if (fs::is_directory(root / "test", error)) return std::vector<std::string>{"res://test"};
     // Where the project does keep tests, so the refusal can say. GUT tests in
     // res://tests were answered with a sentence and nothing to send (#1302).
     const auto found = testScriptDirectories(root, framework.framework);
@@ -550,7 +596,7 @@ std::vector<std::string> testRunSeeds(const fs::path& project_root, const std::v
                                       TestFramework framework) {
     std::vector<std::string> seeds;
     std::vector<std::string> roots = test_paths;
-    if (framework == TestFramework::gut) {
+    if (framework == TestFramework::gut && test_paths.empty()) {
         std::ifstream in(project_root / ".gutconfig.json", std::ios::binary);
         const auto config = in ? json::parse(in, nullptr, false) : json();
         if (config.is_object()) {
@@ -562,8 +608,7 @@ std::vector<std::string> testRunSeeds(const fs::path& project_root, const std::v
                     if (entry.is_string()) roots.push_back(entry.get<std::string>());
                 }
             };
-            // GUT's command line names directories in place of the file's.
-            if (test_paths.empty()) listed("dirs");
+            listed("dirs");
             listed("tests");
         }
     }
@@ -654,6 +699,7 @@ std::vector<std::string> testCommandArguments(const InstalledTestFramework& fram
         // -gexit is what a headless GUT does anyway; saying so keeps a project
         // whose .gutconfig.json says otherwise from waiting for a window.
         arguments.push_back("-gexit");
+        if (!paths.empty()) arguments.push_back("-gconfig=");
         std::vector<std::string> dirs, files;
         for (const auto& path : paths) {
             (path.size() > 3 && path.compare(path.size() - 3, 3, ".gd") == 0 ? files : dirs).push_back(path);
@@ -850,6 +896,10 @@ TestRunVerdict judgeTestRun(const TestRunFacts& facts) {
     verdict.report["summary"] = verdict.summary;
     verdict.report["reason"] = verdict.reason.empty() ? json(nullptr) : json(verdict.reason);
     verdict.report["paths"] = facts.paths;
+    if (gut) {
+        verdict.report["configuration"] = {{"path", "res://.gutconfig.json"},
+                                            {"ignored", !facts.paths.empty()}};
+    }
     verdict.report["exit_code"] = facts.exit_code;
     verdict.report["counts"] = counts;
     verdict.report["tests"] = tests;
@@ -857,7 +907,13 @@ TestRunVerdict judgeTestRun(const TestRunFacts& facts) {
     verdict.report["scripts_did_not_load"] = did_not_load;
     verdict.report["addon_scripts_did_not_load"] = addon_did_not_load;
     verdict.report["truncated"] = truncated || facts.output_truncated;
-    if (verdict.verdict != "pass") verdict.report["output_tail"] = tail(facts.output, 40);
+    if (facts.timed_out) {
+        const auto plain = plainConsoleOutput(facts.output);
+        verdict.report["output_tail"] = tail(plain, 5, 512);
+        if (gut) verdict.report["progress"] = gutScriptProgress(plain, facts.output_truncated);
+    } else if (verdict.verdict != "pass") {
+        verdict.report["output_tail"] = tail(facts.output, 40);
+    }
     return verdict;
 }
 

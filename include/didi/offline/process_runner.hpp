@@ -14,6 +14,8 @@ struct ProcessRequest {
     std::vector<std::string> arguments;
     std::filesystem::path working_directory;
     std::chrono::milliseconds timeout{30000};
+    // Combined stdout/stderr byte cap. A capped UTF-8 prefix drops its final
+    // incomplete character, so it can contain up to three fewer bytes.
     size_t max_output_bytes{1024 * 1024};
     // Variables set for the child alone, on top of this process's own, each
     // replacing one of the same name. This process's environment is never

@@ -784,8 +784,36 @@ IgnoreCheck checkIgnored(const std::filesystem::path& project_root, const std::s
         return offline::runProcess(request);
     };
     auto inside = git({"rev-parse", "--is-inside-work-tree"});
+    if (inside.isOk() && (inside.value().timed_out || inside.value().cancelled ||
+                         inside.value().output_truncated)) {
+        return {false, "could not determine whether " + path + " is in a git work tree"};
+    }
     if (inside.isOk() && !inside.value().timed_out && inside.value().exit_code == 0 &&
         strings::trim(inside.value().output) == "true") {
+        auto tracked = git({"ls-files", "-z", "--", path});
+        if (tracked.isErr() || tracked.value().timed_out || tracked.value().exit_code != 0) {
+            return {false, "could not check git's index for " + path};
+        }
+        if (!tracked.value().output.empty()) {
+            // NUL separators count paths with newlines correctly; a merge can
+            // list one path at several stages, so count each complete name once.
+            std::set<std::string> names;
+            const auto& output = tracked.value().output;
+            for (size_t start = 0, end; (end = output.find('\0', start)) != std::string::npos;
+                 start = end + 1) {
+                names.insert(output.substr(start, end - start));
+            }
+            if (names.empty()) {
+                return {false, "could not read complete tracked paths from git's index for " + path};
+            }
+            const size_t count = names.size();
+            const auto command = "git rm -r --cached -- " + path;
+            return {false, (tracked.value().output_truncated ? "at least " : "") +
+                           std::to_string(count) + " tracked file" + (count == 1 ? "" : "s") +
+                           " in " + path + "; ignore rules do not untrack them. From the project root, run " + command +
+                           ", then commit the removal from the index. Files stay on disk.",
+                    count, tracked.value().output_truncated, command};
+        }
         auto checked = git({"check-ignore", "-v", "--no-index", "--", path});
         if (checked.isOk() && !checked.value().timed_out) {
             if (checked.value().exit_code == 0) {
@@ -799,6 +827,7 @@ IgnoreCheck checkIgnored(const std::filesystem::path& project_root, const std::s
                 return {false, "git does not ignore " + path};
             }
         }
+        return {false, "could not verify git's ignore rules for " + path};
     }
     // No git to ask: the file, read as git reads it.
     if (auto negated = unignored()) return *negated;

@@ -57,6 +57,14 @@ struct Report {
     }
 };
 
+void trackedIgnoreData(Step& step, const IgnoreCheck& state, const std::string& path) {
+    step.data["path"] = path;
+    if (state.tracked_count == 0) return;
+    step.data["tracked_count"] = state.tracked_count;
+    step.data["tracked_count_truncated"] = state.tracked_count_truncated;
+    if (!state.untrack_command.empty()) step.data["untrack_command"] = state.untrack_command;
+}
+
 int finish(const Report& report, bool as_json) {
     const auto exe = offline::executablePath();
     if (as_json) {
@@ -573,7 +581,7 @@ int runSetupCommand(const std::vector<std::string>& arguments) {
             report.add("ignore", "Ignore rules", "fail", ignored.error().message);
         } else if (ignored.value().added.empty()) {
             auto& step = report.add("ignore", "Ignore rules", "unchanged",
-                                    ".gitignore already keeps Didi's state and the client files out of version control");
+                                    ".gitignore already contains Didi's state and client file rules");
             step.data["file"] = utf8(ignored.value().file);
         } else {
             std::string added;
@@ -583,6 +591,15 @@ int runSetupCommand(const std::vector<std::string>& arguments) {
                                         " .gitignore: " + added +
                                         ". A file git already tracks stays tracked until git rm --cached removes it.");
             step.data["file"] = utf8(ignored.value().file);
+        }
+        if (ignored.isOk()) {
+            for (auto rule : rules) {
+                if (!rule.empty() && rule.front() == '/') rule.erase(0, 1);
+                const auto state = checkIgnored(root, rule);
+                if (state.tracked_count == 0) continue;
+                auto& step = report.add("ignore-tracked:" + rule, "Ignore rules", "warn", state.detail);
+                trackedIgnoreData(step, state, rule);
+            }
         }
     }
 
@@ -740,10 +757,11 @@ int runDoctorCommand(const std::vector<std::string>& arguments) {
 
     {
         const auto state = checkIgnored(root, kStateIgnoreRule);
-        report.add("ignore", "Ignore rules", state.ignored ? "ok" : "warn",
-                   state.ignored ? state.detail
+        auto& step = report.add("ignore", "Ignore rules", state.ignored ? "ok" : "warn",
+                   state.ignored || state.tracked_count > 0 ? state.detail
                                  : state.detail + ". It holds the arguments of every change and "
                                    "crash stacks. Run didi setup, or add the line yourself.");
+        trackedIgnoreData(step, state, kStateIgnoreRule);
     }
 
     // Each export preset whose builds carry the addon, which starts the session
@@ -834,6 +852,10 @@ int runDoctorCommand(const std::vector<std::string>& arguments) {
     for (const auto& spec : clientSpecs()) {
         const auto configured = readClientConfig(root, spec.id);
         if (!configured.file_present) continue;
+        const auto ignored = checkIgnored(root, spec.config_file);
+        auto& ignore_step = report.add(std::string("ignore-client:") + spec.name, "Ignore rules",
+                                       ignored.ignored ? "ok" : "warn", ignored.detail);
+        trackedIgnoreData(ignore_step, ignored, spec.config_file);
         any_client = true;
         if (configured.entry_present) named.push_back(spec.id);
         const auto id = std::string("client:") + spec.name;

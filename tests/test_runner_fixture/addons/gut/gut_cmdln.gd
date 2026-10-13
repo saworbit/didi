@@ -2,7 +2,7 @@ extends SceneTree
 
 # A stand-in for GUT's command-line runner, for the Q9 block in
 # tests/test_runner.ps1. It follows the contract project_run_tests relies on:
-# -gdir, -ginclude_subdirs, -gtest and -gjunit_xml_file in; GUT's JUnit shape
+# -gconfig, -gdir, -ginclude_subdirs, -gtest and -gjunit_xml_file in; GUT's JUnit shape
 # out; exit 1 when a test failed and 0 otherwise; a test file that does not
 # parse left out of the report, with Godot's own SCRIPT ERROR printed for it.
 # CI has no GUT, so this is what proves Didi's side of that contract on every
@@ -17,11 +17,25 @@ var _include_subdirs := false
 
 
 func _initialize() -> void:
+	_run.call_deferred()
+
+
+func _run() -> void:
+	var config_path := "res://.gutconfig.json"
+	for argument in OS.get_cmdline_args():
+		if argument.begins_with("-gconfig="):
+			config_path = argument.substr(9)
+	if config_path != "" and FileAccess.file_exists(config_path):
+		var config = JSON.parse_string(FileAccess.get_file_as_string(config_path))
+		if config is Dictionary:
+			_dirs = config.get("dirs", [])
+			_files = config.get("tests", [])
+			_include_subdirs = config.get("include_subdirs", false)
 	for argument in OS.get_cmdline_args():
 		if argument.begins_with("-gdir="):
-			_dirs.append_array(Array(argument.substr(6).split(",")))
+			_dirs = Array(argument.substr(6).split(","))
 		elif argument.begins_with("-gtest="):
-			_files.append_array(Array(argument.substr(7).split(",")))
+			_files = Array(argument.substr(7).split(","))
 		elif argument.begins_with("-gjunit_xml_file="):
 			_junit = argument.substr(17)
 		elif argument == "-ginclude_subdirs":
@@ -31,7 +45,12 @@ func _initialize() -> void:
 	var suites := []
 	var failures := 0
 	var total := 0
+	var seen := {}
 	for path in _files:
+		if seen.has(path):
+			continue
+		seen[path] = true
+		print(path)
 		# A file that does not parse prints its SCRIPT ERROR here and comes
 		# back null, and GUT leaves it out of the report the same way.
 		var script = load(path)
@@ -43,11 +62,13 @@ func _initialize() -> void:
 			if not test_name.begins_with("test_"):
 				continue
 			var test = script.new()
-			test.call(test_name)
+			get_root().add_child(test)
+			await test.call(test_name)
 			cases.append({"name": test_name, "failure": test.failure})
 			total += 1
 			if test.failure != "":
 				failures += 1
+			test.free()
 		suites.append({"path": path, "cases": cases})
 	if not _write(suites, failures, total):
 		quit(1)

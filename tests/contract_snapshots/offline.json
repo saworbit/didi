@@ -2446,7 +2446,7 @@
             },
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "library_name": {
@@ -2567,7 +2567,7 @@
             },
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "from_end": {
@@ -2617,7 +2617,7 @@
             },
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "options": {
@@ -2688,7 +2688,7 @@
           "properties": {
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "paths": {
@@ -2750,7 +2750,7 @@
           "properties": {
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "mute": {
@@ -2833,7 +2833,7 @@
             },
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "mute": {
@@ -2934,7 +2934,7 @@
             },
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "path": {
@@ -3078,7 +3078,7 @@
             },
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "expected_revision": {
@@ -3261,7 +3261,7 @@
             },
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "lease_seconds": {
@@ -3340,7 +3340,7 @@
             },
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "task_id": {
@@ -3414,7 +3414,7 @@
             },
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "priority": {
@@ -3582,7 +3582,7 @@
             },
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "note": {
@@ -3665,7 +3665,7 @@
             },
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "expected_updated_at_ms": {
@@ -3888,7 +3888,7 @@
             },
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "environment": {
@@ -4163,7 +4163,7 @@
           "properties": {
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             }
           },
@@ -4205,7 +4205,7 @@
             },
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "request_id": {
@@ -4330,7 +4330,7 @@
           "properties": {
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             }
           },
@@ -4365,7 +4365,7 @@
           "properties": {
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "journal_entry": {
@@ -4468,7 +4468,7 @@
             },
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "extra_args": {
@@ -4693,7 +4693,7 @@
             },
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "generate_collisions": {
@@ -4755,9 +4755,48 @@
           "openWorldHint": false,
           "readOnlyHint": false
         },
-        "description": "Places 3D mesh library tiles inside a GridMap with coordinate orientations.",
+        "description": "Writes or erases GridMap cells or uniform boxes; at most 256 records and 4096 cells.",
         "inputSchema": {
           "$defs": {
+            "rect": {
+              "additionalProperties": false,
+              "properties": {
+                "position": {
+                  "$ref": "#/$defs/vector3i"
+                },
+                "size": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "x": {
+                      "maximum": 4096,
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "y": {
+                      "maximum": 4096,
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "z": {
+                      "maximum": 4096,
+                      "minimum": 1,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "x",
+                    "y",
+                    "z"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "position",
+                "size"
+              ],
+              "type": "object"
+            },
             "vector3i": {
               "oneOf": [
                 {
@@ -4819,7 +4858,12 @@
               "description": "The cells to write or erase.",
               "items": {
                 "additionalProperties": false,
-                "anyOf": [
+                "oneOf": [
+                  {
+                    "required": [
+                      "coords"
+                    ]
+                  },
                   {
                     "required": [
                       "position"
@@ -4827,7 +4871,7 @@
                   },
                   {
                     "required": [
-                      "coords"
+                      "rect"
                     ]
                   }
                 ],
@@ -4848,6 +4892,9 @@
                   },
                   "position": {
                     "$ref": "#/$defs/vector3i"
+                  },
+                  "rect": {
+                    "$ref": "#/$defs/rect"
                   }
                 },
                 "required": [
@@ -4861,7 +4908,7 @@
             },
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "gridmap_path": {
@@ -4909,7 +4956,7 @@
           "properties": {
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "events": {
@@ -5303,7 +5350,7 @@
             },
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "parent_path": {
@@ -5364,7 +5411,7 @@
             },
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "payload": {
@@ -5416,7 +5463,7 @@
           "properties": {
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "nav_node_path": {
@@ -5593,7 +5640,7 @@
             },
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "file_path": {
@@ -5789,7 +5836,7 @@
             },
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "steps": {
@@ -5832,7 +5879,7 @@
           "properties": {
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "export_path": {
@@ -6054,7 +6101,7 @@
             },
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "run_frames": {
@@ -6186,7 +6233,7 @@
             },
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "mode": {
@@ -6565,7 +6612,7 @@
           "properties": {
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "name": {
@@ -6615,7 +6662,7 @@
             },
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             }
           },
@@ -6664,7 +6711,7 @@
             },
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "max_impacts": {
@@ -7124,7 +7171,7 @@
           "properties": {
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "name": {
@@ -7198,7 +7245,7 @@
             },
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "events": {
@@ -7407,7 +7454,7 @@
             },
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "remove": {
@@ -7651,7 +7698,7 @@
             },
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "overwrite": {
@@ -7882,7 +7929,7 @@
             },
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             }
           },
@@ -7997,7 +8044,7 @@
             },
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "duration_ms": {
@@ -8222,7 +8269,7 @@
           "properties": {
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "events": {
@@ -8614,7 +8661,7 @@
             },
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "extra_args": {
@@ -8909,7 +8956,7 @@
           "properties": {
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             }
           },
@@ -8986,7 +9033,7 @@
             },
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             }
           },
@@ -9024,7 +9071,7 @@
           "properties": {
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "headless": {
@@ -9166,7 +9213,7 @@
           "properties": {
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "paused": {
@@ -9208,7 +9255,7 @@
           "properties": {
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "frames": {
@@ -9250,7 +9297,7 @@
           "properties": {
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "exit_code": {
@@ -9292,7 +9339,7 @@
           "properties": {
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "duration_ms": {
@@ -9390,7 +9437,7 @@
           "properties": {
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "group": {
@@ -9458,7 +9505,7 @@
             },
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "method_name": {
@@ -9521,7 +9568,7 @@
             },
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             }
           },
@@ -9556,7 +9603,7 @@
           "properties": {
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "overwrite": {
@@ -9617,7 +9664,7 @@
           "properties": {
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "target_node": {
@@ -9945,7 +9992,7 @@
           "properties": {
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "name": {
@@ -10062,7 +10109,7 @@
           "properties": {
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "scene_path": {
@@ -10106,7 +10153,7 @@
           "properties": {
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "overwrite": {
@@ -10162,7 +10209,7 @@
           "properties": {
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "group": {
@@ -10213,7 +10260,7 @@
           "properties": {
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "target_node": {
@@ -10257,7 +10304,7 @@
           "properties": {
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "keep_global_transform": {
@@ -10313,7 +10360,7 @@
           "properties": {
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "make_unique": {
@@ -10428,7 +10475,7 @@
           "properties": {
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "script_path": {
@@ -10612,7 +10659,7 @@
             },
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "overwrite": {
@@ -10667,7 +10714,7 @@
           "properties": {
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "target_node": {
@@ -10816,7 +10863,7 @@
             },
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "file_path": {
@@ -11140,7 +11187,7 @@
           "properties": {
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "property_name": {
@@ -11213,7 +11260,7 @@
           "properties": {
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "emitter_node": {
@@ -11295,7 +11342,7 @@
           "properties": {
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "emitter_node": {
@@ -11415,7 +11462,7 @@
             },
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "emitter_node": {
@@ -11799,7 +11846,7 @@
           "openWorldHint": false,
           "readOnlyHint": false
         },
-        "description": "Batch updates 2D TileMapLayer cells with source IDs, atlas coordinates, and alternate tiles.",
+        "description": "Writes or erases TileMapLayer cells or uniform rectangles; at most 256 records and 4096 cells.",
         "inputSchema": {
           "$defs": {
             "atlas_coords": {
@@ -11842,6 +11889,39 @@
                   "type": "object"
                 }
               ]
+            },
+            "rect": {
+              "additionalProperties": false,
+              "properties": {
+                "position": {
+                  "$ref": "#/$defs/vector2i"
+                },
+                "size": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "x": {
+                      "maximum": 4096,
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "y": {
+                      "maximum": 4096,
+                      "minimum": 1,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "x",
+                    "y"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "position",
+                "size"
+              ],
+              "type": "object"
             },
             "vector2i": {
               "oneOf": [
@@ -11895,7 +11975,7 @@
                 "oneOf": [
                   {
                     "additionalProperties": false,
-                    "anyOf": [
+                    "oneOf": [
                       {
                         "required": [
                           "coords"
@@ -11904,6 +11984,11 @@
                       {
                         "required": [
                           "position"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "rect"
                         ]
                       }
                     ],
@@ -11923,6 +12008,9 @@
                       "position": {
                         "$ref": "#/$defs/vector2i"
                       },
+                      "rect": {
+                        "$ref": "#/$defs/rect"
+                      },
                       "source_id": {
                         "maximum": 2147483647,
                         "minimum": 0,
@@ -11937,7 +12025,7 @@
                   },
                   {
                     "additionalProperties": false,
-                    "anyOf": [
+                    "oneOf": [
                       {
                         "required": [
                           "coords"
@@ -11946,6 +12034,11 @@
                       {
                         "required": [
                           "position"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "rect"
                         ]
                       }
                     ],
@@ -11958,6 +12051,9 @@
                       },
                       "position": {
                         "$ref": "#/$defs/vector2i"
+                      },
+                      "rect": {
+                        "$ref": "#/$defs/rect"
                       }
                     },
                     "required": [
@@ -11973,7 +12069,7 @@
             },
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "tilemap_path": {
@@ -12368,7 +12464,7 @@
             },
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "environment": {
@@ -12543,7 +12639,7 @@
             },
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "fov": {
@@ -12616,7 +12712,7 @@
             },
             "dry_run": {
               "default": false,
-              "description": "Return a non-mutating change preview instead of executing.",
+              "description": "Preview changes without mutation.",
               "type": "boolean"
             },
             "navigation_mesh": {

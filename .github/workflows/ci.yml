@@ -411,7 +411,7 @@ jobs:
           # The load-bearing assertion is that no tool argument can turn
           # confirmations off. An agent able to authorise its own bypass would
           # make the confirmation system decorative.
-          "$DIDI_SCHEMA_PYTHON" -m unittest tests.test_yolo_mode tests.test_stdio_process -v
+          "$DIDI_SCHEMA_PYTHON" -m unittest tests.test_yolo_mode tests.test_stdio_process tests.test_vibe_mcp_client -v
 
       - name: Verify the Control Room page and its MCP Apps contract
         shell: bash
@@ -433,7 +433,7 @@ jobs:
           # A typo used to start the server as though the launch had succeeded,
           # and a value option could swallow the flag after it, so an operator
           # could ask for a mode and quietly start without it.
-          "$DIDI_PYTHON" -m unittest tests.test_cli_arguments -v
+          "$DIDI_PYTHON" -m unittest tests.test_cli_arguments tests.test_build_identity -v
 
       - name: Verify didi setup gives a bare project a working session
         shell: bash
@@ -734,6 +734,20 @@ jobs:
           $env:PYTHONPATH = Join-Path $PWD 'tests'
           python -m unittest tests.test_editor_startup_live -v
 
+      - name: Verify focused test runs ignore the GUT project config
+        shell: pwsh
+        env:
+          GODOT_VERSION: ${{ matrix.godot-version }}
+        run: |
+          $godot = Get-ChildItem -Path godot-bin -Filter "Godot_v${env:GODOT_VERSION}-stable_win64.exe" |
+                   Select-Object -First 1
+          if (-not $godot) { throw "Godot native executable not found under godot-bin" }
+          $env:DIDI_TEST_BINARY = (Resolve-Path build/didi.exe).Path
+          $env:DIDI_TEST_GODOT = $godot.FullName
+          $env:DIDI_TEST_GUT_PATH = (Resolve-Path tests/test_runner_fixture/addons/gut).Path
+          python -m unittest tests.test_project_run_tests_live -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       # One command gives a working session (Q12, #1144): didi setup installs
       # the addon this build laid out, starts this line's editor headless, and
       # the server a client would start reaches it. The dock's own code, run
@@ -750,6 +764,18 @@ jobs:
           $env:DIDI_SETUP_GODOT = $godot.FullName
           $env:PYTHONPATH = Join-Path $PWD 'tests'
           python -m unittest tests.test_didi_setup.SetupLive -v
+
+      - name: Verify locally created resource UIDs load in Godot
+        shell: pwsh
+        env:
+          GODOT_VERSION: ${{ matrix.godot-version }}
+        run: |
+          $godot = Get-ChildItem -Path godot-bin -Filter "Godot_v${env:GODOT_VERSION}-stable_win64.exe" |
+                   Select-Object -First 1
+          if (-not $godot) { throw "Godot native executable not found under godot-bin" }
+          $env:DIDI_TEST_BINARY = (Resolve-Path build/didi.exe).Path
+          $env:DIDI_UID_GODOT = $godot.FullName
+          python -m unittest tests.test_resource_uid_live -v
 
       # tests/contract_snapshots/live-<line>.json: the listings once an editor
       # on this line is attached, and the answers to the read-only calls in

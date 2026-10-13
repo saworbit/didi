@@ -766,7 +766,7 @@ Every diff also reports two perceptual measures, whether or not a tolerance was 
 
 ### `viewport_create_test_lab` — Offline
 
-Writes `res://didi_test_lab.tscn` with a basic light, environment node, ground box, and three cameras. A `.tscn` or `.scn` target is instanced under the lab as `TargetInstance`; any other resource is attached to a `TargetInstance` holder node as `metadata/didi_target`, since a plain resource cannot be a node. The result says which happened with `target_instanced`, and reports `target_resource_path` resolved, the way every writer does, and `file_bytes`, the size of the file read back from disk. The header carries no uid, as `resource_create`'s does not; the one it used to carry was not a uid Godot could read, so every lab had none anyway (#1164).
+Writes `res://didi_test_lab.tscn` with a basic light, environment node, ground box, and three cameras. A `.tscn` or `.scn` target is instanced under the lab as `TargetInstance`; any other resource is attached to a `TargetInstance` holder node as `metadata/didi_target`, since a plain resource cannot be a node. The result says which happened with `target_instanced`, and reports `target_resource_path` resolved, the way every writer does, and `file_bytes`, the size of the file read back from disk. The lab header carries no uid; the one it used to carry was not a uid Godot could read, so every lab had none anyway (#1164).
 
 The lab lives at the project root, not under `addons/didi`, so `project_audit_assets` and the search tools can see it, and a project without the addon does not have the folder invented for it. The target is checked before anything is written or created: a target that does not exist is refused with `404` and the project is left exactly as it was.
 
@@ -929,12 +929,16 @@ All three tools are implemented live in editor sessions.
 Writes or erases cells on a `TileMapLayer` in one undoable batch.
 
 - `tilemap_path` (`string`, required): the layer to edit.
-- `cells` (`array`, required): 1 to 256 records. Each is either a write or an erase, and nothing else is accepted.
+- `cells` (`array`, required): 1 to 256 records, touching at most 4096 cells in total. Each is a write or erase.
   - A write carries `coords` (each component `-1048576..1048576`), `source_id` (`integer`, `0..2147483647`), `atlas_coords` (each component `0..1048576`), and optionally `alternative_tile` (`integer`, `0..65535`, default `0`).
   - An erase carries `coords` and `erase: true`.
 - `dry_run` (`boolean`, default `false`).
 
 A coordinate is `[x, y]` or `{"x": .., "y": ..}`, whichever you have. Vectors are objects everywhere else on this surface and `tilemap_get_used_rect` answers with objects, so a used rect can be fed straight back into a write. `coords` and `position` are the same field: this tool and `gridmap_set_cells` each take the other's name.
+
+A record can use `rect: {"position": {"x": 0, "y": 0}, "size": {"x": 40, "y": 24}}` instead of `coords` or `position`. The position also accepts an integer pair; size is an object with positive integer components. The position is included and position plus size is excluded. The final coordinates must remain within the cell coordinate bounds. All records, including rectangles, must cover distinct cells; overlap refuses the whole call before mutation. The 256 limit counts input records, and the separate 4096 limit bounds expanded work. To make a border, fill the outer rectangle with wall tiles, then fill the smaller inner rectangle with floor tiles in a second call.
+
+Individual records keep their existing response shape. A rectangle returns one `cells` entry with `rect`, `cell_count`, and the uniform `source_id`, `atlas_coords` and `alternative_tile` observed after every covered cell was checked. The requested, changed and unchanged counts count cells, including ones expanded from rectangles. There is one UndoRedo action for the entire call, no action for a no-op, and a postcondition failure rolls it back.
 
 The answer's `cells` lists, in request order, what each requested cell holds as the layer reports it: `coords`, `source_id`, `atlas_coords` and `alternative_tile`, read after the commit for a cell that changed, and from the read before it for one that did not. An erased cell reads `source_id: -1`. `gridmap_set_cells` answers the same way with `position`, `item` and `orientation` (#1019).
 
@@ -947,6 +951,8 @@ Returns the used cell boundaries of a `TileMapLayer` without changing it.
 The response carries exact integer `position`, `size`, and end fields.
 
 ### `gridmap_set_cells` — Live
+
+A record also accepts `rect` instead of `position` or `coords`, with a 3D position and positive object size, such as `{"position": [0, 0, 0], "size": {"x": 16, "y": 16, "z": 16}}`. It uniformly writes the existing `item` and optional `orientation`, or erases with `item: -1`. The same 256-record and 4096-cell limits, exclusive endpoint, overlap refusal and one-step UndoRedo apply. A box returns one compact observed `cells` entry with `rect`, `cell_count`, `item` and `orientation`; individual-cell answers are unchanged.
 
 Places or clears `MeshLibrary` items in a `GridMap` in one undoable batch.
 
@@ -1011,6 +1017,8 @@ The result carries `property_check` with `checked` (whether the check ran at all
 
 The result adds `external_references` (path, resource type, id and uid for each header entry), `sub_resources_written` (id, type and the properties each got, in file order) and `load_steps`. 
 
+Each new resource carries a Godot-format random 63-bit UID in its root header. An overwrite preserves the existing root UID; an external reference never supplies it. The response adds `uid`, read back from the written header, and the next project UID map includes it. Identity selection, write, and read-back hold the file lock. An unreadable existing UID or a root header not fully read within the first 64 KiB is refused before replacement. This is file identity; engine registration still follows the editor filesystem scan.
+
 ```json
 {
   "save_path": "res://art/arena_tileset.tres",
@@ -1067,7 +1075,7 @@ Returns UID-to-path mappings discovered in indexed project resources, and option
 
 - `resolve` (`array`, optional): 1 to 256 non-empty `uid://` or `res://` strings.
 
-`uid_map` and `total_uids` always come from the project files, and `uid_map_source` says so on every response. `ResourceUID` exposes no enumeration through GDExtension, so a connected editor does not make the map live; a call without `resolve` therefore reports `execution_mode: "local"`. Not `offline_fallback`: there is no live path for the map to fall back from, so an attached editor would change nothing about the answer.
+`uid_map` and `total_uids` always come from the project files, and `uid_map_source` says so on every response. A text resource or scene owns only the UID on its opening `gd_resource` or `gd_scene` tag. External references and script text do not supply the containing file's UID; scripts use their sidecars. `ResourceUID` exposes no enumeration through GDExtension, so a connected editor does not make the map live; a call without `resolve` therefore reports `execution_mode: "local"`. Not `offline_fallback`: there is no live path for the map to fall back from, so an attached editor would change nothing about the answer.
 
 With `resolve` and a connected editor the answers come from `ResourceUID`, the table the engine itself resolves against, and the response reports `execution_mode: "live"`. Each entry carries `query`, `found`, `uid`, `path`, and `source` (`engine` or `index`). A live entry adds `index_state`: `agrees`, `differs` (a sidecar or `.import` the engine contradicts, which is the drift worth acting on), or `absent`. A miss carries `reason`: `unknown_to_engine` for a well-formed UID or path the engine holds nothing for, `malformed_uid` for text that is not a UID, `unsupported_query` for anything that is neither form, and offline `not_in_project_files` — which is not the same claim as the resource not existing, because a running editor can know a UID whose sidecar has not been written yet.
 
@@ -1730,7 +1738,7 @@ Scene paths reject absolute filesystem paths, backslashes, and parent-relative s
 
 ## 11. Phase 3 runtime sessions
 
-Phase 3 routes live operations to authenticated Godot editors and games. The four session-management tools advertise `local_session_management` because they run locally in the MCP process, which is the same name their successful payloads carry in `execution_mode`. The other six tools advertise `live` and require a session: a legacy client attaches one and later requests inherit it, while a request declaring protocol `2026-07-28` names the session it means in `_meta.didi.runtime_session_id` and is served on that one only. Several sessions can be held at once, so two tasks sharing one process each drive their own editor. On first availability, Didi auto-attaches only when canonical-project discovery yields one session, or one editor among games. Multiple editors or game-only multiplicity remain detached. Explicit attach/detach or route quarantine disables later auto-selection.
+Phase 3 routes live operations to authenticated Godot editors and games. The four session-management tools advertise `local_session_management` because they run locally in the MCP process, which is the same name their successful payloads carry in `execution_mode`. The other six tools advertise `live` and require a session: a legacy client attaches one and later requests inherit it, while a request declaring protocol `2026-07-28` uses `_meta.didi.runtime_session_id` when supplied, or the last successful explicit attach when omitted. A lost explicit choice is refused even for tools with an offline fallback. Automatic discovery does not supply a modern route; detach clears the choice. Several sessions can be held at once, so two tasks sharing one process each drive their own editor. On first availability, Didi auto-attaches only when canonical-project discovery yields one session, or one editor among games. Multiple editors or game-only multiplicity remain detached. Explicit attach/detach or route quarantine disables later auto-selection.
 
 ### `runtime_list_sessions` — Local session management
 
@@ -1902,7 +1910,7 @@ Successful JSON results also carry `structuredContent` alongside the existing te
 
 ## 12. Phase 5 deep domains
 
-All Phase 5 subprocess tools launch an executable with an argv array, never through a command shell. Combined stdout/stderr is capped at 1 MiB, output reports truncation, deadlines terminate the child process group, and paths are confined to the current project. Godot-backed operations use `GODOT_BIN` when set or normal Godot discovery; C# diagnostics require `dotnet` on `PATH`.
+All Phase 5 subprocess tools launch an executable with an argv array, never through a command shell. Combined stdout/stderr is capped at 1 MiB on complete UTF-8 character boundaries, output reports truncation, deadlines terminate the child process group, and paths are confined to the current project. Godot-backed operations use `GODOT_BIN` when set or normal Godot discovery; C# diagnostics require `dotnet` on `PATH`.
 
 A Godot that cannot be started, because nothing is at the path or the file there is not an executable, is refused `503` with `data.code: "engine_unavailable"`, `engine_executable` and `restart_with: "GODOT_BIN set to a Godot executable"` by `shader_check_compile`, `project_export` and `gridmap_export_mesh_library`. That is the code `script_check_syntax` uses for the same fault. A failure of the helper environment itself is still a `500`.
 
@@ -1968,12 +1976,12 @@ Setting a uniform is `shader_set_uniform`, above.
 Runs the project's own GUT or GdUnit4 tests in a headless Godot and returns a result per test, read from the JUnit XML the framework writes. It needs no editor and no session. Q9 in [the build queue](BUILD_QUEUE.md#q9-proof-in-one-call).
 
 - `framework` (`auto`, `gut` or `gdunit4`, default `auto`): `auto` runs whichever is in `addons/` (`addons/gut/gut_cmdln.gd` or `addons/gdUnit4/bin/GdUnitCmdTool.gd`). A project with both has to name one, and one the project does not have is `404`.
-- `paths` (`array` of `res://` directories or `.gd` files, at most 32): default `res://test`, or for GUT with no `res://test`, the directories in its `.gutconfig.json`.
+- `paths` (`array` of `res://` directories or `.gd` files, at most 32): selects only those paths. With none given, GUT uses `.gutconfig.json` when present; otherwise the default is `res://test`.
 - `name` (`string`, default `tests`): the run is recorded as `.didi/scenarios/<name>.json`, beside `runtime_run_scenario`'s records.
 - `timeout_seconds` (`integer`, 5 to 900, default 120).
 - `request_id`: runs it as a job.
 
-GUT is given `-gexit`, `-gdir` and `-ginclude_subdirs` for directories, `-gtest` for files, and `-gjunit_xml_file`; GdUnit4 is given `--ignoreHeadlessMode`, one `-a` per path, and `-rd` with `-rc 1`. The report goes under `.didi/tests/<name>/<run>/`, a directory of the run's own, so two runs of one name at once never read or clear each other's report. A later run of the name removes a run's directory once it is older than the longest timeout and five minutes more.
+GUT is given `-gexit`, `-gdir` and `-ginclude_subdirs` for directories, `-gtest` for files, and `-gjunit_xml_file`. A path selection adds `-gconfig=` so configured directories and tests cannot widen it. `configuration.path` names `.gutconfig.json`, and `configuration.ignored` says whether the run bypassed it. GdUnit4 is given `--ignoreHeadlessMode`, one `-a` per path, and `-rd` with `-rc 1`. The report goes under `.didi/tests/<name>/<run>/`, a directory of the run's own, so two runs of one name at once never read or clear each other's report. A later run of the name removes a run's directory once it is older than the longest timeout and five minutes more.
 
 **The verdict is the report's, not the exit code's.** Measured on 4.7.2, GUT exits `0` when it found no tests, and exits `0` without writing any report when the project was never imported; GdUnit4 exits `0` when it found no tests. So `verdict` is:
 
@@ -1983,11 +1991,11 @@ GUT is given `-gexit`, `-gdir` and `-ginclude_subdirs` for directories, `-gtest`
 
 **A test file that does not parse fails the run.** GUT leaves it out of its report and exits on whatever the other tests did, and GdUnit4 stops and writes nothing. Both print Godot's `SCRIPT ERROR: Parse Error` with the file and line, so `scripts_did_not_load` lists them and the run cannot pass. A script under `addons/` outside the tested paths is listed in `addon_scripts_did_not_load` instead and does not stop a pass: GUT 9.7.1 has two files that do not parse on 4.5.1 and 4.6.2, and its tests run all the same.
 
-`counts` has `total`, `passed`, `failed`, `errors`, `skipped` and `no_assertions`. GUT marks a test that asserted nothing, and it is counted there rather than as a pass. A run that did not pass carries `output_tail`, the last lines Godot printed.
+`counts` has `total`, `passed`, `failed`, `errors`, `skipped` and `no_assertions`. GUT marks a test that asserted nothing, and it is counted there rather than as a pass. A run that did not pass carries `output_tail`, the last lines Godot printed. On a timeout it is five lines at most, capped at 512 bytes, with ANSI colors removed. A GUT timeout also carries `progress.scripts_started` and `progress.last_script`, read from the script headings in the kept output; `progress.output_truncated` says whether that observation covers only the captured prefix. No heading means zero scripts observed and a null last script.
 
 A run that did not pass answers `isError: true` with the report and an `error` beside it: `422 tests_failed`, `422 no_tests` with `field: "paths"`, `422 scripts_did_not_load`, `422 output_truncated` with `field: "paths"`, `409 project_not_imported`, `504 timeout` with `retry_with` a longer `timeout_seconds`.
 
-Like `runtime_run_scenario`, the answer records the SHA-256 of `project.godot`, the autoloads, the test scripts and every script they reach, through `res://` literals and the `class_name` identifiers they use; nothing under `addons/` is followed. For GUT it also records `.gutconfig.json` and the `tests` it lists, because GUT runs those whatever paths were given (#1246). [`godot://project/scenarios`](RESOURCES_AND_PROMPTS.md#godotprojectscenarios) lists the run with `kind: "tests"` and marks it `stale` when one of those files changes.
+Like `runtime_run_scenario`, the record holds the SHA-256 of `project.godot`, the autoloads, the test scripts and every script they reach, through `res://` literals and the `class_name` identifiers they use; nothing under `addons/` is followed. A configured GUT run also records `.gutconfig.json` and the `tests` it lists (#1246). A focused run omits that config and its unselected scripts. A timeout answer omits `files` and `files_truncated`; the full record on disk retains them. [`godot://project/scenarios`](RESOURCES_AND_PROMPTS.md#godotprojectscenarios) lists the run with `kind: "tests"` and marks it `stale` when one of those files changes.
 
 It runs the project's own test code, which can do anything project code can, so it carries `openWorldHint: true`, as `csharp_check_build` does.
 

@@ -1424,6 +1424,7 @@ public:
             for (auto& entry : m_routes) released.push_back(std::move(entry.second));
             m_routes.clear();
             m_selectedSessionId.clear();
+            m_explicitSessionId.reset();
             m_autoAttachEnabled = false;
             ++m_releaseEpoch;
         }
@@ -1509,6 +1510,7 @@ public:
         {
             std::lock_guard<std::mutex> lock(m_mutex);
             m_autoAttachEnabled = false;
+            m_explicitSessionId.reset();
             if (m_selectedSessionId.empty() || !findRouteLocked(m_selectedSessionId)) {
                 // Detach is a cleanup, and a cleanup that errors when there is
                 // nothing to clean up cannot be called safely from a finally
@@ -1535,6 +1537,7 @@ public:
         {
             std::lock_guard<std::mutex> lock(m_mutex);
             released = takeRouteLocked(session_id);
+            if (released && m_explicitSessionId == session_id) m_explicitSessionId.reset();
         }
         if (!released.has_value()) {
             return Error::notFound("No runtime route is open for session: " + session_id);
@@ -1590,6 +1593,12 @@ public:
         return std::nullopt;
     }
 
+    std::optional<std::string> explicitlyAttachedSessionId() const override {
+        const_cast<RuntimeSessionClient*>(this)->releaseExitedRoutes();
+        std::lock_guard<std::mutex> lock(m_mutex);
+        return m_explicitSessionId;
+    }
+
     std::optional<SessionDescriptor> observableSession() const override {
         if (auto selected = activeSession(); selected.has_value()) return selected;
         // The rule auto-selection uses, without the attach: one live session on
@@ -1629,6 +1638,7 @@ public:
     // named a session is not guessing.
     std::optional<RuntimeRouteLease> acquireRouteLeaseFor(const std::string& session_id) override {
         if (session_id.empty()) return std::nullopt;
+        releaseExitedRoutes();
         return leaseFor(session_id);
     }
 
@@ -1664,13 +1674,15 @@ private:
 
     // Every successful open clears the remembered obstruction, because it is a
     // record of the current absence and there is no longer one.
-    Result<json> attachDescriptor(const SessionDescriptor& descriptor, bool make_selected) {
-        auto opened = attachDescriptorInner(descriptor, make_selected);
+    Result<json> attachDescriptor(const SessionDescriptor& descriptor, bool make_selected,
+                                  bool explicit_selection = false) {
+        auto opened = attachDescriptorInner(descriptor, make_selected, explicit_selection);
         if (opened.isOk()) clearRouteObstruction();
         return opened;
     }
 
-    Result<json> attachDescriptorInner(const SessionDescriptor& descriptor, bool make_selected) {
+    Result<json> attachDescriptorInner(const SessionDescriptor& descriptor, bool make_selected,
+                                       bool explicit_selection) {
         if (!m_factory) return Error::internal("Runtime IPC client factory is not configured");
         if (m_clientId.empty()) return Error::internal("Unable to establish MCP client identity");
         std::shared_ptr<files::FileLock> session_lock;
@@ -1742,6 +1754,7 @@ private:
                     m_routes[descriptor.session_id] = std::move(route);
                 }
                 if (make_selected) m_selectedSessionId = descriptor.session_id;
+                if (explicit_selection) m_explicitSessionId = descriptor.session_id;
             }
         }
         if (superseded) {
@@ -1813,7 +1826,7 @@ private:
                               {"server_project_root", m_projectRoot},
                               {"session_id", session_id}});
         }
-        auto attached = attachDescriptor(found->descriptor, make_selected);
+        auto attached = attachDescriptor(found->descriptor, make_selected, make_selected);
         if (attached.isOk() && foreign && attached.value().is_object()) {
             attached.value()["project_mismatch"] = true;
             attached.value()["server_project_root"] = m_projectRoot;
@@ -2035,6 +2048,7 @@ private:
     // The process selection, empty when there is none. Legacy attach sets it;
     // a request that names its own session does not.
     std::string m_selectedSessionId;
+    std::optional<std::string> m_explicitSessionId;
     bool m_autoAttachEnabled{true};
     bool m_autoAttachInProgress{false};
     // Bumped by disconnect, which releases everything. An attach that began

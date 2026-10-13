@@ -2,6 +2,7 @@
 #include "didi/tools/phase7_live_forward.hpp"
 #include "didi/common/ipc_channel.hpp"
 #include "didi/common/json_bounds.hpp"
+#include "didi/common/cell_records.hpp"
 #include "didi/common/logger.hpp"
 #include <optional>
 #include <set>
@@ -108,7 +109,7 @@ json withNormalizedCoordinates(const json& args) {
 }
 
 bool validateTileCells(const json& cells) {
-    if (!cells.is_array() || cells.empty() || cells.size() > 256) return false;
+    if (!cells.is_array() || cells.empty() || cells.size() > cells::kMaxExpandedCells) return false;
     std::set<std::pair<int64_t, int64_t>> coordinates;
     for (const auto& cell : cells) {
         if (!cell.is_object() || !cell.contains("coords") ||
@@ -132,7 +133,7 @@ bool validateTileCells(const json& cells) {
 }
 
 bool validateGridCells(const json& cells) {
-    if (!cells.is_array() || cells.empty() || cells.size() > 256) return false;
+    if (!cells.is_array() || cells.empty() || cells.size() > cells::kMaxExpandedCells) return false;
     std::set<std::tuple<int64_t, int64_t, int64_t>> positions;
     for (const auto& cell : cells) {
         if (!hasOnlyKeys(cell, {"position", "item", "orientation"}) ||
@@ -211,15 +212,19 @@ std::optional<std::string> describeErasedCellWithOrientation(const json& cells) 
 
 CallToolResult handleTilemapSetCells(const ResolvedToolBinding& binding, const json& args,
                          std::shared_ptr<ipc::IIpcClient> ipc) {
-    const json request = withNormalizedCoordinates(args);
+    json request = withNormalizedCoordinates(args);
     if (request.is_object() && request.contains("cells")) {
         if (auto duplicate = describeDuplicateTuple(request["cells"], "coords", 2)) {
             return requestError(binding, *duplicate, 409);
         }
     }
+    if (!request.is_object()) return requestError(binding, "invalid_tilemap_set_cells_request");
+    auto prepared = cells::prepare(request.value("cells", json()), 2);
+    if (prepared.isErr()) return requestError(binding, prepared.error().message, prepared.error().code);
+    request["cells"] = prepared.value().records;
     if (!hasOnlyKeys(request, {"tilemap_path", "cells"}) ||
         !request.contains("tilemap_path") || !boundedString(request["tilemap_path"]) ||
-        !request.contains("cells") || !validateTileCells(request["cells"])) {
+        !request.contains("cells") || !validateTileCells(prepared.value().expanded)) {
         return requestError(binding, "invalid_tilemap_set_cells_request");
     }
     return sendPhase7LiveRequest(binding, request, ipc);
@@ -236,7 +241,7 @@ CallToolResult handleTilemapGetUsedRect(const ResolvedToolBinding& binding, cons
 
 CallToolResult handleGridmapSetCells(const ResolvedToolBinding& binding, const json& args,
                          std::shared_ptr<ipc::IIpcClient> ipc) {
-    const json request = withNormalizedCoordinates(args);
+    json request = withNormalizedCoordinates(args);
     if (request.is_object() && request.contains("cells")) {
         if (auto duplicate = describeDuplicateTuple(request["cells"], "position", 3)) {
             return requestError(binding, *duplicate, 409);
@@ -247,9 +252,13 @@ CallToolResult handleGridmapSetCells(const ResolvedToolBinding& binding, const j
             return requestError(binding, *erased);
         }
     }
+    if (!request.is_object()) return requestError(binding, "invalid_gridmap_set_cells_request");
+    auto prepared = cells::prepare(request.value("cells", json()), 3);
+    if (prepared.isErr()) return requestError(binding, prepared.error().message, prepared.error().code);
+    request["cells"] = prepared.value().records;
     if (!hasOnlyKeys(request, {"gridmap_path", "cells"}) ||
         !request.contains("gridmap_path") || !boundedString(request["gridmap_path"]) ||
-        !request.contains("cells") || !validateGridCells(request["cells"])) {
+        !request.contains("cells") || !validateGridCells(prepared.value().expanded)) {
         return requestError(binding, "invalid_gridmap_set_cells_request");
     }
     return sendPhase7LiveRequest(binding, request, ipc);
@@ -262,7 +271,7 @@ void ToolRegistry::registerTilemapGridTools() {
     {
         ToolDefinition t;
         t.name = "tilemap_set_cells";
-        t.description = "Batch updates 2D TileMapLayer cells with source IDs, atlas coordinates, and alternate tiles.";
+        t.description = "Writes or erases TileMapLayer cells or uniform rectangles; at most 256 records and 4096 cells.";
         t.inputSchema = {
             {"type", "object"},
             {"properties", {
@@ -295,7 +304,7 @@ void ToolRegistry::registerTilemapGridTools() {
     {
         ToolDefinition t;
         t.name = "gridmap_set_cells";
-        t.description = "Places 3D mesh library tiles inside a GridMap with coordinate orientations.";
+        t.description = "Writes or erases GridMap cells or uniform boxes; at most 256 records and 4096 cells.";
         t.inputSchema = {
             {"type", "object"},
             {"properties", {
