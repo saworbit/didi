@@ -136,7 +136,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Fixed
 
-- `2026-10-14` Builds refresh the source commit in their identity without reconfigure or needless recompilation. [#1373](https://github.com/saworbit/didi/issues/1373)
+- `2026-10-14` Builds refresh the source commit in their identity without reconfigure or needless recompilation. [#1373](https://github.com/saworbit/didi/issues/1373) [PR #1391](https://github.com/saworbit/didi/pull/1391)
 - `2026-10-14` Created resources carry Godot-format UIDs, and overwrites preserve the file's existing identity. [#1382](https://github.com/saworbit/didi/issues/1382) [PR #1395](https://github.com/saworbit/didi/pull/1395)
 - `2026-10-14` Resource UID maps read the root header instead of assigning a reference's UID to the containing file. [#1393](https://github.com/saworbit/didi/issues/1393) [PR #1395](https://github.com/saworbit/didi/pull/1395)
 - `2026-10-13` Focused GUT runs ignore the project config; timeout answers show bounded progress without file hashes. [#1375](https://github.com/saworbit/didi/issues/1375) [PR #1389](https://github.com/saworbit/didi/pull/1389)
