@@ -261,6 +261,7 @@ set(GDEXT_SOURCES
     src/gdextension/bridge_scene_files.cpp
     src/gdextension/bridge_node_edits.cpp
     src/gdextension/bridge_history.cpp
+    src/gdextension/bridge_input.cpp
     src/gdextension/godot_values.cpp
     src/gdextension/runtime_bridge.cpp
     src/gdextension/viewport_renderer.cpp

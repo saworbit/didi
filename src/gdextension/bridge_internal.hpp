@@ -156,4 +156,7 @@ Result<HistoryMoved> runEditorHistoryCommand(GDExtensionObjectPtr editor, GDExte
 json undoStatusAnswer(const json& params);
 json undoReferencedAction(const json& params);
 
+json injectInput(const json& params, const std::string& session_kind);
+json inputMapMissingActions(const json& params, const std::string& session_kind);
+
 } // namespace didi::godot::bridge_internal
