@@ -267,6 +267,43 @@ Build Queue item Q16 extends `runtime_read_profiler` with a verdict on what boun
 - `RenderingServer.is_on_render_thread`, asked from the main thread, answers false only with `--render-thread separate`, on all three lines. Nothing else says which mode a game runs in: the flag never reaches `OS.get_cmdline_args`, and when it is given `rendering/driver/threads/thread_model` is never defined, so `get_setting` answers its default. With a separate render thread (4.7.2), the main thread waits for it before the frame's first part, not inside the draw: the shader fixture's 87.6 ms frames spent 87.5 ms there and 0.06 ms in the draw.
 - A root viewport that was never measured reads exactly 0 from both getters. Switching measurement off keeps the last times it took, unchanged, so a nonzero reading says measurement was on at some point, not that it is on now.
 
+### Separate-render-thread fixture probe
+
+On 2026-10-13, each `tests/godot_smoke/perf_{cpu,gpu,physics}.tscn` fixture ran
+windowed with Forward+, a 60 Hz vsync budget and `--render-thread separate`.
+`runtime_read_profiler` measured a 2,000 ms window with five samples after the
+fixture reported ready. Each case used its own game process and session. These
+are observed medians in milliseconds on this machine, not portable timing targets.
+The 4.7.2 GPU row uses the fixed-build rerun saved with the probe evidence.
+
+| Godot | Fixture | Frame | Physics | Process | Outside | GPU | Bound |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
+| 4.5.1 | cpu | 30.749 | 0.027 | 30.093 | 0.565 | 0.005 | cpu |
+| 4.5.1 | gpu | 83.368 | 0.025 | 0.041 | 83.228 | 68.577 | gpu |
+| 4.5.1 | physics | 232.453 | 223.230 | 0.077 | 5.713 | 0.023 | physics |
+| 4.6.2 | cpu | 31.243 | 0.028 | 30.105 | 1.031 | 0.004 | cpu |
+| 4.6.2 | gpu | 69.611 | 0.028 | 0.049 | 69.464 | 68.623 | gpu |
+| 4.6.2 | physics | 212.538 | 207.319 | 0.077 | 4.479 | 0.026 | physics |
+| 4.7.2 | cpu | 116.736 | 0.028 | 30.084 | 86.523 | 0.004 | unknown |
+| 4.7.2 | gpu | 83.848 | 0.029 | 0.045 | 83.703 | 68.631 | gpu |
+| 4.7.2 | physics | 242.461 | 236.151 | 0.104 | 6.619 | 0.023 | physics |
+
+Every verdict names `render_thread: "separate"`. Known bounds have `medium`
+confidence. The 4.7.2 CPU case is `unknown` with `low` confidence: 30.2 ms of
+measured CPU work and 0.004 ms on the GPU do not account for the 116.7 ms frame.
+Its answer names the 86.5 ms main-thread wait for the separate render thread.
+The available frame marks and viewport GPU/CPU measurements do not place that
+wait inside the render thread. They cannot distinguish queue, sync or present
+pacing, so the verdict does not assign it to CPU work.
+
+The native replay test keeps the three worst individual frames returned by each
+of these nine reads. It checks both the median and `slow_frames` rules, including
+the CPU, GPU and physics outliers with long waits that remain `unknown`. In the
+main-thread model, outside time that accounts for most of a frame remains
+unplaced in both reports; in the separate model, measured GPU work can account
+for that wait. No private render-thread timing or guessed attribution was added.
+
+
 ## GDScript rename backend follow-up (#1344)
 
 On 2026-10-13, owned editors on Godot 4.5.1, 4.6.2 and 4.7.2 answered
