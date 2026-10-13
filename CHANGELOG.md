@@ -155,7 +155,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Fixed
 
-- `2026-10-14` Scenarios verify original game exit before reporting teardown complete, and Windows witnesses retain the original process. [#1020](https://github.com/saworbit/didi/issues/1020)
+- `2026-10-14` Scenarios verify original game exit before reporting teardown complete, and Windows witnesses retain the original process. [#1020](https://github.com/saworbit/didi/issues/1020) [PR #1417](https://github.com/saworbit/didi/pull/1417)
 
 - `2026-10-14` Observed-state comparisons allow bounded PowerShell startup on busy CI runners without skipping their assertions. [#1020](https://github.com/saworbit/didi/issues/1020) [PR #1416](https://github.com/saworbit/didi/pull/1416)
 
