@@ -274,6 +274,7 @@ windowed with Forward+, a 60 Hz vsync budget and `--render-thread separate`.
 `runtime_read_profiler` measured a 2,000 ms window with five samples after the
 fixture reported ready. Each case used its own game process and session. These
 are observed medians in milliseconds on this machine, not portable timing targets.
+The 4.7.2 GPU row uses the fixed-build rerun saved with the probe evidence.
 
 | Godot | Fixture | Frame | Physics | Process | Outside | GPU | Bound |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
@@ -284,7 +285,7 @@ are observed medians in milliseconds on this machine, not portable timing target
 | 4.6.2 | gpu | 69.611 | 0.028 | 0.049 | 69.464 | 68.623 | gpu |
 | 4.6.2 | physics | 212.538 | 207.319 | 0.077 | 4.479 | 0.026 | physics |
 | 4.7.2 | cpu | 116.736 | 0.028 | 30.084 | 86.523 | 0.004 | unknown |
-| 4.7.2 | gpu | 83.495 | 0.026 | 0.043 | 83.357 | 68.632 | gpu |
+| 4.7.2 | gpu | 83.848 | 0.029 | 0.045 | 83.703 | 68.631 | gpu |
 | 4.7.2 | physics | 242.461 | 236.151 | 0.104 | 6.619 | 0.023 | physics |
 
 Every verdict names `render_thread: "separate"`. Known bounds have `medium`
@@ -297,7 +298,7 @@ pacing, so the verdict does not assign it to CPU work.
 
 The native replay test keeps the three worst individual frames returned by each
 of these nine reads. It checks both the median and `slow_frames` rules, including
-the CPU and physics outliers with long waits that remain `unknown`. In the
+the CPU, GPU and physics outliers with long waits that remain `unknown`. In the
 main-thread model, outside time that accounts for most of a frame remains
 unplaced in both reports; in the separate model, measured GPU work can account
 for that wait. No private render-thread timing or guessed attribution was added.
