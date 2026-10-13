@@ -171,6 +171,7 @@ if (-not $fixtureRoot.StartsWith($buildRoot + [IO.Path]::DirectorySeparatorChar,
 # extension copy can still be locked; see remove_test_directory.ps1.
 . (Join-Path $PSScriptRoot 'remove_test_directory.ps1')
 . (Join-Path $PSScriptRoot 'observed_post_state.ps1')
+. (Join-Path $PSScriptRoot 'observed_external.ps1')
 . (Join-Path $PSScriptRoot 'bounded_reads.ps1')
 . (Join-Path $PSScriptRoot 'refusal_remedies.ps1')
 . (Join-Path $PSScriptRoot 'follow_ups.ps1')
@@ -3484,6 +3485,7 @@ try {
     $copyHold = { param($id, $path) Tool-Request $id "scene_call_method" @{ target_node = $copyWitness; method_name = "hold"; arguments = @($path) } }
     $copyRead = { param($id, $path) Tool-Request $id "scene_call_method" @{ target_node = $copyWitness; method_name = "held_copy"; arguments = @($path) } }
     $copySceneText = "[gd_scene load_steps=2 format=3]`n`n[ext_resource type=`"Script`" path=`"$copyScript`" id=`"1`"]`n`n[node name=`"CopyProbe`" type=`"Node`"]`nscript = ExtResource(`"1`")`n`n[connection signal=`"ready`" from=`".`" to=`".`" method=`"probe_copy_handler`"]`n"
+    $copyDeltaText = "extends Node`n`nfunc delta():`n`treturn 4`n`nfunc probe_copy_handler():`n`tpass`n"
     $copyRequests = @(
         (@{ jsonrpc = "2.0"; id = 2710; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
         (Tool-Request 2711 "runtime_attach_session" @{ session_id = $editorSession.session_id }),
@@ -3495,9 +3497,10 @@ try {
         (Tool-Request 2717 "script_patch_method" @{ file_path = $copyScript; method_name = "gamma"; new_definition = "func gamma():`n`treturn 3"; create_if_missing = $true }),
         (& $copyRead 2718 $copyScript),
         (Tool-Request 2719 "project_apply_changes" @{ changes = @(
-            @{ path = $copyScript; content = "extends Node`n`nfunc delta():`n`treturn 4`n`nfunc probe_copy_handler():`n`tpass`n" },
+            @{ path = $copyScript; content = $copyDeltaText },
             @{ path = $copyScene; content = $copySceneText }) }),
         (& $copyRead 2720 $copyScript),
+        (Tool-Request 2736 "scene_call_method" @{ target_node = $copyWitness; method_name = "file_text"; arguments = @($copyScript) }),
         (& $copyHold 2721 $copyScene),
         (Tool-Request 2722 "project_rename_references" @{ target = "probe_copy_handler"; new_name = "probe_copy_renamed" }),
         (& $copyRead 2723 $copyScene),
@@ -3552,6 +3555,8 @@ try {
     Assert-True ($copiesApplied.applied -eq $true -and @($copiesApplied.editor_copies_reloaded) -contains $copyScript -and @($copiesApplied.editor_copies_reloaded) -notcontains $copyScene) "project_apply_changes did not reload exactly the one file the editor held: $($copiesApplied | ConvertTo-Json -Depth 6 -Compress)"
     $heldAfterApply = & $copyHeld 2720
     Assert-True (@($heldAfterApply.methods) -contains "delta" -and @($heldAfterApply.methods) -notcontains "beta") "After project_apply_changes, the editor's copy of the script still had the old code: $($heldAfterApply | ConvertTo-Json -Depth 6 -Compress)"
+
+    Assert-ProjectApplyObservedState $copiesApplied $heldAfterApply $copyScript $copyDeltaText (Tool-Payload $copyById[2736]).returned
 
     $copiesRenamed = Tool-Payload $copyById[2722]
     Assert-True (@($copiesRenamed.editor_copies_reloaded) -contains $copyScene) "project_rename_references rewrote a scene the editor holds and did not reload the editor's copy: $($copiesRenamed | ConvertTo-Json -Depth 6 -Compress)"

@@ -13,6 +13,7 @@ before any engine starts.
 import json
 import re
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -22,6 +23,11 @@ except ImportError:
     from tests import didi_binary
 
 TESTS = Path(__file__).resolve().parent
+try:
+    from observed_case_registry import case_binding_problems
+except ImportError:
+    from tests.observed_case_registry import case_binding_problems
+
 REGISTRY = TESTS / "observed_post_state.json"
 CASES = TESTS / "observed_post_state.ps1"
 WITNESS = TESTS / "godot_smoke" / "observed_witness.gd"
@@ -49,13 +55,17 @@ def registry_problems(registry, mutating, cased_tools, witness_calls, witness_fu
                 problems.append(f"{name} names no observed field")
             if not isinstance(entry.get("witness"), str) or not entry["witness"].strip():
                 problems.append(f"{name} does not say what the engine is read through")
-            if name not in cased_tools:
+            if "case" in entry:
+                problems.extend(f"{name}: {problem}" for problem in case_binding_problems(entry["case"], tool=name))
+                if name in cased_tools:
+                    problems.append(f"{name} has both a central and an external case")
+            elif name not in cased_tools:
                 problems.append(f"{name} has observed fields and no case compares them with the engine")
             # A tool that also answers a batch names the list its per-item
             # answers are in, and each item carries the observed fields (Q7).
             if "batch" in entry and (not isinstance(entry["batch"], str) or not entry["batch"]):
                 problems.append(f"{name} names its batch with something that is not a field name")
-            extra = set(entry) - {"observed", "witness", "batch"}
+            extra = set(entry) - {"observed", "witness", "batch", "case"}
         else:
             reason = entry["exempt"]
             if not isinstance(reason, str) or len(reason.split()) < 6:
@@ -113,6 +123,58 @@ class ObservedPostStateRegistry(unittest.TestCase):
         self.assertIn("scene_set_property", cased_tools())
         self.assertIn("load_fresh", witness_calls())
         self.assertIn("load_fresh", witness_functions())
+
+    def test_an_explicit_existing_python_case_is_accepted(self):
+        registry = {"schema": 1, "tools": {"runtime_restore_checkpoint": {
+            "observed": ["editor_pid"], "witness": "OS.get_process_id in the owned editor",
+            "case": {"source": "test_managed_recovery_live.py", "function": "ManagedRecoveryLive.test_observed_runtime_restore_checkpoint"}}}}
+        self.assertEqual(registry_problems(registry, list(registry["tools"]), set(), set(), set()), [])
+
+    def test_an_explicit_existing_powershell_case_is_accepted(self):
+        registry = {"schema": 1, "tools": {"runtime_run_scenario": {
+            "observed": ["teardown.session_gone"], "witness": "Native owned process object after scenario teardown",
+            "case": {"source": "observed_external.ps1", "function": "Assert-ScenarioObservedTeardown"}}}}
+        self.assertEqual(registry_problems(registry, list(registry["tools"]), set(), set(), set()), [])
+
+    def test_an_external_case_names_an_actual_executable(self):
+        registry = {"schema": 1, "tools": {"runtime_checkpoint": {
+            "observed": ["last_checkpoint.files"], "witness": "DirAccess in the owned editor",
+            "case": {"source": "test_managed_recovery_live.py", "function": "ManagedRecoveryLive.test_missing_witness"}}}}
+        problems = registry_problems(registry, list(registry["tools"]), set(), set(), set())
+        self.assertTrue(any("test_missing_witness" in problem and "not defined" in problem for problem in problems), problems)
+
+    def test_external_cases_cannot_escape_the_tests_directory(self):
+        for source in ('../test_managed_recovery_live.py', 'nested/test_managed_recovery_live.py', 'observed_post_state.json'):
+            with self.subTest(source=source):
+                self.assertTrue(case_binding_problems({'source': source, 'function': 'ManagedRecoveryLive.test_observed_runtime_checkpoint'}))
+
+    def test_python_case_must_be_a_test_method(self):
+        self.assertTrue(case_binding_problems({'source': 'test_managed_recovery_live.py', 'function': 'ManagedRecoveryLive.setUp'}))
+
+    def test_nested_observed_values_keep_zero_false_and_null(self):
+        try:
+            from observed_case_registry import field_value
+        except ImportError:
+            from tests.observed_case_registry import field_value
+        value = {'checkpoint': {'files': 0, 'ready': False, 'note': None}}
+        self.assertEqual(field_value(value, 'checkpoint.files'), 0)
+        self.assertIs(field_value(value, 'checkpoint.ready'), False)
+        self.assertIsNone(field_value(value, 'checkpoint.note'))
+        with self.assertRaises(AssertionError):
+            field_value(value, 'checkpoint.bytes')
+
+    def test_binding_rejects_an_unrelated_existing_test(self):
+        binding = {'source': 'test_managed_recovery_live.py', 'function': 'ManagedRecoveryLive.test_local_rejection_does_not_require_restore'}
+        self.assertTrue(case_binding_problems(binding, tool='runtime_checkpoint'))
+
+    def test_removing_the_named_observation_breaks_the_binding(self):
+        source = (TESTS / 'test_managed_recovery_live.py').read_text(encoding='utf-8')
+        source = source.replace("self.check_observed('runtime_checkpoint', payload, {'last_checkpoint': inventory})", 'pass')
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'test_managed_recovery_live.py').write_text(source, encoding='utf-8')
+            binding = {'source': 'test_managed_recovery_live.py', 'function': 'ManagedRecoveryLive.test_observed_runtime_checkpoint'}
+            self.assertTrue(case_binding_problems(binding, tests=root, tool='runtime_checkpoint'))
 
     def test_a_new_mutating_tool_fails(self):
         registry = load_registry()

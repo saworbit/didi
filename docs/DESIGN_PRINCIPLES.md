@@ -44,9 +44,10 @@ the answer fields that carry what it read back, which the live harness compares
 with the engine on all three engine lines, or is exempted with the issue that
 tracks the gap. A tool that claims no state after its call, such as one that
 runs project code, is exempted for good and says why. `tests/test_observed_post_state.py` fails the build when a
-mutating tool has neither. The exemptions are findings: #1020 lists the ones
-no case drives yet. The tools #1019 found answering with the request all read
-back now.
+mutating tool has neither. All 61 mutations that claim post-state now have
+independent cases, including executable bindings in the managed live suite;
+only the three calls that claim no post-state are permanently exempt (#1020).
+The tools #1019 found answering with the request all read back now.
 
 ## P2. Reject what cannot be interpreted
 

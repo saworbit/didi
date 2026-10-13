@@ -38,6 +38,7 @@ foreach ($entry in $observedRegistry.tools.PSObject.Properties) {
         $observedBatchFields[$entry.Name] = [string]$entry.Value.batch
     }
 }
+$observedExternalExecuted = @{}
 $observedExchanges = New-Object System.Collections.ArrayList
 $observedScenePath = "res://observed_post_state.tscn"
 # The script the rename case's scene carries, declaring the handler under both
@@ -75,6 +76,15 @@ function Get-ObservedPayload($Response) {
 # The observed fields an answer leaves out. A tool that also answers a batch
 # keeps each write's fields in its own entry of the list the registry names,
 # so a batch answer is read entry by entry (Q7).
+function Test-ObservedFieldPresent($Payload, [string]$Field) {
+    $value = $Payload
+    foreach ($part in $Field.Split('.')) {
+        if (-not $part -or $null -eq $value -or $null -eq $value.PSObject.Properties[$part]) { return $false }
+        $value = $value.$part
+    }
+    return $true
+}
+
 function Get-ObservedFieldGaps([string]$Tool, $Payload) {
     $gaps = @()
     $batchField = $observedBatchFields[$Tool]
@@ -83,13 +93,13 @@ function Get-ObservedFieldGaps([string]$Tool, $Payload) {
         if ($items.Count -eq 0) { return @("$batchField (empty)") }
         for ($index = 0; $index -lt $items.Count; $index++) {
             foreach ($field in $observedFields[$Tool]) {
-                if ($null -eq $items[$index].PSObject.Properties[$field]) { $gaps += "$batchField[$index].$field" }
+                if (-not (Test-ObservedFieldPresent $items[$index] $field)) { $gaps += "$batchField[$index].$field" }
             }
         }
         return $gaps
     }
     foreach ($field in $observedFields[$Tool]) {
-        if ($null -eq $Payload.PSObject.Properties[$field]) { $gaps += $field }
+        if (-not (Test-ObservedFieldPresent $Payload $field)) { $gaps += $field }
     }
     return $gaps
 }
@@ -794,7 +804,10 @@ function Assert-ObservedPostStateCoverage([string]$ManifestJson) {
     $stale = @($registered | Where-Object { $mutating -notcontains $_ })
     Assert-True ($unaccounted.Count -eq 0) "Mutating tools with neither observed fields nor an exemption in tests/observed_post_state.json: $($unaccounted -join ', ')."
     Assert-True ($stale.Count -eq 0) "tests/observed_post_state.json names tools the server does not implement as mutations: $($stale -join ', ')."
-    $cased = @(Get-ObservedPostStateCases | ForEach-Object { $_.Tool } | Sort-Object -Unique)
+    & python (Join-Path $PSScriptRoot "observed_case_registry.py")
+    Assert-True ($LASTEXITCODE -eq 0) "An external observed case is not executable."
+    $external = @($observedRegistry.tools.PSObject.Properties | Where-Object { $null -ne $_.Value.PSObject.Properties["case"] } | ForEach-Object { $_.Name })
+    $cased = @(@(Get-ObservedPostStateCases | ForEach-Object { $_.Tool }) + $external | Sort-Object -Unique)
     $uncased = @($observedFields.Keys | Where-Object { $cased -notcontains $_ })
     $caseForExempt = @($cased | Where-Object { -not $observedFields.ContainsKey($_) })
     Assert-True ($uncased.Count -eq 0) "Tools whose observed fields no case compares with the engine: $($uncased -join ', ')."
@@ -940,7 +953,12 @@ function Assert-BeforeReported {
 # Presence, over every answer the run recorded.
 function Assert-ObservedAnswersRecorded {
     $missing = @()
+    $separate = @()
     foreach ($tool in @($observedFields.Keys | Sort-Object)) {
+        $binding = $observedRegistry.tools.$tool.case
+        if ($binding.source -like '*.ps1' -and -not $observedExternalExecuted.ContainsKey($tool)) {
+            $missing += "$tool external witness did not execute"
+        }
         # A job read while the job is still working answers with its progress,
         # not the tool's result, so like a dry run it has no post-state yet.
         # The reimport job block reads several of those on a slow runner (Q8).
@@ -950,6 +968,8 @@ function Assert-ObservedAnswersRecorded {
                 -not ($payload.status -eq "working" -and $null -ne $payload.PSObject.Properties["job"])
         })
         if ($answered.Count -eq 0) {
+            # Python live cases run in the managed matrix step, not this editor.
+            if ($binding.source -like '*.py') { $separate += $tool; continue }
             $missing += "$tool never answered successfully"
             continue
         }
@@ -960,5 +980,7 @@ function Assert-ObservedAnswersRecorded {
         }
     }
     Assert-True ($missing.Count -eq 0) "Answers without their observed post-state:`n$($missing -join "`n")"
-    Write-Output "Observed post-state: $($observedExchanges.Count) answers from $($observedFields.Count) checked tools carried every observed field."
+    $checked = $observedFields.Count - $separate.Count
+    Write-Output "Observed post-state: $($observedExchanges.Count) answers from $checked tools carried every observed field."
+    if ($separate.Count) { Write-Output "Required separate Python live cases: $($separate -join ', '). Each must execute its named check_observed comparison in the managed matrix step." }
 }
