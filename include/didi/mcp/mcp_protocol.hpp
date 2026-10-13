@@ -68,12 +68,16 @@ struct RequestScope {
     ProtocolEra era{ProtocolEra::Legacy};
     // The session this request named, if it named one.
     std::optional<std::string> runtime_session_id;
+    // The protocol boundary snapshots an explicit attach when metadata is
+    // absent, including the absence of a choice. Jobs retain that snapshot.
+    // A lost attached route must not be reopened or replaced by discovery.
+    bool explicit_attachment{false};
 
     bool selectsRuntimeSession() const { return runtime_session_id.has_value(); }
 
     // A legacy request inherits whatever route the handshake era attached, the
-    // way it always has. A modern request may only ever be served on the
-    // session it named for itself.
+    // way it always has. A modern request uses a named session or the explicit
+    // attachment snapshot; it never inherits an auto-discovered selection.
     bool mayInheritActiveRoute() const { return era == ProtocolEra::Legacy; }
 
     // The default is a legacy request, so every existing caller and every test

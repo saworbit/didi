@@ -17,8 +17,10 @@ hierarchy, reuse returned paths and refresh the relevant branch after a
 structural change or a missing-node error. Inspect refusals before retrying.
 
 For a modern request, select the intended session through
-`_meta.didi.runtime_session_id` on each request; legacy attachment alone does
-not supply a modern route. See the [protocol contract](API_SPECIFICATION.md#naming-the-runtime-session).
+`_meta.didi.runtime_session_id` on each request. If the host cannot expose that
+metadata, call `runtime_attach_session` with the intended session's id first.
+Calls without a metadata id use that explicit choice and refuse if it is gone.
+See the [protocol contract](API_SPECIFICATION.md#naming-the-runtime-session).
 
 ## Establish the project boundary
 

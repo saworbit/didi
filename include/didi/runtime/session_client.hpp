@@ -276,7 +276,8 @@ class IRuntimeRouteLeaseProvider {
 public:
     virtual ~IRuntimeRouteLeaseProvider() = default;
     // The process selection: whichever session `runtime_attach_session` last
-    // pointed at. This is the legacy lifecycle and stays exactly that.
+    // pointed at. Legacy requests inherit it; modern requests use only an
+    // explicit attach or their own metadata choice.
     virtual std::optional<RuntimeRouteLease> acquireRouteLease() = 0;
 
     // A lease on one named session, whether or not it is the process
@@ -337,8 +338,8 @@ DescriptorRetirementOutcome retireOwnedSessionDescriptor(
 class IRuntimeSessionClient : public ipc::IIpcClient, public IRuntimeRouteLeaseProvider {
 public:
     virtual Result<json> listSessions(const std::optional<std::string>& project_path) = 0;
-    // Selects a session for the process. Sticky, and what the legacy
-    // `runtime_attach_session` tool has always done.
+    // Selects a session for the process. Also supplies the explicit choice for
+    // modern requests whose host cannot expose request metadata.
     virtual Result<json> attachSession(const std::string& session_id) = 0;
 
     // Attaching a session that belongs to a different project than the one this
@@ -384,6 +385,13 @@ public:
         return Error::notConnected("Fresh runtime session state is unavailable");
     }
     virtual std::optional<SessionDescriptor> activeSession() const = 0;
+
+    // The last successful explicit attach, retained if its engine exits or its
+    // route is quarantined. Auto-discovery never sets this choice. Detach and
+    // shutdown clear it. Modern hosts without request-level routing use it.
+    virtual std::optional<std::string> explicitlyAttachedSessionId() const {
+        return std::nullopt;
+    }
 
     // The session this process should report about, selected or not.
     //
