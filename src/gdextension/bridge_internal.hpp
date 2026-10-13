@@ -77,4 +77,11 @@ json navQueryPath(const json& params, const std::string& session_kind);
 std::string busLayoutPathFrom(const std::optional<std::string>& setting);
 std::string busLayoutMovedSentence(const std::string& editor_path, const std::string& project_path);
 
+Result<void> validateScriptPath(const std::string& path);
+Result<void> validateJsonForPropertyType(const std::string& property_name, const json& value,
+                                       GDExtensionVariantType type);
+Result<VariantValue> makeJsonVariant(const json& value, int depth = 0);
+Result<VariantValue> makeJsonVariantForProperty(const json& value, GDExtensionVariantType type);
+bool settingTakesTypedValue(GDExtensionVariantType held);
+
 } // namespace didi::godot::bridge_internal
