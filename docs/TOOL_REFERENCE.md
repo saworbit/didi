@@ -929,12 +929,16 @@ All three tools are implemented live in editor sessions.
 Writes or erases cells on a `TileMapLayer` in one undoable batch.
 
 - `tilemap_path` (`string`, required): the layer to edit.
-- `cells` (`array`, required): 1 to 256 records. Each is either a write or an erase, and nothing else is accepted.
+- `cells` (`array`, required): 1 to 256 records, touching at most 4096 cells in total. Each is a write or erase.
   - A write carries `coords` (each component `-1048576..1048576`), `source_id` (`integer`, `0..2147483647`), `atlas_coords` (each component `0..1048576`), and optionally `alternative_tile` (`integer`, `0..65535`, default `0`).
   - An erase carries `coords` and `erase: true`.
 - `dry_run` (`boolean`, default `false`).
 
 A coordinate is `[x, y]` or `{"x": .., "y": ..}`, whichever you have. Vectors are objects everywhere else on this surface and `tilemap_get_used_rect` answers with objects, so a used rect can be fed straight back into a write. `coords` and `position` are the same field: this tool and `gridmap_set_cells` each take the other's name.
+
+A record can use `rect: {"position": {"x": 0, "y": 0}, "size": {"x": 40, "y": 24}}` instead of `coords` or `position`. The position also accepts an integer pair; size is an object with positive integer components. The position is included and position plus size is excluded. The final coordinates must remain within the cell coordinate bounds. All records, including rectangles, must cover distinct cells; overlap refuses the whole call before mutation. The 256 limit counts input records, and the separate 4096 limit bounds expanded work. To make a border, fill the outer rectangle with wall tiles, then fill the smaller inner rectangle with floor tiles in a second call.
+
+Individual records keep their existing response shape. A rectangle returns one `cells` entry with `rect`, `cell_count`, and the uniform `source_id`, `atlas_coords` and `alternative_tile` observed after every covered cell was checked. The requested, changed and unchanged counts count cells, including ones expanded from rectangles. There is one UndoRedo action for the entire call, no action for a no-op, and a postcondition failure rolls it back.
 
 The answer's `cells` lists, in request order, what each requested cell holds as the layer reports it: `coords`, `source_id`, `atlas_coords` and `alternative_tile`, read after the commit for a cell that changed, and from the read before it for one that did not. An erased cell reads `source_id: -1`. `gridmap_set_cells` answers the same way with `position`, `item` and `orientation` (#1019).
 
@@ -947,6 +951,8 @@ Returns the used cell boundaries of a `TileMapLayer` without changing it.
 The response carries exact integer `position`, `size`, and end fields.
 
 ### `gridmap_set_cells` — Live
+
+A record also accepts `rect` instead of `position` or `coords`, with a 3D position and positive object size, such as `{"position": [0, 0, 0], "size": {"x": 16, "y": 16, "z": 16}}`. It uniformly writes the existing `item` and optional `orientation`, or erases with `item: -1`. The same 256-record and 4096-cell limits, exclusive endpoint, overlap refusal and one-step UndoRedo apply. A box returns one compact observed `cells` entry with `rect`, `cell_count`, `item` and `orientation`; individual-cell answers are unchanged.
 
 Places or clears `MeshLibrary` items in a `GridMap` in one undoable batch.
 

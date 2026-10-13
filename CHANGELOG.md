@@ -136,6 +136,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Fixed
 
+- `2026-10-13` TileMap and GridMap fill or erase rectangles and boxes in one undoable call, returning compact observed state. [#1322](https://github.com/saworbit/didi/issues/1322) [#1370](https://github.com/saworbit/didi/pull/1370)
 - `2026-10-13` The live harness checks that game shutdown cancels an active profiler read without touching a freed viewport. [#1234](https://github.com/saworbit/didi/issues/1234) [#1366](https://github.com/saworbit/didi/pull/1366)
 - `2026-10-13` The live audio loop control proves playback started and finished even when detached launch attaches after the track ends. [#1359](https://github.com/saworbit/didi/issues/1359) · [PR #1364](https://github.com/saworbit/didi/pull/1364)
 - `2026-10-13` SECURITY records why administrator bypass and non-strict branch checks are retained, and states the limits they leave. [#806](https://github.com/saworbit/didi/issues/806) · [PR #1363](https://github.com/saworbit/didi/pull/1363)

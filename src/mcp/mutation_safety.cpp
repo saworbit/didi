@@ -287,7 +287,7 @@ void MutationSafety::decorateSchema(const ResolvedToolBinding& binding, json& sc
     }
     schema["properties"]["dry_run"] = {
         {"type", "boolean"}, {"default", false},
-        {"description", "Return a non-mutating change preview instead of executing."}
+        {"description", "Preview changes without mutation."}
     };
     if (canRequireConfirmation(binding)) {
         schema["properties"]["confirmation_token"] = {
