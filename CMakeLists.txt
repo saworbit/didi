@@ -257,6 +257,7 @@ set(GDEXT_SOURCES
     src/gdextension/bridge_editor.cpp
     src/gdextension/bridge_groups.cpp
     src/gdextension/bridge_resources.cpp
+    src/gdextension/bridge_performance.cpp
     src/gdextension/godot_values.cpp
     src/gdextension/runtime_bridge.cpp
     src/gdextension/viewport_renderer.cpp
