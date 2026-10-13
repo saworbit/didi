@@ -1525,3 +1525,25 @@ requires an amendment.
 | `runtime_restore_checkpoint` | Discard an uncertain working state while retaining it for inspection, then resume from verified saved files. | host `offline_fallback`, managed editor ownership | remove/overwrite; dry-run and confirmation | `test_restore_dry_run_and_corrupt_checkpoint_preserve_running_editor_and_files` |
 
 Coverage is saved project files, with checked saves for supported active-scene edits. It does not claim full unsaved editor state or host-process crash resume. Surface rises from 109 canonical / 106 implemented to 113 canonical / 110 implemented; three API-blocked reservations remain.
+
+## Rectangle records on the existing cell writers (#1322)
+
+This argument amendment adds no canonical name. `tilemap_set_cells` and
+`gridmap_set_cells` keep their editor-only, idempotent, dry-run and single-step UndoRedo behavior. A record may
+locate a uniform fill or erase with rect, whose position and positive integer
+size name a 2D rectangle or 3D box. The 256-record limit remains; at most 4096
+cells may be touched per call. Overlapping records are refused before any
+mutation. The prepared cell writes use the same resource checks, snapshots,
+undo transaction and postcondition rollback as individual cells. Rectangle
+results describe a uniform state read from every covered cell, rather than
+repeating that state once per cell.
+
+This follows P1 (observed state), P2 (closed shapes and explicit bounds), P3
+(one write path), P4 (compact records and results) and P8 (bounded engine work).
+Phase7TileGrid.RectangleRecordsForwardOnce and
+Phase7TileGrid.RectangleRefusalsPrecedeDispatch prove request handling;
+tests/rectangle_cell_fills.ps1 proves a 40 by 24 room, erases, no partial
+resource refusal, save/reload, one-step undo/redo, idempotence and the work
+limit on Godot 4.5.1, 4.6.2 and 4.7.2. The schema must fit the existing tools/list
+budgets; changing the shared dry-run sentence preserves its meaning and frees
+space without a budget raise. Review is required before landing.

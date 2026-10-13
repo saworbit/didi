@@ -408,6 +408,10 @@ the Phase 8 exclusion stands. Read the ports from the editor settings rather
 than assuming the defaults. Two editors on one machine contend for one port;
 report that instead of guessing which editor answered.
 
+The [2026-10-13 rename backend probe](PHASE_7_API_FEASIBILITY.md#gdscript-rename-backend-follow-up-1344)
+records the attribution and source-range limits found while investigating
+[#1344](https://github.com/saworbit/didi/issues/1344).
+
 **Done when:** The gate's result is recorded in the
 [Phase 7 feasibility evidence](PHASE_7_API_FEASIBILITY.md), and diagnostics for
 a script that uses an autoload come from the language server with no heuristic.

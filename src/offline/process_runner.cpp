@@ -40,6 +40,20 @@ void appendBounded(ProcessResult& result, const char* data, size_t size, size_t 
     }
 }
 
+void dropIncompleteUtf8Suffix(std::string& output) {
+    if (output.empty()) return;
+    size_t start = output.size() - 1;
+    while (start > 0 && output.size() - start < 4 &&
+           (static_cast<unsigned char>(output[start]) & 0xC0) == 0x80) {
+        --start;
+    }
+    const auto lead = static_cast<unsigned char>(output[start]);
+    const size_t width = lead >= 0xC2 && lead <= 0xDF ? 2 :
+                         lead >= 0xE0 && lead <= 0xEF ? 3 :
+                         lead >= 0xF0 && lead <= 0xF4 ? 4 : 1;
+    if (output.size() - start < width) output.resize(start);
+}
+
 #if !defined(_WIN32)
 char**& processEnvironment() {
 #if defined(__APPLE__)
@@ -473,6 +487,10 @@ Result<ProcessResult> runProcess(const ProcessRequest& request) {
     else result.exit_code = 1;
 #endif
 
+    // Both platforms retain the same byte prefix. Trim only after all reads,
+    // so a character split across reads completes below the cap, and discarded
+    // later chunks cannot refill the space freed at an incomplete character.
+    if (result.output_truncated) dropIncompleteUtf8Suffix(result.output);
     result.duration_seconds = std::chrono::duration<double>(
         std::chrono::steady_clock::now() - started).count();
     return result;

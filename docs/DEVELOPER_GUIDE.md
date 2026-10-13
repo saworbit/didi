@@ -47,6 +47,13 @@ ctest --test-dir build --output-on-failure
 
 ### Build options
 
+The build id combines the version, source commit, and configure timestamp.
+Each build reads the current Git HEAD, so a pull or checkout needs no separate
+reconfigure to refresh the commit. An unchanged id leaves the generated source
+untouched; a changed id recompiles one translation unit. Detached HEAD, packed
+refs, and linked worktrees use Git's own lookup. Without Git the commit is
+`nogit`, and the configure timestamp still distinguishes build trees.
+
 | Option | Default | Effect |
 | :--- | :--- | :--- |
 | `DIDI_ELASTIC_INGRESS` | `OFF` | Enables the explicitly requested `safe-v1` profile on three read-only tools; strict calls stay strict. See [Elastic Ingress](ELASTIC_INGRESS.md) for the contract and paired-build verification. |

@@ -592,12 +592,11 @@ bool McpServer::uiSurfaceVisible(ProtocolEra era, const json& params) const {
 }
 
 DescriptorHeld McpServer::descriptorHolderFor(const RequestScope& scope) {
-    // A modern request is served only on the session it named, and it could
-    // only name one it had already been told about. A legacy client is one
-    // conversation, so the process remembers, for tool answers and resource
-    // reads alike.
+    // Metadata naming a session shows the client already knows its descriptor.
+    // An explicit-attach fallback still sends the full descriptor. A legacy
+    // conversation uses its ledger for tool answers and resource reads alike.
     if (scope.era == ProtocolEra::Modern) {
-        return [named = scope.runtime_session_id](const json& descriptor) {
+        return [named = scope.explicit_attachment ? std::nullopt : scope.runtime_session_id](const json& descriptor) {
             return named.has_value() && descriptor.value("session_id", "") == *named;
         };
     }
@@ -695,6 +694,11 @@ JsonRpcResponse McpServer::handleRequest(const JsonRpcRequest& req) {
     RequestScope scope;
     scope.era = era;
     scope.runtime_session_id = requestedRuntimeSession(req.params);
+    if (era == ProtocolEra::Modern && !scope.selectsRuntimeSession()) {
+        const auto sessions = std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(m_ipcClient);
+        scope.runtime_session_id = sessions ? sessions->explicitlyAttachedSessionId() : std::nullopt;
+        scope.explicit_attachment = true;
+    }
     std::optional<std::string> requested_version;
     if (era == ProtocolEra::Modern &&
         req.params["_meta"][kProtocolVersionMetaKey].is_string()) {
@@ -1853,7 +1857,6 @@ void McpServer::releaseRuntimeSession() {
     // routes the selection never points at, so reading only the selection here
     // would leak exactly those.
     const auto held = m_runtimeSessionClient->heldSessions();
-    if (held.empty()) return;
     size_t released = 0;
     for (const auto& session : held) {
         const auto closed = m_runtimeSessionClient->closeSessionRoute(session.session_id);
@@ -1864,6 +1867,9 @@ void McpServer::releaseRuntimeSession() {
         }
         ++released;
     }
+    // A lost route may leave an explicit choice but no held session to close.
+    // Full teardown also clears that choice and any failed per-route cleanup.
+    m_runtimeSessionClient->disconnect();
     if (released > 0) {
         DIDI_LOG_INFO("MCP_SERVER", "Released ", released, " runtime session route(s) on shutdown");
     }

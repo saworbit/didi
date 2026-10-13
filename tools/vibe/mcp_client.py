@@ -33,6 +33,7 @@ import importlib.util
 import json
 import os
 import subprocess
+import time
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -42,6 +43,28 @@ import sys as _sys  # noqa: E402
 
 _sys.path.insert(0, str(Path(__file__).resolve().parent))
 from editor_log import EditorLog, EngineLine  # noqa: E402
+
+
+def _read_pipe_now(pipe) -> bytes | None:
+    """Read available bytes without waiting for EOF from inherited writers."""
+    if os.name == "nt":
+        import ctypes
+        import msvcrt
+        from ctypes import wintypes
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        peek = kernel.PeekNamedPipe
+        peek.argtypes = [wintypes.HANDLE, ctypes.c_void_p, wintypes.DWORD,
+                         ctypes.c_void_p, ctypes.POINTER(wintypes.DWORD), ctypes.c_void_p]
+        peek.restype = wintypes.BOOL
+        available = wintypes.DWORD()
+        if not peek(msvcrt.get_osfhandle(pipe.fileno()), None, 0, None,
+                    ctypes.byref(available), None):
+            if ctypes.get_last_error() == 109:  # ERROR_BROKEN_PIPE is EOF.
+                return b""
+            raise ctypes.WinError(ctypes.get_last_error())
+        return pipe.read1(min(available.value, 65536)) if available.value else None
+    import select
+    return pipe.read1(65536) if select.select([pipe], [], [], 0)[0] else None
 
 PROTOCOL_VERSION = "2024-11-05"
 CLIENT_INFO = {"name": "didi-vibe", "version": "1"}
@@ -173,8 +196,14 @@ class Session:
         # first of those as an answer; this one keeps them instead, so a probe
         # can assert on what arrived.
         self.notifications: list[dict] = []
-        self.initialize_result = self.request("initialize", INITIALIZE["params"])
-        self.notify("notifications/initialized")
+        self._stderr_text = ""
+        self._closed = False
+        try:
+            self.initialize_result = self.request("initialize", INITIALIZE["params"])
+            self.notify("notifications/initialized")
+        except Exception:
+            self.close(timeout=1.0)
+            raise
 
     def take_notifications(self, method: str | None = None) -> list[dict]:
         """Notifications received so far, removed from the queue.
@@ -268,18 +297,64 @@ class Session:
         return self.request("tools/list", {})["result"]["tools"]
 
     def stderr(self) -> str:
-        """Whatever the server logged, available once the process has exited."""
-        if self.process.stderr is None:
-            return ""
-        return self.process.stderr.read().decode(errors="replace")
+        """Server logs after exit, retained across close and repeated reads."""
+        if self.process.stderr is not None and not self.process.stderr.closed:
+            self._stderr_text += self.process.stderr.read().decode(errors="replace")
+        return self._stderr_text
 
     def close(self, timeout: float = 10.0) -> None:
+        """Send EOF, drain both readers and reap; force-kill on timeout."""
+        if self._closed:
+            return
+        diagnostics = []
+        readers = [pipe for pipe in (self.process.stdout, self.process.stderr)
+                   if pipe is not None and not pipe.closed]
+        deadline = time.monotonic() + max(timeout, 0.0)
+
+        def drain():
+            progressed = False
+            for pipe in readers[:]:
+                data = _read_pipe_now(pipe)
+                if data is None:
+                    continue
+                if not data:
+                    readers.remove(pipe)
+                else:
+                    progressed = True
+                    if pipe is self.process.stderr:
+                        diagnostics.append(data)
+            return progressed
+
         try:
-            if self.process.stdin is not None:
-                self.process.stdin.close()
-            self.process.wait(timeout=timeout)
-        except Exception:
-            self.process.kill()
+            if self.process.stdin is not None and not self.process.stdin.closed:
+                try:
+                    self.process.stdin.close()
+                except BrokenPipeError:
+                    pass  # An already exited reader has received EOF.
+            while True:
+                progressed = drain()
+                running = self.process.poll() is None
+                if not running and not progressed:
+                    break
+                if time.monotonic() >= deadline:
+                    if running:
+                        self.process.kill()
+                    self.process.wait(timeout=max(timeout, 1.0))
+                    drain()
+                    break
+                if not progressed:
+                    time.sleep(0.005)
+        finally:
+            try:
+                if self.process.poll() is None:
+                    self.process.kill()
+                    self.process.wait(timeout=max(timeout, 1.0))
+            finally:
+                self._stderr_text += b"".join(diagnostics).decode(errors="replace")
+                for pipe in (self.process.stdin, self.process.stdout, self.process.stderr):
+                    if pipe is not None and not pipe.closed:
+                        pipe.close()
+                self._closed = True
 
     def __enter__(self) -> "Session":
         return self

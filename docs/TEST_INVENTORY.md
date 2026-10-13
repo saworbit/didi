@@ -10,14 +10,14 @@ Every number here is derived from the suites themselves rather than written down
 
 | Measure | Count |
 | --- | ---: |
-| Automated tests | **1771** |
-| Live-harness assertions | 1687 |
+| Automated tests | **1800** |
+| Live-harness assertions | 1696 |
 
 The badge in the [README](../README.md) shows the automated test total. Harness assertions are counted separately because they are assertions inside one live scenario, not independently runnable cases; adding them together would flatter the number.
 
 ## Native C++ suite (`didi_tests`)
 
-**1159 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
+**1178 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
 
 | Suite | Tests |
 | --- | ---: |
@@ -60,9 +60,9 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `Phase7Navigation` | 1 |
 | `Phase7Physics` | 1 |
 | `Phase7Signals` | 12 |
-| `Phase7TileGrid` | 7 |
+| `Phase7TileGrid` | 11 |
 | `Phase7Viewport` | 4 |
-| `ProcessRunner` | 2 |
+| `ProcessRunner` | 5 |
 | `ProjectSearch` | 17 |
 | `Prompts` | 1 |
 | `PropertyPaths` | 13 |
@@ -70,13 +70,13 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `RefusalRemedies` | 13 |
 | `ReimportJob` | 13 |
 | `RepeatedFailures` | 5 |
-| `ResourceIndexer` | 13 |
+| `ResourceIndexer` | 14 |
 | `Resources` | 2 |
 | `ResponseEconomy` | 21 |
 | `RuntimeLaunch` | 14 |
 | `RuntimeLogs` | 12 |
 | `RuntimeOutput` | 6 |
-| `RuntimeRouting` | 66 |
+| `RuntimeRouting` | 71 |
 | `RuntimeSessions` | 31 |
 | `RuntimeTree` | 1 |
 | `ScenarioRunner` | 21 |
@@ -85,7 +85,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `Schema` | 2 |
 | `Segmentation` | 5 |
 | `SpeculativeVerify` | 10 |
-| `TestReports` | 15 |
+| `TestReports` | 17 |
 | `TestRunner` | 2 |
 | `ToolManifest` | 1 |
 | `ToolProfile` | 6 |
@@ -95,7 +95,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `ViewportIsolation` | 2 |
 | `autoload_diagnostics` | 9 |
 | `config_file_syntax` | 31 |
-| `didi_setup` | 14 |
+| `didi_setup` | 15 |
 | `ghost_preview` | 4 |
 | `performance_verdict` | 24 |
 | `phase7` | 1 |
@@ -105,7 +105,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `phase7c_profiler` | 11 |
 | `project_settings_file` | 19 |
 | `resource_create` | 5 |
-| `resource_references` | 20 |
+| `resource_references` | 23 |
 | `tool_annotations` | 10 |
 | `tool_input_schema` | 8 |
 | `tool_manifest` | 11 |
@@ -114,11 +114,12 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 
 ## Python contract suites (`tests/test_*.py`)
 
-**612 tests.** Derived from `test_*` methods on every `unittest.TestCase` subclass, read with `ast`.
+**622 tests.** Derived from `test_*` methods on every `unittest.TestCase` subclass, read with `ast`.
 
 | File | Tests |
 | --- | ---: |
 | `test_bounded_reads.py` | 4 |
+| `test_build_identity.py` | 4 |
 | `test_check_release_archive.py` | 15 |
 | `test_ci_change_classification.py` | 7 |
 | `test_cli_arguments.py` | 13 |
@@ -127,7 +128,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `test_control_room_app.py` | 14 |
 | `test_control_room_protocol.py` | 17 |
 | `test_didi_binary.py` | 10 |
-| `test_didi_setup.py` | 20 |
+| `test_didi_setup.py` | 21 |
 | `test_documentation_validator.py` | 119 |
 | `test_editor_console.py` | 9 |
 | `test_editor_startup_live.py` | 1 |
@@ -137,43 +138,47 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `test_field_trial.py` | 158 |
 | `test_follow_ups.py` | 5 |
 | `test_fuzz_target_lists.py` | 6 |
+| `test_generate_class_reference.py` | 5 |
 | `test_include_layers.py` | 4 |
 | `test_initialize_instructions.py` | 5 |
 | `test_managed_recovery.py` | 3 |
 | `test_managed_recovery_adversarial.py` | 3 |
-| `test_managed_recovery_live.py` | 10 |
+| `test_managed_recovery_live.py` | 4 |
 | `test_mcp_wire_contract.py` | 15 |
-| `test_observed_post_state.py` | 12 |
+| `test_observed_post_state.py` | 4 |
 | `test_phase7_plan_ownership.py` | 10 |
 | `test_phase7_schema_contract.py` | 6 |
 | `test_phase7_signal_admission.py` | 3 |
+| `test_project_run_tests_live.py` | 4 |
 | `test_refusal_codes.py` | 13 |
 | `test_refusal_remedies.py` | 5 |
-| `test_stdio_process.py` | 2 |
+| `test_resource_uid_live.py` | 2 |
+| `test_stdio_process.py` | 3 |
 | `test_test_inventory.py` | 27 |
 | `test_tool_output_schema_contract.py` | 5 |
 | `test_tool_profiles.py` | 7 |
 | `test_vendored_versions.py` | 23 |
+| `test_vibe_mcp_client.py` | 7 |
 | `test_yolo_mode.py` | 10 |
 
 ## Live Godot harness (`tests/*.ps1`)
 
-**1687 assertions.** Derived from `Assert-True` call sites. The harness is one long live scenario rather than a set of named cases, so this counts assertions and says so.
+**1696 assertions.** Derived from `Assert-True` call sites. The harness is one long live scenario rather than a set of named cases, so this counts assertions and says so.
 
 | File | Assertions |
 | --- | ---: |
 | `bounded_reads.ps1` | 4 |
 | `change_journal.ps1` | 20 |
 | `follow_ups.ps1` | 2 |
-| `observed_external.ps1` | 7 |
-| `observed_post_state.ps1` | 16 |
+| `observed_post_state.ps1` | 15 |
 | `performance_verdicts.ps1` | 14 |
 | `phase7_success.ps1` | 2 |
 | `profiler_shutdown.ps1` | 9 |
+| `rectangle_cell_fills.ps1` | 19 |
 | `refusal_remedies.ps1` | 3 |
 | `reimport_job.ps1` | 19 |
 | `run_godot_integration.ps1` | 1458 |
-| `scenario_runner.ps1` | 31 |
+| `scenario_runner.ps1` | 29 |
 | `scene_tab_reload.ps1` | 36 |
 | `test_runner.ps1` | 15 |
 | `typed_object_layer.ps1` | 42 |
