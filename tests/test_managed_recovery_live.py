@@ -455,10 +455,17 @@ class ManagedRecoveryLive(unittest.TestCase):
         (project / 'apply_observed.gd').write_text('extends Node\nfunc beta():\n\treturn 2\n', encoding='utf-8')
         self.assertTrue(self.witness('hold', resource))
         (project / '.gitignore').write_text('.godot/\n.didi/\n.worktrees/\n', encoding='utf-8')
-        # Inherit the real user's Git identity; this disposable repository
-        # never overrides user.name or user.email.
+        # Keep configured identity. A fresh CI runner needs a fallback only
+        # for this disposable commit, without changing any Git config file.
         for args in (['init', '--quiet'], ['add', '.'], ['-c', 'core.autocrlf=false', 'commit', '--quiet', '-m', 'Observed apply fixture']):
-            done = subprocess.run(['git'] + args, cwd=project, capture_output=True, text=True, timeout=5)
+            identity = []
+            if 'commit' in args:
+                for key, fallback in [('user.name', 'didi'), ('user.email', 'didi@example.invalid')]:
+                    configured = subprocess.run(['git', 'config', '--get', key], cwd=project, capture_output=True, text=True, timeout=5)
+                    self.assertIn(configured.returncode, (0, 1), configured.stderr)
+                    if not configured.stdout.strip():
+                        identity.extend(['-c', key + '=' + fallback])
+            done = subprocess.run(['git'] + identity + args, cwd=project, capture_output=True, text=True, timeout=5)
             self.assertEqual(done.returncode, 0, done.stderr)
         expected = 'extends Node\nfunc delta():\n\treturn 4\n'
         result, payload = self.tool('project_apply_changes', changes=[{'path': resource, 'content': expected}], timeout_seconds=15)
