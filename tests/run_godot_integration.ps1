@@ -6005,6 +6005,7 @@ text = "Not a key"
     # main.tscn open as it found it.
     Invoke-TypedObjectLayerBlock -EditorSession $editorSession -FixtureRoot $fixtureRoot
     Invoke-RectangleCellFillsBlock -EditorSession $editorSession -FixtureRoot $fixtureRoot
+    Invoke-NodeArraySlotsBlock -EditorSession $editorSession -FixtureRoot $fixtureRoot
 
     # Q15 in docs/BUILD_QUEUE.md. Its fixture scene is its own, and it leaves
     # main.tscn open as it found it.

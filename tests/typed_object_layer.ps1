@@ -266,3 +266,86 @@ function Invoke-TypedObjectLayerBlock {
     foreach ($id in 7157, 7121, 7122) { [void](Tool-Payload $freedById[$id]) }
     Write-Output "Typed object layer: a batch over three nodes undid and redid as one step, and the save kept what the answers said."
 }
+
+# Typed node arrays and initial instance slots (#1357). The paths are from
+# the holder, and every element must resolve before any value can change.
+function Invoke-NodeArraySlotsBlock {
+    param($EditorSession, [string]$FixtureRoot)
+    $root = "/root/NodeArraySlots"
+    $holder = "$root/Holder"
+    $requests = @(
+        (@{ jsonrpc = "2.0"; id = 7160; method = "initialize"; params = @{ protocolVersion = "2024-11-05" } } | ConvertTo-Json -Compress),
+        (Tool-Request 7161 "runtime_attach_session" @{ session_id = $EditorSession.session_id }),
+        (Tool-Request 7162 "scene_open" @{ scene_path = "res://node_array_slot_cases.tscn" }),
+        (Tool-Request 7163 "scene_set_property" @{ target_node = $holder; property_name = "targets"; value = @("../A", "../B") }),
+        (Tool-Request 7164 "scene_get_property" @{ target_node = $holder; property_name = "targets" }),
+        (Tool-Request 7165 "scene_set_property" @{ target_node = $holder; property_name = "targets"; value = @("../B", "../Plain") }),
+        (Tool-Request 7166 "scene_get_property" @{ target_node = $holder; property_name = "targets" }),
+        (Tool-Request 7167 "editor_undo" @{}),
+        (Tool-Request 7168 "scene_get_property" @{ target_node = $holder; property_name = "targets" }),
+        (Tool-Request 7169 "editor_redo" @{}),
+        (Tool-Request 7170 "scene_get_property" @{ target_node = $holder; property_name = "targets" }),
+        (Tool-Request 7171 "scene_set_property" @{ target_node = $holder; property_name = "script_targets"; value = @(@{ type = "NodePath"; value = "../A" }, $null) }),
+        (Tool-Request 7172 "scene_get_property" @{ target_node = $holder; property_name = "script_targets" }),
+        (Tool-Request 7187 "scene_set_property" @{ target_node = $holder; property_name = "script_targets"; value = @("../A", "../Native") }),
+        (Tool-Request 7188 "scene_get_property" @{ target_node = $holder; property_name = "script_targets" }),
+        (Tool-Request 7189 "scene_set_property" @{ target_node = $holder; property_name = "unnamed_targets"; value = @("../Unnamed", "../Inherited") }),
+        (Tool-Request 7190 "scene_get_property" @{ target_node = $holder; property_name = "unnamed_targets" }),
+        (Tool-Request 7191 "scene_set_property" @{ target_node = $holder; property_name = "unnamed_targets"; value = @("../Inherited", "../A") }),
+        (Tool-Request 7192 "scene_get_property" @{ target_node = $holder; property_name = "unnamed_targets" }),
+        (Tool-Request 7173 "scene_set_property" @{ target_node = $holder; property_name = "resources"; value = @("res://node_array_slots.gd", $null) }),
+        (Tool-Request 7174 "scene_get_property" @{ target_node = $holder; property_name = "resources" }),
+        (Tool-Request 7175 "editor_save_scene" @{}),
+        (Tool-Request 7176 "scene_instantiate_node" @{ scene_path = "res://node_array_instance.tscn"; parent_path = $root; name = "Initial"; properties = @{ target = "../A"; targets = @("../A", "Local"); unnamed_targets = @("../Unnamed", "../Inherited") } }),
+        (Tool-Request 7177 "scene_get_property" @{ target_node = "$root/Initial"; property_name = "targets" }),
+        (Tool-Request 7178 "eval_gdscript" @{ context_node = "$root/Initial"; expression = 'node.get("ready_saw_target")' }),
+        (Tool-Request 7179 "editor_undo" @{}),
+        (Tool-Request 7180 "scene_get_property" @{ target_node = "$root/Initial"; property_name = "target" }),
+        (Tool-Request 7181 "editor_redo" @{}),
+        (Tool-Request 7182 "scene_get_property" @{ target_node = "$root/Initial"; property_name = "target" }),
+        (Tool-Request 7183 "scene_instantiate_node" @{ scene_path = "res://node_array_instance.tscn"; parent_path = $root; name = "Refused"; properties = @{ target = "../A"; targets = @("../A", "../Plain") } }),
+        (Tool-Request 7184 "scene_get_property" @{ target_node = "$root/Refused"; property_name = "target" }),
+        (Tool-Request 7193 "scene_instantiate_node" @{ scene_path = "res://node_array_instance.tscn"; parent_path = $root; name = "RefusedScript"; properties = @{ unnamed_targets = @("../Unnamed", "../A") } }),
+        (Tool-Request 7194 "scene_get_property" @{ target_node = "$root/RefusedScript"; property_name = "target" }),
+        (Tool-Request 7185 "editor_save_scene" @{}),
+        (Tool-Request 7186 "scene_close" @{ discard_unsaved = $true }),
+        (Tool-Request 7195 "scene_open" @{ scene_path = "res://node_array_slot_cases.tscn" }),
+        (Tool-Request 7196 "scene_get_property" @{ target_node = $holder; property_name = "targets" }),
+        (Tool-Request 7197 "scene_get_property" @{ target_node = "$root/Initial"; property_name = "unnamed_targets" }),
+        (Tool-Request 7198 "scene_close" @{ discard_unsaved = $true })
+    )
+    $raw = Invoke-Didi -Requests $requests -Arguments @("--project", $FixtureRoot)
+    $byId = @{}
+    foreach ($response in @($raw | Where-Object { $_ -like "{*" } | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.PSObject.Properties.Name -contains "id" })) { $byId[[int]$response.id] = $response }
+    $write = Tool-Payload $byId[7163]
+    Assert-True ($write.applied -eq $true -and $write.undo_redo_registered -eq $true) "Typed node array write did not land: $($byId[7163].result.content[0].text)"
+    Assert-True (((Tool-Payload $byId[7164]).value -join ",") -eq "../A,../B") "Typed node array did not read as paths from its holder."
+    Assert-True ($byId[7165].result.isError -eq $true -and $byId[7165].result.content[0].text -match 'targets\[1\].*takes a Node2D') "Wrong-class array element was not refused with its index: $($byId[7165].result.content[0].text)"
+    Assert-True (((Tool-Payload $byId[7166]).value -join ",") -eq "../A,../B") "Refused typed node array partially changed its earlier elements."
+    Assert-True (@((Tool-Payload $byId[7168]).value).Count -eq 0) "One undo did not restore the empty node array."
+    Assert-True (((Tool-Payload $byId[7170]).value -join ",") -eq "../A,../B") "One redo did not restore the node array."
+    $scriptArray = (Tool-Payload $byId[7172]).value
+    Assert-True ($scriptArray.Count -eq 2 -and $scriptArray[0] -eq "../A" -and $null -eq $scriptArray[1]) "Script-typed node array did not preserve paths and null."
+    Assert-True ($byId[7187].result.isError -eq $true -and $byId[7187].result.content[0].text -match 'script_targets\[1\]') "A native Node2D without the required script was accepted into a script-typed array."
+    $keptScriptArray = (Tool-Payload $byId[7188]).value
+    Assert-True ($keptScriptArray.Count -eq 2 -and $keptScriptArray[0] -eq "../A" -and $null -eq $keptScriptArray[1]) "A refused script-typed array partially changed its earlier elements."
+    Assert-True (((Tool-Payload $byId[7190]).value -join ",") -eq "../Unnamed,../Inherited") "An unnamed script array did not accept its script and an inherited script."
+    Assert-True ($byId[7191].result.isError -eq $true -and $byId[7191].result.content[0].text -match 'unnamed_targets\[1\]') "An incompatible script was not refused before typed array construction."
+    Assert-True (((Tool-Payload $byId[7192]).value -join ",") -eq "../Unnamed,../Inherited") "An incompatible script cleared or partially changed the existing array."
+    $resources = (Tool-Payload $byId[7174]).value
+    Assert-True ($resources.Count -eq 2 -and $resources[0] -eq "res://node_array_slots.gd" -and $null -eq $resources[1]) "Resource array changed its existing path/null conversion."
+    $instance = Tool-Payload $byId[7176]
+    Assert-True ($instance.undo_redo_registered -eq $true -and $null -eq $instance.properties_not_applied) "Initial node slots did not land on an instance: $($byId[7176].result.content[0].text)"
+    Assert-True (((Tool-Payload $byId[7177]).value -join ",") -eq "../A,Local") "Initial node array did not resolve the parent and instance child."
+    Assert-True ((Tool-Payload $byId[7178]).value -eq $true) "The tool script's first ready callback did not see the initial node reference."
+    Assert-True ($byId[7180].result.isError -eq $true -and (Tool-Payload $byId[7182]).value -eq "../A") "Instance undo/redo did not remove and restore its node slots."
+    Assert-True ($byId[7183].result.isError -eq $true -and $byId[7184].result.isError -eq $true) "Refused initial node array left a new node in the scene."
+    Assert-True ($byId[7193].result.isError -eq $true -and $byId[7194].result.isError -eq $true) "Refused initial script-typed array left a new instance in the scene."
+    [void](Tool-Payload $byId[7185])
+    $saved = Get-Content -LiteralPath (Join-Path $FixtureRoot "node_array_slot_cases.tscn") -Raw
+    Assert-True ($saved -match 'targets = \[NodePath\("\.\./A"\), NodePath\("\.\./B"\)\]' -and $saved -match 'target = NodePath\("\.\./A"\)' -and $saved -match 'node_paths=PackedStringArray\([^)]*"unnamed_targets"[^)]*\)') "The saved scene did not keep node arrays and initial slots as Godot does: $saved"
+    [void](Tool-Payload $byId[7186])
+    Assert-True (((Tool-Payload $byId[7196]).value -join ",") -eq "../A,../B" -and ((Tool-Payload $byId[7197]).value -join ",") -eq "../Unnamed,../Inherited") "Saved node arrays did not reload with their native and script references."
+    [void](Tool-Payload $byId[7198])
+    Write-Output "Node arrays: paths, nulls, script types, refusal rollback, saved references and undo verified."
+}

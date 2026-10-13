@@ -1,0 +1,28 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://node_array_slots.gd" id="1"]
+[ext_resource type="Script" path="res://node_array_point.gd" id="2"]
+
+[ext_resource type="Script" path="res://node_array_unnamed_point.gd" id="3"]
+[ext_resource type="Script" path="res://node_array_inherited_point.gd" id="4"]
+
+[node name="NodeArraySlots" type="Node2D"]
+
+[node name="Holder" type="Node" parent="."]
+script = ExtResource("1")
+
+[node name="A" type="Node2D" parent="."]
+script = ExtResource("2")
+
+[node name="B" type="Node2D" parent="."]
+script = ExtResource("2")
+
+[node name="Plain" type="Node" parent="."]
+
+[node name="Native" type="Node2D" parent="."]
+
+[node name="Unnamed" type="Node2D" parent="."]
+script = ExtResource("3")
+
+[node name="Inherited" type="Node2D" parent="."]
+script = ExtResource("4")
