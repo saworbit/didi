@@ -248,6 +248,7 @@ set(GDEXT_SOURCES
     src/gdextension/godot_bridge.cpp
     src/gdextension/bridge_anim.cpp
     src/gdextension/bridge_ui.cpp
+    src/gdextension/bridge_spatial.cpp
     src/gdextension/godot_values.cpp
     src/gdextension/runtime_bridge.cpp
     src/gdextension/viewport_renderer.cpp

@@ -5,6 +5,7 @@
 // those rules or add another write path.
 #include "didi/gdextension/godot_values.hpp"
 #include <optional>
+#include <set>
 #include <initializer_list>
 
 namespace didi::godot::bridge_internal {
@@ -62,5 +63,15 @@ Result<std::string> logicalPathFromEditedRoot(GDExtensionObjectPtr root, GDExten
 
 json uiListControls(const json& params, const std::string& session_kind);
 json uiHitTest(const json& params, const std::string& session_kind);
+
+Result<VariantValue> makeVector3(double x, double y, double z);
+Result<std::set<int64_t>> packedIntegerSet(VariantValue& packed);
+Result<json> pointVariantToJson(VariantValue& value, int dimension);
+
+json physicsClearance(const json& params, const std::string& session_kind);
+json visionFrustumQuery(const json& params, const std::string& session_kind);
+json physicsRaycastBatch(const json& params, const std::string& session_kind);
+json physicsRaycast(const json& params, const std::string& session_kind);
+json navQueryPath(const json& params, const std::string& session_kind);
 
 } // namespace didi::godot::bridge_internal

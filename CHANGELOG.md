@@ -110,6 +110,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Changed
 
+- `2026-10-14` Raycast, clearance, frustum and navigation bridge queries compile in a spatial domain file with their existing engine checks. [#1255](https://github.com/saworbit/didi/issues/1255) · [PR #1398](https://github.com/saworbit/didi/pull/1398)
 - `2026-10-14` UI control listing and hit testing compile in their own bridge file while preserving geometry and hit ordering. [#1255](https://github.com/saworbit/didi/issues/1255) [PR #1398](https://github.com/saworbit/didi/pull/1398)
 - `2026-10-14` Animation bridge handlers compile in their own file and share the existing scene and undo helpers through a private header. [#1255](https://github.com/saworbit/didi/issues/1255) [PR #1398](https://github.com/saworbit/didi/pull/1398)
 - `2026-10-11` The live harness compares `asset_reimport`'s `announced` with the `.import` files on disk, so six mutating tools are left unchecked, not seven. [#1020](https://github.com/saworbit/didi/issues/1020) · [PR #1283](https://github.com/saworbit/didi/pull/1283)
