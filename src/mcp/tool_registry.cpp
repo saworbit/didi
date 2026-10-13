@@ -476,15 +476,17 @@ std::optional<runtime::SessionDescriptor> selectedSessionOf(
     return sessions ? sessions->activeSession() : std::optional<runtime::SessionDescriptor>{};
 }
 
-// A modern request that named no session asked a live tool to run on whatever
-// the process happened to be pointed at. Say what to do rather than refuse.
+// A modern request needs a named route or a successful explicit attach.
 Error unnamedRuntimeSessionError(const std::string& tool_name) {
     Error error(400,
                 "This tool runs against a Godot session, and a request declaring protocol "
-                "2026-07-28 has to name the one it means. Discover sessions with "
-                "runtime_list_sessions, then set _meta.didi.runtime_session_id on the call.");
+                "2026-07-28 needs a session choice. Discover sessions with "
+                "runtime_list_sessions, then call runtime_attach_session with its session_id "
+                "or set _meta.didi.runtime_session_id on the call.");
     error.data = {{"tool", tool_name},
-                  {"missing", std::string("_meta.") + kDidiMetaKey + "." + kRuntimeSessionMetaKey}};
+                  {"missing", std::string("_meta.") + kDidiMetaKey + "." + kRuntimeSessionMetaKey},
+                  {"next_call", {{"tool", "runtime_list_sessions"},
+                                 {"reason", "Choose a session and attach it with runtime_attach_session."}}}};
     return error;
 }
 
@@ -492,11 +494,14 @@ Error unnamedRuntimeSessionError(const std::string& tool_name) {
 // process is already holding as many as it will.
 Error runtimeSessionMismatchError(const std::string& tool_name, const std::string& wanted,
                                   const std::optional<runtime::SessionDescriptor>& held) {
-    Error error(409, "The runtime session this request named could not be reached.");
+    Error error(409, "The chosen runtime session could not be reached. List sessions and attach "
+                     "the intended engine again with runtime_attach_session.");
     error.data = {{"tool", tool_name},
                   {"requested_session_id", wanted},
                   {"selected_session_id",
-                   held.has_value() ? json(held->session_id) : json(nullptr)}};
+                   held.has_value() ? json(held->session_id) : json(nullptr)},
+                  {"next_call", {{"tool", "runtime_list_sessions"},
+                                 {"reason", "The chosen session is gone; choose and attach a live one."}}}};
     return error;
 }
 
@@ -1116,6 +1121,14 @@ std::optional<CallToolResult> ToolRegistry::selectNamedRuntimeRoute(
     const std::string& tool_name, const RequestScope& scope,
     std::optional<runtime::RuntimeRouteLease>& lease) {
     const std::string& wanted = *scope.runtime_session_id;
+    if (scope.explicit_attachment) {
+        lease = runtime::acquireRuntimeRouteLeaseFor(m_sourceIpcClient, wanted);
+        if (!lease) {
+            return structuredLiveToolError(
+                runtimeSessionMismatchError(tool_name, wanted, std::nullopt), std::nullopt);
+        }
+        return std::nullopt;
+    }
 
     // The session this request named, whether or not it is the one the process
     // has selected. Two tasks naming two editors both get served; neither is
@@ -2159,22 +2172,27 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
         const bool managed_route =
             std::dynamic_pointer_cast<runtime::IRuntimeRouteLeaseProvider>(m_sourceIpcClient) != nullptr;
 
-        // Which session this request is entitled to. A legacy request inherits
-        // the attached route, which is the lifecycle it was written against. A
-        // modern request gets the session it named and nothing else: inheriting
-        // here is what let one task drive an editor a different task attached,
-        // on a process the specification says is not a conversation boundary.
-        if (scope.mayInheritActiveRoute() || scope.selectsRuntimeSession()) {
+        // Per-request metadata takes precedence. Hosts that cannot expose it
+        // use their explicit attach, never a route picked by auto-discovery.
+        if (scope.mayInheritActiveRoute()) {
             lease = runtime::acquireRuntimeRouteLease(m_sourceIpcClient);
         }
         if (scope.selectsRuntimeSession()) {
             auto selection = selectNamedRuntimeRoute(name, scope, lease);
             if (selection.has_value()) return *selection;
         } else if (!scope.mayInheritActiveRoute()) {
-            // A modern request that named no session gets no live route. When
-            // the tool can answer offline it does, and the payload says
-            // offline_fallback, so nothing is served live by accident.
-            if (!supports_offline) {
+            const auto attached = !scope.explicit_attachment && m_runtimeSessionClient
+                                      ? m_runtimeSessionClient->explicitlyAttachedSessionId()
+                                      : std::nullopt;
+            if (attached.has_value()) {
+                lease = runtime::acquireRuntimeRouteLeaseFor(m_sourceIpcClient, *attached);
+                if (!lease.has_value()) {
+                    // Do not reopen, auto-select, or hide the lost choice with
+                    // synthetic output, even for tools with an offline path.
+                    return structuredLiveToolError(
+                        runtimeSessionMismatchError(name, *attached, std::nullopt), std::nullopt);
+                }
+            } else if (!supports_offline) {
                 return structuredLiveToolError(
                     unnamedRuntimeSessionError(name), std::nullopt);
             }

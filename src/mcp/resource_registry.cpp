@@ -24,31 +24,49 @@ namespace {
 // watcher reads blackboard resources on its own thread while the stdio loop is
 // serving a request on this one.
 thread_local RequestScope t_readScope = RequestScope::legacy();
+thread_local std::optional<runtime::RuntimeRouteLease> t_readLease;
+thread_local bool t_readLeaseResolved = false;
 
 // Installs the scope for one read and takes it out again however the read
 // leaves, including through an exception from a handler.
 struct ScopedReadScope {
-    explicit ScopedReadScope(const RequestScope& scope) : previous(t_readScope) {
+    explicit ScopedReadScope(const RequestScope& scope,
+                             std::optional<runtime::RuntimeRouteLease> lease,
+                             bool resolved)
+        : previous(t_readScope), previous_lease(std::move(t_readLease)),
+          previous_resolved(t_readLeaseResolved) {
         t_readScope = scope;
+        t_readLease = std::move(lease);
+        t_readLeaseResolved = resolved;
     }
-    ~ScopedReadScope() { t_readScope = previous; }
+    ~ScopedReadScope() {
+        t_readScope = previous;
+        t_readLease = std::move(previous_lease);
+        t_readLeaseResolved = previous_resolved;
+    }
     ScopedReadScope(const ScopedReadScope&) = delete;
     ScopedReadScope& operator=(const ScopedReadScope&) = delete;
     RequestScope previous;
+    std::optional<runtime::RuntimeRouteLease> previous_lease;
+    bool previous_resolved;
 };
 
 // The route a resource read may use, which is not always the one the process
-// holds. A modern request is served on the session it named and on no other,
-// so a read that named nothing falls through to the offline branch the handler
-// already has rather than answering from an editor it never selected.
+// holds. Modern reads prefer the named session, then an explicit attach.
 std::optional<runtime::RuntimeRouteLease> scopedRouteLease(
     const std::shared_ptr<ipc::IIpcClient>& client) {
+    if (t_readLeaseResolved) return t_readLease;
     const auto& scope = t_readScope;
-    if (!scope.mayInheritActiveRoute() && !scope.selectsRuntimeSession()) return std::nullopt;
     // A read that named a session is served from that one whether or not it is
     // the process selection, and never from another.
     if (scope.selectsRuntimeSession()) {
         return runtime::acquireRuntimeRouteLeaseFor(client, *scope.runtime_session_id);
+    }
+    if (!scope.mayInheritActiveRoute()) {
+        const auto sessions = std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(client);
+        const auto attached = !scope.explicit_attachment && sessions
+                                  ? sessions->explicitlyAttachedSessionId() : std::nullopt;
+        return attached ? runtime::acquireRuntimeRouteLeaseFor(client, *attached) : std::nullopt;
     }
     return runtime::acquireRuntimeRouteLease(client);
 }
@@ -286,7 +304,25 @@ Result<std::string> ResourceRegistry::readResource(const std::string& uri,
     if (!res) {
         return Error::notFound("Resource not found: " + uri);
     }
-    const ScopedReadScope read_scope(scope);
+    const bool attachment_read = !scope.mayInheritActiveRoute() &&
+                                (scope.explicit_attachment || !scope.selectsRuntimeSession());
+    std::optional<runtime::RuntimeRouteLease> read_lease;
+    if (attachment_read &&
+        std::find(res->capability.modes.begin(), res->capability.modes.end(), "live") !=
+            res->capability.modes.end()) {
+        const auto sessions = std::dynamic_pointer_cast<runtime::IRuntimeSessionClient>(m_ipcClient);
+        const auto attached = scope.explicit_attachment ? scope.runtime_session_id
+                                  : sessions ? sessions->explicitlyAttachedSessionId() : std::nullopt;
+        if (attached) read_lease = runtime::acquireRuntimeRouteLeaseFor(m_ipcClient, *attached);
+        if (attached && !read_lease) {
+            return Error(409, "The explicitly attached session is gone. List sessions and attach "
+                              "the intended engine again with runtime_attach_session.",
+                         {{"requested_session_id", *attached},
+                          {"next_call", {{"tool", "runtime_list_sessions"},
+                                         {"reason", "Choose and attach a live session."}}}});
+        }
+    }
+    const ScopedReadScope read_scope(scope, std::move(read_lease), attachment_read);
     auto result = res->readHandler();
     if (result.isErr()) return result;
 

@@ -369,8 +369,8 @@ coordination tools are for.
 
 ### Naming the runtime session
 
-A client that declares protocol `2026-07-28` on its requests must say which
-Godot session each one means:
+A client that declares protocol `2026-07-28` can select the Godot session on
+each request:
 
 ```json
 {
@@ -389,12 +389,18 @@ Godot session each one means:
 }
 ```
 
-That request is served on that session and no other. A request that names none
-gets no live session at all: a tool that can answer offline does and says
-`offline_fallback`, and a live-only tool is refused with `400` naming the field
-to set. The reason is that a stdio process is not a conversation under that
-revision, so a request cannot be handed whatever session some other task
-happened to attach.
+That request is served on that session and no other. For a host that does not
+let the model supply request metadata, call `runtime_attach_session` with the
+intended `session_id` first. Requests without a metadata id then use that
+explicit choice, including resource reads. A lost choice is refused with
+`409`, even for tools such as `viewport_capture_frame` that can answer offline.
+Background jobs keep the choice they saw when submitted.
+
+Without an explicit attach, automatic discovery does not supply a modern
+route. Offline tools can still answer, and a live-only tool is refused with
+`400` naming the attach or metadata route. Tasks sharing one process and using
+different engines must each supply the metadata id; the explicit attach is a
+shared choice. Detach clears that choice.
 
 Naming a session the process is not already routed to opens a route to it,
 alongside any others, up to eight at once. Opening a route does not move the
