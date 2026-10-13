@@ -30,6 +30,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 BRIDGE = ROOT / "src" / "gdextension" / "godot_bridge.cpp"
 HOOK = ROOT / "src" / "gdextension" / "editor_hook.cpp"
+BRIDGE_FILES = (BRIDGE, *sorted(BRIDGE.parent.glob("bridge_*.cpp")))
 
 # The rule is about refusals, not about two files. It used to name these two
 # and the extension emits refusals from five, so #890 and #892 both landed in
@@ -37,7 +38,8 @@ HOOK = ROOT / "src" / "gdextension" / "editor_hook.cpp"
 # message while the hook, four hundred lines away and inside the guard, put the
 # same identifier under `data.code` where it belongs.
 #
-# `godot_bridge.cpp` is not in this list. It answers to the rule above instead,
+# The core bridge and its domain files are not in this list. They answer to
+# the rule above instead,
 # which is about `bridgeError` and the message position, and its refusals are
 # built through helpers this scan cannot read line by line.
 ROUTER = ROOT / "src" / "gdextension" / "runtime_request_router.cpp"
@@ -51,7 +53,7 @@ IPC = ROOT / "src" / "gdextension" / "gdextension_ipc.cpp"
 LITERAL_REFUSAL_FILES = (HOOK, ROUTER, IPC)
 ERROR_JSON_FILES = (SANDBOX, RUNTIME_BRIDGE)
 
-# `godot_bridge.cpp` is held to the rule for the two statuses where the floor's
+# The core bridge and discovered domain files keep the two statuses where the floor's
 # name loses something a caller acts on, and not for the rest. A 409 is a state
 # the caller can do something about and a 422 says which of several things was
 # wrong with what it sent, so `conflict` and `unprocessable` were covering four
@@ -62,7 +64,7 @@ ERROR_JSON_FILES = (SANDBOX, RUNTIME_BRIDGE)
 # there are 184 of them, and naming each would bury the two dozen that matter.
 # 404 and 501 keep `not_found` and `unimplemented`, which say everything there
 # is to say.
-PARTIAL_ERROR_JSON_FILES = ((BRIDGE, (409, 422)),)
+PARTIAL_ERROR_JSON_FILES = tuple((path, (409, 422)) for path in BRIDGE_FILES)
 
 # A bare identifier: lower case, at least one underscore, no spaces. The thing
 # a caller should never be shown as an explanation.
@@ -168,14 +170,15 @@ def _error_json_arguments(source: str) -> list[tuple[int, list[str]]]:
 
 class BridgeIdentifiersReachCallersThroughBridgeError(unittest.TestCase):
     def test_no_errorjson_call_passes_a_bare_identifier(self) -> None:
-        source = BRIDGE.read_text(encoding="utf-8")
         offenders = []
-        for line, message in _error_json_messages(source):
-            # The message position only. A `data` value may legitimately be an
-            # identifier -- that is where identifiers belong.
-            for literal in re.findall(r'"([^"\\\n]*)"', message):
-                if IDENTIFIER.match(literal):
-                    offenders.append(f"{BRIDGE.name}:{line} -> {literal}")
+        for path in BRIDGE_FILES:
+            source = path.read_text(encoding="utf-8")
+            for line, message in _error_json_messages(source):
+                # The message position only. A `data` value may legitimately be an
+                # identifier -- that is where identifiers belong.
+                for literal in re.findall(r'"([^"\\\n]*)"', message):
+                    if IDENTIFIER.match(literal):
+                        offenders.append(f"{path.name}:{line} -> {literal}")
         self.assertEqual(
             offenders, [],
             "errorJson hands the message straight to the caller, so a bare "
@@ -201,13 +204,14 @@ class BridgeHelperRefusalsNameThemselves(unittest.TestCase):
         # apart by message text, which is how the 403 told a caller to fix
         # file permissions (#1184, #1196). The errorJson rule above never saw
         # them, so a refusal built that way fails here instead.
-        source = BRIDGE.read_text(encoding="utf-8")
         offenders = []
-        for match in re.finditer(r"\bfail\(\s*(\d{3})\s*,", source):
-            status = int(match.group(1))
-            if 400 < status < 500:
-                line = source.count("\n", 0, match.start()) + 1
-                offenders.append(f"{BRIDGE.name}:{line} ({status})")
+        for path in BRIDGE_FILES:
+            source = path.read_text(encoding="utf-8")
+            for match in re.finditer(r"\bfail\(\s*(\d{3})\s*,", source):
+                status = int(match.group(1))
+                if 400 < status < 500:
+                    line = source.count("\n", 0, match.start()) + 1
+                    offenders.append(f"{path.name}:{line} ({status})")
         self.assertEqual(
             offenders, [],
             "fail(status, message) carries no data.code, so the floor names "
@@ -222,15 +226,16 @@ class BridgeHelperRefusalsNameThemselves(unittest.TestCase):
         # World3D" all arrived as conflict, which the remedy table cannot fix
         # (#1222). A third argument that is a variable is trusted; one written
         # out in place has to name the code.
-        source = BRIDGE.read_text(encoding="utf-8")
         offenders = []
-        for line, arguments in _call_arguments(source, r"\bError\("):
-            status = arguments[0].strip()
-            if not status.isdigit() or not 400 < int(status) < 500:
-                continue
-            data = arguments[2].strip() if len(arguments) > 2 else ""
-            if not data or (data.startswith("{") and '"code"' not in data):
-                offenders.append(f"{BRIDGE.name}:{line} ({status})")
+        for path in BRIDGE_FILES:
+            source = path.read_text(encoding="utf-8")
+            for line, arguments in _call_arguments(source, r"\bError\("):
+                status = arguments[0].strip()
+                if not status.isdigit() or not 400 < int(status) < 500:
+                    continue
+                data = arguments[2].strip() if len(arguments) > 2 else ""
+                if not data or (data.startswith("{") and '"code"' not in data):
+                    offenders.append(f"{path.name}:{line} ({status})")
         self.assertEqual(
             offenders, [],
             "Error(status, message) carries no data.code, so the floor names "
@@ -249,7 +254,7 @@ REWRAP = re.compile(r"errorJson\(\s*(?P<error>[A-Za-z_][\w.()\->\[\]]*?)\.code\s
 class ResultErrorsKeepTheirData(unittest.TestCase):
     def test_no_error_is_rewrapped_without_its_data(self) -> None:
         offenders = []
-        for path in (BRIDGE, SANDBOX, RUNTIME_BRIDGE):
+        for path in (*BRIDGE_FILES, SANDBOX, RUNTIME_BRIDGE):
             source = path.read_text(encoding="utf-8")
             # The one overload that takes the Error whole is where the rewrap
             # belongs, so its own body is the exception.
@@ -331,11 +336,10 @@ class HookRefusalsNameThemselves(unittest.TestCase):
             "number arrive under one name:\n  " + "\n  ".join(offenders))
 
     def test_every_refusal_emitting_file_is_scanned(self) -> None:
-        # The list above is the thing that goes stale, which is how the router
-        # sat outside it. A new file in src/gdextension that answers with a
-        # refusal shape this test understands has to be added to it.
+        # Bridge domains are discovered by name and keep the original bridge
+        # rules. Other extension refusal emitters still need an explicit rule.
         scanned = {path.name for path in LITERAL_REFUSAL_FILES + ERROR_JSON_FILES}
-        scanned.add(BRIDGE.name)
+        scanned.update(path.name for path, _ in PARTIAL_ERROR_JSON_FILES)
         unscanned = []
         for path in sorted((ROOT / "src" / "gdextension").glob("*.cpp")):
             if path.name in scanned:
@@ -452,12 +456,13 @@ class HookRefusalsNameThemselves(unittest.TestCase):
         and the vocabulary that matters here cannot be told from the others by
         reading the source text.
         """
-        source = BRIDGE.read_text(encoding="utf-8")
-        self.assertNotIn(
-            '"reverted"', source,
-            "The failed-mutation outcome is rolled_back when the undo took and "
-            "unknown when it did not. reverted is a tenth word for the nine "
-            "sites' first one, and the live signal probe asserts rolled_back.")
+        for path in BRIDGE_FILES:
+            source = path.read_text(encoding="utf-8")
+            self.assertNotIn(
+                '"reverted"', source,
+                "The failed-mutation outcome is rolled_back when the undo took and "
+                "unknown when it did not. reverted is a tenth word for the nine "
+                "sites' first one, and the live signal probe asserts rolled_back.")
 
     def test_the_cancelled_command_is_not_called_a_timeout(self) -> None:
         source = HOOK.read_text(encoding="utf-8")
