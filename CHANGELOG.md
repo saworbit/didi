@@ -109,7 +109,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 - `2026-09-23` A release archive can be installed and checked in one command. [PR #911](https://github.com/saworbit/didi/pull/911)
 
 ### Changed
-- `2026-10-14` Scene create, open, close and branch packing compile together with existing save, ownership and dirty-state checks. [#1255](https://github.com/saworbit/didi/issues/1255)
+- `2026-10-14` Scene create, open, close and branch packing compile together with existing save, ownership and dirty-state checks. [#1255](https://github.com/saworbit/didi/issues/1255) · [PR #1408](https://github.com/saworbit/didi/pull/1408)
 - `2026-10-14` Performance monitors and frame timing compile together with their existing measurement ownership and shutdown checks. [#1255](https://github.com/saworbit/didi/issues/1255) · [PR #1407](https://github.com/saworbit/didi/pull/1407)
 - `2026-10-14` Resource refresh, imported stream, script attachment and class lookup bridge handlers compile together with existing checks. [#1255](https://github.com/saworbit/didi/issues/1255) · [PR #1406](https://github.com/saworbit/didi/pull/1406)
 - `2026-10-14` Scene group bridge operations compile in one domain with the existing membership, persistence and undo checks. [#1255](https://github.com/saworbit/didi/issues/1255) · [PR #1405](https://github.com/saworbit/didi/pull/1405)
