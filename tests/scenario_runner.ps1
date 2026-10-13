@@ -25,6 +25,26 @@
 # res://scenario_runner is its own, and it puts the controller back as it found
 # it.
 
+function Assert-ScenarioProcessWitness($Answer, $EditorSession, [string]$FixtureRoot) {
+    # Windows Godot only tracks processes it created itself. Native handles
+    # witness Didi's game and a known live control without session discovery.
+    $pidValue = [int64]$Answer.game.pid
+    Assert-True ($pidValue -gt 0) "The scenario names no game process to witness."
+    $editor = Get-Process -Id $EditorSession.pid -ErrorAction Stop
+    try {
+        $null = $editor.Handle
+        $started = $editor.StartTime.ToUniversalTime().Ticks
+        $game = Get-Process -Id $pidValue -ErrorAction SilentlyContinue
+        $running = $false
+        if ($null -ne $game) {
+            try { $null = $game.Handle; $running = -not $game.HasExited }
+            finally { $game.Dispose() }
+        }
+        Assert-ScenarioObservedTeardown $Answer $running (-not $editor.HasExited)
+        Assert-True ($editor.StartTime.ToUniversalTime().Ticks -eq $started) "The live editor witness changed process identity."
+    } finally { $editor.Dispose() }
+}
+
 function Get-ScenarioRunnerSteps([bool]$TwoPresses) {
     $player = "/root/DoubleJump/Player"
     # Standing first, whatever the game did before the scenario paused it.
@@ -98,6 +118,7 @@ function Invoke-ScenarioRunnerBlock {
     Assert-True ($pass.steps[6].matched.message -eq "double jump") "The double-jump pass did not cite the controller's own output: $passText"
     Assert-True ($pass.game.fixed_fps -eq 60) "The scenario's game did not run at the project's physics rate: $($pass.game.fixed_fps)"
     Assert-True ($pass.teardown.ok -eq $true -and $pass.teardown.session_gone -eq $true) "The double-jump scenario did not stop its game: $($pass.teardown | ConvertTo-Json -Compress)"
+    Assert-ScenarioProcessWitness $pass $EditorSession $FixtureRoot
     $recorded = @($pass.files | ForEach-Object { $_.path })
     Assert-True ($recorded -contains "project.godot" -and $recorded -contains $scene -and $recorded -contains "res://scenario_runner/double_jump_player.gd") "The pass does not name the files it ran against: $($recorded -join ', ')"
     Assert-True ($pass.stale -eq $false) "A pass nothing changed under reported itself stale."
@@ -116,6 +137,8 @@ function Invoke-ScenarioRunnerBlock {
     Assert-True ($one.failure.step -eq 4 -and $one.error.data.code -eq "scenario_failed" -and $one.error.data.field -eq "steps") "The one-press failure did not name its assertion: $oneText"
     Assert-True ([double]$one.steps[4].value -gt -120) "The one-press run reports a height only a second jump reaches: $($one.steps[4].value)"
     Assert-True ($one.teardown.session_gone -eq $true) "The failed scenario did not stop its game: $oneText"
+
+    Assert-ScenarioProcessWitness $one $EditorSession $FixtureRoot
 
     # Refused before a game starts.
     $smokeText = $byId[8007].result.content[0].text
@@ -150,6 +173,7 @@ function Invoke-ScenarioRunnerBlock {
         $brokenText = $brokenById[8012].result.content[0].text
         $broken = $brokenText | ConvertFrom-Json
         Assert-True ($brokenById[8012].result.isError -and $broken.verdict -eq "fail" -and $broken.failure.step -eq 5) "The double-jump scenario passed a controller that allows one jump: $brokenText"
+        Assert-ScenarioProcessWitness $broken $EditorSession $FixtureRoot
         $afterBroken = Get-ScenarioRunnerSessionIds $brokenById[8013]
         Assert-True (($before -join ",") -eq ($afterBroken -join ",")) "The failed scenario left a session behind: $($afterBroken -join ', ')"
     } finally {
