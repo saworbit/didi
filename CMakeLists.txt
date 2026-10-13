@@ -9,29 +9,9 @@ project(didi VERSION 2.0.1 LANGUAGES C CXX)
 # at configure, with a number, instead of inside a generator.
 find_package(Python3 3.9 REQUIRED COMPONENTS Interpreter)
 
-# The build identity, which is not the version. Two installs can both be 1.6.0
-# and still be different builds, because the server binary and the GDExtension
-# are copied around separately. The commit says which source, and the configure
-# stamp separates two builds of the same source, so the pair matches only when
-# it was configured together. The commit is best effort: without git it reads
-# nogit, and the stamp alone still separates two configures.
-find_package(Git QUIET)
-set(DIDI_BUILD_COMMIT "nogit")
-if(GIT_FOUND)
-    execute_process(
-        COMMAND "${GIT_EXECUTABLE}" rev-parse --short=12 HEAD
-        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-        OUTPUT_VARIABLE DIDI_BUILD_COMMIT_RAW
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        ERROR_QUIET
-        RESULT_VARIABLE DIDI_BUILD_COMMIT_STATUS
-    )
-    if(DIDI_BUILD_COMMIT_STATUS EQUAL 0 AND DIDI_BUILD_COMMIT_RAW)
-        set(DIDI_BUILD_COMMIT "${DIDI_BUILD_COMMIT_RAW}")
-    endif()
-endif()
-string(TIMESTAMP DIDI_BUILD_STAMP "%Y%m%dT%H%M%S" UTC)
-set(DIDI_BUILD_ID "${PROJECT_VERSION}+${DIDI_BUILD_COMMIT}.${DIDI_BUILD_STAMP}")
+# Refresh the source commit on every build, including pulls and checkouts that
+# did not reconfigure. The configure stamp still pairs server and extension.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/build_identity.cmake")
 
 # The version had to be typed into four files and kept in step by a documentation
 # check. Everything in C++ now reads it from here, generated from project()
@@ -39,18 +19,6 @@ set(DIDI_BUILD_ID "${PROJECT_VERSION}+${DIDI_BUILD_COMMIT}.${DIDI_BUILD_STAMP}")
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/cmake/version.hpp.in"
     "${CMAKE_BINARY_DIR}/generated/include/didi/common/version.hpp"
-    @ONLY
-)
-
-# The build id is the half that changes on every configure, and version.hpp sits
-# behind mcp_protocol.hpp, which 28 files include. Keeping the volatile string in
-# its own translation unit means a reconfigure with no source change recompiles
-# one file rather than 57 targets (#633). configure_file rewrites an output only
-# when its content differs, so version.hpp itself is now untouched unless the
-# version is.
-configure_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/build_id.cpp.in"
-    "${CMAKE_BINARY_DIR}/generated/src/didi_build_id.cpp"
     @ONLY
 )
 
@@ -253,6 +221,7 @@ set(CORE_SOURCES
 find_package(Threads REQUIRED)
 
 add_library(didi_core STATIC ${CORE_SOURCES} "${CMAKE_BINARY_DIR}/generated/src/didi_build_id.cpp")
+add_dependencies(didi_core didi_build_identity)
 set_target_properties(didi_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_include_directories(didi_core PUBLIC ${DIDI_INCLUDE_DIRECTORIES})
 target_link_libraries(didi_core PUBLIC Threads::Threads)

@@ -433,7 +433,7 @@ jobs:
           # A typo used to start the server as though the launch had succeeded,
           # and a value option could swallow the flag after it, so an operator
           # could ask for a mode and quietly start without it.
-          "$DIDI_PYTHON" -m unittest tests.test_cli_arguments -v
+          "$DIDI_PYTHON" -m unittest tests.test_cli_arguments tests.test_build_identity -v
 
       - name: Verify didi setup gives a bare project a working session
         shell: bash
