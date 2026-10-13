@@ -766,7 +766,7 @@ Every diff also reports two perceptual measures, whether or not a tolerance was 
 
 ### `viewport_create_test_lab` — Offline
 
-Writes `res://didi_test_lab.tscn` with a basic light, environment node, ground box, and three cameras. A `.tscn` or `.scn` target is instanced under the lab as `TargetInstance`; any other resource is attached to a `TargetInstance` holder node as `metadata/didi_target`, since a plain resource cannot be a node. The result says which happened with `target_instanced`, and reports `target_resource_path` resolved, the way every writer does, and `file_bytes`, the size of the file read back from disk. The header carries no uid, as `resource_create`'s does not; the one it used to carry was not a uid Godot could read, so every lab had none anyway (#1164).
+Writes `res://didi_test_lab.tscn` with a basic light, environment node, ground box, and three cameras. A `.tscn` or `.scn` target is instanced under the lab as `TargetInstance`; any other resource is attached to a `TargetInstance` holder node as `metadata/didi_target`, since a plain resource cannot be a node. The result says which happened with `target_instanced`, and reports `target_resource_path` resolved, the way every writer does, and `file_bytes`, the size of the file read back from disk. The lab header carries no uid; the one it used to carry was not a uid Godot could read, so every lab had none anyway (#1164).
 
 The lab lives at the project root, not under `addons/didi`, so `project_audit_assets` and the search tools can see it, and a project without the addon does not have the folder invented for it. The target is checked before anything is written or created: a target that does not exist is refused with `404` and the project is left exactly as it was.
 
@@ -1017,6 +1017,8 @@ The result carries `property_check` with `checked` (whether the check ran at all
 
 The result adds `external_references` (path, resource type, id and uid for each header entry), `sub_resources_written` (id, type and the properties each got, in file order) and `load_steps`. 
 
+Each new resource carries a Godot-format random 63-bit UID in its root header. An overwrite preserves the existing root UID; an external reference never supplies it. The response adds `uid`, read back from the written header, and the next project UID map includes it. Identity selection, write, and read-back hold the file lock. An unreadable existing UID or a root header not fully read within the first 64 KiB is refused before replacement. This is file identity; engine registration still follows the editor filesystem scan.
+
 ```json
 {
   "save_path": "res://art/arena_tileset.tres",
@@ -1073,7 +1075,7 @@ Returns UID-to-path mappings discovered in indexed project resources, and option
 
 - `resolve` (`array`, optional): 1 to 256 non-empty `uid://` or `res://` strings.
 
-`uid_map` and `total_uids` always come from the project files, and `uid_map_source` says so on every response. `ResourceUID` exposes no enumeration through GDExtension, so a connected editor does not make the map live; a call without `resolve` therefore reports `execution_mode: "local"`. Not `offline_fallback`: there is no live path for the map to fall back from, so an attached editor would change nothing about the answer.
+`uid_map` and `total_uids` always come from the project files, and `uid_map_source` says so on every response. A text resource or scene owns only the UID on its opening `gd_resource` or `gd_scene` tag. External references and script text do not supply the containing file's UID; scripts use their sidecars. `ResourceUID` exposes no enumeration through GDExtension, so a connected editor does not make the map live; a call without `resolve` therefore reports `execution_mode: "local"`. Not `offline_fallback`: there is no live path for the map to fall back from, so an attached editor would change nothing about the answer.
 
 With `resolve` and a connected editor the answers come from `ResourceUID`, the table the engine itself resolves against, and the response reports `execution_mode: "live"`. Each entry carries `query`, `found`, `uid`, `path`, and `source` (`engine` or `index`). A live entry adds `index_state`: `agrees`, `differs` (a sidecar or `.import` the engine contradicts, which is the drift worth acting on), or `absent`. A miss carries `reason`: `unknown_to_engine` for a well-formed UID or path the engine holds nothing for, `malformed_uid` for text that is not a UID, `unsupported_query` for anything that is neither form, and offline `not_in_project_files` — which is not the same claim as the resource not existing, because a running editor can know a UID whose sidecar has not been written yet.
 

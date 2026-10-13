@@ -136,6 +136,8 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Fixed
 
+- `2026-10-14` Created resources carry Godot-format UIDs, and overwrites preserve the file's existing identity. [#1382](https://github.com/saworbit/didi/issues/1382) [PR #1395](https://github.com/saworbit/didi/pull/1395)
+- `2026-10-14` Resource UID maps read the root header instead of assigning a reference's UID to the containing file. [#1393](https://github.com/saworbit/didi/issues/1393) [PR #1395](https://github.com/saworbit/didi/pull/1395)
 - `2026-10-13` Focused GUT runs ignore the project config; timeout answers show bounded progress without file hashes. [#1375](https://github.com/saworbit/didi/issues/1375) [PR #1389](https://github.com/saworbit/didi/pull/1389)
 - `2026-10-13` Capped subprocess output drops an incomplete UTF-8 character instead of throwing while reporting the run. [#1388](https://github.com/saworbit/didi/issues/1388) [PR #1390](https://github.com/saworbit/didi/pull/1390)
 - `2026-10-13` Modern hosts can use an explicit runtime attach without request metadata; a lost session is refused instead of returning a synthetic frame. [#1374](https://github.com/saworbit/didi/issues/1374) [PR #1377](https://github.com/saworbit/didi/pull/1377)

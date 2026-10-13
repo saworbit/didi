@@ -10,14 +10,14 @@ Every number here is derived from the suites themselves rather than written down
 
 | Measure | Count |
 | --- | ---: |
-| Automated tests | **1775** |
+| Automated tests | **1781** |
 | Live-harness assertions | 1696 |
 
 The badge in the [README](../README.md) shows the automated test total. Harness assertions are counted separately because they are assertions inside one live scenario, not independently runnable cases; adding them together would flatter the number.
 
 ## Native C++ suite (`didi_tests`)
 
-**1173 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
+**1177 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
 
 | Suite | Tests |
 | --- | ---: |
@@ -70,7 +70,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `RefusalRemedies` | 13 |
 | `ReimportJob` | 13 |
 | `RepeatedFailures` | 5 |
-| `ResourceIndexer` | 13 |
+| `ResourceIndexer` | 14 |
 | `Resources` | 2 |
 | `ResponseEconomy` | 21 |
 | `RuntimeLaunch` | 14 |
@@ -105,7 +105,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `phase7c_profiler` | 11 |
 | `project_settings_file` | 19 |
 | `resource_create` | 5 |
-| `resource_references` | 20 |
+| `resource_references` | 23 |
 | `tool_annotations` | 10 |
 | `tool_input_schema` | 8 |
 | `tool_manifest` | 11 |
@@ -114,7 +114,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 
 ## Python contract suites (`tests/test_*.py`)
 
-**602 tests.** Derived from `test_*` methods on every `unittest.TestCase` subclass, read with `ast`.
+**604 tests.** Derived from `test_*` methods on every `unittest.TestCase` subclass, read with `ast`.
 
 | File | Tests |
 | --- | ---: |
@@ -150,6 +150,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `test_project_run_tests_live.py` | 4 |
 | `test_refusal_codes.py` | 13 |
 | `test_refusal_remedies.py` | 5 |
+| `test_resource_uid_live.py` | 2 |
 | `test_stdio_process.py` | 2 |
 | `test_test_inventory.py` | 27 |
 | `test_tool_output_schema_contract.py` | 5 |

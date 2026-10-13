@@ -405,6 +405,25 @@ static void test_project_text_scan_shares_the_index_and_rename_does_not() {
     didi::offline::ResourceIndexer::invalidateSharedIndex();
 }
 
+static void test_uid_belongs_to_the_root_header_not_references_or_script_text() {
+    IndexFixture fixture;
+    fixture.write("texture.tres", "[gd_resource type=\"GradientTexture2D\" format=3 uid=\"uid://embedded123\"]\n[resource]\n");
+    fixture.write("material.tres", "[gd_resource type=\"ShaderMaterial\" format=3]\n"
+                                  "[ext_resource type=\"Texture2D\" uid=\"uid://embedded123\" path=\"res://texture.tres\" id=\"1\"]\n"
+                                  "[resource]\n");
+    fixture.write("scene.tscn", "[gd_scene format=3]\n"
+                                "[ext_resource type=\"Texture2D\" uid=\"uid://embedded123\" path=\"res://texture.tres\" id=\"1\"]\n"
+                                "[node name=\"Root\" type=\"Node\"]\n");
+    fixture.write("player.gd", "# uid=\"uid://embedded123\"\nextends Node\n");
+    fixture.write("player.gd.uid", "uid://d1d1player123\n");
+    didi::offline::ResourceIndexer indexer;
+    indexer.scan(fixture.root());
+    ASSERT_TRUE(indexer.findExact("res://material.tres")->uid.empty());
+    ASSERT_TRUE(indexer.findExact("res://scene.tscn")->uid.empty());
+    ASSERT_EQ(indexer.findExact("res://texture.tres")->uid, "uid://embedded123");
+    ASSERT_EQ(indexer.findExact("res://player.gd")->uid, "uid://d1d1player123");
+}
+
 struct RegisterResourceIndexerTests {
     RegisterResourceIndexerTests() {
         registerTest("ResourceIndexer.ExactLookupAndDirectoryListing",
@@ -423,6 +442,8 @@ struct RegisterResourceIndexerTests {
                      test_the_index_is_in_path_order_whatever_the_filesystem);
         registerTest("ResourceIndexer.TypeDetection", test_resource_type_detection);
         registerTest("ResourceIndexer.UidSidecar", test_uid_sidecar_fallback);
+        registerTest("ResourceIndexer.UidBelongsToRootHeader",
+                     test_uid_belongs_to_the_root_header_not_references_or_script_text);
         registerTest("ResourceIndexer.ExternalUidSidecar", test_uid_sidecars_are_indexed_for_external_resources);
         registerTest("ResourceIndexer.ImportedAssetUid",
                      test_imported_assets_take_their_uid_from_import_metadata);
