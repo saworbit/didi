@@ -17,8 +17,10 @@ hierarchy, reuse returned paths and refresh the relevant branch after a
 structural change or a missing-node error. Inspect refusals before retrying.
 
 For a modern request, select the intended session through
-`_meta.didi.runtime_session_id` on each request; legacy attachment alone does
-not supply a modern route. See the [protocol contract](API_SPECIFICATION.md#naming-the-runtime-session).
+`_meta.didi.runtime_session_id` on each request. If the host cannot expose that
+metadata, call `runtime_attach_session` with the intended session's id first.
+Calls without a metadata id use that explicit choice and refuse if it is gone.
+See the [protocol contract](API_SPECIFICATION.md#naming-the-runtime-session).
 
 ## Establish the project boundary
 
@@ -262,6 +264,8 @@ Treat `eval_gdscript` as a small read-only expression language. Prefer literals,
 <!-- phase7-current-status:end -->
 
 Phase 7 is `PARTIAL_DELIVERY`. The implementation is 119/122 canonical tools, and 3 Phase 7 names remain registered but unimplemented. The 2026-08-29 Godot 4.5.1/4.7.2 gate found 15/18 implementation-feasible and exactly 3/18 API-blocked under the approved contracts: `physics_simulate_step`, `nav_bake_mesh`, and `runtime_get_call_stack`. For those three, no supported public API/semantics satisfying the exact approved contract was found on either tested version.
+
+For a uniform fill, a cell record in `tilemap_set_cells` can use `rect: {"position": [0, 0], "size": {"x": 40, "y": 24}}` in place of its coordinate, with the same source, atlas and optional alternative tile. Erase with the same rect and `erase: true`. `gridmap_set_cells` uses a 3D rect and its existing item/orientation fields; `item: -1` erases. Sizes are positive integer objects, the far edge is excluded, and records may not overlap. There are at most 256 records and 4096 expanded cells per call. A rectangle result is one compact observed entry, and one undo reverses the whole call. Paint an outer wall rectangle, then an inner floor rectangle in a second call to make a border.
 
 All 15 feasible Phase 7 names are delivered and callable, including `tilemap_set_cells`, `tilemap_get_used_rect`, and `gridmap_set_cells` in editor sessions. Do not call or advertise the remaining 3 as available; feasibility is not implementation. See [reproducible evidence](PHASE_7_API_FEASIBILITY.md) and the [approved executable plan](PHASE_7_IMPLEMENTATION_PLAN.md).
 

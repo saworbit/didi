@@ -2466,6 +2466,7 @@ public:
     bool isConnected() const override { return !routes.empty(); }
     didi::Result<didi::json> sendRequest(const std::string& method, const didi::json&,
                                          int) override {
+        if (routes.empty()) return didi::Error::notConnected("The test route was released");
         served.push_back(serving.empty() ? std::string("<none>") : serving);
         last_method = method;
         return didi::json{{"status", "ok"}, {"method", method}};
@@ -2516,9 +2517,15 @@ public:
         auto it = routes.find(session_id);
         if (it == routes.end()) return std::nullopt;
         serving = session_id;
-        return didi::runtime::RuntimeRouteLease{
+        auto lease = didi::runtime::RuntimeRouteLease{
             std::static_pointer_cast<didi::ipc::IIpcClient>(shared_from_this()), it->second,
             generation};
+        if (drop_after_lease) {
+            drop_after_lease = false;
+            routes.erase(session_id);
+            selected.clear();
+        }
+        return lease;
     }
     bool quarantineRoute(const didi::runtime::RuntimeRouteLease&) override { return false; }
 
@@ -2541,6 +2548,7 @@ public:
     std::vector<std::string> served;
     std::string last_method;
     uint64_t generation{1};
+    bool drop_after_lease{false};
 };
 
 didi::mcp::RequestScope modernNaming(const std::string& session_id) {
@@ -2621,6 +2629,173 @@ void test_legacy_call_still_inherits_the_attached_route() {
     ASSERT_FALSE(result.isError);
     ASSERT_EQ(fake->served.size(), static_cast<size_t>(1));
     ASSERT_EQ(fake->served[0], std::string(kSessionA));
+}
+
+// #1374: an explicit attach is the host's session choice when it cannot put
+// request metadata under the model's control. Exercise the real session client.
+void test_modern_call_uses_an_explicit_attach_without_metadata() {
+    SessionDirectoryFixture fixture;
+    const auto game = fixture.add(kSessionB, "game");
+    auto client = fixture.client();
+    ScopedRegistryRoute cleanup;
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.setRuntimeSessionClient(client);
+    const auto attached = registry.callTool("runtime_attach_session",
+        {{"session_id", game.session_id}}, modernNamingNothing());
+    ASSERT_FALSE(attached.isError);
+    for (const auto* tool : {"runtime_get_tree", "runtime_read_output", "runtime_stop"}) {
+        const auto result = registry.callTool(tool, didi::json::object(), modernNamingNothing());
+        ASSERT_FALSE(result.isError);
+        ASSERT_EQ(payload(result)["execution_mode"], "live");
+        ASSERT_EQ(payload(result)["session"]["session_id"], game.session_id);
+    }
+    const auto other = fixture.add(kSessionA, "game");
+    const auto named = registry.callTool("runtime_get_tree", didi::json::object(),
+                                         modernNaming(other.session_id));
+    ASSERT_FALSE(named.isError);
+    ASSERT_EQ(payload(named)["session"]["session_id"], other.session_id);
+    const auto selected = registry.callTool("runtime_get_tree", didi::json::object(),
+                                            modernNamingNothing());
+    ASSERT_FALSE(selected.isError);
+    ASSERT_EQ(payload(selected)["session"]["session_id"], game.session_id);
+    // A queued request keeps the attach it saw at admission, even after the
+    // host selects another engine before the worker dispatches it.
+    auto queued = modernNaming(game.session_id);
+    queued.explicit_attachment = true;
+    ASSERT_TRUE(client->attachSession(other.session_id).isOk());
+    const auto held = registry.callTool("runtime_get_tree", didi::json::object(), queued);
+    ASSERT_FALSE(held.isError);
+    ASSERT_EQ(payload(held)["session"]["session_id"], game.session_id);
+    ASSERT_TRUE(client->closeSessionRoute(game.session_id).isOk());
+    ASSERT_TRUE(registry.callTool("runtime_get_tree", didi::json::object(), queued).isError);
+    client->disconnect();
+}
+
+void test_modern_auto_selection_and_failed_attach_do_not_supply_a_route() {
+    SessionDirectoryFixture fixture;
+    fixture.add(kSessionA, "game");
+    auto client = fixture.client();
+    ScopedRegistryRoute cleanup;
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.setRuntimeSessionClient(client);
+    ASSERT_TRUE(client->isConnected()); // Auto-discovered, not explicitly chosen.
+    ASSERT_TRUE(registry.callTool("runtime_get_tree", didi::json::object(),
+                                  modernNamingNothing()).isError);
+    ASSERT_TRUE(client->attachSession(kSessionB).isErr());
+    ASSERT_TRUE(registry.callTool("runtime_get_tree", didi::json::object(),
+                                  modernNamingNothing()).isError);
+    ASSERT_TRUE(client->attachSession(kSessionA).isOk());
+    ASSERT_FALSE(registry.callTool("runtime_get_tree", didi::json::object(),
+                                   modernNamingNothing()).isError);
+    ASSERT_TRUE(client->detachSession().isOk());
+    ASSERT_TRUE(registry.callTool("runtime_get_tree", didi::json::object(),
+                                  modernNamingNothing()).isError);
+    ASSERT_FALSE(registry.callTool("viewport_capture_frame", didi::json::object(),
+                                   modernNamingNothing()).isError);
+    client->disconnect();
+}
+
+void test_modern_protocol_boundary_uses_the_explicit_attach() {
+    SessionDirectoryFixture fixture;
+    const auto game = fixture.add(kSessionA, "game");
+    auto client = fixture.client();
+    ScopedRegistryRoute cleanup;
+    didi::mcp::McpServer server;
+    server.setIpcClient(client);
+    auto request = [&](const char* name, didi::json arguments) {
+        didi::mcp::JsonRpcRequest req;
+        req.id = 1;
+        req.method = "tools/call";
+        req.params = {{"name", name}, {"arguments", std::move(arguments)},
+            {"_meta", {{didi::mcp::kProtocolVersionMetaKey, didi::mcp::kModernProtocolVersion},
+                       {"io.modelcontextprotocol/clientCapabilities", didi::json::object()}}}};
+        return server.handleRequest(req);
+    };
+    const auto attached = request("runtime_attach_session", {{"session_id", game.session_id}});
+    ASSERT_FALSE(attached.error.has_value());
+    ASSERT_FALSE(attached.result.value("isError", false));
+    const auto tree = request("runtime_get_tree", didi::json::object());
+    ASSERT_FALSE(tree.error.has_value());
+    ASSERT_FALSE(tree.result.value("isError", false));
+    const auto textPayload = [](const didi::mcp::JsonRpcResponse& response) {
+        return didi::json::parse(response.result["content"][0]["text"].get<std::string>());
+    };
+    ASSERT_EQ(textPayload(tree)["execution_mode"], "live");
+    ASSERT_EQ(textPayload(tree)["session"]["session_id"], game.session_id);
+    ASSERT_TRUE(client->quarantineRoute(*client->acquireRouteLeaseFor(game.session_id)));
+    const auto lost = request("viewport_capture_frame", didi::json::object());
+    ASSERT_FALSE(lost.error.has_value());
+    ASSERT_TRUE(lost.result.value("isError", false));
+    ASSERT_EQ(textPayload(lost)["error"]["data"]["requested_session_id"], game.session_id);
+    server.stop();
+    const auto stopped = request("runtime_get_tree", didi::json::object());
+    ASSERT_TRUE(stopped.result.value("isError", false));
+    ASSERT_EQ(textPayload(stopped)["error"]["code"], 400);
+    client->disconnect();
+}
+
+void test_modern_resources_follow_explicit_attach_and_refuse_its_loss() {
+    SessionDirectoryFixture fixture;
+    fixture.add(kSessionA, "editor");
+    auto client = fixture.client();
+    auto& resources = didi::mcp::ResourceRegistry::instance();
+    struct Cleanup {
+        ~Cleanup() {
+            auto& resources = didi::mcp::ResourceRegistry::instance();
+            resources.setIpcClient(nullptr);
+            resources.registerAllDefaultResources();
+        }
+    } cleanup;
+    resources.registerAllDefaultResources();
+    resources.setIpcClient(client);
+    ASSERT_TRUE(client->attachSession(kSessionA).isOk());
+    const auto live = resources.readResource("godot://editor/state", modernNamingNothing());
+    ASSERT_TRUE(live.isOk());
+    ASSERT_EQ(didi::json::parse(live.value())["execution_mode"], "live");
+    ASSERT_EQ(fixture.state->last_method, "editor.getState");
+    const auto lease = client->acquireRouteLeaseFor(kSessionA);
+    ASSERT_TRUE(lease.has_value());
+    ASSERT_TRUE(client->quarantineRoute(*lease));
+    const auto lost = resources.readResource("godot://editor/state", modernNamingNothing());
+    ASSERT_TRUE(lost.isErr());
+    ASSERT_EQ(lost.error().data["requested_session_id"], kSessionA);
+    client->disconnect();
+
+    // The route can vanish immediately after preflight. The read must retain
+    // that lease and report its failure rather than acquire again and fall back.
+    auto racing = std::make_shared<TwoSessionFake>(kSessionA, kSessionB, thisProjectPath());
+    ASSERT_TRUE(racing->attachSession(kSessionA).isOk());
+    resources.setIpcClient(racing);
+    racing->drop_after_lease = true;
+    auto admitted = modernNaming(kSessionA);
+    admitted.explicit_attachment = true;
+    const auto raced = resources.readResource("godot://editor/state", admitted);
+    ASSERT_TRUE(raced.isErr());
+}
+
+void test_modern_capture_refuses_a_lost_explicit_attach() {
+    SessionDirectoryFixture fixture;
+    const auto game = fixture.add(kSessionB, "game");
+    auto client = fixture.client();
+    ScopedRegistryRoute cleanup;
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.setRuntimeSessionClient(client);
+    ASSERT_TRUE(client->attachSession(game.session_id).isOk());
+    // Keep the choice after the route is quarantined. Never fabricate a frame
+    // or auto-select another engine to hide a lost session.
+    const auto lease = client->acquireRouteLeaseFor(game.session_id);
+    ASSERT_TRUE(lease.has_value());
+    ASSERT_TRUE(client->quarantineRoute(*lease));
+    // A refused close is not a successful detach and must preserve the choice.
+    ASSERT_TRUE(client->closeSessionRoute(game.session_id).isErr());
+    fixture.state->last_method.clear();
+    const auto capture = registry.callTool("viewport_capture_frame",
+        didi::json::object(), modernNamingNothing());
+    ASSERT_TRUE(capture.isError);
+    ASSERT_EQ(payload(capture)["error"]["data"]["requested_session_id"], game.session_id);
+    ASSERT_TRUE(fixture.state->last_method.empty());
+    ASSERT_TRUE(client->heldSessions().empty());
+    client->disconnect();
 }
 
 void test_modern_call_naming_the_attached_session_is_served_on_it() {
@@ -3121,13 +3296,12 @@ void test_a_route_whose_engine_exited_does_not_fill_the_limit() {
     auto client = fixture.client();
     ASSERT_TRUE(client->attachSession(stopped.session_id).isOk());
 
+    const auto stale_lease = client->acquireRouteLeaseFor(stopped.session_id);
+    ASSERT_TRUE(stale_lease.has_value());
     game.end();
-    {
-        // The premise: the connection still says it is up.
-        const auto lease = client->acquireRouteLeaseFor(stopped.session_id);
-        ASSERT_TRUE(lease.has_value());
-        ASSERT_TRUE(lease->client->isConnected());
-    }
+    // The pipe still says it is up, but leasing checks the engine too.
+    ASSERT_TRUE(stale_lease->client->isConnected());
+    ASSERT_FALSE(client->acquireRouteLeaseFor(stopped.session_id).has_value());
 
     // The whole cap's worth of live sessions. The last one was refused with
     // 429 while the stopped game still counted.
@@ -3162,6 +3336,14 @@ void test_a_selected_route_whose_engine_exited_is_dropped_before_use() {
     ASSERT_TRUE(client->activeSession().has_value());
 
     game.end();
+    ScopedRegistryRoute cleanup;
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.setRuntimeSessionClient(client);
+    auto queued = modernNaming(stopped.session_id);
+    queued.explicit_attachment = true;
+    const auto deferred = registry.callTool("runtime_get_tree", didi::json::object(), queued);
+    ASSERT_TRUE(deferred.isError);
+    ASSERT_EQ(payload(deferred)["error"]["code"], 409);
     ASSERT_FALSE(client->activeSession().has_value());
     ASSERT_FALSE(client->observableSession().has_value());
     ASSERT_FALSE(client->isConnected());
@@ -3310,6 +3492,16 @@ struct RegisterRuntimeRoutingTests {
                      test_authoritative_handshake_compares_every_public_identity_field);
         registerTest("RuntimeRouting.ModernCallDoesNotInheritRoute",
                      test_modern_call_without_a_handle_does_not_inherit_the_attached_route);
+        registerTest("RuntimeRouting.ModernExplicitAttachWithoutMetadata",
+                     test_modern_call_uses_an_explicit_attach_without_metadata);
+        registerTest("RuntimeRouting.ModernCaptureRefusesLostExplicitAttach",
+                     test_modern_capture_refuses_a_lost_explicit_attach);
+        registerTest("RuntimeRouting.ModernAutoSelectionIsNotExplicitAttach",
+                     test_modern_auto_selection_and_failed_attach_do_not_supply_a_route);
+        registerTest("RuntimeRouting.ModernResourcesFollowExplicitAttach",
+                     test_modern_resources_follow_explicit_attach_and_refuse_its_loss);
+        registerTest("RuntimeRouting.ModernProtocolBoundaryUsesExplicitAttach",
+                     test_modern_protocol_boundary_uses_the_explicit_attach);
         registerTest("RuntimeRouting.LegacyCallStillInheritsRoute",
                      test_legacy_call_still_inherits_the_attached_route);
         registerTest("RuntimeRouting.ModernCallUsesTheSessionItNamed",

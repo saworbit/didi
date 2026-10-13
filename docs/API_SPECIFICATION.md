@@ -209,20 +209,30 @@ is `kServerInstructions` in `src/mcp/mcp_server.cpp`.
 
 ### Naming the runtime session
 
-A Godot session is state that spans requests, so a modern request names the one
-it means in `_meta["didi"]["runtime_session_id"]`. Discover the ids with
-`runtime_list_sessions`.
+A modern request can name the Godot session it means in
+`_meta["didi"]["runtime_session_id"]`. Discover the ids with `runtime_list_sessions`.
 
-A modern request is only ever served on the session it named. Naming nothing
-gets no live route at all: a tool that can answer offline does and says
-`offline_fallback` when it had a live path to fall back from and `local` when
-it never did, and a live-only tool is refused with `400` naming the field
-to set. Availability follows the same rule, so `tools/list` will not report a
-tool live because an unrelated request opened a route to an editor.
+A metadata id takes precedence over the process's explicit attach. For hosts
+that cannot expose request metadata to the model, a successful
+`runtime_attach_session` supplies the route for later modern requests without
+an id. This is a Didi compatibility path, a shared process choice rather than
+the per-call handles recommended by the pinned MCP tools guidance. Concurrent
+tasks driving different engines must each send their own metadata id.
+
+The boundary snapshots the choice for dispatch, availability and background
+jobs. Automatic discovery never supplies that choice. If the chosen session
+exits or its route is quarantined, live tools refuse with `409` and name the
+session and a reattach step. This includes tools with an offline fallback, so
+`viewport_capture_frame` cannot hide a lost game behind a synthetic grid.
+Detach and shutdown clear the choice. Failed attaches do not replace it.
+
+With neither an explicit attach nor a metadata id, an offline tool still
+answers in its declared local mode; a live-only tool returns `400` naming
+`runtime_attach_session` and the metadata alternative.
 
 `resources/read` is scoped the same way. `godot://editor/state` and
-`godot://runtime/logs` read from a live session, so a modern read that named no
-session gets the offline payload rather than another task's editor.
+`godot://runtime/logs` use the metadata route or explicit attach, and refuse a
+lost explicit choice. Without either choice they return the offline payload.
 `godot://project/journal` reads its file either way, and only the judgement of
 which entries can still be undone needs the session.
 

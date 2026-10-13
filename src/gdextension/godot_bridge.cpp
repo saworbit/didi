@@ -13,6 +13,7 @@
 #include "didi/common/connection_flags.hpp"
 #include "didi/common/godot_error.hpp"
 #include "didi/common/json_bounds.hpp"
+#include "didi/common/cell_records.hpp"
 #include "didi/common/project_path.hpp"
 #include "didi/common/scene_node_path.hpp"
 #include "didi/offline/project_settings_file.hpp"
@@ -12108,6 +12109,8 @@ json GodotBridge::bridgeTilemapSetCells(const std::string& /*method*/, const jso
         params["cells"].empty() || params["cells"].size() > 256) {
         return bridgeError(400, "invalid_tilemap_set_cells_request");
     }
+    auto prepared = cells::prepare(params["cells"], 2);
+    if (prepared.isErr()) return errorJson(prepared.error());
     for (const auto& bind : {
              std::make_tuple("Object", "is_class", 3927539163LL),
              std::make_tuple("TileMapLayer", "get_tile_set", 2678226422LL),
@@ -12168,7 +12171,8 @@ json GodotBridge::bridgeTilemapSetCells(const std::string& /*method*/, const jso
     };
     std::vector<Cell> cells;
     std::set<std::pair<int64_t, int64_t>> seen;
-    for (const auto& record : params["cells"]) {
+    std::set<std::tuple<int64_t, int64_t, int64_t, int64_t>> validated_tiles;
+    for (const auto& record : prepared.value().expanded) {
         if (!record.is_object() || !record.contains("coords") || !record["coords"].is_array() ||
             record["coords"].size() != 2) return bridgeError(400, "invalid_tilemap_set_cells_request");
         const auto x_value = boundedJsonInteger(record["coords"][0], -1048576, 1048576);
@@ -12204,24 +12208,29 @@ json GodotBridge::bridgeTilemapSetCells(const std::string& /*method*/, const jso
                 return bridgeError(400, "invalid_tilemap_set_cells_request");
             const int64_t ax = *ax_value;
             const int64_t ay = *ay_value;
-            auto source_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, source);
-            auto has_source = callObject(tile_set.value(), "TileSet", "has_source", 1116898809LL, {&source_value.value()});
-            auto has_flag = has_source.isOk() ? scalarFromVariant<GDExtensionBool>(has_source.value(), GDEXTENSION_VARIANT_TYPE_BOOL)
-                                              : Result<GDExtensionBool>(has_source.error());
-            if (has_flag.isErr() || !has_flag.value()) return bridgeError(404, "tilemap_tile_not_found");
-            auto source_object_value = callObject(tile_set.value(), "TileSet", "get_source", 1763540252LL, {&source_value.value()});
-            auto source_object = source_object_value.isOk() ? objectFromVariant(source_object_value.value())
-                                                            : Result<GDExtensionObjectPtr>(source_object_value.error());
-            if (source_object.isErr() || !source_object.value()) return bridgeError(404, "tilemap_tile_not_found");
-            auto atlas_class = objectIsClass(source_object.value(), "TileSetAtlasSource");
-            if (atlas_class.isErr() || !atlas_class.value()) return bridgeError(404, "tilemap_tile_not_found");
             auto requested_atlas = makeVector2i(ax, ay);
-            auto alternative_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, alternative);
-            auto tile_data_value = callObject(source_object.value(), "TileSetAtlasSource", "get_tile_data", 3534028207LL,
-                                              {&requested_atlas.value(), &alternative_value.value()});
-            auto tile_data = tile_data_value.isOk() ? objectFromVariant(tile_data_value.value())
-                                                    : Result<GDExtensionObjectPtr>(tile_data_value.error());
-            if (tile_data.isErr() || !tile_data.value()) return bridgeError(404, "tilemap_tile_not_found");
+            if (requested_atlas.isErr()) return bridgeError(501, "required_bind_unavailable");
+            const auto tile_key = std::make_tuple(source, ax, ay, alternative);
+            if (!validated_tiles.count(tile_key)) {
+                auto source_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, source);
+                auto has_source = callObject(tile_set.value(), "TileSet", "has_source", 1116898809LL, {&source_value.value()});
+                auto has_flag = has_source.isOk() ? scalarFromVariant<GDExtensionBool>(has_source.value(), GDEXTENSION_VARIANT_TYPE_BOOL)
+                                                  : Result<GDExtensionBool>(has_source.error());
+                if (has_flag.isErr() || !has_flag.value()) return bridgeError(404, "tilemap_tile_not_found");
+                auto source_object_value = callObject(tile_set.value(), "TileSet", "get_source", 1763540252LL, {&source_value.value()});
+                auto source_object = source_object_value.isOk() ? objectFromVariant(source_object_value.value())
+                                                                : Result<GDExtensionObjectPtr>(source_object_value.error());
+                if (source_object.isErr() || !source_object.value()) return bridgeError(404, "tilemap_tile_not_found");
+                auto atlas_class = objectIsClass(source_object.value(), "TileSetAtlasSource");
+                if (atlas_class.isErr() || !atlas_class.value()) return bridgeError(404, "tilemap_tile_not_found");
+                auto alternative_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, alternative);
+                auto tile_data_value = callObject(source_object.value(), "TileSetAtlasSource", "get_tile_data", 3534028207LL,
+                                                  {&requested_atlas.value(), &alternative_value.value()});
+                auto tile_data = tile_data_value.isOk() ? objectFromVariant(tile_data_value.value())
+                                                        : Result<GDExtensionObjectPtr>(tile_data_value.error());
+                if (tile_data.isErr() || !tile_data.value()) return bridgeError(404, "tilemap_tile_not_found");
+                validated_tiles.insert(tile_key);
+            }
             atlas = std::move(requested_atlas.value());
         }
         auto old_source_value = callObject(layer.value(), "TileMapLayer", "get_cell_source_id", 2485466453LL, {&coords.value()});
@@ -12257,7 +12266,7 @@ json GodotBridge::bridgeTilemapSetCells(const std::string& /*method*/, const jso
     if (changed_count == 0) {
         for (auto& cell : cells) observed_cells.push_back(snapshotCell(cell));
         return liveResult({{"requested_cells", cells.size()}, {"changed_cells", 0},
-            {"unchanged_cells", cells.size()}, {"cells", std::move(observed_cells)}, {"undo_redo_registered", false}, {"outcome", "completed"}, {"rollback", "not_required"}});
+            {"unchanged_cells", cells.size()}, {"cells", cells::compactObserved(prepared.value(), observed_cells, 2)}, {"undo_redo_registered", false}, {"outcome", "completed"}, {"rollback", "not_required"}});
     }
     auto manager = undoManager(editor);
     if (manager.isErr()) return errorJson(manager.error());
@@ -12303,7 +12312,7 @@ json GodotBridge::bridgeTilemapSetCells(const std::string& /*method*/, const jso
                                               observed_atlas.value(), observed_alt.value()));
     }
     return liveSceneMutation({{"requested_cells", cells.size()}, {"changed_cells", changed_count},
-        {"unchanged_cells", cells.size() - changed_count}, {"cells", std::move(observed_cells)}, {"undo_redo_registered", true}, {"outcome", "completed"}, {"rollback", "undo_redo"}});
+        {"unchanged_cells", cells.size() - changed_count}, {"cells", cells::compactObserved(prepared.value(), observed_cells, 2)}, {"undo_redo_registered", true}, {"outcome", "completed"}, {"rollback", "undo_redo"}});
 }
 
 
@@ -12314,6 +12323,8 @@ json GodotBridge::bridgeGridmapSetCells(const std::string& /*method*/, const jso
         params["gridmap_path"].get<std::string>().size() > 1024 ||
         !params.contains("cells") || !params["cells"].is_array() || params["cells"].empty() ||
         params["cells"].size() > 256) return bridgeError(400, "invalid_gridmap_set_cells_request");
+    auto prepared = cells::prepare(params["cells"], 3);
+    if (prepared.isErr()) return errorJson(prepared.error());
     for (const auto& bind : {std::make_tuple("Object", "is_class", 3927539163LL),
              std::make_tuple("GridMap", "get_mesh_library", 3350993772LL),
              std::make_tuple("GridMap", "set_cell_item", 3449088946LL),
@@ -12354,7 +12365,7 @@ json GodotBridge::bridgeGridmapSetCells(const std::string& /*method*/, const jso
     struct Cell { VariantValue position; int64_t item; int64_t orientation; int64_t old_item; int64_t old_orientation; bool changed; };
     std::vector<Cell> cells;
     std::set<std::tuple<int64_t, int64_t, int64_t>> seen;
-    for (const auto& record : params["cells"]) {
+    for (const auto& record : prepared.value().expanded) {
         if (!hasOnlyKeys(record, {"position", "item", "orientation"}) || !record.contains("position") ||
             !record["position"].is_array() || record["position"].size() != 3 || !record.contains("item") ||
             !record["item"].is_number_integer()) return bridgeError(400, "invalid_gridmap_set_cells_request");
@@ -12398,7 +12409,7 @@ json GodotBridge::bridgeGridmapSetCells(const std::string& /*method*/, const jso
     if (changed_count == 0) {
         for (auto& cell : cells) observed_cells.push_back(observedCell(cell.position, cell.old_item, cell.old_orientation));
         return liveResult({{"requested_cells", cells.size()}, {"changed_cells", 0},
-            {"unchanged_cells", cells.size()}, {"cells", std::move(observed_cells)}, {"undo_redo_registered", false}, {"outcome", "completed"}, {"rollback", "not_required"}});
+            {"unchanged_cells", cells.size()}, {"cells", cells::compactObserved(prepared.value(), observed_cells, 3)}, {"undo_redo_registered", false}, {"outcome", "completed"}, {"rollback", "not_required"}});
     }
     auto manager = undoManager(editor);
     if (manager.isErr()) return errorJson(manager.error());
@@ -12435,7 +12446,7 @@ json GodotBridge::bridgeGridmapSetCells(const std::string& /*method*/, const jso
         observed_cells.push_back(observedCell(cell.position, observed_item.value(), observed_orientation.value()));
     }
     return liveSceneMutation({{"requested_cells", cells.size()}, {"changed_cells", changed_count},
-        {"unchanged_cells", cells.size() - changed_count}, {"cells", std::move(observed_cells)}, {"undo_redo_registered", true}, {"outcome", "completed"}, {"rollback", "undo_redo"}});
+        {"unchanged_cells", cells.size() - changed_count}, {"cells", cells::compactObserved(prepared.value(), observed_cells, 3)}, {"undo_redo_registered", true}, {"outcome", "completed"}, {"rollback", "undo_redo"}});
 }
 
 

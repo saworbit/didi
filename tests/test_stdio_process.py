@@ -1,6 +1,7 @@
 import subprocess
 import sys
 import unittest
+from unittest.mock import patch
 
 try:
     from stdio_process import stop
@@ -33,3 +34,14 @@ class StdioProcessCleanup(unittest.TestCase):
         child.wait(timeout=10)
         stop(child)
         self.assert_closed(child)
+
+    def test_cleanup_after_owner_closed_pipes_starts_no_reader_threads(self):
+        child = self.child("pass")
+        child.wait(timeout=10)
+        for pipe in (child.stdin, child.stdout, child.stderr):
+            pipe.close()
+        errors = []
+        with patch("threading.excepthook", side_effect=errors.append):
+            stop(child)
+        self.assert_closed(child)
+        self.assertEqual(errors, [])

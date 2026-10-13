@@ -2,6 +2,7 @@
 #include "didi/common/types.hpp"
 #include "didi/mcp/tool_registry.hpp"
 #include "didi/offline/resource_indexer.hpp"
+#include "didi/offline/resource_uid.hpp"
 
 #include <chrono>
 #include <filesystem>
@@ -20,6 +21,7 @@ void registerTest(const std::string& name, std::function<void()> fn);
 namespace didi {
 namespace mcp {
 CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
+CallToolResult handleProjectGetUidMap(const json& args, std::shared_ptr<ipc::IIpcClient> ipc);
 }
 }
 
@@ -92,6 +94,92 @@ std::string textOf(const didi::mcp::CallToolResult& result) {
     return {};
 }
 
+void created_resources_have_distinct_uids_in_the_project_index() {
+    ProjectFixture project("uid-create");
+    const auto first = create({{"save_path", "res://art/first.tres"},
+                               {"resource_type", "RectangleShape2D"}});
+    const auto second = create({{"save_path", "res://art/second.tres"},
+                                {"resource_type", "RectangleShape2D"}});
+    ASSERT_TRUE(!first.isError && !second.isError);
+    const auto first_uid = payloadOf(first).value("uid", std::string());
+    const auto second_uid = payloadOf(second).value("uid", std::string());
+    ASSERT_TRUE(first_uid.rfind("uid://", 0) == 0 && first_uid.size() > 6);
+    ASSERT_TRUE(second_uid != first_uid);
+    ASSERT_TRUE(project.read("art/first.tres").find("uid=\"" + first_uid + "\"") != std::string::npos);
+    const auto index = payloadOf(didi::mcp::handleProjectGetUidMap(json::object(), nullptr));
+    ASSERT_EQ(index["uid_map"][first_uid], "res://art/first.tres");
+    ASSERT_EQ(index["uid_map"][second_uid], "res://art/second.tres");
+}
+
+void resource_overwrite_preserves_the_root_uid_not_an_external_uid() {
+    ProjectFixture project("uid-overwrite");
+    {
+        std::ofstream file("art/existing.tres", std::ios::binary);
+        file << "[gd_resource type=\"CircleShape2D\" format=3 uid=\"uid://b4xk5g0wkmabc\"]\n\n"
+                "[resource]\nradius = 2.0\n";
+    }
+    const auto overwritten = create({{"save_path", "res://art/existing.tres"},
+                                     {"resource_type", "CircleShape2D"}, {"overwrite", true},
+                                     {"properties", json::array({{{"name", "radius"}, {"value", 3.0}}})}});
+    ASSERT_TRUE(!overwritten.isError);
+    ASSERT_EQ(payloadOf(overwritten)["uid"], "uid://b4xk5g0wkmabc");
+    ASSERT_TRUE(project.read("art/existing.tres").find("uid=\"uid://b4xk5g0wkmabc\"") != std::string::npos);
+    {
+        std::ofstream file("art/no_uid.tres", std::ios::binary);
+        file << "[gd_resource type=\"Resource\" load_steps=2 format=3]\n"
+                "[ext_resource type=\"Texture2D\" uid=\"uid://b4xk5g0wkmabc\" path=\"res://art/tiles.png\" id=\"1\"]\n"
+                "[resource]\n";
+    }
+    const auto no_uid = create({{"save_path", "res://art/no_uid.tres"},
+                                {"resource_type", "Resource"}, {"overwrite", true}});
+    ASSERT_TRUE(!no_uid.isError);
+    ASSERT_TRUE(payloadOf(no_uid).value("uid", std::string()) != "uid://b4xk5g0wkmabc");
+}
+
+void root_uid_reader_handles_tag_comments_escapes_and_header_bounds() {
+    const std::string header = "\xef\xbb\xbf ; lead uid=\"uid://wrong\"\n"
+        "[gd_resource type=\"Resource\" format=3 ; uid=\"uid://wrong\" ]\n"
+        "uid = \"uid:\\u002f\\U00002fabc\"]\n";
+    ASSERT_EQ(didi::offline::inspectTextResourceUidHeader(header).uid, "uid://abc");
+    ASSERT_EQ(didi::offline::inspectTextResourceUidHeader(
+        "[gd_resource type=\"Resource\" uid=\"uid://abc\" uid=\"uid://def\"]").uid, "uid://def");
+    ASSERT_TRUE(didi::offline::inspectTextResourceUidHeader(
+        "[gd_resource type=\"Resource\" note=\"uid=\\\"uid://wrong\\\"\"]").uid.empty());
+    ASSERT_EQ(didi::offline::inspectTextResourceUidHeader(
+        "[gd_resource type=\"Resource\" note=[\"uid\", [\"uid://wrong\"]] uid=\"uid://abc\"]").uid, "uid://abc");
+    ProjectFixture project("uid-header");
+    {
+        std::ofstream("art/quoted.tres", std::ios::binary) << header << "[resource]\n";
+    }
+    const auto overwritten = create({{"save_path", "res://art/quoted.tres"},
+                                    {"resource_type", "Resource"}, {"overwrite", true}});
+    ASSERT_TRUE(!overwritten.isError);
+    ASSERT_EQ(payloadOf(overwritten)["uid"], "uid://abc");
+    const std::string oversized = "[gd_resource type=\"Resource\"" + std::string(65536, ' ') +
+                                  "uid=\"uid://abc\"]\n[resource]\n";
+    std::ofstream("art/wide.tres", std::ios::binary) << oversized;
+    const auto refused = create({{"save_path", "res://art/wide.tres"},
+                                {"resource_type", "Resource"}, {"overwrite", true}});
+    ASSERT_TRUE(refused.isError);
+    ASSERT_EQ(project.read("art/wide.tres"), oversized);
+    const std::string long_prefix = ";" + std::string(65536, 'x') +
+        "\n[gd_resource type=\"Resource\" uid=\"uid://abc\"]\n[resource]\n";
+    std::ofstream("art/prefix.tres", std::ios::binary) << long_prefix;
+    const auto prefix_refused = create({{"save_path", "res://art/prefix.tres"},
+        {"resource_type", "Resource"}, {"overwrite", true}});
+    ASSERT_TRUE(prefix_refused.isError);
+    ASSERT_EQ(project.read("art/prefix.tres"), long_prefix);
+    for (const std::string opening : {"[ gd_resource", "[gd_resource; comment\n"}) {
+        const auto spaced = opening + " type=\"Resource\" uid=\"uid://abc\"]\n[resource]\n";
+        ASSERT_EQ(didi::offline::inspectTextResourceUidHeader(spaced).uid, "uid://abc");
+        std::ofstream("art/spaced.tres", std::ios::binary) << spaced;
+        const auto result = create({{"save_path", "res://art/spaced.tres"},
+            {"resource_type", "Resource"}, {"overwrite", true}});
+        ASSERT_TRUE(!result.isError);
+        ASSERT_EQ(payloadOf(result)["uid"], "uid://abc");
+    }
+}
+
 // The case #380 reported as impossible: a TileSet needs an atlas source that
 // points at a texture, which is one [sub_resource] and one [ext_resource] in
 // the same file, and there was no way to say either.
@@ -121,7 +209,7 @@ void writes_a_tileset_with_an_atlas_source_and_a_texture() {
     const auto contents = project.read("art/arena_tileset.tres");
     // load_steps counts the externals, the sub-resources and the resource
     // itself. Godot uses it to size its load, and it had nowhere to come from.
-    ASSERT_TRUE(contents.find("[gd_resource type=\"TileSet\" load_steps=3 format=3]") !=
+    ASSERT_TRUE(contents.find("[gd_resource type=\"TileSet\" load_steps=3 format=3 uid=\"") !=
                 std::string::npos);
     ASSERT_TRUE(contents.find(
         "[ext_resource type=\"Texture2D\" path=\"res://art/tiles.png\" id=\"1_didi\"]") !=
@@ -147,8 +235,9 @@ void writes_a_tileset_with_an_atlas_source_and_a_texture() {
 // .tres, and that was what the [ext_resource] line said (#1316).
 void references_a_written_tres_by_its_declared_type() {
     ProjectFixture project("declared-type");
-    ASSERT_TRUE(!create({{"save_path", "res://art/ramp.tres"}, {"resource_type", "GradientTexture2D"},
-                         {"properties", json::object()}}).isError);
+    const auto ramp = create({{"save_path", "res://art/ramp.tres"}, {"resource_type", "GradientTexture2D"},
+                              {"properties", json::object()}});
+    ASSERT_TRUE(!ramp.isError);
     const auto referenced = create({
         {"save_path", "res://art/atlas.tres"},
         {"resource_type", "AtlasTexture"},
@@ -156,9 +245,12 @@ void references_a_written_tres_by_its_declared_type() {
             {{"name", "atlas"}, {"value", {{"type", "ExtResource"}, {"path", "res://art/ramp.tres"}}}}})}});
     ASSERT_TRUE(!referenced.isError);
     const auto contents = project.read("art/atlas.tres");
-    ASSERT_TRUE(contents.find("[ext_resource type=\"GradientTexture2D\" path=\"res://art/ramp.tres\"") !=
+    ASSERT_TRUE(contents.find("[ext_resource type=\"GradientTexture2D\" uid=\"" +
+                              payloadOf(ramp).at("uid").get<std::string>() +
+                              "\" path=\"res://art/ramp.tres\"") !=
                 std::string::npos);
     ASSERT_EQ(payloadOf(referenced)["external_references"][0]["resource_type"], json("GradientTexture2D"));
+    ASSERT_EQ(payloadOf(referenced)["external_references"][0]["uid"], payloadOf(ramp)["uid"]);
 }
 
 // Break caught: one header entry per file, not per mention. Two entries for one
@@ -275,8 +367,7 @@ void lets_a_sub_resource_name_one_declared_above_it() {
     ASSERT_EQ(payloadOf(result).value("load_steps", 0), 3);
 }
 
-// A resource with no references is written exactly as it was before, header
-// included. load_steps of 1 is what Godot omits, so this omits it too.
+// A resource with no references still omits load_steps of 1, as Godot does.
 void leaves_a_plain_resource_exactly_as_it_was() {
     ProjectFixture project("plain");
     const auto result = create({
@@ -286,8 +377,9 @@ void leaves_a_plain_resource_exactly_as_it_was() {
     });
     ASSERT_TRUE(!result.isError);
     const auto contents = project.read("art/plain.tres");
-    ASSERT_EQ(contents, std::string("[gd_resource type=\"CircleShape2D\" format=3]\n\n"
-                                    "[resource]\nradius = 8.0\n"));
+    ASSERT_EQ(contents, "[gd_resource type=\"CircleShape2D\" format=3 uid=\"" +
+                        payloadOf(result).at("uid").get<std::string>() +
+                        "\"]\n\n[resource]\nradius = 8.0\n");
 }
 
 void refuses_a_malformed_sub_resources_argument() {
@@ -741,7 +833,7 @@ void writes_a_class_name_type_the_way_godot_does() {
     });
     ASSERT_TRUE(!written.isError);
     const auto tres = project.read("art/item.tres");
-    ASSERT_TRUE(tres.rfind("[gd_resource type=\"Resource\" script_class=\"ObservedItem\" load_steps=2 format=3]", 0) == 0);
+    ASSERT_TRUE(tres.rfind("[gd_resource type=\"Resource\" script_class=\"ObservedItem\" load_steps=2 format=3 uid=\"", 0) == 0);
     ASSERT_TRUE(tres.find("[ext_resource type=\"Script\" path=\"res://item.gd\" id=\"") != std::string::npos);
     // The script first, so the loader sets the script's own properties on an
     // instance that has them.
@@ -882,6 +974,12 @@ void follows_a_class_name_chain_to_its_engine_base() {
 
 struct Register {
     Register() {
+        registerTest("resource_references.created_uids_are_indexed",
+                     created_resources_have_distinct_uids_in_the_project_index);
+        registerTest("resource_references.overwrite_preserves_root_uid",
+                     resource_overwrite_preserves_the_root_uid_not_an_external_uid);
+        registerTest("resource_references.root_uid_header_syntax",
+                     root_uid_reader_handles_tag_comments_escapes_and_header_bounds);
         registerTest("resource_references.written_tres_by_declared_type",
                      references_a_written_tres_by_its_declared_type);
         registerTest("resource_references.class_name_type_written_as_godot_does",
