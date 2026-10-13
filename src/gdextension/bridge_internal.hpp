@@ -163,4 +163,9 @@ json inputMapMissingActions(const json& params, const std::string& session_kind)
 json ghostPreviewRender(const json& params);
 json ghostPreviewClear(const json& params);
 
+Result<bool> objectHasProperty(GDExtensionObjectPtr object, const std::string& property);
+Result<VariantValue> makeResourceForProperty(const std::string& property_name, const json& value, const std::string& expected_class);
+bool isNilVariant(VariantValue& value);
+bool jsonTypeIsInsidePropertyContract(int godot_type);
+
 } // namespace didi::godot::bridge_internal
