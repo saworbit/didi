@@ -56,6 +56,7 @@ json animPlayTrack(const json& params, const std::string& session_kind);
 json animAddLibrary(const json& params, const std::string& session_kind);
 
 Result<VariantValue> makeVector2(double x, double y);
+Result<VariantValue> makeColor(double r, double g, double b, double a);
 Result<json> variantToJson(VariantValue& value, int depth = 0, bool lenient = false);
 Result<json> vector2ToJson(VariantValue& value);
 Result<json> rect2ToJson(VariantValue& value);
@@ -158,5 +159,8 @@ json undoReferencedAction(const json& params);
 
 json injectInput(const json& params, const std::string& session_kind);
 json inputMapMissingActions(const json& params, const std::string& session_kind);
+
+json ghostPreviewRender(const json& params);
+json ghostPreviewClear(const json& params);
 
 } // namespace didi::godot::bridge_internal
