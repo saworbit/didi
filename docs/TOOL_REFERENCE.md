@@ -42,7 +42,8 @@ On a success they sit beside the other fields; on a refusal they are under
 `error.data`. A call during which the engine printed nothing has no such field.
 A local writer that makes an attached editor reload, rebuild or index what it
 wrote, such as `script_create`, `resource_create` or `project_rename_references`,
-carries the lines the editor printed while it did, at most sixteen (#1289). Work
+carries the lines the editor printed while it did, including refused refreshes
+and restoring the previous scene tab, at most sixteen (#1289). Work
 the editor does later, such as compiling a shader the first time a node draws
 it, lands on whichever call comes next.
 The lines are the engine's own words and are attributed by time, not by cause:
