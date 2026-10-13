@@ -136,7 +136,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Fixed
 
-- `2026-10-13` Local file writers retain engine diagnostics from refused refreshes and restoring the previous scene tab. [#1289](https://github.com/saworbit/didi/issues/1289)
+- `2026-10-13` Local file writers retain engine diagnostics from refused refreshes and restoring the previous scene tab. [#1289](https://github.com/saworbit/didi/issues/1289) [#1369](https://github.com/saworbit/didi/pull/1369)
 - `2026-10-13` The live audio loop control proves playback started and finished even when detached launch attaches after the track ends. [#1359](https://github.com/saworbit/didi/issues/1359) · [PR #1364](https://github.com/saworbit/didi/pull/1364)
 - `2026-10-13` SECURITY records why administrator bypass and non-strict branch checks are retained, and states the limits they leave. [#806](https://github.com/saworbit/didi/issues/806) · [PR #1363](https://github.com/saworbit/didi/pull/1363)
 - `2026-10-12` The agent guide covers node slots and presets that ship the addon, and CONTRIBUTING names the typed setter step in a class reference refresh. [PR #1356](https://github.com/saworbit/didi/pull/1356)
