@@ -5,6 +5,7 @@
 // those rules or add another write path.
 #include "didi/gdextension/godot_values.hpp"
 #include <optional>
+#include <initializer_list>
 
 namespace didi::godot::bridge_internal {
 
@@ -50,5 +51,16 @@ json liveSceneMutation(json fields);
 json animListTracks(const json& params, const std::string& session_kind);
 json animPlayTrack(const json& params, const std::string& session_kind);
 json animAddLibrary(const json& params, const std::string& session_kind);
+
+Result<VariantValue> makeVector2(double x, double y);
+Result<json> variantToJson(VariantValue& value, int depth = 0, bool lenient = false);
+Result<json> vector2ToJson(VariantValue& value);
+Result<json> rect2ToJson(VariantValue& value);
+bool hasOnlyKeys(const json& value, std::initializer_list<const char*> allowed);
+Result<std::string> nodeString(GDExtensionObjectPtr node, const char* method, int64_t hash);
+Result<std::string> logicalPathFromEditedRoot(GDExtensionObjectPtr root, GDExtensionObjectPtr node);
+
+json uiListControls(const json& params, const std::string& session_kind);
+json uiHitTest(const json& params, const std::string& session_kind);
 
 } // namespace didi::godot::bridge_internal
