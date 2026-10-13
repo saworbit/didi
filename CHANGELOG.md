@@ -137,6 +137,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 ### Fixed
 
 - `2026-10-13` Class reference refreshes refuse missing or unusable typed-setter probe output before replacing the reference. [#1360](https://github.com/saworbit/didi/issues/1360) · [PR #1362](https://github.com/saworbit/didi/pull/1362)
+- `2026-10-13` SECURITY records why administrator bypass and non-strict branch checks are retained, and states the limits they leave. [#806](https://github.com/saworbit/didi/issues/806) · [PR #1363](https://github.com/saworbit/didi/pull/1363)
 - `2026-10-12` The agent guide covers node slots and presets that ship the addon, and CONTRIBUTING names the typed setter step in a class reference refresh. [PR #1356](https://github.com/saworbit/didi/pull/1356)
 - `2026-10-12` An editor ray or clearance query hits a `TileMapLayer` tile or `GridMap` cell placed after the editor started, as a game does. [#1308](https://github.com/saworbit/didi/issues/1308) · [PR #1354](https://github.com/saworbit/didi/pull/1354)
 - `2026-10-12` `resource_create` writes each element of `NavigationPolygon.outlines` and other typed-setter arrays as its packed type, not as numbers Godot loads as zeros. [#1294](https://github.com/saworbit/didi/issues/1294) · [PR #1351](https://github.com/saworbit/didi/pull/1351)
