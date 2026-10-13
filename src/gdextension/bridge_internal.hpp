@@ -7,6 +7,7 @@
 #include <optional>
 #include <set>
 #include <initializer_list>
+#include <string_view>
 
 namespace didi::godot::bridge_internal {
 
@@ -89,5 +90,10 @@ json wrongNodeTypeError(const std::string& identifier, const std::string& path,
 Result<VariantValue> makeVector2i(int64_t x, int64_t y);
 Result<VariantValue> makeVector3i(int64_t x, int64_t y, int64_t z);
 Result<json> integerVectorToJson(VariantValue& value, int dimensions);
+
+Error bridgeRefusal(int code, const std::string& identifier);
+#if defined(DIDI_PHASE7_SIGNAL_TEST_SEAMS)
+bool takePhase7SignalTestSeam(std::string_view expected);
+#endif
 
 } // namespace didi::godot::bridge_internal
