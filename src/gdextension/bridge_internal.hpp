@@ -96,4 +96,33 @@ Error bridgeRefusal(int code, const std::string& identifier);
 bool takePhase7SignalTestSeam(std::string_view expected);
 #endif
 
+struct InheritedSceneState {
+    // The scene the edited scene inherits, or empty when it inherits nothing.
+    std::string base_scene;
+    // Root-relative node paths the base chain declares, "." for the root.
+    std::set<std::string> node_paths;
+};
+
+
+struct NodeOwnership {
+    // The edited root owns it, or it is the root: what the file lists.
+    bool owned_by_scene{false};
+    // Owned by an instance the edited scene has not marked editable, or by
+    // nothing: the packer discards it, and everything under it.
+    bool foreign{false};
+    // Declared by the scene this one inherits.
+    bool inherited{false};
+    std::string owner_scene;    // the instance's scene file, when foreign
+    std::string instance_root;  // that instance's logical path, when foreign
+};
+
+Result<InheritedSceneState> inheritedSceneState(GDExtensionObjectPtr root);
+Result<NodeOwnership> classifyNodeOwnership(GDExtensionObjectPtr root, GDExtensionObjectPtr node,
+                                          const InheritedSceneState& inherited);
+void addEditedSceneIdentity(json& payload, GDExtensionObjectPtr root);
+Result<std::vector<std::string>> openScenePaths(GDExtensionObjectPtr editor);
+json unsavedScenesReport(GDExtensionObjectPtr editor);
+const std::string& displayServerName();
+bool engineCanRender();
+
 } // namespace didi::godot::bridge_internal

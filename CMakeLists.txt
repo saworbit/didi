@@ -254,6 +254,7 @@ set(GDEXT_SOURCES
     src/gdextension/bridge_tiles.cpp
     src/gdextension/bridge_camera.cpp
     src/gdextension/bridge_signals.cpp
+    src/gdextension/bridge_editor.cpp
     src/gdextension/godot_values.cpp
     src/gdextension/runtime_bridge.cpp
     src/gdextension/viewport_renderer.cpp

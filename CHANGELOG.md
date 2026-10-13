@@ -109,6 +109,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 - `2026-09-23` A release archive can be installed and checked in one command. [PR #911](https://github.com/saworbit/didi/pull/911)
 
 ### Changed
+- `2026-10-14` Editor state, selection, protocol and export-reload handlers compile in one domain with their existing hierarchy limits. [#1255](https://github.com/saworbit/didi/issues/1255)
 - `2026-10-14` Signal bridge operations compile in their own domain with the same metadata limits, connection checks and undo paths. [#1255](https://github.com/saworbit/didi/issues/1255) · [PR #1403](https://github.com/saworbit/didi/pull/1403)
 - `2026-10-14` Camera transform and debug-draw bridge handlers compile in one domain with their existing undo and restore checks. [#1255](https://github.com/saworbit/didi/issues/1255) · [PR #1402](https://github.com/saworbit/didi/pull/1402)
 - `2026-10-14` TileMap and GridMap bridge handlers compile in one domain with the same cell validation, undo and readback paths. [#1255](https://github.com/saworbit/didi/issues/1255) · [PR #1401](https://github.com/saworbit/didi/pull/1401)
