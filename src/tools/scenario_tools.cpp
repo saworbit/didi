@@ -101,6 +101,7 @@ public:
         }
         m_sessionId = published.value("session_id", std::string());
         m_gamePid = published.value("pid", m_spawnedPid);
+        m_gameStartedAtMs = published.value("started_at_ms", int64_t{0});
 
         // A route of its own, so the caller's selection never moves: the
         // editor it was working in is still the one its next call reaches.
@@ -235,23 +236,29 @@ public:
         }
         m_lease.reset();
 
-        // Gone means its descriptor is gone, which is how a game that exits
-        // retires it, or that the process behind it is dead, which is how a
-        // crashed one leaves it: listed, with alive: false.
+        // Retirement precedes the end of Godot's shutdown. Wait for the
+        // original process too, bound to the creation time in its descriptor,
+        // so a still-dying game or a reused PID cannot be reported as gone.
         const auto waited_from = std::chrono::steady_clock::now();
         const auto deadline = waited_from + std::chrono::seconds(10);
         bool gone = false;
         while (true) {
+            bool retired = false;
+            m_gameStillPublished = false;
             auto listed = m_sessions->listSessions(launchedProjectPath());
             if (listed.isOk() && listed.value().is_object() && listed.value()["sessions"].is_array()) {
-                gone = true;
+                retired = true;
                 for (const auto& entry : listed.value()["sessions"]) {
                     if (entry.value("session_id", std::string()) == m_sessionId &&
                         entry.value("alive", true)) {
-                        gone = false;
+                        retired = false;
+                        m_gameStillPublished = true;
                     }
                 }
             }
+            gone = retired && m_gameStartedAtMs > 0 &&
+                   runtime::processInstanceState(m_gamePid, m_gameStartedAtMs) ==
+                       runtime::ProcessInstanceState::proven_stale;
             if (gone || std::chrono::steady_clock::now() >= deadline) break;
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
@@ -262,7 +269,7 @@ public:
         if (!gone) {
             return Error(409,
                          "Game " + std::to_string(m_gamePid) + " (session " + m_sessionId +
-                             ") was still published 10 seconds after it was asked to stop.",
+                             ") did not finish a verified shutdown within 10 seconds after it was asked to stop.",
                          {{"code", "teardown_failed"}, {"pid", m_gamePid}, {"session_id", m_sessionId}});
         }
         return report;
@@ -278,6 +285,7 @@ public:
 
     const std::string& sessionId() const { return m_sessionId; }
     uint64_t gamePid() const { return m_gamePid != 0 ? m_gamePid : m_spawnedPid; }
+    bool gameStillPublished() const { return m_gameStillPublished; }
 
 private:
     Result<json> send(const std::string& method, const json& params, int timeout_ms, bool repeatable) {
@@ -306,9 +314,11 @@ private:
     std::chrono::steady_clock::time_point m_started;
     uint64_t m_spawnedPid{0};
     uint64_t m_gamePid{0};
+    int64_t m_gameStartedAtMs{0};
     std::string m_engineExecutable;
     std::string m_sessionId;
     bool m_routeOpen{false};
+    bool m_gameStillPublished{false};
     std::optional<runtime::RuntimeRouteLease> m_lease;
 };
 
@@ -324,11 +334,14 @@ json scenarioError(const runtime::ScenarioOutcome& outcome, const LiveScenarioDr
     }
     if (failure.stage == "teardown") {
         json data = {{"code", "teardown_failed"}, {"retryable", false}};
-        if (!driver.sessionId().empty()) {
+        if (!driver.sessionId().empty() && driver.gameStillPublished()) {
             data["next_call"] = {{"tool", "runtime_attach_session"},
                                  {"arguments", {{"session_id", driver.sessionId()}}},
                                  {"reason", "The game this scenario started may still be running: "
                                             "attach to it and call runtime_stop."}};
+        } else {
+            data["no_remedy"] = "Exit was not verified and no live session route was verified "
+                                "for retrying runtime_stop.";
         }
         if (driver.gamePid() != 0) data["pid"] = driver.gamePid();
         return {{"code", 409}, {"message", failure.message}, {"data", std::move(data)}};

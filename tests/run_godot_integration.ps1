@@ -269,6 +269,7 @@ $env:DIDI_LOG_LEVEL = "INFO"
 # command left behind.
 & (Join-Path $PSScriptRoot "test_engine_crash_classifier.ps1")
 & (Join-Path $PSScriptRoot "test_observed_agreement.ps1")
+& (Join-Path $PSScriptRoot "test_scenario_process_witness.ps1")
 & (Join-Path $PSScriptRoot "test_engine_crash_artifacts.ps1")
 
 function Test-EngineWorkerCrash($EngineProcess) {

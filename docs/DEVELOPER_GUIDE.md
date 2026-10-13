@@ -648,6 +648,13 @@ A tool that reads or writes a property of a node, or of a resource the node hold
   after setting `DIDI_TEST_BINARY` and `DIDI_RECOVERY_GODOT`. Process liveness
   on Windows uses owned native handles and creation times: Godot's
   `OS.is_process_running` only knows children created by that Godot process.
+  The PowerShell scenario fixture acknowledges a process captured while alive
+  and keeps its native handle through the comparison, including failed runs.
+  Scenario teardown waits for both session retirement and exit of the original
+  process, checked against the descriptor's creation time; retirement alone
+  can precede the end of Godot's shutdown. Missing captures and live games fail
+  the comparison, and `tests/test_scenario_process_witness.ps1` also exercises
+  a changed PID lookup and repeated cleanup before an engine is started.
 - Regenerate the [contract snapshots](#contract-snapshots), because a new tool
   changes `tools/list`. It also grows the full profile's bytes, so it may need
   a [budget](#tool-list-budgets-and-the-core-profile) raised first, in a pull
