@@ -445,7 +445,9 @@ class ManagedRecoveryLive(unittest.TestCase):
     def assert_powershell_observation(self, case, data):
         path = self.root / ('observed-' + case + '.json')
         path.write_text(json.dumps(data), encoding='utf-8')
-        checked = subprocess.run(['powershell', '-NoProfile', '-File', str(Path(__file__).parent / 'run_observed_external.ps1'), '-Case', case, '-InputPath', str(path)], capture_output=True, text=True, timeout=5)
+        # Cold PowerShell startup on a busy runner can exceed five seconds.
+        # Keep the comparison bounded by the observed cases' twenty-second wait.
+        checked = subprocess.run(['powershell', '-NoProfile', '-File', str(Path(__file__).parent / 'run_observed_external.ps1'), '-Case', case, '-InputPath', str(path)], capture_output=True, text=True, timeout=20)
         self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
 
     def test_observed_project_apply_changes(self):
