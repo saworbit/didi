@@ -1020,7 +1020,9 @@ Result<json> resourcePathToJson(VariantValue& value);
 // vector sent there would land as a Dictionary that reads back the same. It
 // takes scalars only.
 Result<VariantValue> makeArrayForProperty(const std::string& property_name, const json& value,
-                                          VariantValue& current) {
+                                          VariantValue& current,
+                                          const std::function<Result<VariantValue>(const std::string&,
+                                              const json&, const std::string&)>& object_builder = {}) {
     if (GodotApi::instance().variant_get_type(current.ptr()) != GDEXTENSION_VARIANT_TYPE_ARRAY) {
         return Error::invalidArgument("Property \"" + property_name +
                                       "\" holds no Array to take an element type from.");
@@ -1056,6 +1058,7 @@ Result<VariantValue> makeArrayForProperty(const std::string& property_name, cons
                 return makeJsonVariant(item);
             }
             if (element == GDEXTENSION_VARIANT_TYPE_OBJECT) {
+                if (object_builder) return object_builder(name, item, class_text);
                 if (!propertyTypeAcceptsJson(item, element)) {
                     return Error::invalidArgument(describePropertyTypeMismatch(name, item, element));
                 }
@@ -4326,10 +4329,41 @@ bool isNodeSlot(const PropertyDescriptor& descriptor) {
            descriptor.hint == kPropertyHintNodeType;
 }
 
+// An exported Array[Node] has ARRAY_TYPE (23) and an Object element (24)
+// with NODE_TYPE (34), followed by the native or script class (#1357).
+std::optional<std::string> nodeArrayClass(const PropertyDescriptor& descriptor) {
+    if (descriptor.declared_type != GDEXTENSION_VARIANT_TYPE_ARRAY || descriptor.hint != 23 ||
+        !strings::startsWith(descriptor.hint_string, "24/34:")) return std::nullopt;
+    return descriptor.hint_string.substr(6);
+}
+
 // A node slot's value as the inspector shows it and the scene file keeps it:
 // the path from the node that holds the slot. Nothing when it holds no node.
 // Node.get_path_to is 498846349 on all three lines.
 std::optional<json> nodeSlotToJson(const ResolvedProperty& resolved, VariantValue& value) {
+    if (nodeArrayClass(resolved.descriptor)) {
+        if (GodotApi::instance().variant_get_type(value.ptr()) != GDEXTENSION_VARIANT_TYPE_ARRAY) {
+            return std::nullopt;
+        }
+        auto count = callVariant(value, "size");
+        if (count.isErr()) return std::nullopt;
+        auto size = scalarFromVariant<int64_t>(count.value(), GDEXTENSION_VARIANT_TYPE_INT);
+        if (size.isErr()) return std::nullopt;
+        ResolvedProperty element;
+        element.holder = resolved.holder;
+        element.descriptor.declared_type = GDEXTENSION_VARIANT_TYPE_OBJECT;
+        element.descriptor.hint = kPropertyHintNodeType;
+        json items = json::array();
+        for (int64_t i = 0; i < size.value(); ++i) {
+            auto index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, i);
+            if (index.isErr()) return std::nullopt;
+            auto item = callVariant(value, "get", {&index.value()});
+            if (item.isErr()) return std::nullopt;
+            if (auto path = nodeSlotToJson(element, item.value())) items.push_back(*path);
+            else items.push_back(nullptr);
+        }
+        return items;
+    }
     if (!isNodeSlot(resolved.descriptor)) return std::nullopt;
     if (GodotApi::instance().variant_get_type(value.ptr()) != GDEXTENSION_VARIANT_TYPE_OBJECT) {
         return std::nullopt;
@@ -4353,26 +4387,34 @@ std::optional<json> nodeSlotToJson(const ResolvedProperty& resolved, VariantValu
 // declares. Object.is_class answers for native classes only. Object.get_script
 // is 1214101251, Script.get_global_name 2002593661 and Script.get_base_script
 // 278624046 on all three lines.
-Result<bool> nodeIsOfClass(GDExtensionObjectPtr node, const std::string& class_name) {
-    auto native = objectIsClass(node, class_name.c_str());
-    if (native.isErr()) return native.error();
-    if (native.value()) return true;
+Result<bool> nodeScriptMatches(GDExtensionObjectPtr node,
+                                const std::function<Result<bool>(GDExtensionObjectPtr)>& matches) {
     auto script_value = callObject(node, "Object", "get_script", 1214101251LL);
     if (script_value.isErr()) return script_value.error();
     VariantValue held = std::move(script_value.value());
     for (int depth = 0; depth < 32; ++depth) {
         auto script = objectFromVariant(held);
         if (script.isErr() || !script.value()) return false;
-        auto name = callObject(script.value(), "Script", "get_global_name", 2002593661LL);
-        if (name.isOk()) {
-            auto text = stringFromVariant(name.value(), GDEXTENSION_VARIANT_TYPE_STRING_NAME);
-            if (text.isOk() && text.value() == class_name) return true;
-        }
+        auto matched = matches(script.value());
+        if (matched.isErr()) return matched.error();
+        if (matched.value()) return true;
         auto base = callObject(script.value(), "Script", "get_base_script", 278624046LL);
         if (base.isErr()) return false;
         held = std::move(base.value());
     }
     return false;
+}
+
+Result<bool> nodeIsOfClass(GDExtensionObjectPtr node, const std::string& class_name) {
+    auto native = objectIsClass(node, class_name.c_str());
+    if (native.isErr()) return native.error();
+    if (native.value()) return true;
+    return nodeScriptMatches(node, [&](GDExtensionObjectPtr script) -> Result<bool> {
+        auto name = callObject(script, "Script", "get_global_name", 2002593661LL);
+        if (name.isErr()) return false;
+        auto text = stringFromVariant(name.value(), GDEXTENSION_VARIANT_TYPE_STRING_NAME);
+        return text.isOk() && text.value() == class_name;
+    });
 }
 
 Result<json> describeProperty(const ResolvedProperty& resolved, const std::string& path,
@@ -4432,21 +4474,22 @@ struct PreparedWrite {
 // names. A path was refused as not a resource path, and Godot itself drops a
 // NodePath written into the slot, or a node of another class, and leaves the
 // slot empty without a word, on 4.5.1, 4.6.2 and 4.7.2 (#1292).
-Result<VariantValue> makeNodeForSlot(GDExtensionObjectPtr root, const PreparedWrite& write,
-                                     const json& value) {
+Result<VariantValue> makeNodeForSlot(GDExtensionObjectPtr root, GDExtensionObjectPtr holder,
+                                     const std::string& property, const std::string& target_path,
+                                     const std::string& slot_class, const json& value,
+                                     GDExtensionObjectPtr prospective_parent = nullptr) {
     if (value.is_null()) return VariantValue{};
-    const auto& slot_class = write.resolved.descriptor.hint_string;
     std::string path;
     if (value.is_string()) {
         path = value.get<std::string>();
-    } else if (value.is_object() && value.value("type", std::string()) == "NodePath" &&
+    } else if (value.is_object() && value.contains("type") && value["type"] == "NodePath" &&
                value.contains("value") && value["value"].is_string()) {
         path = value["value"].get<std::string>();
     }
     if (path.empty()) {
         return Error::invalidArgument(
-            "Property \"" + write.property + "\" holds a " + slot_class +
-            " node. Send its path from " + write.target_path +
+            "Property \"" + property + "\" holds a " + slot_class +
+            " node. Send its path from " + target_path +
             ", such as \"../Target\", or from the scene root, such as \"/root/Main/Target\", "
             "or null to empty the slot.");
     }
@@ -4458,19 +4501,62 @@ Result<VariantValue> makeNodeForSlot(GDExtensionObjectPtr root, const PreparedWr
     } else {
         auto node_path = makeNodePath(path);
         if (node_path.isErr()) return node_path.error();
-        auto result = callObject(write.resolved.holder, "Node", "get_node_or_null", 2734337346LL,
-                                 {&node_path.value()});
-        if (result.isErr()) return result.error();
-        auto object = objectFromVariant(result.value());
-        if (object.isErr()) return object.error();
-        found = object.value();
+        // An instance is still orphaned during preflight. Walk the real
+        // NodePath names, substituting its prospective parent only when a
+        // '..' steps out of its root. No add_child runs a tool script early.
+        if (prospective_parent) {
+            auto names = callVariant(node_path.value(), "get_name_count");
+            if (names.isErr()) return names.error();
+            auto count = scalarFromVariant<int64_t>(names.value(), GDEXTENSION_VARIANT_TYPE_INT);
+            if (count.isErr()) return count.error();
+            found = holder;
+            for (int64_t i = 0; i < count.value() && found; ++i) {
+                auto index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, i);
+                if (index.isErr()) return index.error();
+                auto name = callVariant(node_path.value(), "get_name", {&index.value()});
+                if (name.isErr()) return name.error();
+                auto text = stringFromVariant(name.value(), GDEXTENSION_VARIANT_TYPE_STRING_NAME);
+                if (text.isErr()) return text.error();
+                if (text.value() == ".") continue;
+                if (text.value() == ".." && found == holder) {
+                    found = prospective_parent;
+                    continue;
+                }
+                auto part = makeNodePath(text.value());
+                if (part.isErr()) return part.error();
+                auto next = text.value() == ".."
+                    ? callObject(found, "Node", "get_parent", 3160264692LL)
+                    : callObject(found, "Node", "get_node_or_null", 2734337346LL, {&part.value()});
+                if (next.isErr()) return next.error();
+                auto object = objectFromVariant(next.value());
+                if (object.isErr()) return object.error();
+                found = object.value();
+            }
+        } else {
+            auto result = callObject(holder, "Node", "get_node_or_null", 2734337346LL,
+                                     {&node_path.value()});
+            if (result.isErr()) return result.error();
+            auto object = objectFromVariant(result.value());
+            if (object.isErr()) return object.error();
+            found = object.value();
+        }
     }
     if (!found) {
-        return Error::notFound("Property \"" + write.property + "\": there is no node at " + path +
-                               " from " + write.target_path + ".");
+        return Error::notFound("Property \"" + property + "\": there is no node at " + path +
+                               " from " + target_path + ".");
     }
-    if (relativePathWithinEditedRoot(root, found).isErr()) {
-        return Error::invalidArgument("Property \"" + write.property + "\": " + path +
+    bool in_instance = prospective_parent && found == holder;
+    if (prospective_parent && !in_instance) {
+        auto found_value = makeObject(found);
+        if (found_value.isErr()) return found_value.error();
+        auto beneath = callObject(holder, "Node", "is_ancestor_of", 3093956946LL, {&found_value.value()});
+        if (beneath.isErr()) return beneath.error();
+        auto yes = scalarFromVariant<GDExtensionBool>(beneath.value(), GDEXTENSION_VARIANT_TYPE_BOOL);
+        if (yes.isErr()) return yes.error();
+        in_instance = yes.value();
+    }
+    if (!in_instance && relativePathWithinEditedRoot(root, found).isErr()) {
+        return Error::invalidArgument("Property \"" + property + "\": " + path +
                                       " is outside the edited scene, and a scene keeps a path to "
                                       "its own nodes only.");
     }
@@ -4483,11 +4569,47 @@ Result<VariantValue> makeNodeForSlot(GDExtensionObjectPtr root, const PreparedWr
         matches = is.value();
     }
     if (!matches) {
-        return Error::invalidArgument("Property \"" + write.property + "\" takes a " + slot_class +
+        return Error::invalidArgument("Property \"" + property + "\" takes a " + slot_class +
                                       ", and " + path + " is a " + nodeClassName(found) +
                                       ". Godot leaves the slot empty for a node of another class.");
     }
     return makeObject(found);
+}
+
+Result<VariantValue> makeNodeArrayForSlot(GDExtensionObjectPtr root, GDExtensionObjectPtr holder,
+                                          const std::string& property, const std::string& target_path,
+                                          const std::string& slot_class, const json& value,
+                                          VariantValue& current,
+                                          GDExtensionObjectPtr prospective_parent = nullptr) {
+    // An unnamed script's export hint names only its native base. The typed
+    // Array still requires that exact script, or one extending it. Godot's
+    // Array constructor prints an error and returns empty on a mismatch.
+    auto script = callVariant(current, "get_typed_script");
+    if (script.isErr()) return script.error();
+    GDExtensionObjectPtr required_script = nullptr;
+    if (GodotApi::instance().variant_get_type(script.value().ptr()) == GDEXTENSION_VARIANT_TYPE_OBJECT) {
+        auto object = objectFromVariant(script.value());
+        if (object.isErr()) return object.error();
+        required_script = object.value();
+    }
+    return makeArrayForProperty(property, value, current,
+        [&](const std::string& name, const json& item, const std::string&) -> Result<VariantValue> {
+            auto built = makeNodeForSlot(root, holder, name, target_path, slot_class, item, prospective_parent);
+            if (built.isErr()) return built.error();
+            if (required_script && !item.is_null()) {
+                auto node = objectFromVariant(built.value());
+                if (node.isErr()) return node.error();
+                auto matches = nodeScriptMatches(node.value(), [&](GDExtensionObjectPtr actual) -> Result<bool> {
+                    return actual == required_script;
+                });
+                if (matches.isErr()) return matches.error();
+                if (!matches.value()) {
+                    return Error::invalidArgument("Property \"" + name +
+                        "\" requires nodes using the array's declared script or a script that extends it.");
+                }
+            }
+            return std::move(built.value());
+        });
 }
 
 // Every check the write makes, short of making it. A dry run runs this too,
@@ -4558,7 +4680,8 @@ Result<PreparedWrite> prepareWrite(GDExtensionObjectPtr root, const std::string&
     }
     const auto& value = item["value"];
     if (property_type == GDEXTENSION_VARIANT_TYPE_OBJECT && isNodeSlot(write.resolved.descriptor)) {
-        auto node_value = makeNodeForSlot(root, write, value);
+        auto node_value = makeNodeForSlot(root, write.resolved.holder, write.property,
+                                          write.target_path, write.resolved.descriptor.hint_string, value);
         if (node_value.isErr()) return node_value.error();
         write.requested = value;
         write.old_value = std::move(old_value.value());
@@ -4570,7 +4693,10 @@ Result<PreparedWrite> prepareWrite(GDExtensionObjectPtr root, const std::string&
     auto new_value = property_type == GDEXTENSION_VARIANT_TYPE_OBJECT
         ? makeResourceForProperty(write.property, value, write.resolved.descriptor.class_name)
         : property_type == GDEXTENSION_VARIANT_TYPE_ARRAY
-        ? makeArrayForProperty(write.property, value, old_value.value())
+        ? (nodeArrayClass(write.resolved.descriptor)
+            ? makeNodeArrayForSlot(root, write.resolved.holder, write.property, write.target_path,
+                                   *nodeArrayClass(write.resolved.descriptor), value, old_value.value())
+            : makeArrayForProperty(write.property, value, old_value.value()))
         : property_type == GDEXTENSION_VARIANT_TYPE_DICTIONARY
         ? makeDictionaryForProperty(write.property, value, old_value.value())
         : makeJsonVariantForProperty(value, property_type);
@@ -16764,6 +16890,7 @@ json GodotBridge::bridgeSceneInstantiateNode(const std::string& /*method*/, cons
         json requested;
         json written;
         json before;
+        int type{0};
         int hint{0};
         std::string hint_string;
         // The engine's value, kept to set again once the node is parented.
@@ -16800,15 +16927,26 @@ json GodotBridge::bridgeSceneInstantiateNode(const std::string& /*method*/, cons
                     static_cast<GDExtensionVariantType>(declared.value()->declared_type);
             }
         }
-        auto compatible = validateJsonForPropertyType(it.key(), it.value(), property_type);
+        const bool node_slot = declared.isOk() && declared.value() && isNodeSlot(*declared.value());
+        const auto node_array = declared.isOk() && declared.value()
+            ? nodeArrayClass(*declared.value()) : std::nullopt;
+        auto compatible = node_slot ? Result<void>::ok()
+                                    : validateJsonForPropertyType(it.key(), it.value(), property_type);
         if (compatible.isErr()) {
             GodotApi::instance().object_destroy(node);
             return errorJson(compatible.error());
         }
-        auto property_value = property_type == GDEXTENSION_VARIANT_TYPE_OBJECT
+        const auto target_path = params.value("parent_path", "") + "/" + params.value("name", node_type);
+        auto property_value = node_slot
+            ? makeNodeForSlot(root.value(), node, it.key(), target_path, declared.value()->hint_string,
+                              it.value(), parent.value())
+            : property_type == GDEXTENSION_VARIANT_TYPE_OBJECT
             ? makeResourceForProperty(it.key(), it.value(), declared_class)
             : property_type == GDEXTENSION_VARIANT_TYPE_ARRAY
-            ? makeArrayForProperty(it.key(), it.value(), current_value.value())
+            ? (node_array
+                ? makeNodeArrayForSlot(root.value(), node, it.key(), target_path, *node_array,
+                                       it.value(), current_value.value(), parent.value())
+                : makeArrayForProperty(it.key(), it.value(), current_value.value()))
             : property_type == GDEXTENSION_VARIANT_TYPE_DICTIONARY
             ? makeDictionaryForProperty(it.key(), it.value(), current_value.value())
             : makeJsonVariantForProperty(it.value(), property_type);
@@ -16824,6 +16962,7 @@ json GodotBridge::bridgeSceneInstantiateNode(const std::string& /*method*/, cons
         }
         InitialProperty record;
         record.name = it.key();
+        record.type = static_cast<int>(property_type);
         record.requested = it.value();
         // Against the Variant that was sent, not the JSON it came from, for
         // the reason scene_set_property gives: {r,g,b} comes back with four
@@ -16898,11 +17037,24 @@ json GodotBridge::bridgeSceneInstantiateNode(const std::string& /*method*/, cons
     // words, so a call where every one landed costs nothing extra.
     json not_applied = json::array();
     for (auto& record : initial_written) {
+        ResolvedProperty resolved;
+        resolved.holder = node;
+        resolved.descriptor.declared_type = record.type;
+        resolved.descriptor.hint = record.hint;
+        resolved.descriptor.hint_string = record.hint_string;
+        const auto encode = [&](VariantValue& value) -> Result<json> {
+            if (auto slot = nodeSlotToJson(resolved, value)) return *slot;
+            return variantToJson(value);
+        };
+        if (record.value && (isNodeSlot(resolved.descriptor) || nodeArrayClass(resolved.descriptor))) {
+            auto written = encode(*record.value);
+            if (written.isOk()) record.written = written.value();
+        }
         auto name = makeStringName(record.name);
         if (name.isErr()) continue;
         auto observed = callObject(node, "Object", "get", 2760726917LL, {&name.value()});
         if (observed.isErr()) continue;
-        auto observed_json = variantToJson(observed.value());
+        auto observed_json = encode(observed.value());
         if (observed_json.isErr() || jsonValuesEquivalent(observed_json.value(), record.written)) {
             continue;
         }
@@ -16915,7 +17067,7 @@ json GodotBridge::bridgeSceneInstantiateNode(const std::string& /*method*/, cons
             auto again = callObject(node, "Object", "set", 3776071444LL, {&name.value(), &*record.value});
             if (again.isOk()) {
                 auto reread = callObject(node, "Object", "get", 2760726917LL, {&name.value()});
-                auto reread_json = reread.isOk() ? variantToJson(reread.value()) : Result<json>(reread.error());
+                auto reread_json = reread.isOk() ? encode(reread.value()) : Result<json>(reread.error());
                 if (reread_json.isOk() && jsonValuesEquivalent(reread_json.value(), record.written)) continue;
                 if (reread_json.isOk()) observed_json = std::move(reread_json);
             }
