@@ -154,7 +154,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 - `2026-09-23` The website and the quickstart start from the download. [PR #910](https://github.com/saworbit/didi/pull/910)
 
 ### Fixed
-- `2026-10-14` Input key-name refusals name the event and numeric value to retry, and global enum reflection supplies the lookup. [#1415](https://github.com/saworbit/didi/issues/1415)
+- `2026-10-14` Input key-name refusals name the event and numeric value to retry, and global enum reflection supplies the lookup. [#1415](https://github.com/saworbit/didi/issues/1415) [PR #1418](https://github.com/saworbit/didi/pull/1418)
 
 - `2026-10-14` Scenarios verify original game exit before reporting teardown complete, and Windows witnesses retain the original process. [#1020](https://github.com/saworbit/didi/issues/1020) [PR #1417](https://github.com/saworbit/didi/pull/1417)
 
