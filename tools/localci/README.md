@@ -224,6 +224,11 @@ offers the rebuilt image as a pull request -- see
 staying unpatched. The release number is still a manual decision; only the
 digest is automated.
 
+GitHub CI does not build this Dockerfile, so green checks do not verify the
+local image. After changing the digest or copied inputs, run the lanes with
+Docker available. An automated image build and smoke check is tracked in
+[#1419](https://github.com/saworbit/didi/issues/1419).
+
 The same goes for `lane.sh`: it duplicates steps from `ci.yml` rather than
 reading them, so the two can drift. The duplication is deliberate — `act` and
 similar workflow runners bring their own fidelity gaps, and the steps here are
