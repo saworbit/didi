@@ -58,6 +58,20 @@ class ClassReferenceRefreshTests(unittest.TestCase):
         self.assertEqual(reference["classes"]["NavigationPolygon"]["properties"]["outlines"],
                          {"type": "Array", "element_type": "PackedVector2Array"})
 
+    def test_refresh_keeps_global_key_enum_for_refusal_guidance(self):
+        api = json.loads(self.api.read_text(encoding="utf-8"))
+        api["global_enums"] = [{"name": "Key", "values": [
+            {"name": "KEY_W", "value": 87},
+            {"name": "KEY_ESCAPE", "value": 4194305},
+        ]}]
+        self.api.write_text(json.dumps(api), encoding="utf-8")
+        result = self.refresh({"NavigationPolygon": {"outlines": "PackedVector2Array"}})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        reference = json.loads(self.output.read_text(encoding="utf-8"))
+        self.assertIn("@GlobalScope", reference["classes"])
+        self.assertEqual(reference["classes"]["@GlobalScope"]["enums"]["Key"],
+                         {"KEY_W": 87, "KEY_ESCAPE": 4194305})
+
     def test_committed_reference_keeps_navigation_outline_element_type(self):
         reference = json.loads((ROOT / "resources" / "didi_class_reference.json").read_text(
             encoding="utf-8"))

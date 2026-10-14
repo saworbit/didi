@@ -99,6 +99,10 @@ def build_reference(api: dict, typed_setters: dict | None = None) -> dict:
         entry["name"]: trim_class(entry, typed_setters.get(entry["name"]))
         for entry in api.get("classes", [])
     }
+    if api.get("global_enums"):
+        classes["@GlobalScope"] = trim_class({"enums": api["global_enums"]})
+        classes["@GlobalScope"]["global_scope"] = True
+        classes["@GlobalScope"]["is_instantiable"] = False
     return {
         "schema": 1,
         # Recorded so a caller can see which Godot the reflection describes. The

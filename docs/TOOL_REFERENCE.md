@@ -1683,7 +1683,7 @@ An event with no `device` is bound to all devices, `-1`, as the editor's Input M
 
 The modifiers are `shift_pressed`, `alt_pressed`, `ctrl_pressed` and `meta_pressed`, which is Godot's own name for each and what this tool writes into `project.godot`. `shift`, `alt`, `ctrl` and `meta` are accepted as aliases, and `project_list_input_actions` reports both spellings, so a descriptor read from it can be written straight back. Setting the two names of one modifier to different values is refused.
 
-`keycode` and `physical_keycode` are Godot `Key` enum values, not ASCII codes and not characters: `Space` is `32`, `Escape` is `4194305`, `F1` is `4194332`. `script_reflect_class` on `Key` lists them.
+`keycode` and `physical_keycode` are Godot `Key` enum values, not ASCII codes and not characters: `Space` is `32`, `Escape` is `4194305`, `F1` is `4194332`. `script_reflect_class` on `@GlobalScope`, with `fields: ["enums"]`, lists the pinned `Key` enum. Both this tool and `runtime_inject_input` refuse string key names. An exact enum name such as `KEY_ESCAPE` or `ESCAPE` carries its integer in `retry_with.events`, with `event_index`; the batch is not applied. A batch over 1024 bytes is not echoed; `expected_value` still names the integer. Unknown names point to the enum lookup instead of guessing.
 
 A refusal names the `events` entry it is about and the property or type that is wrong, the way every other argument refusal on this surface does.
 

@@ -1806,7 +1806,9 @@ json GDScriptDiagnostics::reflectClass(const std::string& class_name) {
             // This tool has no live mode, so telling the caller to attach an
             // editor was advice they could follow and get the same answer
             // back. It says what the pinned dump covers instead (#405).
-            {"description", "Godot engine class " + class_name +
+            {"description", (entry->value("global_scope", false)
+                                 ? std::string("Godot global enums ")
+                                 : std::string("Godot engine class ")) + class_name +
                             " read from the class reference pinned to " +
                             reference.apiVersion() +
                             ". This is a shipped dump of the engine API, not the running "

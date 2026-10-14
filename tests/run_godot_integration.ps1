@@ -809,6 +809,15 @@ try {
             @{ type = "action"; action_name = "ui_accept"; pressed = $true },
             @{ type = "action"; action_name = "harness_never_declared"; pressed = $true }
         ) }),
+        # A key name is refused with its integer, without dispatching the
+        # valid first event either. The unchanged counter below is the witness.
+        (Tool-Request 14150 "runtime_inject_input" @{ events = @(
+            @{ type = "action"; action_name = "ui_accept"; pressed = $true },
+            @{ type = "key"; keycode = "KEY_ESCAPE"; pressed = $true }
+        ) }),
+        (Tool-Request 14151 "runtime_inject_input" @{ events = @(
+            @{ type = "key"; physical_keycode = "W"; pressed = $true }
+        ) }),
         (Tool-Request 398 "runtime_get_tree" @{ root_path = "/root/RuntimeRoot"; max_depth = 1 }),
         # A click with no position lands at the viewport origin, and a caller
         # who found a control's rect through ui_list_controls had no way to
@@ -1314,6 +1323,14 @@ try {
     Assert-True ($undeclared.code -eq 400 -and $undeclared.data.reason -eq "undefined_input_action" -and (@($undeclared.data.undefined_actions) -join ",") -eq "harness_never_declared") "runtime_inject_input did not name the undeclared action: $($runtimeById[399].result.content[0].text)"
     $inputFinal = Runtime-InputCounter (Tool-Payload $runtimeById[398])
     Assert-True ($inputFinal -eq $inputAfter) "A rejected batch or a dry run still dispatched input; the counter moved from $inputAfter to $inputFinal."
+    foreach ($case in @(@{ Id = 14150; Index = 1; Field = "keycode"; Value = 4194305 },
+                       @{ Id = 14151; Index = 0; Field = "physical_keycode"; Value = 87 })) {
+        $answer = $runtimeById[$case.Id]
+        $refused = ($answer.result.content[0].text | ConvertFrom-Json).error
+        Assert-True ($answer.result.isError -and $refused.code -eq 400 -and
+            $refused.data.event_index -eq $case.Index -and
+            $refused.data.retry_with.events[$case.Index].($case.Field) -eq $case.Value) "Input key refusal did not carry the integer for its event."
+    }
 
     $hit3d = Tool-Payload $runtimeById[400]
     Assert-True ($hit3d.execution_mode -eq "live" -and $hit3d.dimension -eq 3 -and $hit3d.hit -eq $true) "3D raycast did not hit the fixture body."
@@ -2019,6 +2036,14 @@ try {
             @{ type = "key"; keycode = 33; wobble = $true }
         ) }),
         (Tool-Request 5604 "project_remove_input_action" @{ action = "engine_spelling" }),
+        (Tool-Request 14152 "project_set_input_action" @{ action = "named_key_refusal"; events = @(
+            @{ type = "key"; keycode = 65 },
+            @{ type = "key"; physical_keycode = "KEY_ESCAPE" }
+        ) }),
+        (Tool-Request 14153 "project_set_input_action" @{ action = "named_key_refusal"; events = @(
+            @{ type = "key"; keycode = "W" }
+        ) }),
+        (Tool-Request 14154 "project_list_input_actions" @{ action = "named_key_refusal" }),
         (Tool-Request 83 "project_set_input_action" @{ action = "bad_event"; events = @(@{ type = "touch" }) }),
         (Tool-Request 84 "project_set_input_action" @{ action = "bad_deadzone"; deadzone = 1.5; events = @() }),
         (Tool-Request 85 "project_set_input_action" @{ action = "empty_key"; events = @(@{ type = "key" }) }),
@@ -4627,6 +4652,15 @@ try {
     Assert-True ($byId[5603].result.content[0].text -match "wobble") "The refusal did not name the offending property."
 
     Assert-True ((Tool-Payload $byId[5604]).removed -eq $true) "The engine-spelling probe action was left registered."
+    foreach ($case in @(@{ Id = 14152; Index = 1; Field = "physical_keycode"; Value = 4194305 },
+                       @{ Id = 14153; Index = 0; Field = "keycode"; Value = 87 })) {
+        $answer = $byId[$case.Id]
+        $refused = ($answer.result.content[0].text | ConvertFrom-Json).error
+        Assert-True ($answer.result.isError -and $refused.code -eq 400 -and
+            $refused.data.event_index -eq $case.Index -and
+            $refused.data.retry_with.events[$case.Index].($case.Field) -eq $case.Value) "InputMap key refusal did not carry the integer for its event."
+    }
+    Assert-True $byId[14154].result.isError "A refused key-name batch still persisted an InputMap action."
     Assert-True $byId[84].result.isError "Out-of-range InputMap deadzone was accepted."
     Assert-True $byId[85].result.isError "Empty key event was accepted."
 
