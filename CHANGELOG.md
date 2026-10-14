@@ -137,7 +137,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 - `2026-09-23` The website and the quickstart start from the download. [PR #910](https://github.com/saworbit/didi/pull/910)
 
 ### Fixed
-- `2026-10-14` The guides document global enums, verified scenario shutdown and the local image validation limit, and link the landed bridge changes. [#1419](https://github.com/saworbit/didi/issues/1419)
+- `2026-10-14` The guides document global enums, verified scenario shutdown and the local image validation limit, and link the landed bridge changes. [PR #1420](https://github.com/saworbit/didi/pull/1420)
 - `2026-10-14` Empty shaders list zero uniforms and refuse undeclared writes without printing an engine error. [#1358](https://github.com/saworbit/didi/issues/1358) · [PR #1413](https://github.com/saworbit/didi/pull/1413)
 - `2026-10-14` Typed node arrays and initial instance node slots accept scene paths, read them back, and save with undo. [#1357](https://github.com/saworbit/didi/issues/1357) · [PR #1413](https://github.com/saworbit/didi/pull/1413)
 - `2026-10-14` Input key-name refusals name the event and numeric value to retry, and global enum reflection supplies the lookup. [#1415](https://github.com/saworbit/didi/issues/1415) [PR #1418](https://github.com/saworbit/didi/pull/1418)
