@@ -273,8 +273,11 @@ record of what they ran against.
   `runtime.getOutput`, `vision.captureViewport`, `runtime.stop`. The run loop
   in `src/runtime/scenario_runner.cpp` is pure and talks to the game through
   `IScenarioDriver`; `src/tools/scenario_tools.cpp` is the driver over the
-  bridge. Teardown runs on every path and confirms the session is gone (a
-  crashed game's descriptor counts as gone when it reads `alive: false`).
+  bridge. Teardown runs on every path and requires both session retirement
+  and verified exit of the original process. A descriptor with `alive: false`
+  counts as retired, but does not alone prove process exit. An unverified
+  shutdown prevents a pass and is recorded in `teardown`. An earlier step
+  failure remains the primary error; a retired session has no stop remedy.
 - **Tests**: `project_run_tests` runs GUT or GdUnit4 from the command line, as
   `shader_check_compile` runs its helper, and judges the JUnit XML the
   framework writes rather than its exit code. The rules and the parser are in
@@ -313,6 +316,7 @@ the read times the frame's parts itself while it samples.
   process and render CPU; the rest of the draw is waiting. A separate render
   thread (`RenderingServer.is_on_render_thread` false on the main thread) is
   waited for before the frame's first part, so that time counts as waiting.
+  Per-frame `slow_frames` use the same wait rule as the window verdict.
 - **Self-check**: with `self_check`, the read sets the timer's `stall_usec`
   once its samples are taken, so every process step after that is busy for a
   known time, and judges those frames again.

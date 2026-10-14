@@ -19,6 +19,8 @@ namespace didi::offline {
 // tools/generate_class_reference.py trims the 6.9 MB dump to the parts this
 // answers with, and the result is loaded once on first use and cached. Nothing
 // is parsed if no caller ever asks.
+// Global enums are stored under @GlobalScope as a non-instantiable record
+// with no methods, properties or signals.
 class ClassReference {
 public:
     // The reference for this process. Loading is attempted once; a failure is
@@ -40,8 +42,8 @@ public:
     const std::string& apiVersion() const { return m_apiVersion; }
     size_t size() const { return m_classes.is_object() ? m_classes.size() : 0; }
 
-    // The trimmed record for one class, or nullptr when the reference is
-    // unavailable or does not name it.
+    // The trimmed record for one class or @GlobalScope, or nullptr when the
+    // reference is unavailable or does not name it.
     const json* find(const std::string& class_name) const;
     // Whether any class in the reference declares a signal with this name.
     bool anyClassHasSignal(const std::string& signal) const;

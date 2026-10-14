@@ -155,6 +155,8 @@ public:
     // says so and has_errors follows the engine (#1188).
     static void deferLexicalErrorsToCleanEngine(std::vector<ScriptDiagnostic>& diagnostics);
 
+    // Reflect a pinned engine class, or @GlobalScope for global enums.
+    // Without the installed reference, only the built-in class snapshot is used.
     static json reflectClass(const std::string& class_name);
     // `max_symbols` bounds how many declarations come back, counted across all
     // six kinds, because the response is one thing rather than six. The result

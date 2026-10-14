@@ -7,6 +7,9 @@ parts a caller asks `script_reflect_class` for -- inheritance, properties,
 methods, signals and enums -- which is about a fifth of the size and small
 enough to sit next to the binary.
 
+Global enums are kept in a non-instantiable @GlobalScope record with no
+methods, properties or signals. Global functions are not part of this record.
+
 The output is committed as resources/didi_class_reference.json and read at
 runtime. It is committed rather than generated during the build because
 extension_api.json is a local artifact, produced by `godot --dump-extension-api`
@@ -93,6 +96,7 @@ def trim_class(entry: dict, element_types: dict | None = None) -> dict:
 
 
 def build_reference(api: dict, typed_setters: dict | None = None) -> dict:
+    """Build class and global-enum records, merging probed setter element types."""
     header = api.get("header", {})
     typed_setters = typed_setters or {}
     classes = {

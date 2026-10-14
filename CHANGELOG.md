@@ -110,25 +110,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Changed
 - `2026-10-14` Local CI uses the refreshed Ubuntu 24.04 image while keeping its base pinned by digest. [PR #1361](https://github.com/saworbit/didi/pull/1361)
-- `2026-10-14` Scene properties and instantiation compile with their typed preflight, shared-resource copy and undo checks. [#1255](https://github.com/saworbit/didi/issues/1255) · [PR #1413](https://github.com/saworbit/didi/pull/1413)
-- `2026-10-14` Shader inspection, uniform writes and compilation probes compile together with existing validation and undo checks. [#1255](https://github.com/saworbit/didi/issues/1255) · [PR #1412](https://github.com/saworbit/didi/pull/1412)
-- `2026-10-14` Ghost previews and viewport captures compile in their domains with existing RID cleanup and material restoration. [#1255](https://github.com/saworbit/didi/issues/1255) · [PR #1411](https://github.com/saworbit/didi/pull/1411)
-- `2026-10-14` Input event construction, dispatch and paused queues compile together with existing preflight and release checks. [#1255](https://github.com/saworbit/didi/issues/1255) · [PR #1410](https://github.com/saworbit/didi/pull/1410)
-- `2026-10-14` Node edits, undo, redo and scene saving compile in their domains with existing owner restoration and history checks. [#1255](https://github.com/saworbit/didi/issues/1255) · [PR #1409](https://github.com/saworbit/didi/pull/1409)
-- `2026-10-14` Scene create, open, close and branch packing compile together with existing save, ownership and dirty-state checks. [#1255](https://github.com/saworbit/didi/issues/1255) · [PR #1408](https://github.com/saworbit/didi/pull/1408)
-- `2026-10-14` Performance monitors and frame timing compile together with their existing measurement ownership and shutdown checks. [#1255](https://github.com/saworbit/didi/issues/1255) · [PR #1407](https://github.com/saworbit/didi/pull/1407)
-- `2026-10-14` Resource refresh, imported stream, script attachment and class lookup bridge handlers compile together with existing checks. [#1255](https://github.com/saworbit/didi/issues/1255) · [PR #1406](https://github.com/saworbit/didi/pull/1406)
-- `2026-10-14` Scene group bridge operations compile in one domain with the existing membership, persistence and undo checks. [#1255](https://github.com/saworbit/didi/issues/1255) · [PR #1405](https://github.com/saworbit/didi/pull/1405)
-- `2026-10-14` Editor state, selection, protocol and export-reload handlers compile in one domain with their existing hierarchy limits. [#1255](https://github.com/saworbit/didi/issues/1255) · [PR #1404](https://github.com/saworbit/didi/pull/1404)
-- `2026-10-14` Signal bridge operations compile in their own domain with the same metadata limits, connection checks and undo paths. [#1255](https://github.com/saworbit/didi/issues/1255) · [PR #1403](https://github.com/saworbit/didi/pull/1403)
-- `2026-10-14` Camera transform and debug-draw bridge handlers compile in one domain with their existing undo and restore checks. [#1255](https://github.com/saworbit/didi/issues/1255) · [PR #1402](https://github.com/saworbit/didi/pull/1402)
-- `2026-10-14` TileMap and GridMap bridge handlers compile in one domain with the same cell validation, undo and readback paths. [#1255](https://github.com/saworbit/didi/issues/1255) · [PR #1401](https://github.com/saworbit/didi/pull/1401)
-- `2026-10-14` Project settings, autoloads, input actions and UID bridge handlers compile in one domain with their existing save rollback. [#1255](https://github.com/saworbit/didi/issues/1255) · [PR #1400](https://github.com/saworbit/didi/pull/1400)
-- `2026-10-14` Audio bus bridge handlers compile in their own domain file with the existing layout snapshot and engine checks. [#1255](https://github.com/saworbit/didi/issues/1255) · [PR #1399](https://github.com/saworbit/didi/pull/1399)
-
-- `2026-10-14` Raycast, clearance, frustum and navigation bridge queries compile in a spatial domain file with their existing engine checks. [#1255](https://github.com/saworbit/didi/issues/1255) · [PR #1398](https://github.com/saworbit/didi/pull/1398)
-- `2026-10-14` UI control listing and hit testing compile in their own bridge file while preserving geometry and hit ordering. [#1255](https://github.com/saworbit/didi/issues/1255) [PR #1398](https://github.com/saworbit/didi/pull/1398)
-- `2026-10-14` Animation bridge handlers compile in their own file and share the existing scene and undo helpers through a private header. [#1255](https://github.com/saworbit/didi/issues/1255) [PR #1398](https://github.com/saworbit/didi/pull/1398)
+- `2026-10-14` Bridge handlers compile in domain files with shared private helpers, preserving validation, undo and resource ownership. [#1255](https://github.com/saworbit/didi/issues/1255) · [PR #1413](https://github.com/saworbit/didi/pull/1413)
 - `2026-10-13` Six remaining mutation tools compare reported state with independent witnesses in CI, including fixtures without Git identity. [#1020](https://github.com/saworbit/didi/issues/1020) [#1371](https://github.com/saworbit/didi/pull/1371)
 - `2026-10-11` The live harness compares `asset_reimport`'s `announced` with the `.import` files on disk, so six mutating tools are left unchecked, not seven. [#1020](https://github.com/saworbit/didi/issues/1020) · [PR #1283](https://github.com/saworbit/didi/pull/1283)
 - `2026-10-11` The GDExtension sources share one definition of their Godot value wrappers and error answers, and a test fails on a new copy. [#1255](https://github.com/saworbit/didi/issues/1255) · [PR #1284](https://github.com/saworbit/didi/pull/1284)
@@ -155,6 +137,9 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 - `2026-09-23` The website and the quickstart start from the download. [PR #910](https://github.com/saworbit/didi/pull/910)
 
 ### Fixed
+- `2026-10-14` The guides document global enums, verified scenario shutdown and the local image validation limit, and link the landed bridge changes. [PR #1420](https://github.com/saworbit/didi/pull/1420)
+- `2026-10-14` Empty shaders list zero uniforms and refuse undeclared writes without printing an engine error. [#1358](https://github.com/saworbit/didi/issues/1358) · [PR #1413](https://github.com/saworbit/didi/pull/1413)
+- `2026-10-14` Typed node arrays and initial instance node slots accept scene paths, read them back, and save with undo. [#1357](https://github.com/saworbit/didi/issues/1357) · [PR #1413](https://github.com/saworbit/didi/pull/1413)
 - `2026-10-14` Input key-name refusals name the event and numeric value to retry, and global enum reflection supplies the lookup. [#1415](https://github.com/saworbit/didi/issues/1415) [PR #1418](https://github.com/saworbit/didi/pull/1418)
 
 - `2026-10-14` Scenarios verify original game exit before reporting teardown complete, and Windows witnesses retain the original process. [#1020](https://github.com/saworbit/didi/issues/1020) [PR #1417](https://github.com/saworbit/didi/pull/1417)
@@ -179,8 +164,6 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 - `2026-10-13` The live harness checks that game shutdown cancels an active profiler read without touching a freed viewport. [#1234](https://github.com/saworbit/didi/issues/1234) [#1366](https://github.com/saworbit/didi/pull/1366)
 - `2026-10-13` The live audio loop control proves playback started and finished even when detached launch attaches after the track ends. [#1359](https://github.com/saworbit/didi/issues/1359) · [PR #1364](https://github.com/saworbit/didi/pull/1364)
 - `2026-10-13` SECURITY records why administrator bypass and non-strict branch checks are retained, and states the limits they leave. [#806](https://github.com/saworbit/didi/issues/806) · [PR #1363](https://github.com/saworbit/didi/pull/1363)
-- `2026-10-13` Empty shaders list zero uniforms and refuse undeclared writes without printing an engine error. [#1358](https://github.com/saworbit/didi/issues/1358) · [PR #1365](https://github.com/saworbit/didi/pull/1365)
-- `2026-10-13` Typed node arrays and initial instance node slots accept scene paths, read them back, and save with undo. [#1357](https://github.com/saworbit/didi/issues/1357) · [PR #1367](https://github.com/saworbit/didi/pull/1367)
 - `2026-10-12` The agent guide covers node slots and presets that ship the addon, and CONTRIBUTING names the typed setter step in a class reference refresh. [PR #1356](https://github.com/saworbit/didi/pull/1356)
 - `2026-10-12` An editor ray or clearance query hits a `TileMapLayer` tile or `GridMap` cell placed after the editor started, as a game does. [#1308](https://github.com/saworbit/didi/issues/1308) · [PR #1354](https://github.com/saworbit/didi/pull/1354)
 - `2026-10-12` `resource_create` writes each element of `NavigationPolygon.outlines` and other typed-setter arrays as its packed type, not as numbers Godot loads as zeros. [#1294](https://github.com/saworbit/didi/issues/1294) · [PR #1351](https://github.com/saworbit/didi/pull/1351)
