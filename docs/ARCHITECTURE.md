@@ -276,7 +276,8 @@ record of what they ran against.
   bridge. Teardown runs on every path and requires both session retirement
   and verified exit of the original process. A descriptor with `alive: false`
   counts as retired, but does not alone prove process exit. An unverified
-  shutdown returns `teardown_failed`; a retired session has no stop remedy.
+  shutdown prevents a pass and is recorded in `teardown`. An earlier step
+  failure remains the primary error; a retired session has no stop remedy.
 - **Tests**: `project_run_tests` runs GUT or GdUnit4 from the command line, as
   `shader_check_compile` runs its helper, and judges the JUnit XML the
   framework writes rather than its exit code. The rules and the parser are in
