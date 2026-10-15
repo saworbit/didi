@@ -514,11 +514,12 @@ helper process that can take minutes, during which nothing else was answered.
 scan, which can take minutes on a slow editor, past the fifteen seconds the
 bridge waits for any one command. `runtime_run_scenario` and `project_run_tests`
 (Q9) start a Godot of their own and run a scenario or a test suite to the end,
-which can take most of their timeout.
+which can take most of their timeout. `runtime_launch` holds a call to 120
+seconds, and as a job may run up to 900 (#1428).
 Each can now run as a **job**: the same tool call, through the same pipeline,
 on a thread of its own, with its answer kept.
 
-**`request_id`.** All six tools take an optional `request_id`, 8 to 64 letters,
+**`request_id`.** All seven tools take an optional `request_id`, 8 to 64 letters,
 digits, `.`, `_`, `:` or `-`, chosen by the caller. A call that carries one runs
 as a job and waits up to about ten seconds for it:
 

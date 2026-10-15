@@ -1090,7 +1090,8 @@ bool ToolRegistry::inProfile(const std::string& name, ToolProfile profile) const
 bool toolRunsAsJob(const std::string& canonical) {
     return canonical == "project_export" || canonical == "csharp_check_build" ||
            canonical == "asset_reimport" || canonical == "editor_reload_project" ||
-           canonical == "runtime_run_scenario" || canonical == "project_run_tests";
+           canonical == "runtime_run_scenario" || canonical == "project_run_tests" ||
+           canonical == "runtime_launch";
 }
 
 ToolManifest ToolRegistry::buildManifest() const {

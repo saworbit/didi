@@ -138,6 +138,10 @@ struct TestSessionResult {
     // to exit 124 by itself, so the two are not the same claim and the summary
     // branches on this one.
     bool timed_out{false};
+    // Whether the job this run belonged to was cancelled, which stops the game
+    // the way the timeout does. exit_code is 130 then. A blocking call is never
+    // cancelled: nothing can ask it to stop (#1428).
+    bool cancelled{false};
     int exit_code{0};
     double duration_seconds{0.0};
     std::vector<TestSessionLog> logs;

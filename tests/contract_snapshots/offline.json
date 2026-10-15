@@ -4455,7 +4455,7 @@
           "openWorldHint": true,
           "readOnlyHint": false
         },
-        "description": "Starts a separate Godot process. Blocking by default: captures stdout/stderr, classifies errors after exit, and enforces a 1-120 second timeout. With detach: true it leaves the game running and answers with the session to drive it through. Legacy name for runtime_launch, which is listed separately and is the same tool. Prefer the canonical name: it is what error data reports as canonical_tool.",
+        "description": "Starts a separate Godot process. Blocking by default: captures stdout/stderr, classifies errors after exit, and enforces a 1-120 second timeout, or up to 900 as a job with request_id. With detach: true it leaves the game running and answers with the session to drive it through. Legacy name for runtime_launch, which is listed separately and is the same tool. Prefer the canonical name: it is what error data reports as canonical_tool.",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {
@@ -4493,6 +4493,11 @@
               "description": "Run without a window. The engine still runs project code.",
               "type": "boolean"
             },
+            "request_id": {
+              "description": "Runs the call as a job; repeating it with this request_id reads the result.",
+              "minLength": 8,
+              "type": "string"
+            },
             "scene_path": {
               "description": "The res:// scene to run. Defaults to the project's main scene.",
               "type": "string"
@@ -4500,7 +4505,7 @@
             "timeout_seconds": {
               "default": 10,
               "description": "How long to wait for the session to come up before giving up.",
-              "maximum": 120,
+              "maximum": 900,
               "minimum": 1,
               "type": "integer"
             }
@@ -8651,7 +8656,7 @@
           "openWorldHint": true,
           "readOnlyHint": false
         },
-        "description": "Starts a separate Godot process. Blocking by default: captures stdout/stderr, classifies errors after exit, and enforces a 1-120 second timeout. With detach: true it leaves the game running and answers with the session to drive it through.",
+        "description": "Starts a separate Godot process. Blocking by default: captures stdout/stderr, classifies errors after exit, and enforces a 1-120 second timeout, or up to 900 as a job with request_id. With detach: true it leaves the game running and answers with the session to drive it through.",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {
@@ -8689,6 +8694,11 @@
               "description": "Run without a window. The engine still runs project code.",
               "type": "boolean"
             },
+            "request_id": {
+              "description": "Runs the call as a job; repeating it with this request_id reads the result.",
+              "minLength": 8,
+              "type": "string"
+            },
             "scene_path": {
               "description": "The res:// scene to run. Defaults to the project's main scene.",
               "type": "string"
@@ -8696,7 +8706,7 @@
             "timeout_seconds": {
               "default": 10,
               "description": "How long to wait for the session to come up before giving up.",
-              "maximum": 120,
+              "maximum": 900,
               "minimum": 1,
               "type": "integer"
             }

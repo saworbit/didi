@@ -2,6 +2,7 @@
 #include "didi/tools/game_launch.hpp"
 #include "didi/tools/phase7_live_forward.hpp"
 #include "didi/mcp/mutation_safety.hpp"
+#include "didi/common/cancellation.hpp"
 #include "didi/common/ipc_channel.hpp"
 #include "didi/common/engine_version.hpp"
 #include "didi/common/project_path.hpp"
@@ -431,13 +432,29 @@ json awaitLaunchedGameSession(const std::shared_ptr<runtime::IRuntimeSessionClie
     return nullptr;
 }
 
+// The longest a runtime_launch job may run, the same ceiling project_export
+// and project_run_tests have.
+constexpr int kMaxLaunchJobSeconds = 900;
+
 CallToolResult handleExecuteTestSession(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     if (!args.is_object()) {
         return CallToolResult::errorJson(400, "runtime_launch arguments must be an object");
     }
+    // 120 seconds is as long as one call may hold the server (#30). A job runs
+    // on a thread of its own, so a run as one may take up to 900 (#1428).
+    const bool as_job = runningAsJob();
+    const int max_timeout = as_job ? kMaxLaunchJobSeconds : 120;
     if (args.contains("timeout_seconds") &&
-        !integerInRange(args["timeout_seconds"], 1, 120)) {
-        return CallToolResult::errorJson(400, "timeout_seconds must be an integer from 1 to 120");
+        !integerInRange(args["timeout_seconds"], 1, max_timeout)) {
+        if (!as_job && integerInRange(args["timeout_seconds"], 121, kMaxLaunchJobSeconds)) {
+            return CallToolResult::errorJson(
+                400,
+                "timeout_seconds above 120 needs request_id. Without one the call holds the server "
+                "until the run ends; with one it runs as a job, which may take up to 900.",
+                {{"code", "launch_needs_job"}, {"field", "request_id"}});
+        }
+        return CallToolResult::errorJson(
+            400, "timeout_seconds must be an integer from 1 to " + std::to_string(max_timeout));
     }
     if (args.contains("detach") && !args["detach"].is_boolean()) {
         return CallToolResult::errorJson(400, "detach must be a boolean");
@@ -868,12 +885,11 @@ void ToolRegistry::registerRuntimeTools() {
     {
         ToolDefinition t;
         t.name = "runtime_launch";
-        t.description = "Starts a separate Godot process, captures stdout/stderr, classifies errors after exit, and enforces a 1-120 second timeout.";
         t.inputSchema = {
             {"type", "object"},
             {"properties", {
                 {"scene_path", {{"type", "string"}}},
-                {"timeout_seconds", {{"type", "integer"}, {"default", 10}, {"minimum", 1}, {"maximum", 120}}},
+                {"timeout_seconds", {{"type", "integer"}, {"default", 10}, {"minimum", 1}, {"maximum", 900}}},
                 {"headless", {{"type", "boolean"}, {"default", true}}},
                 {"break_on_error", {{"type", "boolean"}, {"default", true}, {"description", "Classify captured ERROR lines as failure after process exit; does not terminate the child early"}}},
                 {"extra_args", {{"type", "array"}, {"items", {{"type", "string"}}}}},
@@ -885,10 +901,11 @@ void ToolRegistry::registerRuntimeTools() {
                             {"description",
                              "Leave the game running and return once it has published a session. "
                              "Nothing is captured: read it with runtime_read_output and end it with "
-                             "runtime_stop."}}}
+                             "runtime_stop."}}},
+                {"request_id", {{"type", "string"}, {"minLength", 8}}}
             }}
         };
-        t.description = "Starts a separate Godot process. Blocking by default: captures stdout/stderr, classifies errors after exit, and enforces a 1-120 second timeout. With detach: true it leaves the game running and answers with the session to drive it through.";
+        t.description = "Starts a separate Godot process. Blocking by default: captures stdout/stderr, classifies errors after exit, and enforces a 1-120 second timeout, or up to 900 as a job with request_id. With detach: true it leaves the game running and answers with the session to drive it through.";
         // The source client, not the lease dispatcher: this tool spawns its own
         // Godot and takes no live route, and the wrapper is not a session
         // client, so reading the session through it answered "no session" next
