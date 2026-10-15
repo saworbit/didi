@@ -556,6 +556,79 @@ static void test_gdscript_symbol_patch_parameterized_annotation() {
     ASSERT_EQ(patched.find("var speed"), patched.rfind("var speed"));
 }
 
+static void test_gdscript_symbol_patch_takes_a_multi_line_value_whole() {
+    // Break caught: the span ended at the first line indented at or below the
+    // declaration, which is where a multi-line array or dictionary closes, so
+    // the old ] stayed under the replacement's and the script stopped parsing
+    // while the call answered success (#1434).
+    const std::string original =
+        "extends Node\n\n"
+        "## The cases the gate runs.\n"
+        "const ALL_CASES: PackedStringArray = [\n"
+        "\t\"idle\", \"light_hit\",\n"
+        "\t\"blocker\",\n"
+        "]\n"
+        "const TABLE := {\n"
+        "\t\"a\": \"]\", # a bracket in a string and a comment ]\n"
+        "}\n\n"
+        "func run() -> void:\n"
+        "\tpass\n";
+    auto patched = didi::offline::GDScriptDiagnostics::patchSymbol(
+        original, "ALL_CASES",
+        "const ALL_CASES: PackedStringArray = [\n\t\"idle\", \"light_hit\",\n\t\"blocker\", \"auto_dip\",\n]",
+        "constant");
+    ASSERT_TRUE(patched.isOk());
+    const auto& text = patched.value().source_text;
+    ASSERT_TRUE(text.find("\"auto_dip\",\n]\nconst TABLE := {") != std::string::npos);
+    ASSERT_TRUE(text.find("]\n]") == std::string::npos);
+    // The doc comment above it is part of what was replaced, and the answer
+    // says which lines those were.
+    ASSERT_TRUE(text.find("## The cases the gate runs.") == std::string::npos);
+    ASSERT_EQ(patched.value().replaced_first_line, 3);
+    ASSERT_EQ(patched.value().replaced_last_line, 7);
+
+    // A dictionary whose strings and comments hold brackets closes where its
+    // own brace does.
+    auto table = didi::offline::GDScriptDiagnostics::patchSymbol(
+        original, "TABLE", "const TABLE := {\n\t\"b\": 2,\n}", "constant");
+    ASSERT_TRUE(table.isOk());
+    ASSERT_TRUE(table.value().source_text.find("\t\"b\": 2,\n}\n\nfunc run()") != std::string::npos);
+    ASSERT_TRUE(table.value().source_text.find("\"a\"") == std::string::npos);
+    ASSERT_EQ(table.value().replaced_first_line, 8);
+    ASSERT_EQ(table.value().replaced_last_line, 10);
+}
+
+static void test_gdscript_symbol_patch_finds_an_inner_class_with_a_base() {
+    // Break caught: an inner class was matched only as class Name:, so the
+    // usual class Name extends Base: was "not declared" and the refusal
+    // offered create_if_missing, which would have added a second one (#1435).
+    const std::string original =
+        "extends Control\n\n"
+        "class _Crosshair extends Control:\n"
+        "\tfunc _draw() -> void:\n"
+        "\t\tpass\n\n"
+        "class _Quoted extends \"res://base.gd\":\n"
+        "\tvar size := 1\n\n"
+        "func _ready() -> void:\n"
+        "\tpass\n";
+    auto patched = didi::offline::GDScriptDiagnostics::patchSymbol(
+        original, "_Crosshair",
+        "class _Crosshair extends Control:\n\tfunc _draw() -> void:\n\t\tdraw_circle(Vector2.ZERO, 4.0, Color.WHITE)",
+        "class");
+    ASSERT_TRUE(patched.isOk());
+    ASSERT_TRUE(!patched.value().created);
+    const auto& text = patched.value().source_text;
+    ASSERT_EQ(text.find("class _Crosshair"), text.rfind("class _Crosshair"));
+    ASSERT_TRUE(text.find("draw_circle") != std::string::npos);
+    ASSERT_TRUE(text.find("class _Quoted extends \"res://base.gd\":") != std::string::npos);
+
+    auto quoted = didi::offline::GDScriptDiagnostics::patchSymbol(
+        original, "_Quoted", "class _Quoted extends \"res://base.gd\":\n\tvar size := 2", "class");
+    ASSERT_TRUE(quoted.isOk());
+    ASSERT_TRUE(!quoted.value().created);
+    ASSERT_TRUE(quoted.value().source_text.find("var size := 2") != std::string::npos);
+}
+
 static void test_gdscript_symbol_patch_keeps_annotated_neighbour() {
     // Break caught: the backward preamble scan absorbed any previous line
     // starting with '@', including a complete declaration such as
@@ -1043,6 +1116,10 @@ struct RegisterScriptPatchTests {
                      test_gdscript_symbol_patch_keeps_the_blank_lines_after_the_symbol);
         registerTest("GDScript.PatchParameterizedAnnotation", test_gdscript_symbol_patch_parameterized_annotation);
         registerTest("GDScript.PatchKeepsAnnotatedNeighbour", test_gdscript_symbol_patch_keeps_annotated_neighbour);
+        registerTest("GDScript.PatchTakesAMultiLineValueWhole",
+                     test_gdscript_symbol_patch_takes_a_multi_line_value_whole);
+        registerTest("GDScript.PatchFindsAnInnerClassWithABase",
+                     test_gdscript_symbol_patch_finds_an_inner_class_with_a_base);
         registerTest("GDScript.PatchKeepsNestedMethodNested",
                      test_gdscript_symbol_patch_keeps_a_nested_method_nested);
         registerTest("GDScript.PatchRefusesAmbiguousName",

@@ -10145,6 +10145,58 @@ static void test_writers_report_the_path_they_resolved() {
 // with no trailing newline gained one, and both the preview and the result
 // reported a single-method change (#550). patch_script_symbols is the same
 // handler.
+// A patch that would leave brackets open is refused before anything is
+// written, and one written with errors is not called a success (#1434).
+static void test_patch_method_refuses_a_patch_that_cannot_parse() {
+    ScopedToolProject project("patch-refuses-unparseable");
+    writeAuditFile("project.godot", "config_version=5\n");
+    const std::string original =
+        "extends Node\n\nconst CASES := [\n\t\"idle\",\n]\n\nfunc patch_me() -> void:\n\tpass\n";
+    writeAuditFile("cases.gd", original);
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    const auto call = [&](const std::string& name, const std::string& type,
+                          const std::string& definition) {
+        const didi::json base{{"file_path", "res://cases.gd"}, {"method_name", name},
+                              {"symbol_type", type}, {"new_definition", definition}};
+        auto preview = base;
+        preview["dry_run"] = true;
+        const auto previewed = registry.callTool("script_patch_method", preview);
+        if (previewed.isError) return previewed;
+        auto confirm = base;
+        confirm["confirmation_token"] = didi::json::parse(previewed.content[0].text)
+                                            ["mutation_preview"]["confirmation_token"];
+        return registry.callTool("script_patch_method", confirm);
+    };
+    const auto read = [] {
+        std::ifstream in("cases.gd", std::ios::binary);
+        return std::string(std::istreambuf_iterator<char>(in), {});
+    };
+
+    const auto refused = call("CASES", "constant", "const CASES := [\n\t\"idle\", \"hit\",");
+    ASSERT_TRUE(refused.isError);
+    const auto error = didi::json::parse(refused.content[0].text)["error"];
+    ASSERT_EQ(error["code"], 400);
+    ASSERT_EQ(error["data"]["field"], "new_definition");
+    ASSERT_EQ(error["data"]["replaced_lines"], didi::json::array({3, 5}));
+    ASSERT_TRUE(error["message"].get<std::string>().find("Nothing was written") != std::string::npos);
+    ASSERT_EQ(read(), original);
+
+    const auto replaced = call("CASES", "constant", "const CASES := [\n\t\"idle\", \"hit\",\n]");
+    ASSERT_TRUE(!replaced.isError);
+    const auto answer = didi::json::parse(replaced.content[0].text);
+    ASSERT_EQ(answer["replaced_lines"], didi::json::array({3, 5}));
+    ASSERT_TRUE(read().find("\"hit\",\n]\n\nfunc patch_me()") != std::string::npos);
+
+    // Written, and broken in a way the bracket count cannot see.
+    const auto broken = call("patch_me", "function", "func patch_me() -> void\n\tpass");
+    ASSERT_TRUE(!broken.isError);
+    const auto broken_answer = didi::json::parse(broken.content[0].text);
+    ASSERT_EQ(broken_answer["has_errors"], true);
+    ASSERT_EQ(broken_answer["status"], "written_with_errors");
+}
+
 static void test_patch_method_keeps_the_file_line_endings() {
     ScopedToolProject project("patch-line-endings");
     writeAuditFile("project.godot", "config_version=5\n");
@@ -10989,6 +11041,8 @@ struct RegisterToolTests {
                      test_set_setting_checks_the_files_a_value_names);
         registerTest("Tools.WritersReportTheResolvedPath",
                      test_writers_report_the_path_they_resolved);
+        registerTest("Tools.PatchMethodRefusesAPatchThatCannotParse",
+                     test_patch_method_refuses_a_patch_that_cannot_parse);
         registerTest("Tools.PatchMethodKeepsLineEndings",
                      test_patch_method_keeps_the_file_line_endings);
         registerTest("Tools.ReflectClassComparesProjectFeatures",

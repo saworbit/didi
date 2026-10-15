@@ -650,7 +650,7 @@ Rewrites a matching GDScript symbol in a project-root-confined file, then runs t
 
 - `file_path` (`string`, required, non-empty).
 - `method_name` (`string`, required, non-empty).
-- `new_definition` (`string`, required, non-empty); it must declare the symbol `method_name` names.
+- `new_definition` (`string`, required, non-empty); it must declare the symbol `method_name` names. It replaces the declaration together with the `##` doc comments and bare annotations directly above it, so a replacement that leaves the comment out removes it. `replaced_lines` in the answer gives the first and last line of the old text it took, and is null when the symbol was created (#1434).
 - `symbol_type` (`string`, default `"function"`); one of `function`, `variable`, `constant`, `signal`, `enum`, `class`. Any other value is refused by the argument check before the file is opened.
 - `create_if_missing` (`boolean`, default `false`); add the symbol when the script does not declare it. A signal, variable or enum goes after the last top-level one of its kind, an `@onready` variable after the last `@onready` one, and otherwise below the header and the class doc comment, never between the two, because Godot reads a class's description from the `##` lines before its first member (#1305). A function goes at the end.
 - Legacy alias: `patch_script_symbols`.
@@ -665,7 +665,9 @@ The symbol has to be there. A `method_name` the script does not declare is a 404
 
 `symbol_type` is checked against the published set rather than passed through. An unrecognised value used to fall through to a looser match and, on the way past, switch off the check that the replacement declares what it replaces, so one mistyped letter replaced a function with a variable and reported success.
 
-The indentation of the declaration being replaced is preserved, so a method declared inside a nested `class` stays inside it.
+The indentation of the declaration being replaced is preserved, so a method declared inside a nested `class` stays inside it. An inner class is found with or without an `extends` clause, as in `class Name extends Base:` (#1435). A value that spans lines, such as a multi-line array or dictionary constant, is replaced through the bracket that closes it, even when that bracket sits at the declaration's own indent (#1434).
+
+A patch that would leave the script's parentheses, brackets or braces unbalanced where they were balanced is refused with a 400 naming `new_definition`, and nothing is written. A patch that is written and still has errors answers `status: "written_with_errors"` rather than `"success"`, beside `has_errors: true` and the diagnostics (#1434).
 
 The file's own conventions are preserved too. A CRLF file stays CRLF on every line, a byte order mark stays, and a file that ended without a newline does not gain one; `new_definition` may be spelled with either line ending and joins the file in the file's convention. `file_path` in the result is the resolved path in the readers' spelling, the way `script_create` reports `script_path`.
 
