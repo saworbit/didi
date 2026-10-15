@@ -279,13 +279,8 @@ void ToolRegistry::registerSignalTools() {
         ToolDefinition t;
         t.name = "signal_list_connections";
         t.description = "Lists the signals a node declares and the connections going out of each. The node is the emitter; connections into it are not listed.";
-        t.inputSchema = {
-            {"type", "object"},
-            {"properties", {
-                {"target_node", {{"type", "string"}, {"description", "Target NodePath"}}}
-            }},
-            {"required", {"target_node"}}
-        };
+        // The published schema is schemas/phase7/signal_list_connections.schema.json;
+        // registerTool sets it (#1438).
         t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
             return handleSignalListConnections(binding, args, m_ipcClient);
         };
@@ -295,16 +290,8 @@ void ToolRegistry::registerSignalTools() {
         ToolDefinition t;
         t.name = "signal_connect";
         t.description = "Binds a signal from an emitter node to a target method or callable.";
-        t.inputSchema = {
-            {"type", "object"},
-            {"properties", {
-                {"emitter_node", {{"type", "string"}, {"description", "Emitter NodePath"}}},
-                {"signal_name", {{"type", "string"}, {"description", "Signal name"}}},
-                {"target_node", {{"type", "string"}, {"description", "Receiver NodePath"}}},
-                {"target_method", {{"type", "string"}, {"description", "Method name to call"}}}
-            }},
-            {"required", {"emitter_node", "signal_name", "target_node", "target_method"}}
-        };
+        // The published schema is schemas/phase7/signal_connect.schema.json;
+        // registerTool sets it (#1438).
         t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
             return handleSignalConnect(binding, args, m_ipcClient);
         };
@@ -314,16 +301,8 @@ void ToolRegistry::registerSignalTools() {
         ToolDefinition t;
         t.name = "signal_disconnect";
         t.description = "Unbinds existing signal connections.";
-        t.inputSchema = {
-            {"type", "object"},
-            {"properties", {
-                {"emitter_node", {{"type", "string"}, {"description", "Emitter NodePath"}}},
-                {"signal_name", {{"type", "string"}, {"description", "Signal name"}}},
-                {"target_node", {{"type", "string"}, {"description", "Receiver NodePath"}}},
-                {"target_method", {{"type", "string"}, {"description", "Method name"}}}
-            }},
-            {"required", {"emitter_node", "signal_name", "target_node", "target_method"}}
-        };
+        // The published schema is schemas/phase7/signal_disconnect.schema.json;
+        // registerTool sets it (#1438).
         t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
             return handleSignalDisconnect(binding, args, m_ipcClient);
         };
@@ -333,15 +312,8 @@ void ToolRegistry::registerSignalTools() {
         ToolDefinition t;
         t.name = "signal_emit";
         t.description = "Emits a custom signal manually with arguments for event testing.";
-        t.inputSchema = {
-            {"type", "object"},
-            {"properties", {
-                {"target_node", {{"type", "string"}, {"description", "Emitter NodePath"}}},
-                {"signal_name", {{"type", "string"}, {"description", "Signal name"}}},
-                {"arguments", {{"type", "array"}, {"description", "Positional signal arguments"}}}
-            }},
-            {"required", {"target_node", "signal_name"}}
-        };
+        // The published schema is schemas/phase7/signal_emit.schema.json;
+        // registerTool sets it (#1438).
         t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
             return handleSignalEmit(binding, args, m_ipcClient);
         };

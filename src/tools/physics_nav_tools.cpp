@@ -163,15 +163,8 @@ void ToolRegistry::registerPhysicsNavTools() {
         ToolDefinition t;
         t.name = "physics_raycast_query";
         t.description = "Fires a 2D/3D physics raycast to check line-of-sight, ray hits, and collision masks.";
-        t.inputSchema = {
-            {"type", "object"},
-            {"properties", {
-                {"from", {{"type", "object"}, {"description", "Ray start position"}}},
-                {"to", {{"type", "object"}, {"description", "Ray end position"}}},
-                {"collision_mask", {{"type", "integer"}, {"minimum", 1}, {"maximum", 4294967295}, {"default", 1}}}
-            }},
-            {"required", {"from", "to"}}
-        };
+        // The published schema is schemas/phase7/physics_raycast_query.schema.json;
+        // registerTool sets it (#1438).
         t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
             return handlePhysicsRaycastQuery(binding, args, m_ipcClient);
         };
@@ -181,13 +174,8 @@ void ToolRegistry::registerPhysicsNavTools() {
         ToolDefinition t;
         t.name = "physics_simulate_step";
         t.description = "Advances the physics engine by N ticks to test gravity, velocity, or collision response deterministically.";
-        t.inputSchema = {
-            {"type", "object"},
-            {"properties", {
-                {"steps", {{"type", "integer"}, {"default", 1}}},
-                {"delta", {{"type", "number"}, {"default", 0.0166667}}}
-            }}
-        };
+        // The published schema is schemas/phase7/physics_simulate_step.schema.json;
+        // registerTool sets it (#1438).
         t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
             return handlePhysicsSimulateStep(binding, args, m_ipcClient);
         };
@@ -197,12 +185,8 @@ void ToolRegistry::registerPhysicsNavTools() {
         ToolDefinition t;
         t.name = "nav_bake_mesh";
         t.description = "Triggers runtime or editor navigation mesh baking (NavigationMesh / NavigationPolygon).";
-        t.inputSchema = {
-            {"type", "object"},
-            {"properties", {
-                {"nav_node_path", {{"type", "string"}, {"description", "Path to NavigationRegion3D / NavigationMesh"}}}
-            }}
-        };
+        // The published schema is schemas/phase7/nav_bake_mesh.schema.json;
+        // registerTool sets it (#1438).
         t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
             return handleNavBakeMesh(binding, args, m_ipcClient);
         };
@@ -212,14 +196,8 @@ void ToolRegistry::registerPhysicsNavTools() {
         ToolDefinition t;
         t.name = "nav_query_path";
         t.description = "Tests pathfinding between two points to verify walkable navmeshes.";
-        t.inputSchema = {
-            {"type", "object"},
-            {"properties", {
-                {"start_point", {{"type", "object"}, {"description", "Vector3 start"}}},
-                {"end_point", {{"type", "object"}, {"description", "Vector3 target"}}}
-            }},
-            {"required", {"start_point", "end_point"}}
-        };
+        // The published schema is schemas/phase7/nav_query_path.schema.json;
+        // registerTool sets it (#1438).
         t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
             return handleNavQueryPath(binding, args, m_ipcClient);
         };
@@ -229,13 +207,8 @@ void ToolRegistry::registerPhysicsNavTools() {
         ToolDefinition t;
         t.name = "anim_list_tracks";
         t.description = "Lists the animations an AnimationPlayer holds, by the names anim_play_track takes, with each one's length, loop mode and tracks (type, node path and key times). Reads the edited scene in an editor and the running tree in a game. An AnimationTree is refused.";
-        t.inputSchema = {
-            {"type", "object"},
-            {"properties", {
-                {"animation_player_path", {{"type", "string"}, {"description", "Path to AnimationPlayer"}}}
-            }},
-            {"required", {"animation_player_path"}}
-        };
+        // The published schema is schemas/phase7/anim_list_tracks.schema.json;
+        // registerTool sets it (#1438).
         t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
             return handleAnimListTracks(binding, args, m_ipcClient);
         };
@@ -245,15 +218,8 @@ void ToolRegistry::registerPhysicsNavTools() {
         ToolDefinition t;
         t.name = "anim_play_track";
         t.description = "Plays one animation on an AnimationPlayer in a running game and reports whether it is playing. Game sessions only. Name the animation the way anim_list_tracks or anim_add_library reports it: library/animation, or the bare name for the default library.";
-        t.inputSchema = {
-            {"type", "object"},
-            {"properties", {
-                {"animation_player_path", {{"type", "string"}}},
-                {"animation_name", {{"type", "string"}}},
-                {"custom_speed", {{"type", "number"}, {"default", 1.0}}}
-            }},
-            {"required", {"animation_player_path", "animation_name"}}
-        };
+        // The published schema is schemas/phase7/anim_play_track.schema.json;
+        // registerTool sets it (#1438).
         t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
             return handleAnimPlayTrack(binding, args, m_ipcClient);
         };

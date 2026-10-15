@@ -908,18 +908,8 @@ void ToolRegistry::registerRuntimeTools() {
         t.description = "Dispatches input events into the running game. A mouse event's position is in "
                         "window pixels, as ui_list_controls' screen_rect is. While the game is paused a "
                         "batch is held for the first frame that processes, unless paused_delivery is now.";
-        t.inputSchema = {
-            {"type", "object"},
-            {"properties", {
-                {"event_type", {{"type", "string"}, {"default", "action"}}},
-                {"action_name", {{"type", "string"}}},
-                {"key_code", {{"type", "string"}}},
-                {"pressed", {{"type", "boolean"}, {"default", true}}},
-                {"strength", {{"type", "number"}, {"default", 1.0}}},
-                {"duration_ms", {{"type", "integer"}, {"default", 100}}}
-            }},
-            {"required", {"event_type"}}
-        };
+        // The published schema is schemas/phase7/runtime_inject_input.schema.json;
+        // registerTool sets it (#1438).
         t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
             return handleInjectInputEvent(binding, args, m_ipcClient);
         };
@@ -936,7 +926,8 @@ void ToolRegistry::registerRuntimeTools() {
         ToolDefinition t;
         t.name = "runtime_get_call_stack";
         t.description = "Fetches current debugger call stack and variable scopes on engine break/crash.";
-        t.inputSchema = {{"type", "object"}};
+        // The published schema is schemas/phase7/runtime_get_call_stack.schema.json;
+        // registerTool sets it (#1438).
         t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
             return handleRuntimeGetCallStack(binding, args, m_ipcClient);
         };
@@ -946,7 +937,8 @@ void ToolRegistry::registerRuntimeTools() {
         ToolDefinition t;
         t.name = "runtime_read_profiler";
         t.description = "Samples Performance monitors and judges whether CPU, GPU or physics bounds the frame.";
-        t.inputSchema = {{"type", "object"}};
+        // The published schema is schemas/phase7/runtime_read_profiler.schema.json;
+        // registerTool sets it (#1438).
         t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
             return handleRuntimeReadProfiler(binding, args, m_ipcClient);
         };

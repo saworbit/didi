@@ -104,9 +104,14 @@ public:
     // Mirrors the server's confirmation policy so didi_control_room can report
     // it. The gate itself stays in the protocol layer; this is only the view.
     void setConfirmationsSkipped(bool skipped) { m_skipConfirmations = skipped; }
+    // Phase 7 tools registered with an inline inputSchema. registerTool
+    // publishes the generated schema instead, so an inline one is dead text
+    // that drifts from what clients see (#1438). Kept empty by a test.
+    const std::set<std::string>& phase7InlineSchemas() const { return m_phase7InlineSchemas; }
 
 private:
     ToolRegistry() = default;
+    std::set<std::string> m_phase7InlineSchemas;
 
     // Binds a modern request to the runtime session it named.
     //

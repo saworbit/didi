@@ -272,14 +272,8 @@ void ToolRegistry::registerTilemapGridTools() {
         ToolDefinition t;
         t.name = "tilemap_set_cells";
         t.description = "Writes or erases TileMapLayer cells or uniform rectangles; at most 256 records and 4096 cells.";
-        t.inputSchema = {
-            {"type", "object"},
-            {"properties", {
-                {"tilemap_path", {{"type", "string"}}},
-                {"cells", {{"type", "array"}, {"description", "Array of {coords: [x, y], source_id: int, atlas_coords: [x, y]}"}}}
-            }},
-            {"required", {"tilemap_path", "cells"}}
-        };
+        // The published schema is schemas/phase7/tilemap_set_cells.schema.json;
+        // registerTool sets it (#1438).
         t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
             return handleTilemapSetCells(binding, args, m_ipcClient);
         };
@@ -289,13 +283,8 @@ void ToolRegistry::registerTilemapGridTools() {
         ToolDefinition t;
         t.name = "tilemap_get_used_rect";
         t.description = "Returns used cell boundaries and layer structures.";
-        t.inputSchema = {
-            {"type", "object"},
-            {"properties", {
-                {"tilemap_path", {{"type", "string"}}}
-            }},
-            {"required", {"tilemap_path"}}
-        };
+        // The published schema is schemas/phase7/tilemap_get_used_rect.schema.json;
+        // registerTool sets it (#1438).
         t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
             return handleTilemapGetUsedRect(binding, args, m_ipcClient);
         };
@@ -305,14 +294,8 @@ void ToolRegistry::registerTilemapGridTools() {
         ToolDefinition t;
         t.name = "gridmap_set_cells";
         t.description = "Writes or erases GridMap cells or uniform boxes; at most 256 records and 4096 cells.";
-        t.inputSchema = {
-            {"type", "object"},
-            {"properties", {
-                {"gridmap_path", {{"type", "string"}}},
-                {"cells", {{"type", "array"}, {"description", "Array of {position: [x, y, z], item: int, orientation: int}"}}}
-            }},
-            {"required", {"gridmap_path", "cells"}}
-        };
+        // The published schema is schemas/phase7/gridmap_set_cells.schema.json;
+        // registerTool sets it (#1438).
         t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
             return handleGridmapSetCells(binding, args, m_ipcClient);
         };

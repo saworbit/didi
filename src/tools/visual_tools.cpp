@@ -542,16 +542,8 @@ void ToolRegistry::registerVisualTools() {
         ToolDefinition t;
         t.name = "viewport_set_camera_transform";
         t.description = "Updates an in-scene Camera3D transform and optional field of view through the editor UndoRedo history.";
-        t.inputSchema = {
-            {"type", "object"},
-            {"properties", {
-                {"camera_path", {{"type", "string"}}},
-                {"position", {{"type", "object"}, {"description", "Vector3 {x, y, z}"}}},
-                {"rotation_degrees", {{"type", "object"}, {"description", "Optional Vector3 {x, y, z} in degrees"}}},
-                {"fov", {{"type", "number"}}}
-            }},
-            {"required", {"camera_path", "position"}}
-        };
+        // The published schema is schemas/phase7/viewport_set_camera_transform.schema.json;
+        // registerTool sets it (#1438).
         t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
             return handleViewportSetCameraTransform(binding, args, m_ipcClient);
         };
@@ -584,14 +576,8 @@ void ToolRegistry::registerVisualTools() {
         ToolDefinition t;
         t.name = "viewport_toggle_debug_draw";
         t.description = "Sets editor SceneTree collision and navigation debug hints for future games run from that editor.";
-        t.inputSchema = {
-            {"type", "object"},
-            {"properties", {
-                {"collision_shapes", {{"type", "boolean"}, {"default", true}}},
-                {"navigation_mesh", {{"type", "boolean"}, {"default", false}}},
-                {"wireframe", {{"type", "boolean"}, {"default", false}}}
-            }}
-        };
+        // The published schema is schemas/phase7/viewport_toggle_debug_draw.schema.json;
+        // registerTool sets it (#1438).
         t.boundHandler = [this](const ResolvedToolBinding& binding, const json& args) {
             return handleViewportToggleDebugDraw(binding, args, m_ipcClient);
         };
