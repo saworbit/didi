@@ -1624,7 +1624,7 @@ Legacy alias: `inject_input_event`, same schema, same policy. Dispatches explici
 - `target_context` (`"game_input"`, optional). Always `game_input`: the events reach the attached game's root viewport, and an editor session refuses the call. The parameter has no second value; its description used to offer the editor as a choice the schema never accepted.
 - `paused_delivery` (`"hold"` or `"now"`, optional, default `"hold"`): what happens to a batch sent while the game is paused, described below.
 
-`keycode` and `physical_keycode` require integer values from Godot's `Key` enum. Look them up with `script_reflect_class` using `@GlobalScope` and `fields: ["enums"]`. The `KEY_ESCAPE` and `ESCAPE` strings are refused with `event_index` and `expected_value`. For a batch up to 1024 bytes, `retry_with.events` carries the corrected integer; larger batches receive the lookup as `next_call`.
+`keycode` and `physical_keycode` require integer values from Godot's `Key` enum. Look them up with `script_reflect_class` using `@GlobalScope` and `fields: ["enums"]`. A key name is refused with `event_index` and `expected_value`, in any case and with spaces or hyphens for underscores: `KEY_ESCAPE`, `escape`, `Space` and `page down` all name their constant (#1432). For a batch up to 1024 bytes, `retry_with.events` carries the corrected integer; a larger batch carries only `expected_value`. A name no constant matches receives the lookup as `next_call`.
 
 Every event is constructed and fully configured on the Godot main thread before the first one is dispatched, so a malformed or unconstructible event anywhere in the batch fails the whole call with nothing sent. An `action` event must name an action the game's `InputMap` defines. Godot dispatches an `InputEventAction` for an action nobody declared without complaint and nothing reacts to it, so the call used to answer `completed` for a misspelled action exactly as for a real one. It is refused with `400`, `reason: "undefined_input_action"` and `undefined_actions`, before anything in the batch is sent, which is how `runtime_explore_scene` already refused the same batch. A game loads its actions when it starts, so an action written with `project_set_input_action` while the game was running is not in its map until it is restarted, and the refusal says so. Press and release are separate events; there is no duration, no timer and no implied release. `parse_input_event` returns void and only buffers the event, so the call then flushes the batch with `Input.flush_buffered_events`, the call Godot documents for this, and the game has handled every event before the answer arrives. `input_state` then says what Input holds for each control the batch named, in the order it first named it: an action's `pressed` and `strength`, a key's `pressed` by `keycode` (or by `physical_keycode` when that is all it named), a mouse or joypad button's `pressed`, and a joypad axis's `axis_value`. Mouse motion moves nothing Input exposes, so it has no entry. Before, the answer only counted calls made (#1019). The response is `{dispatched_event_count, queued_event_count, event_types, input_state, outcome: "completed", rollback: "not_available", paused: false, delivery: "immediate", execution_mode: "live", session_kind: "game"}`. When the state cannot be read, the events were still sent, `input_state` is `null` and a `limitation` says why.
 
@@ -1691,7 +1691,7 @@ An event with no `device` is bound to all devices, `-1`, as the editor's Input M
 
 The modifiers are `shift_pressed`, `alt_pressed`, `ctrl_pressed` and `meta_pressed`, which is Godot's own name for each and what this tool writes into `project.godot`. `shift`, `alt`, `ctrl` and `meta` are accepted as aliases, and `project_list_input_actions` reports both spellings, so a descriptor read from it can be written straight back. Setting the two names of one modifier to different values is refused.
 
-`keycode` and `physical_keycode` are Godot `Key` enum values, not ASCII codes and not characters: `Space` is `32`, `Escape` is `4194305`, `F1` is `4194332`. `script_reflect_class` on `@GlobalScope`, with `fields: ["enums"]`, lists the pinned `Key` enum. Both this tool and `runtime_inject_input` refuse string key names. An exact enum name such as `KEY_ESCAPE` or `ESCAPE` carries its integer in `retry_with.events`, with `event_index`; the batch is not applied. A batch over 1024 bytes is not echoed; `expected_value` still names the integer. Unknown names point to the enum lookup instead of guessing.
+`keycode` and `physical_keycode` are Godot `Key` enum values, not ASCII codes and not characters: `Space` is `32`, `Escape` is `4194305`, `F1` is `4194332`. `script_reflect_class` on `@GlobalScope`, with `fields: ["enums"]`, lists the pinned `Key` enum. Both this tool and `runtime_inject_input` refuse string key names. A key name in any case, with spaces or hyphens for underscores, such as `KEY_ESCAPE`, `escape`, `Space` or `page down`, carries its integer in `retry_with.events`, with `event_index`; the batch is not applied (#1432). A batch over 1024 bytes is not echoed; `expected_value` still names the integer. Unknown names point to the enum lookup instead of guessing.
 
 A refusal names the `events` entry it is about and the property or type that is wrong, the way every other argument refusal on this surface does.
 
@@ -2208,11 +2208,17 @@ computed by the same function `tools/list` uses so the two cannot disagree;
 live at this moment; `sessions`, the published descriptors with `session_id`,
 `kind`, `pid`, `project_path`, `protocol_version`, `started_at_ms`, `stale` and
 which is selected, plus `alive` when the scanner established it and no `alive`
-key at all when it could not, because rendering an unknown as dead is a lie; `facts`, a flat label/value
+key at all when it could not, because rendering an unknown as dead is a lie;
+`selected_session_attached`, false for a session the server re-attached by
+itself, which a request declaring 2026-07-28 is not served on until
+`runtime_attach_session` chooses it (#1436); `facts`, a flat label/value
 table; and `log`, a tail of this process's own diagnostics.
 
 A light is amber whenever the honest answer is *unknown*, and carries the reason.
-A connected route that did not report its kind is amber, not green.
+A connected route that did not report its kind is amber, not green. When an
+attach was refused because another MCP client holds the editor's session lock,
+the Bridge light reads `Held by another client` with the editor's pid, not
+`Detached` (#1448).
 
 Two things the payload deliberately never contains. The session token is not in
 the allowlist the response is built from, and neither is the endpoint: a rendered

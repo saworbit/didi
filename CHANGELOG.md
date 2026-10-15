@@ -140,6 +140,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 - `2026-09-23` The website and the quickstart start from the download. [PR #910](https://github.com/saworbit/didi/pull/910)
 
 ### Fixed
+- `2026-10-15` The guides describe key names in any case, model instancing, `script_patch_method`'s replaced lines, the held Bridge light and setup's ignore rules. [PR #1459](https://github.com/saworbit/didi/pull/1459)
 - `2026-10-15` The control room lights a bridge another MCP client holds as held, with the editor's pid, instead of Detached. [#1448](https://github.com/saworbit/didi/issues/1448) · [PR #1458](https://github.com/saworbit/didi/pull/1458)
 - `2026-10-15` CONTRIBUTING says how to rebuild on Windows while an MCP client runs `didi.exe`. [#1449](https://github.com/saworbit/didi/issues/1449) · [PR #1458](https://github.com/saworbit/didi/pull/1458)
 - `2026-10-15` A build's stamp is the later of its configure time and its commit's time, so `didi setup` orders a newer commit from one build directory as newer. [#1450](https://github.com/saworbit/didi/issues/1450) · [PR #1457](https://github.com/saworbit/didi/pull/1457)
