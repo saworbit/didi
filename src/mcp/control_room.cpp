@@ -387,6 +387,9 @@ json buildControlRoomModel(const ControlRoomInputs& in,
     model["sessions"] = std::move(sessions);
     if (in.selected_session_id.has_value()) {
         model["selected_session"] = *in.selected_session_id;
+        if (in.selected_session_attached.has_value()) {
+            model["selected_session_attached"] = *in.selected_session_attached;
+        }
     }
     model["session_note"] =
         "A listed session is a descriptor Godot published. `alive` is what the "

@@ -83,6 +83,26 @@ std::string lightReason(const json& model, const std::string& label) {
 // -----------------------------------------------------------------------
 // A1. No secret reaches the page.
 // -----------------------------------------------------------------------
+// A session the server re-attached by itself is selected and not chosen,
+// and a request declaring 2026-07-28 is refused on it. The model says which
+// (#1436), and says nothing when no session is selected.
+void test_an_automatic_selection_is_marked_as_not_attached() {
+    ControlRoomInputs in;
+    in.sessions = {makeSession("aaaabbbbccccddddeeeeffff00001111", "editor")};
+    in.selected_session_id = "aaaabbbbccccddddeeeeffff00001111";
+    in.selected_session_attached = false;
+    in.connected = true;
+    in.session_kind = "editor";
+    ASSERT_EQ(buildControlRoomModel(in, {})["selected_session_attached"], false);
+
+    in.selected_session_attached = true;
+    ASSERT_EQ(buildControlRoomModel(in, {})["selected_session_attached"], true);
+
+    ControlRoomInputs none;
+    none.selected_session_attached = false;
+    ASSERT_FALSE(buildControlRoomModel(none, {}).contains("selected_session_attached"));
+}
+
 void test_no_session_token_reaches_the_model() {
     ControlRoomInputs in;
     in.sessions = {makeSession("aaaabbbbccccddddeeeeffff00001111", "editor")};
@@ -890,6 +910,8 @@ void test_dropped_records_are_disclosed() {
 
 struct Register {
     Register() {
+        registerTest("ControlRoom.AutomaticSelectionIsMarkedNotAttached",
+                     test_an_automatic_selection_is_marked_as_not_attached);
         registerTest("ControlRoom.NoSessionTokenReachesTheModel",
                      test_no_session_token_reaches_the_model);
         registerTest("ControlRoom.ListedSessionsParseWithoutAToken",

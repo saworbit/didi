@@ -215,7 +215,11 @@ A modern request can name the Godot session it means in
 A metadata id takes precedence over the process's explicit attach. For hosts
 that cannot expose request metadata to the model, a successful
 `runtime_attach_session` supplies the route for later modern requests without
-an id. This is a Didi compatibility path, a shared process choice rather than
+an id. A route the server selected by itself, such as an automatic re-attach
+to the project's only editor, is not that choice: `didi_control_room` shows it
+with `selected_session_attached: false`, and a request without an id is refused
+naming it, with `runtime_attach_session` and its `session_id` as the next call
+(#1436). This is a Didi compatibility path, a shared process choice rather than
 the per-call handles recommended by the pinned MCP tools guidance. Concurrent
 tasks driving different engines must each send their own metadata id.
 
@@ -287,7 +291,10 @@ and `cancel` both refuse and stay distinguishable, because an agent that cannot
 tell refusal from dismissal will retry the one it should not. Both answer `403`
 with `data.code: "not_approved"` and `data.action`. A decline carries
 `no_remedy` and `retryable: false`; a dismissal was never answered, so it
-carries `retry_after_ms: 0` and `retryable: true`.
+carries `retry_after_ms: 0` and `retryable: true`. A client can answer decline
+without showing a prompt, so `no_remedy` says the client declined, for the
+person or on their behalf, and names the `dry_run` then `confirmation_token`
+route for a person who says the decline was not theirs (#1433).
 
 **A client that cannot elicit is not silently downgraded.** The specification
 forbids sending a mode the client did not declare, so the token flow remains and

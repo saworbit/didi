@@ -478,16 +478,32 @@ std::optional<runtime::SessionDescriptor> selectedSessionOf(
 }
 
 // A modern request needs a named route or a successful explicit attach.
-Error unnamedRuntimeSessionError(const std::string& tool_name) {
-    Error error(400,
-                "This tool runs against a Godot session, and a request declaring protocol "
-                "2026-07-28 needs a session choice. Discover sessions with "
-                "runtime_list_sessions, then call runtime_attach_session with its session_id "
-                "or set _meta.didi.runtime_session_id on the call.");
+// `selected` is a route the server selected without being asked, such as an
+// automatic re-attach. The control room reports it as selected, so the refusal
+// names it and the one call that chooses it (#1436).
+Error unnamedRuntimeSessionError(const std::string& tool_name,
+                                 const std::optional<std::string>& selected = std::nullopt) {
+    std::string message =
+        "This tool runs against a Godot session, and a request declaring protocol "
+        "2026-07-28 needs a session choice. Discover sessions with "
+        "runtime_list_sessions, then call runtime_attach_session with its session_id "
+        "or set _meta.didi.runtime_session_id on the call.";
+    if (selected.has_value()) {
+        message += " Session " + *selected + " is selected, but it was picked automatically, "
+                   "which is not a choice.";
+    }
+    Error error(400, message);
     error.data = {{"tool", tool_name},
                   {"missing", std::string("_meta.") + kDidiMetaKey + "." + kRuntimeSessionMetaKey},
                   {"next_call", {{"tool", "runtime_list_sessions"},
                                  {"reason", "Choose a session and attach it with runtime_attach_session."}}}};
+    if (selected.has_value()) {
+        error.data["selected_session"] = *selected;
+        error.data["next_call"] = {
+            {"tool", "runtime_attach_session"},
+            {"arguments", {{"session_id", *selected}}},
+            {"reason", "Attach the selected session to choose it. runtime_list_sessions shows any others."}};
+    }
     return error;
 }
 
@@ -2274,8 +2290,14 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
                         runtimeSessionMismatchError(name, *attached, std::nullopt), std::nullopt);
                 }
             } else if (!supports_offline) {
+                const auto selected = m_runtimeSessionClient
+                                          ? m_runtimeSessionClient->activeSession()
+                                          : std::optional<runtime::SessionDescriptor>{};
                 return structuredLiveToolError(
-                    unnamedRuntimeSessionError(name), std::nullopt);
+                    unnamedRuntimeSessionError(
+                        name, selected.has_value() ? std::optional<std::string>(selected->session_id)
+                                                   : std::nullopt),
+                    std::nullopt);
             }
         }
 

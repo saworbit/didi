@@ -178,6 +178,10 @@ struct ControlRoomInputs {
 
     std::vector<ControlRoomSession> sessions;
     std::optional<std::string> selected_session_id;
+    // Whether runtime_attach_session chose the selected session. False for one
+    // the server re-attached by itself, which a request declaring 2026-07-28
+    // is not served on (#1436). Unset when nothing is selected.
+    std::optional<bool> selected_session_attached;
 
     bool skip_confirmations{false};
     bool managed_recovery_armed{false};

@@ -168,6 +168,13 @@ class ElicitationConfirmationTests(unittest.TestCase):
         self.assertEqual(data["tool"], "resource_create")
         self.assertIs(data["retryable"], False)
         self.assertIn("declined", data["no_remedy"])
+        # A client can decline without showing a prompt, so the remedy does not
+        # say the person did, and it names the route a person can still take
+        # (#1433).
+        self.assertNotIn("The person declined", data["no_remedy"])
+        self.assertIn("on their behalf", data["no_remedy"])
+        self.assertIn("dry_run: true", data["no_remedy"])
+        self.assertIn("confirmation_token", data["no_remedy"])
 
     def test_cancelling_is_distinguishable_from_declining(self):
         offered = self._call(self._gated_arguments(), ELICITATION_CAPABLE)["result"]
