@@ -83,6 +83,16 @@ add noise to the log and change nothing about who is responsible.
    cmake -B build -S .
    cmake --build build --config Release
    ```
+   On Windows a `didi.exe` that an MCP client is running cannot be replaced, so
+   the link fails with `LNK1104` and leaves the new extension beside the old
+   server (#1449). Windows lets a running file be renamed: move it aside, build,
+   then stop the old server, and the client starts the new one on its next call.
+   ```powershell
+   Move-Item build/Release/didi.exe build/Release/didi.exe.old
+   cmake --build build --config Release
+   ```
+   `didi setup` refuses to install an addon whose build differs from the
+   server's, so a half-finished build is caught before it reaches a project.
 
 3. **Run the Test Suite**:
    ```bash

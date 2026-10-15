@@ -251,10 +251,19 @@ void test_detached_says_which_kind_of_detached() {
         didi::runtime::RouteObstruction held;
         held.kind = "bridge_held";
         held.cause = "Another MCP client holds the bridge to this editor.";
+        held.recovery = "Wait for that client to release the session.";
+        held.pid = 48672;
         held.at_ms = 1'700'000'000'000;
         in.route_obstruction = held;
+        // A published descriptor for this project lit the bridge "Detached,
+        // attach one", which the attach then refused (#1448).
+        in.descriptors_for_this_project = true;
         const auto model = buildControlRoomModel(in, {});
         ASSERT_TRUE(model["facts"].dump().find("bridge_held") != std::string::npos);
+        const auto lights = model["lights"].dump();
+        ASSERT_TRUE(lights.find("Held by another client") != std::string::npos);
+        ASSERT_TRUE(lights.find("editor pid 48672") != std::string::npos);
+        ASSERT_TRUE(lights.find("Detached") == std::string::npos);
     }
 
     {

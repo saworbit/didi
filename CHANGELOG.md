@@ -140,6 +140,8 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 - `2026-09-23` The website and the quickstart start from the download. [PR #910](https://github.com/saworbit/didi/pull/910)
 
 ### Fixed
+- `2026-10-15` The control room lights a bridge another MCP client holds as held, with the editor's pid, instead of Detached. [#1448](https://github.com/saworbit/didi/issues/1448)
+- `2026-10-15` CONTRIBUTING says how to rebuild on Windows while an MCP client runs `didi.exe`. [#1449](https://github.com/saworbit/didi/issues/1449)
 - `2026-10-15` A build's stamp is the later of its configure time and its commit's time, so `didi setup` orders a newer commit from one build directory as newer. [#1450](https://github.com/saworbit/didi/issues/1450) · [PR #1457](https://github.com/saworbit/didi/pull/1457)
 - `2026-10-15` `didi setup` leaves the tracked `.gitignore` alone for a path git already ignores elsewhere, and says where. [#1451](https://github.com/saworbit/didi/issues/1451) · [PR #1457](https://github.com/saworbit/didi/pull/1457)
 - `2026-10-15` `create_if_missing` puts a new constant after the script's last top-level constant, not after its last function. [#1453](https://github.com/saworbit/didi/issues/1453) · [PR #1456](https://github.com/saworbit/didi/pull/1456)

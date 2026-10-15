@@ -112,6 +112,15 @@ json bridgeLight(const ControlRoomInputs& in) {
         return light("Bridge", "warn", "Game stopped on request", "",
                      in.route_obstruction->cause + " " + in.route_obstruction->recovery);
     }
+    // Another MCP client holds this editor's session lock. Detached, attach
+    // one, was the advice the attach then refused with 423 (#1448).
+    if (in.route_obstruction.has_value() && in.route_obstruction->kind == "bridge_held") {
+        const auto& held = *in.route_obstruction;
+        return light("Bridge", "warn", "Held by another client", held.session_id,
+                     "Another MCP client holds the bridge to this editor" +
+                         (held.pid != 0 ? " (editor pid " + std::to_string(held.pid) + ")" : std::string()) +
+                         ", so an attach is refused until it lets go. " + held.recovery);
+    }
     if (in.managed_unavailable) {
         return light("Bridge", "bad", "Route unreachable",
                      in.selected_session_id.value_or(""),
