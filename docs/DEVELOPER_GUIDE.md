@@ -576,6 +576,11 @@ export_tool.handler = [this](const json& args) {
 registerTool(std::move(export_tool));
 ```
 
+A Phase 7 tool is the exception: its published schema is
+`schemas/phase7/<name>.schema.json`, which `registerTool` sets, so its
+definition sets no `inputSchema`. One written there would be thrown away, and
+the `phase7 generated schemas` test fails on it (#1438).
+
 Once the tool's real answer has been seen, its `outputSchema` goes in the same
 place, written with the `output_schema` helpers in that header. An alias is
 registered from a copy of its tool, so it promises the same shape.

@@ -134,7 +134,10 @@ What `setup` does, in order, and what stops it:
    journal holds the arguments of every change and crash reports hold stacks,
    and each client file names this machine's paths. A rule already there in
    another spelling (`/.didi`, `.didi/*`), or negated with `!`, counts as
-   present, and nothing already in the file changes. A file git already tracks
+   present, and nothing already in the file changes. A path git already
+   ignores from elsewhere, such as `.git/info/exclude` or a global excludes
+   file, gets no line, and the step names the file and line that ignores it
+   (#1451). A file git already tracks
    stays tracked until `git rm --cached` removes it. Setup counts tracked state
    and client files and warns with the command to run from the project root to remove them from the index,
    followed by a commit. It never runs that command or deletes those files.
@@ -177,7 +180,7 @@ mismatch, no editor open, a client that cannot reach the guide, `.didi/` not
 ignored, or a preset that ships the addon is a warning.
 
 The client configuration records absolute paths for one machine, which is why
-setup adds each file it writes to `.gitignore`. Keep `.mcp.json`,
+setup adds each file it writes to `.gitignore`, unless git already ignores it from elsewhere. Keep `.mcp.json`,
 `.cursor/mcp.json`, `.vscode/mcp.json` and `.codex/config.toml` out of version
 control unless everyone who clones the project keeps Didi and the project at the
 same paths.

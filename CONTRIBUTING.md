@@ -229,6 +229,10 @@ unmergeable.
 Everything else -- CodeQL, OpenSSF Scorecard, dependency review, workflow
 linting, labelling -- runs alongside and does not block a merge.
 
+A change to `tools/localci/`, `requirements-dev.txt` or `ci.yml` also builds the
+local CI image and runs `tools/localci/smoke.sh` in it. CI Gate needs that job,
+so a broken image fails the pull request; any other change skips it (#1419).
+
 When a pull request closes, `cache-cleanup.yml` deletes the Actions caches its
 runs saved. Only that pull request could ever restore them, and left in place
 they push `main`'s compiler caches out of the repository's 10 GiB cache limit.

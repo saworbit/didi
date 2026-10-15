@@ -52,7 +52,8 @@ The `README.md` inside the archive has the notes for that platform. On macOS, cl
 > `--replace-addon`. `didi doctor --project D:/my_game` checks all of it from outside the
 > editor. The rest of this step is the same thing by hand.
 >
-> Setup also adds `.didi/` to the project's `.gitignore`, with each client file it wrote.
+> Setup also adds `.didi/` to the project's `.gitignore`, with each client file it wrote, unless git
+> already ignores them, through `.git/info/exclude` for instance.
 > Didi keeps its change journal, file locks, crash reports and run records in `.didi/`, and
 > the journal holds the arguments of every change, so none of it belongs in version control.
 > A client file such as `.mcp.json` names this machine's paths to `didi` and the project.
