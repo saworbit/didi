@@ -140,6 +140,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 - `2026-09-23` The website and the quickstart start from the download. [PR #910](https://github.com/saworbit/didi/pull/910)
 
 ### Fixed
+- `2026-10-15` `script_patch_method` with `create_if_missing` puts a new member beside its kind when an earlier one holds a bracket in a string or comment. [#1460](https://github.com/saworbit/didi/issues/1460) · [PR #1464](https://github.com/saworbit/didi/pull/1464)
 - `2026-10-15` `project_list_resources` types an imported model by its `.import`, so `type_filter: "PackedScene"` finds a `.glb`, and a rescan sees a sidecar written later. [#1461](https://github.com/saworbit/didi/issues/1461) · [PR #1463](https://github.com/saworbit/didi/pull/1463)
 - `2026-10-15` The asset audit reads a uid the way Godot does, so `uid="uid://ABC"` beside a real path is no longer called unresolved. [#1446](https://github.com/saworbit/didi/issues/1446) · [PR #1463](https://github.com/saworbit/didi/pull/1463)
 - `2026-10-15` CONTRIBUTING names the workflows that start no build, and says a closed pull request's caches are deleted to free space, not to save `main`'s. [PR #1462](https://github.com/saworbit/didi/pull/1462)
