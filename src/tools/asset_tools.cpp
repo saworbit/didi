@@ -1332,10 +1332,13 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
         // only after the engine was asked about the class_name. Asked now, or
         // the answer said the engine was not consulted while an editor was
         // attached and answering (#1427).
+        std::string base_not_consulted;
         if (engine_not_consulted.empty() && !engine_classes.count(type_name)) {
             auto base_answer = askAttachedEngineForTypes(ipc, {type_name});
             if (base_answer.not_consulted.empty()) {
                 engine_classes.insert(base_answer.known.begin(), base_answer.known.end());
+            } else {
+                base_not_consulted = std::move(base_answer.not_consulted);
             }
         }
         EngineTypeVerdict answer;
@@ -1344,9 +1347,10 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
         answer.answered = found != engine_classes.end();
         answer.known = answer.answered && found->second;
         if (!answer.answered) {
-            answer.not_consulted = engine_not_consulted.empty()
-                                       ? "The attached engine's answer did not name this type."
-                                       : engine_not_consulted;
+            answer.not_consulted = !engine_not_consulted.empty() ? engine_not_consulted
+                                   : !base_not_consulted.empty()
+                                       ? base_not_consulted
+                                       : "The attached engine's answer did not name this type.";
         }
         verdict = answer;
         return verdict;

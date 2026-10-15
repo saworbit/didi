@@ -4406,6 +4406,9 @@ public:
         if (method != "engine.classExists") {
             return didi::Error(404, "Unknown method: " + method);
         }
+        if (fail_from_call >= 0 && calls++ >= fail_from_call) {
+            return didi::Error(503, "pipe closed");
+        }
         // An addon older than the route answers the way an unknown method
         // answers, which is not the same fact as a class the engine lacks.
         if (!m_routeKnown) return didi::Error(501, "Unknown method: engine.classExists");
@@ -4430,6 +4433,9 @@ public:
 
     std::string method_seen;
     didi::json names_seen;
+    // From this call on, the engine stops answering. Negative never.
+    int fail_from_call = -1;
+    int calls = 0;
 
 private:
     std::set<std::string> m_classes;
@@ -4506,6 +4512,21 @@ static void test_resource_create_asks_the_engine_about_a_class_name_base() {
     ASSERT_EQ(check["type_checked_against"], "attached_engine");
     ASSERT_TRUE(!check.contains("engine_not_consulted"));
     ASSERT_EQ(client->names_seen, didi::json::array({"Resource"}));
+
+    // A base question that fails says why, rather than that the engine's
+    // answer left the type out.
+    auto failing = std::make_shared<ClassListClient>(
+        std::set<std::string>{"Resource"}, "Godot Engine v4.7.2.stable.official", true);
+    failing->fail_from_call = 1;
+    const auto unasked = didi::mcp::handleResourceCreate(
+        {{"save_path", "res://profile2.tres"}, {"resource_type", "ImpactProfile"},
+         {"properties", {{"power", 3}}}},
+        failing);
+    if (unasked.isError) throw std::runtime_error(unasked.content[0].text);
+    const auto unasked_check = didi::json::parse(unasked.content[0].text)["property_check"];
+    ASSERT_EQ(unasked_check["type_checked_against"], "api_reference");
+    ASSERT_TRUE(unasked_check["engine_not_consulted"].get<std::string>().find("pipe closed") !=
+                std::string::npos);
 }
 
 // An editor that answers the class check and, after a write, the request to
