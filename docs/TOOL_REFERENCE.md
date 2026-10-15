@@ -443,7 +443,7 @@ code. `CONNECT_PERSIST` is the engine's own answer to "is this in the scene file
 so that is what `scene` means now. A filter of `origin != "editor"` selects the
 same set it always did.
 
-### `signal_connect` and `signal_disconnect` — Live
+### `signal_connect` and `signal_disconnect` — Live, `signal_connect` also offline
 
 Mutations. Both require `emitter_node`, `signal_name`, `target_node` and
 `target_method`.
@@ -485,6 +485,39 @@ exact callable a connect added, and redo restores it.
 Whether the target method can accept the arguments the signal carries is a precondition for `signal_connect` only. A disconnect never calls the method, so an incompatible pair is answered the same way any other pair that is not connected is answered: `409`, no such connection. `signal_disconnect` never reports a method signature problem.
 
 A method the file declares and the engine does not have is `409` with `code: "target_script_not_compiled"`, not `404 target_method_not_found`. A GDScript that will not compile is still assigned to the node, and no script instance stands behind it, so every method the file declares is absent as far as the engine is concerned; reported as a missing method it sends a caller to rename something that was already right. The refusal carries `script_path`, and `unresolved_autoloads` naming any singleton this project has registered that the script mentions, with the same `note` `script_check_syntax` carries for that condition: a newly registered autoload does not exist in the editor that registered it until that editor restarts, so nothing naming it compiles until then. A method that is in no file is still `404`.
+
+#### `signal_connect` with no editor attached
+
+With no editor session attached, `signal_connect` takes `scene_path`, the
+`.tscn` to connect in, writes the `[connection]` line into that file atomically
+and reads it back (#1387). It answers `execution_mode: "offline_fallback"`,
+`undo_redo_registered: false` and `rollback: "none"`, with `written_to`, the
+`connection` as the file stores it, and `line_written`. With an editor attached
+`scene_path` is refused, because the live route connects in the edited scene.
+
+The file route checks what the live one checks, from the project's files rather
+than the running objects:
+
+- The emitter and the target resolve as they do live, `.` and `/root/<Root>/...`
+  included, and are written relative to the scene root, as the editor writes
+  them. A node inside an instanced scene, an instanced node, a node with a
+  built-in script and an inherited scene are refused with `422`
+  `connection_not_judged`, because what they declare is in another file or in
+  none.
+- The signal must be declared by the emitter's script, a script it extends or
+  its engine class, and the method by the target's. A missing one is `404`
+  `declared_signal_not_found` or `target_method_not_found`, as live.
+- When both come from GDScript, the method must take the signal's arguments, or
+  the call is `409` `signal_target_arity_incompatible`, and the answer says
+  `arity_checked: true`. An engine class's signals are known by name alone, so a
+  connection from one is written with `arity_checked: false`, and Godot reports
+  a mismatch when the signal fires.
+- A connection the file already has is `409`. `flags` is written as the editor
+  writes it: no `flags` for `2`, `flags=N` for the others.
+
+Measured on 4.5.1, 4.6.2 and 4.7.2: a scene with connections written this way
+loads with each one connected and no ERROR lines. An editor that has the scene
+open without the Didi addon saves its own copy over the file, so close it first.
 
 ### `signal_emit` — Live
 

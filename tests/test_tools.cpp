@@ -7636,7 +7636,7 @@ static void test_tool_capabilities_are_honest() {
     // execution mode. A still-reserved Phase 7 name is checked below, so this
     // test keeps covering both sides of the split.
     ASSERT_EQ(signal_json["_meta"]["didi"]["executionModes"],
-              didi::json::array({"live"}));
+              didi::json::array({"live", "offline_fallback"}));
     ASSERT_EQ(signal_json["_meta"]["didi"]["implemented"], true);
     // A delivered tool must lose the UNIMPLEMENTED prefix, and a reserved one
     // must keep it. Checking both is what stops the prefix from becoming
