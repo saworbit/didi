@@ -1429,6 +1429,19 @@ std::optional<Error> probeFileTarget(const FileTarget& target, const json& argum
                          "add this one.",
                      json{{"code", "not_found"}, {"retry_with", {{"create_if_missing", true}}}});
     }
+    // The patch itself, computed the way the write computes it, and the
+    // write's own refusals of it: one ambiguous name, or a result whose
+    // brackets do not balance. A preview minted a token for a patch the write
+    // then refused as unbalanced (#1452).
+    const auto lf = [](const std::string& text) { return strings::replaceAll(text, "\r\n", "\n"); };
+    const auto source = lf(contents.str());
+    auto patched = offline::GDScriptDiagnostics::patchSymbol(
+        source, symbol_name, lf(arguments.value("new_definition", std::string())), symbol_type,
+        arguments.value("create_if_missing", false));
+    if (patched.isErr()) return patched.error();
+    if (auto refused = offline::GDScriptDiagnostics::refuseUnbalancedPatch(source, patched.value())) {
+        return *refused;
+    }
     return std::nullopt;
 }
 

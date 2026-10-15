@@ -598,6 +598,26 @@ static void test_gdscript_symbol_patch_takes_a_multi_line_value_whole() {
     ASSERT_EQ(table.value().replaced_last_line, 10);
 }
 
+static void test_gdscript_symbol_patch_creates_a_constant_beside_the_constants() {
+    // Break caught: a new constant went after the last function, though a
+    // signal, variable or enum went beside its own kind (#1453).
+    const std::string original =
+        "extends Node\n\n"
+        "const SPEED := 4\n"
+        "const SCHEDULE := {\n"
+        "\t\"dawn\": 6,\n"
+        "}\n\n"
+        "var sandbox: Node\n\n"
+        "func run() -> void:\n"
+        "\tpass\n";
+    auto created = didi::offline::GDScriptDiagnostics::patchSymbol(
+        original, "PATROL", "const PATROL := [1, 2]", "constant", true);
+    ASSERT_TRUE(created.isOk());
+    ASSERT_TRUE(created.value().created);
+    ASSERT_TRUE(created.value().source_text.find("}\nconst PATROL := [1, 2]\n\nvar sandbox") !=
+                std::string::npos);
+}
+
 static void test_gdscript_symbol_patch_finds_an_inner_class_with_a_base() {
     // Break caught: an inner class was matched only as class Name:, so the
     // usual class Name extends Base: was "not declared" and the refusal
@@ -1118,6 +1138,8 @@ struct RegisterScriptPatchTests {
         registerTest("GDScript.PatchKeepsAnnotatedNeighbour", test_gdscript_symbol_patch_keeps_annotated_neighbour);
         registerTest("GDScript.PatchTakesAMultiLineValueWhole",
                      test_gdscript_symbol_patch_takes_a_multi_line_value_whole);
+        registerTest("GDScript.PatchCreatesAConstantBesideTheConstants",
+                     test_gdscript_symbol_patch_creates_a_constant_beside_the_constants);
         registerTest("GDScript.PatchFindsAnInnerClassWithABase",
                      test_gdscript_symbol_patch_finds_an_inner_class_with_a_base);
         registerTest("GDScript.PatchKeepsNestedMethodNested",

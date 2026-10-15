@@ -119,6 +119,15 @@ public:
                                                        const std::string& new_definition,
                                                        const std::string& symbol_type);
 
+    // Refuses a patch that leaves parentheses, brackets or braces unbalanced
+    // where the original had them balanced: a script in that state cannot parse
+    // (#1434). Only the count rules, which are exact; the lexical pass's other
+    // rules are a heuristic the engine check may overrule. The write and its dry
+    // run both ask this, so a preview never mints a token for a patch the
+    // write refuses (#1452).
+    static std::optional<Error> refuseUnbalancedPatch(const std::string& original_text,
+                                                      const SymbolPatch& patched);
+
     static Result<SymbolPatch> patchSymbol(const std::string& source_text,
                                            const std::string& symbol_name,
                                            const std::string& new_definition,
