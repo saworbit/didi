@@ -74,6 +74,10 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         // and into the .tscn scene_path names when no editor is attached, so a
         // scene's signals can be wired before anything opens it (#1387).
         "signal_connect",
+        // scene_create: live through PackedScene and ResourceSaver in the
+        // editor, which then opens the scene, and with no editor attached into
+        // a .tscn of one root node, checked against the class reference (#1380).
+        "scene_create",
         // project_set_input_action: the same file, the [input] section, written
         // straight with no editor, so a new project's actions can be set before
         // anything opens it (#1379).
@@ -108,7 +112,7 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         "project_list_input_actions", "project_remove_input_action",
         "scene_list_groups",
         "scene_add_to_group", "scene_remove_from_group", "scene_get_group_members",
-        "scene_create", "scene_open", "scene_close", "scene_pack_branch",
+        "scene_open", "scene_close", "scene_pack_branch",
         "runtime_read_logs", "runtime_read_output", "runtime_set_paused", "runtime_step", "runtime_stop",
         "runtime_get_tree", "eval_gdscript"
         , "asset_reimport", "viewport_diff_capture", "ui_hit_test", "scene_get_selection"

@@ -832,6 +832,12 @@ const std::map<std::string, Rule>& rules() {
         {"reload_unread", [](const Refusal&) { return field("request_id"); }},
         {"reload_not_found", [](const Refusal&) { return field("request_id"); }},
         {"reload_status_unanswered", [](const Refusal&) { return field("request_id"); }},
+        // scene_create offline has no class reference to check root_type
+        // against; an attached editor checks it against ClassDB (#1380).
+        {"root_type_not_judged", [](const Refusal&) {
+            return nextCall("runtime_list_sessions", json::object(),
+                            "Attach an editor, which checks root_type against the engine.");
+        }},
         // signal_connect offline could not resolve what a node declares; an
         // attached editor answers from the running objects (#1387).
         {"connection_not_judged", [](const Refusal&) {
