@@ -1,11 +1,13 @@
 #include "didi/mcp/project_tools.hpp"
 #include "didi/common/project_path.hpp"
 #include "didi/offline/import_options.hpp"
+#include "didi/offline/input_actions.hpp"
 #include "didi/offline/project_search.hpp"
 #include "didi/offline/project_settings_file.hpp"
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <filesystem>
 #include <set>
 #include "didi/mcp/tool_registration.hpp"
@@ -131,7 +133,100 @@ CallToolResult handleProjectListInputActions(const json& args, std::shared_ptr<i
     return forwardLiveProject(args, ipc, "project.listInputActions", "list project input actions");
 }
 CallToolResult handleProjectSetInputAction(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
-    return forwardLiveProject(args, ipc, "project.setInputAction", "persist a project input action");
+    if (ipc && ipc->isConnected()) {
+        return forwardLiveProject(args, ipc, "project.setInputAction", "persist a project input action");
+    }
+    // With no editor attached the action goes straight into project.godot, as
+    // project_set_setting's value does, so a new project's input map can be
+    // written before anything opens it (#1379). The arguments are checked by
+    // the same rules the bridge applies. Each event is written with the
+    // properties the call set and its device, and Godot fills the rest when it
+    // loads the file: once an engine saves the project, the [input] text is
+    // byte for byte what the live route writes, on 4.5.1, 4.6.2 and 4.7.2.
+    if (!args.is_object()) {
+        return CallToolResult::errorJson(400, "Invalid input action request: arguments must be an object");
+    }
+    const std::string action = args.value("action", "");
+    if (auto valid = offline::validateInputActionName(action); valid.isErr()) {
+        return CallToolResult::fromError(valid.error());
+    }
+    double deadzone = 0.2;
+    if (args.contains("deadzone")) {
+        if (!args["deadzone"].is_number() || !std::isfinite(args["deadzone"].get<double>()) ||
+            args["deadzone"].get<double>() < 0.0 || args["deadzone"].get<double>() > 1.0) {
+            return CallToolResult::errorJson(400, "deadzone must be finite and within 0.0..1.0");
+        }
+        deadzone = args["deadzone"].get<double>();
+    }
+    const json descriptors = args.value("events", json::array());
+    if (!descriptors.is_array()) return CallToolResult::errorJson(400, "events must be an array");
+    std::vector<offline::InputEventSpec> events;
+    for (size_t index = 0; index < descriptors.size(); ++index) {
+        auto parsed = offline::parseInputEventDescriptor(descriptors[index]);
+        if (parsed.isErr()) {
+            return CallToolResult::errorJson(parsed.error().code, "Argument 'events' entry " +
+                                                                      std::to_string(index) + ": " +
+                                                                      parsed.error().message);
+        }
+        events.push_back(std::move(parsed.value()));
+    }
+    std::error_code root_error;
+    const auto root = std::filesystem::current_path(root_error);
+    if (root_error) {
+        return CallToolResult::errorJson(500, "The project root cannot be resolved for an offline input action write");
+    }
+    const std::string setting = "input/" + action;
+    auto current = offline::readProjectSetting(root, setting);
+    if (current.isErr()) {
+        return CallToolResult::fromError(current.error(), "Failed to read project.godot: ");
+    }
+    // An engine registers its own ui_* actions as settings, and the live route
+    // counts one as there whether or not the project overrides it. Offline
+    // nothing says which ui_* names are the engine's, so each counts as there.
+    const bool engine_default = strings::startsWith(action, "ui_");
+    if ((current.value().existed || engine_default) && !args.value("replace", false)) {
+        json data = {{"code", "already_exists"}, {"retry_with", {{"replace", true}}}};
+        if (!current.value().existed) data["engine_default"] = true;
+        return CallToolResult::errorJson(409, "Input action already exists; pass replace: true to update it",
+                                         std::move(data));
+    }
+    const auto literal = offline::inputActionLiteral(deadzone, events);
+    auto written = offline::writeInputActionLiteral(root, action, literal);
+    if (written.isErr()) {
+        return CallToolResult::fromError(written.error(), "Failed to persist a project input action: ");
+    }
+    // What the file holds now, read back rather than the text rendered (#1019).
+    auto stored = offline::readProjectSetting(root, setting);
+    if (stored.isErr()) {
+        return CallToolResult::fromError(
+            Error(500, "project.godot was written and could not be read back to confirm it: " +
+                           stored.error().message));
+    }
+    json payload = {
+        {"status", "success"},
+        {"action", action},
+        {"deadzone", deadzone},
+        {"event_count", events.size()},
+        {"removed", false},
+        {"persisted", true},
+        {"defined_by_project", stored.value().existed},
+        {"runtime_reloaded", false},
+        {"execution_mode", "offline_fallback"},
+        {"is_live_engine", false},
+        {"written_to", "res://project.godot"},
+        {"replaced_existing", written.value().existed},
+        {"value_written", stored.value().existed ? json(stored.value().literal) : json(nullptr)},
+        {"takes_effect",
+         "when a game starts, or an editor opens the project, which loads the project's input "
+         "actions from this file."},
+        {"limitation",
+         "project.godot was written directly because no editor session is attached, so no engine "
+         "checked the events. Each one is written with the properties this call set and the "
+         "engine fills the rest with its defaults when it loads the file. If a Godot editor is "
+         "running on this project without the Didi addon, close it before writing, because "
+         "saving its own settings would overwrite this."}};
+    if (written.value().existed) payload["previous_value"] = written.value().previous_literal;
+    return CallToolResult::successJson(std::move(payload));
 }
 CallToolResult handleProjectRemoveInputAction(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     return forwardLiveProject(args, ipc, "project.removeInputAction", "remove a project input action");

@@ -182,6 +182,7 @@ set(CORE_SOURCES
     src/offline/project_settings_file.cpp
     src/offline/project_file_lock.cpp
     src/offline/import_options.cpp
+    src/offline/input_actions.cpp
     src/offline/test_runner.cpp
     src/offline/test_reports.cpp
     src/offline/process_runner.cpp
@@ -433,6 +434,7 @@ set(TEST_SOURCES
     tests/test_blackboard.cpp
     tests/test_blackboard_resources.cpp
     tests/test_project_search.cpp
+    tests/test_input_actions.cpp
     tests/test_project_settings_file.cpp
     tests/test_didi_setup.cpp
     tests/test_config_file_syntax.cpp

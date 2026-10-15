@@ -4,6 +4,7 @@
 #include "didi/common/config_file_syntax.hpp"
 #include "didi/common/godot_error.hpp"
 #include "didi/common/project_path.hpp"
+#include "didi/offline/input_actions.hpp"
 #include "didi/offline/project_settings_file.hpp"
 #include <algorithm>
 #include <cctype>
@@ -47,110 +48,19 @@ Result<void> validateIdentifier(const std::string& value, const std::string& lab
     return Result<void>::ok();
 }
 
-Result<void> validateActionName(const std::string& action) {
-    if (action.empty() || action.size() > 128) return Error::invalidArgument("action must be a non-empty name");
-    for (unsigned char character : action) {
-        if (std::iscntrl(character) || std::isspace(character)) {
-            return Error::invalidArgument("action may not contain whitespace or control characters");
-        }
-    }
-    return Result<void>::ok();
-}
-
-// The first property of `value` that `allowed` does not list, and the list
-// itself, as a sentence.
-//
-// Every other argument refusal on this surface names the property and says what
-// the tool takes, which is what #397 and #418 delivered and why the mistake is
-// normally cheap. The input-event refusals said only that something was wrong,
-// on a tool whose vocabulary was not published at all (#737).
-std::string unknownPropertyDetail(const json& value, std::initializer_list<const char*> allowed) {
-    std::string offender;
-    for (auto it = value.begin(); it != value.end(); ++it) {
-        bool found = false;
-        for (const auto* key : allowed) {
-            if (it.key() == key) { found = true; break; }
-        }
-        if (!found) { offender = it.key(); break; }
-    }
-    std::string accepted;
-    for (const auto* key : allowed) {
-        if (!accepted.empty()) accepted += ", ";
-        accepted += key;
-    }
-    return "Unknown property '" + offender + "'. This event type accepts: " + accepted + ".";
-}
-
-// One modifier, under either spelling.
-//
-// Godot's own property is shift_pressed, which is what runtime_inject_input
-// takes and what project_set_input_action writes into project.godot. It read
-// `shift` and refused `shift_pressed`, so one surface spelled one thing two
-// ways and the engine's own name was the one that did not work (#737). The
-// engine spelling is the answer; the short one still works, because something
-// may depend on it.
-Result<std::optional<bool>> modifierFlag(const json& descriptor, const std::string& name) {
-    const std::string engine = name + "_pressed";
-    const bool has_engine = descriptor.contains(engine);
-    const bool has_short = descriptor.contains(name);
-    if (has_engine && has_short && descriptor[engine] != descriptor[name]) {
-        return Error::invalidArgument("Input event sets '" + engine + "' and '" + name +
-                                      "' to different values, and they are the same modifier. "
-                                      "Send one, preferably '" + engine +
-                                      "', which is Godot's own name for it.");
-    }
-    if (!has_engine && !has_short) return std::optional<bool>{};
-    const auto& value = has_engine ? descriptor[engine] : descriptor[name];
-    if (!value.is_boolean()) {
-        return Error::invalidArgument(std::string(has_engine ? engine : name) + " must be boolean");
-    }
-    return std::optional<bool>(value.get<bool>());
-}
-
+// The event a descriptor names, built the way the editor's Input Map dialog
+// builds one. What the descriptor may say, and every refusal of it, is shared
+// with the offline route, which writes the same event into project.godot when
+// no editor is attached (#1379).
 Result<VariantValue> makeInputEvent(const json& descriptor) {
-    if (!descriptor.is_object() || !descriptor.contains("type") || !descriptor["type"].is_string()) {
-        return Error::invalidArgument("Each input event must be an object with a string type");
-    }
-    const std::string type = descriptor["type"].get<std::string>();
-    const char* class_name = nullptr;
-    if (type == "key") {
-        const std::initializer_list<const char*> allowed = {
-            "type", "keycode", "physical_keycode", "unicode", "shift_pressed", "alt_pressed",
-            "ctrl_pressed", "meta_pressed", "shift", "alt", "ctrl", "meta", "device"};
-        if (!hasOnlyKeys(descriptor, allowed)) {
-            return Error::invalidArgument("Key event: " + unknownPropertyDetail(descriptor, allowed));
-        }
-        class_name = "InputEventKey";
-    } else if (type == "mouse_button") {
-        const std::initializer_list<const char*> allowed = {"type", "button_index", "device"};
-        if (!hasOnlyKeys(descriptor, allowed)) {
-            return Error::invalidArgument("Mouse-button event: " +
-                                          unknownPropertyDetail(descriptor, allowed));
-        }
-        class_name = "InputEventMouseButton";
-    } else if (type == "joypad_button") {
-        const std::initializer_list<const char*> allowed = {"type", "button_index", "device"};
-        if (!hasOnlyKeys(descriptor, allowed)) {
-            return Error::invalidArgument("Joypad-button event: " +
-                                          unknownPropertyDetail(descriptor, allowed));
-        }
-        class_name = "InputEventJoypadButton";
-    } else if (type == "joypad_motion") {
-        const std::initializer_list<const char*> allowed = {"type", "axis", "axis_value", "device"};
-        if (!hasOnlyKeys(descriptor, allowed)) {
-            return Error::invalidArgument("Joypad-motion event: " +
-                                          unknownPropertyDetail(descriptor, allowed));
-        }
-        class_name = "InputEventJoypadMotion";
-    } else {
-        return Error::invalidArgument(
-            "Unsupported input event type: " + type +
-            ". This tool accepts: key, mouse_button, joypad_button, joypad_motion.");
-    }
+    auto parsed = didi::offline::parseInputEventDescriptor(descriptor);
+    if (parsed.isErr()) return parsed.error();
+    const auto& spec = parsed.value();
+    const char* class_name = spec.class_name.c_str();
 
     NativeName native_class(class_name);
     auto object = constructObject(native_class.ptr());
-    if (!object) return Error::internal("Godot could not construct " + std::string(class_name));
+    if (!object) return Error::internal("Godot could not construct " + spec.class_name);
     auto fail = [&](const Error& error) -> Result<VariantValue> {
         GodotApi::instance().object_destroy(object);
         return error;
@@ -173,60 +83,34 @@ Result<VariantValue> makeInputEvent(const json& descriptor) {
     // joypad, so a second controller never fired the action, and for a key it
     // is 0 on 4.5.1 and 16 on 4.7.2, so one call wrote different files on
     // different lines (#1295).
-    if (descriptor.contains("device") &&
-        (!descriptor["device"].is_number_integer() || descriptor["device"].get<int64_t>() < -1)) {
-        return fail(Error::invalidArgument("Input event device must be an integer >= -1"));
+    if (auto set = set_int("InputEvent", "set_device", 1286410249LL, spec.device); set.isErr()) {
+        return fail(set.error());
     }
-    {
-        const int64_t device = descriptor.contains("device") ? descriptor["device"].get<int64_t>() : -1;
-        auto set = set_int("InputEvent", "set_device", 1286410249LL, device);
-        if (set.isErr()) return fail(set.error());
-    }
-    if (type == "key") {
-        bool has_identity = false;
-        for (const auto* key : {"keycode", "physical_keycode", "unicode"}) {
-            if (!descriptor.contains(key)) continue;
-            if (!descriptor[key].is_number_integer() || descriptor[key].get<int64_t>() <= 0) {
-                return fail(Error::invalidArgument(std::string(key) + " must be a positive integer"));
-            }
+    if (spec.type == "key") {
+        const std::pair<const char*, const std::optional<int64_t>*> identities[] = {
+            {"keycode", &spec.keycode}, {"physical_keycode", &spec.physical_keycode}, {"unicode", &spec.unicode}};
+        for (const auto& [key, value] : identities) {
+            if (!value->has_value()) continue;
             const int64_t hash = std::string(key) == "unicode" ? 1286410249LL : 888074362LL;
-            auto set = set_int("InputEventKey", (std::string("set_") + key).c_str(), hash, descriptor[key].get<int64_t>());
-            if (set.isErr()) return fail(set.error());
-            has_identity = true;
-        }
-        if (!has_identity) return fail(Error::invalidArgument("Key event requires keycode, physical_keycode, or unicode"));
-        for (const auto* modifier : {"shift", "alt", "ctrl", "meta"}) {
-            auto flag = modifierFlag(descriptor, modifier);
-            if (flag.isErr()) return fail(flag.error());
-            if (!flag.value().has_value()) continue;
-            auto set = set_bool((std::string("set_") + modifier + "_pressed").c_str(),
-                                *flag.value());
+            auto set = set_int("InputEventKey", (std::string("set_") + key).c_str(), hash, **value);
             if (set.isErr()) return fail(set.error());
         }
-    } else if (type == "mouse_button" || type == "joypad_button") {
-        if (!descriptor.contains("button_index") || !descriptor["button_index"].is_number_integer()) {
-            return fail(Error::invalidArgument("button_index is required and must be an integer"));
+        const std::pair<const char*, const std::optional<bool>*> modifiers[] = {
+            {"set_shift_pressed", &spec.shift_pressed}, {"set_alt_pressed", &spec.alt_pressed},
+            {"set_ctrl_pressed", &spec.ctrl_pressed}, {"set_meta_pressed", &spec.meta_pressed}};
+        for (const auto& [setter, value] : modifiers) {
+            if (!value->has_value()) continue;
+            auto set = set_bool(setter, **value);
+            if (set.isErr()) return fail(set.error());
         }
-        const int64_t button = descriptor["button_index"].get<int64_t>();
-        const int64_t maximum = type == "mouse_button" ? 9 : 127;
-        if (button < (type == "mouse_button" ? 1 : 0) || button > maximum) {
-            return fail(Error::invalidArgument("button_index is outside the supported range"));
-        }
-        auto set = set_int(class_name, "set_button_index", type == "mouse_button" ? 3624991109LL : 1466368136LL, button);
+    } else if (spec.type == "mouse_button" || spec.type == "joypad_button") {
+        auto set = set_int(class_name, "set_button_index", spec.type == "mouse_button" ? 3624991109LL : 1466368136LL,
+                           *spec.button_index);
         if (set.isErr()) return fail(set.error());
     } else {
-        if (!descriptor.contains("axis") || !descriptor["axis"].is_number_integer() ||
-            descriptor["axis"].get<int64_t>() < 0 || descriptor["axis"].get<int64_t>() > 9) {
-            return fail(Error::invalidArgument("axis is required and must be in 0..9"));
-        }
-        if (!descriptor.contains("axis_value") || !descriptor["axis_value"].is_number() ||
-            !std::isfinite(descriptor["axis_value"].get<double>()) ||
-            descriptor["axis_value"].get<double>() < -1.0 || descriptor["axis_value"].get<double>() > 1.0) {
-            return fail(Error::invalidArgument("axis_value is required and must be finite within -1.0..1.0"));
-        }
-        auto axis = set_int(class_name, "set_axis", 1332685170LL, descriptor["axis"].get<int64_t>());
+        auto axis = set_int(class_name, "set_axis", 1332685170LL, *spec.axis);
         if (axis.isErr()) return fail(axis.error());
-        auto axis_value = makeScalar(GDEXTENSION_VARIANT_TYPE_FLOAT, descriptor["axis_value"].get<double>());
+        auto axis_value = makeScalar(GDEXTENSION_VARIANT_TYPE_FLOAT, *spec.axis_value);
         if (axis_value.isErr()) return fail(axis_value.error());
         auto set = callObject(object, class_name, "set_axis_value", 373806689LL, {&axis_value.value()});
         if (set.isErr()) return fail(set.error());
@@ -1193,7 +1077,7 @@ json GodotBridge::bridgeProjectInputActions(const std::string& method, const jso
     }
 
     const std::string action = params.value("action", "");
-    auto valid_action = validateActionName(action);
+    auto valid_action = didi::offline::validateInputActionName(action);
     if (valid_action.isErr()) return errorJson(valid_action.error());
     const std::string setting_path = "input/" + action;
     auto setting_name = makeStringName(setting_path);

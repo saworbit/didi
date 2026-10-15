@@ -70,6 +70,10 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         // writing editor_plugins/enabled, and until it is enabled there is no
         // session to write it through (#382).
         "project_set_setting",
+        // project_set_input_action: the same file, the [input] section, written
+        // straight with no editor, so a new project's actions can be set before
+        // anything opens it (#1379).
+        "project_set_input_action",
         // The two readers of that same file. project_get_setting is the direct
         // counterpart of the writer above, and refusing offline meant a caller
         // could write a setting, see the file change, and not read it back, so
@@ -97,7 +101,7 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         "editor_undo", "editor_redo", "editor_save_scene",
         "editor_reload_project", "script_attach_to_node", "script_detach_from_node",
         "project_set_autoload", "project_remove_autoload",
-        "project_list_input_actions", "project_set_input_action", "project_remove_input_action",
+        "project_list_input_actions", "project_remove_input_action",
         "scene_list_groups",
         "scene_add_to_group", "scene_remove_from_group", "scene_get_group_members",
         "scene_create", "scene_open", "scene_close", "scene_pack_branch",
@@ -2664,6 +2668,27 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
                 return std::nullopt;
             }
             before = {{"setting", read.value().setting},
+                      {"exists", read.value().existed},
+                      {"literal", read.value().literal}};
+            return std::nullopt;
+        };
+    } else if (binding.policy_source == "project_set_input_action") {
+        // What the file holds for the action now, read the way the offline
+        // write reads it before replacing it (#1379).
+        target_probe = [](const json& call_arguments, json& before,
+                          json& subject) -> std::optional<Error> {
+            if (!call_arguments.is_object() || !call_arguments.contains("action") ||
+                !call_arguments["action"].is_string()) {
+                return std::nullopt;
+            }
+            subject = {{"action", call_arguments["action"]}};
+            auto read = offline::readProjectSetting(
+                std::filesystem::current_path(), "input/" + call_arguments["action"].get<std::string>());
+            if (read.isErr()) {
+                if (read.error().code == 409) return read.error();
+                return std::nullopt;
+            }
+            before = {{"action", call_arguments["action"]},
                       {"exists", read.value().existed},
                       {"literal", read.value().literal}};
             return std::nullopt;
