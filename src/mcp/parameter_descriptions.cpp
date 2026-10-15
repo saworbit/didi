@@ -85,10 +85,10 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
         {"scene_create.scene_path",
          "Where to write the new scene, a normalized res:// path ending in .tscn. This is "
          "the output path; the argument is scene_path."},
-        {"scene_create.root_type",
-         "Class of the scene's root node: Node2D, Node3D or Control."},
+        // root_type carries its own text in the schema, which wins over this
+        // table. The default name is Root on both routes, never the file's.
         {"scene_create.root_name",
-         "Name for the root node. Defaults to a name derived from the file."},
+         "Name for the root node. Defaults to Root."},
         {"scene_open.scene_path",
          "The res:// .tscn to open as the edited scene. Every later scene_* call answers "
          "about this scene until another is opened."},
