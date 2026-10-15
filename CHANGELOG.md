@@ -138,8 +138,8 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 - `2026-09-23` The website and the quickstart start from the download. [PR #910](https://github.com/saworbit/didi/pull/910)
 
 ### Fixed
-- `2026-10-15` After an automatic re-attach, a modern request's refusal names the session and `runtime_attach_session`, and the control room marks it not attached. [#1436](https://github.com/saworbit/didi/issues/1436)
-- `2026-10-15` A declined approval says the client declined, for the person or on their behalf, and names the dry run and token route. [#1433](https://github.com/saworbit/didi/issues/1433)
+- `2026-10-15` After an automatic re-attach, a modern request's refusal names the session and `runtime_attach_session`, and the control room marks it not attached. [#1436](https://github.com/saworbit/didi/issues/1436) · [PR #1441](https://github.com/saworbit/didi/pull/1441)
+- `2026-10-15` A declined approval says the client declined, for the person or on their behalf, and names the dry run and token route. [#1433](https://github.com/saworbit/didi/issues/1433) · [PR #1441](https://github.com/saworbit/didi/pull/1441)
 - `2026-10-15` `script_patch_method` finds an inner class declared `class Name extends Base:`. [#1435](https://github.com/saworbit/didi/issues/1435) · [PR #1440](https://github.com/saworbit/didi/pull/1440)
 - `2026-10-15` `script_patch_method` replaces a multi-line value through its closing bracket, refuses a patch that unbalances brackets, and names the lines replaced. [#1434](https://github.com/saworbit/didi/issues/1434) · [PR #1440](https://github.com/saworbit/didi/pull/1440)
 - `2026-10-15` A key name in any case, or with spaces for underscores, such as "w", "Space" or "page down", refuses with the integer to send. [#1432](https://github.com/saworbit/didi/issues/1432) · [PR #1439](https://github.com/saworbit/didi/pull/1439)
