@@ -1086,6 +1086,9 @@ try {
         (Tool-Request 2370 "eval_gdscript" @{ expression = "node.get('position').x"; context_node = "/root/RuntimeRoot/Spatial/RayTarget2D" }),
         (Tool-Request 2371 "eval_gdscript" @{ expression = "position.x"; context_node = "/root/RuntimeRoot/Spatial/RayTarget2D" }),
         (Tool-Request 2372 "eval_gdscript" @{ expression = "node.get('position').script"; context_node = "/root/RuntimeRoot/Spatial/RayTarget2D" }),
+        # An Object-valued property is refused, naming it, its type and what
+        # node.get reads, so an assert can be rewritten against a value (#1429).
+        (Tool-Request 7411 "eval_gdscript" @{ expression = "node.get('owner') != null"; context_node = "/root/RuntimeRoot/Spatial/RayTarget2D" }),
         (Tool-Request 324 "eval_gdscript" @{ expression = "[1, 2, 3]"; context_node = "/root/RuntimeRoot" }),
         (Tool-Request 325 "eval_gdscript" @{ expression = "{'answer': 42, 'ok': true}"; context_node = "/root/RuntimeRoot" }),
         (Tool-Request 326 "eval_gdscript" @{ expression = "Vector2(3, 4)"; context_node = "/root/RuntimeRoot" }),
@@ -1246,6 +1249,8 @@ try {
     Assert-True ($runtimeById[2371].result.isError) "A bare property read reached the engine."
     Assert-True ($runtimeById[2371].result.content[0].text -match "property reads are forbidden") "A bare property read was refused for the wrong reason."
     Assert-True ($runtimeById[2372].result.isError) "A non-component member of a property read was accepted."
+    $objectRead = [string]$runtimeById[7411].result.content[0].text
+    Assert-True ($runtimeById[7411].result.isError -and (($objectRead | ConvertFrom-Json).error.message -match 'node\.get\("owner"\) holds a value of type Object, and node\.get reads only a bool')) "An Object-valued node.get was not refused with the property, its type and the readable types: $objectRead"
 
     # A paused game reported a stuck interval with measured: true, which is the
     # one thing this tool's own rules say a window it could not have driven must

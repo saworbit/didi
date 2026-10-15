@@ -10479,7 +10479,10 @@ static void test_input_key_names_are_refused_with_the_integer_to_send() {
     for (const auto* tool : {"project_set_input_action", "runtime_inject_input"}) {
         for (const auto* field : {"keycode", "physical_keycode"}) {
             for (const auto& named : std::vector<std::pair<std::string, int>>{
-                     {"KEY_W", 87}, {"W", 87}, {"KEY_ESCAPE", 4194305}, {"ESCAPE", 4194305}}) {
+                     {"KEY_W", 87}, {"W", 87}, {"KEY_ESCAPE", 4194305}, {"ESCAPE", 4194305},
+                     // Any case, and spaces for underscores (#1432).
+                     {"w", 87}, {"Space", 32}, {"escape", 4194305}, {"key_space", 32},
+                     {"page down", 4194324}, {"kp enter", 4194310}}) {
                 didi::json first = {{"type", "key"}, {"keycode", 65}};
                 didi::json second = {{"type", "key"}, {field, named.first}};
                 didi::json args = {{"events", didi::json::array({first, second})}};
@@ -10505,7 +10508,7 @@ static void test_input_key_names_are_refused_with_the_integer_to_send() {
                 ASSERT_TRUE(next.content.front().text.find("invalid_arguments") == std::string::npos);
             }
         }
-        for (const auto* unknown : {"w", "87", "Escape", "KEY_NO_SUCH_KEY", "KEY_NONE"}) {
+        for (const auto* unknown : {"87", "KEY_NO_SUCH_KEY", "KEY_NONE", "none"}) {
             didi::json event = {{"type", "key"}, {"keycode", unknown}};
             didi::json args = {{"events", didi::json::array({event})}};
             if (std::string(tool) == "project_set_input_action") args["action"] = "key_name_probe";
@@ -10531,6 +10534,8 @@ static void test_input_key_names_are_refused_with_the_integer_to_send() {
     ASSERT_EQ(large_data["event_index"], 31);
     ASSERT_EQ(large_data["expected_value"], 4194305);
     ASSERT_TRUE(!large_data.contains("retry_with"));
+    // The value is known, so nothing tells the caller to go and read the enum.
+    ASSERT_TRUE(!large_data.contains("next_call"));
     ASSERT_TRUE(large.content.front().text.size() < 1024);
     const auto reflected = registry.callTool("script_reflect_class", {{"class_name", "@GlobalScope"}});
     ASSERT_TRUE(!reflected.isError);

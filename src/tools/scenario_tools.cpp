@@ -478,7 +478,7 @@ void ToolRegistry::registerScenarioTools() {
                                         {"description", "wait: frames to run. press: frames held, default 1. wait_until: at most."}}},
                             {"action", {{"type", "string"}, {"description", "press: an InputMap action."}}},
                             {"expression", {{"type", "string"}, {"maxLength", 512},
-                                            {"description", "assert, wait_until: a sandbox expression such as node.get(\"position\").y; true, or a number within minimum and maximum."}}},
+                                            {"description", "assert, wait_until: a sandbox expression such as node.get(\"position\").y; true, or a number within minimum and maximum. node.get reads a bool, int, float, String, StringName, NodePath, Vector2, Vector3 or Color, never an Object."}}},
                             {"context_node", {{"type", "string"}}},
                             {"minimum", number},
                             {"maximum", number},
