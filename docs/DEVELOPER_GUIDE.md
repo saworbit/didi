@@ -47,9 +47,11 @@ ctest --test-dir build --output-on-failure
 
 ### Build options
 
-The build id combines the version, source commit, and configure timestamp.
-Each build reads the current Git HEAD, so a pull or checkout needs no separate
-reconfigure to refresh the commit. An unchanged id leaves the generated source
+The build id combines the version, source commit, and a timestamp: the
+configure time, or the commit's time when that is later, so a newer commit
+built in the same build directory orders as newer and `didi setup` can say so
+(#1450). Each build reads the current Git HEAD, so a pull or checkout needs no
+separate reconfigure to refresh the commit. An unchanged id leaves the generated source
 untouched; a changed id recompiles one translation unit. Detached HEAD, packed
 refs, and linked worktrees use Git's own lookup. Without Git the commit is
 `nogit`, and the configure timestamp still distinguishes build trees.

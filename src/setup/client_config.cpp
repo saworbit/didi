@@ -747,7 +747,17 @@ Result<IgnoreWrite> writeIgnoreRules(const std::filesystem::path& project_root,
             write.overridden.emplace_back(rule, last->line);
             continue;
         }
-        if (keys.insert(key).second) write.added.push_back(rule);
+        if (keys.count(key)) continue;
+        // A project can keep Didi out of version control without its tracked
+        // .gitignore saying so, through .git/info/exclude or a global
+        // excludes file. Adding the rule then changed a tracked file for
+        // nothing, and it had to be reverted by hand (#1451).
+        if (const auto state = checkIgnored(project_root, rule); state.ignored) {
+            write.already_ignored.emplace_back(rule, state.detail);
+            continue;
+        }
+        keys.insert(key);
+        write.added.push_back(rule);
     }
     if (write.added.empty()) return write;
     std::string body = found.value().body;
