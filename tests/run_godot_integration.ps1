@@ -2231,6 +2231,18 @@ try {
         (Tool-Request 2554 "scene_set_property" @{ target_node = "/root/NodeSlots/Holder"; property_name = "target"; value = "../Plain" }),
         (Tool-Request 2555 "scene_set_property" @{ target_node = "/root/NodeSlots/Holder"; property_name = "target"; value = "../Nowhere" }),
         (Tool-Request 2556 "scene_set_property" @{ target_node = "/root/NodeSlots/Holder"; property_name = "target"; value = "/root/NodeSlots/Point" }),
+        # A string into a script-exported NodePath and StringName. set() dropped
+        # the String and the write answered unchanged (#1423).
+        (Tool-Request 7404 "scene_set_property" @{ target_node = "/root/NodeSlots/Holder"; property_name = "marker_path"; value = "../Point" }),
+        (Tool-Request 7405 "scene_get_property" @{ target_node = "/root/NodeSlots/Holder"; property_name = "marker_path" }),
+        (Tool-Request 7406 "scene_set_property" @{ target_node = "/root/NodeSlots/Holder"; property_name = "tag"; value = "loud" }),
+        (Tool-Request 7407 "scene_get_property" @{ target_node = "/root/NodeSlots/Holder"; property_name = "tag" }),
+        # A class_name resource with a typed StringName. It was written
+        # StringName("..."), which the editor cannot parse (#1422), and its
+        # base was never put to the engine (#1427).
+        (Tool-Request 7408 "resource_create" @{ save_path = "res://impact_profile.tres"; resource_type = "ImpactProfile"; overwrite = $true; properties = @{ profile_name = @{ type = "StringName"; value = "Pistol" } } }),
+        (Tool-Request 7409 "scene_set_property" @{ target_node = "/root/NodeSlots/Holder"; property_name = "profile"; value = "res://impact_profile.tres" }),
+        (Tool-Request 7410 "scene_get_property" @{ target_node = "/root/NodeSlots/Holder"; property_name = "profile:profile_name" }),
         (Tool-Request 2557 "editor_save_scene" @{}),
         (Tool-Request 2558 "scene_close" @{ discard_unsaved = $true }),
         (Tool-Request 112 "scene_create" @{ scene_path = "res:////escape.tscn" }),
@@ -4923,9 +4935,23 @@ try {
     Assert-True ($byId[2554].result.isError -eq $true -and $byId[2554].result.content[0].text -match "takes a Node2D") "A node of another class was accepted into a node slot: $($byId[2554].result.content[0].text)"
     Assert-True ($byId[2555].result.isError -eq $true -and $byId[2555].result.content[0].text -match "no node at") "A path to no node was accepted into a node slot: $($byId[2555].result.content[0].text)"
     Assert-True ((Tool-Payload $byId[2556]).value -eq "../Point") "An absolute path did not land as the path from the holder: $($byId[2556].result.content[0].text)"
+    $markerWrite = Tool-Payload $byId[7404]
+    Assert-True ((-not $byId[7404].result.isError) -and $markerWrite.applied -eq $true -and $markerWrite.value -eq "../Point") "A string was not stored in a script-exported NodePath: $($byId[7404].result.content[0].text)"
+    $markerRead = Tool-Payload $byId[7405]
+    Assert-True ($markerRead.value -eq "../Point" -and $markerRead.type -eq "NodePath") "A script-exported NodePath did not read back as the string written: $($byId[7405].result.content[0].text)"
+    $tagWrite = Tool-Payload $byId[7406]
+    Assert-True ((-not $byId[7406].result.isError) -and $tagWrite.applied -eq $true -and $tagWrite.value -eq "loud") "A string was not stored in a script-exported StringName: $($byId[7406].result.content[0].text)"
+    $tagRead = Tool-Payload $byId[7407]
+    Assert-True ($tagRead.value -eq "loud" -and $tagRead.type -eq "StringName") "A script-exported StringName did not read back as the string written: $($byId[7407].result.content[0].text)"
+    $profileCheck = (Tool-Payload $byId[7408]).property_check
+    Assert-True ((-not $byId[7408].result.isError) -and $profileCheck.script_class -eq "ImpactProfile" -and $profileCheck.type_checked_against -eq "attached_engine" -and $null -eq $profileCheck.engine_not_consulted) "A class_name resource was not checked against the attached engine: $($byId[7408].result.content[0].text)"
+    Assert-True ((-not $byId[7409].result.isError) -and (Tool-Payload $byId[7409]).applied -eq $true) "The editor could not load a resource_create file holding a StringName: $($byId[7409].result.content[0].text)"
+    $profileRead = Tool-Payload $byId[7410]
+    Assert-True ($profileRead.value -eq "Pistol" -and $profileRead.type -eq "StringName") "A typed StringName written by resource_create did not load as one: $($byId[7410].result.content[0].text)"
     Assert-True (-not $byId[2557].result.isError) "The node slot scene could not be saved: $($byId[2557].result.content[0].text)"
     $slotSceneText = Get-Content -LiteralPath (Join-Path $fixtureRoot "node_slot_cases.tscn") -Raw
     Assert-True ($slotSceneText -match 'node_paths=PackedStringArray\("target"\)' -and $slotSceneText -match 'target = NodePath\("\.\./Point"\)') "The saved scene did not keep the node slot as Godot keeps one: $slotSceneText"
+    Assert-True ($slotSceneText -match 'marker_path = NodePath\("\.\./Point"\)' -and $slotSceneText -match 'tag = &"loud"') "The saved scene did not keep the NodePath and StringName exports written as strings: $slotSceneText"
     Assert-True ((Tool-Payload $byId[2558]).closed -eq $true) "Node slot scene could not be closed."
     Assert-True ((Tool-Payload $byId[111]).closed -eq $true) "Smoke scene cleanup failed."
     Assert-True $byId[112].result.isError "Non-normalized res:// scene path was accepted."

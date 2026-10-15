@@ -445,7 +445,12 @@ Result<std::string> tresNamedTypeLiteral(const json& value, const std::string& p
             return Error::invalidArgument("Property \"" + property + "\" declares type " + name +
                                           ", which needs its text under \"value\"");
         }
-        return name + "(\"" + escapeTresString(text->get<std::string>()) + "\")";
+        // Godot's text format spells a StringName &"...". It has no
+        // StringName("...") constructor, and a file holding one fails to parse
+        // (#1422). NodePath("...") is the format's own spelling.
+        const auto escaped = escapeTresString(text->get<std::string>());
+        if (name == "StringName") return "&\"" + escaped + "\"";
+        return name + "(\"" + escaped + "\")";
     }
     if (namesType(name, kPackedArrayTypes, std::size(kPackedArrayTypes))) {
         const auto items = value.find("values");
@@ -1323,6 +1328,16 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
     const auto verdictFor = [&](const std::string& type_name) {
         std::optional<EngineTypeVerdict> verdict;
         if (!attached.has_value()) return verdict;
+        // A class_name is checked as its engine base, and that base is known
+        // only after the engine was asked about the class_name. Asked now, or
+        // the answer said the engine was not consulted while an editor was
+        // attached and answering (#1427).
+        if (engine_not_consulted.empty() && !engine_classes.count(type_name)) {
+            auto base_answer = askAttachedEngineForTypes(ipc, {type_name});
+            if (base_answer.not_consulted.empty()) {
+                engine_classes.insert(base_answer.known.begin(), base_answer.known.end());
+            }
+        }
         EngineTypeVerdict answer;
         answer.engine_version = attached->engine_version;
         const auto found = engine_classes.find(type_name);

@@ -138,6 +138,9 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 - `2026-09-23` The website and the quickstart start from the download. [PR #910](https://github.com/saworbit/didi/pull/910)
 
 ### Fixed
+- `2026-10-15` `resource_create` writes a typed StringName as `&"..."`, so the file loads instead of failing to parse. [#1422](https://github.com/saworbit/didi/issues/1422)
+- `2026-10-15` `scene_set_property` stores a string in a script-exported NodePath or StringName, reads it back and saves it. [#1423](https://github.com/saworbit/didi/issues/1423)
+- `2026-10-15` `resource_create` checks a `class_name` resource's engine base against the attached engine instead of reporting it unconsulted. [#1427](https://github.com/saworbit/didi/issues/1427)
 - `2026-10-14` The guides document global enums, verified scenario shutdown and the local image validation limit, and link the landed bridge changes. [PR #1420](https://github.com/saworbit/didi/pull/1420)
 - `2026-10-14` Empty shaders list zero uniforms and refuse undeclared writes without printing an engine error. [#1358](https://github.com/saworbit/didi/issues/1358) · [PR #1413](https://github.com/saworbit/didi/pull/1413)
 - `2026-10-14` Typed node arrays and initial instance node slots accept scene paths, read them back, and save with undo. [#1357](https://github.com/saworbit/didi/issues/1357) · [PR #1413](https://github.com/saworbit/didi/pull/1413)

@@ -4484,6 +4484,30 @@ static void test_resource_create_type_guard_asks_the_attached_engine() {
     }
 }
 
+// A class_name is checked as its engine base, which was never put to the
+// engine: the answer said type_checked_against api_reference and "The attached
+// engine's answer did not name this type", with an editor attached and
+// answering (#1427). The base is asked once the class_name resolves to it.
+static void test_resource_create_asks_the_engine_about_a_class_name_base() {
+    ScopedToolProject project("resource-class-name-base");
+    std::ofstream("profile.gd", std::ios::binary)
+        << "class_name ImpactProfile\nextends Resource\n\n@export var power := 1\n";
+
+    auto client = std::make_shared<ClassListClient>(
+        std::set<std::string>{"Resource"}, "Godot Engine v4.7.2.stable.official", true);
+    const auto written = didi::mcp::handleResourceCreate(
+        {{"save_path", "res://profile.tres"}, {"resource_type", "ImpactProfile"},
+         {"properties", {{"power", 3}, {"resource_name", "pistol"}}}},
+        client);
+    if (written.isError) throw std::runtime_error(written.content[0].text);
+    const auto report = didi::json::parse(written.content[0].text);
+    const auto& check = report["property_check"];
+    ASSERT_EQ(check["script_class"], "ImpactProfile");
+    ASSERT_EQ(check["type_checked_against"], "attached_engine");
+    ASSERT_TRUE(!check.contains("engine_not_consulted"));
+    ASSERT_EQ(client->names_seen, didi::json::array({"Resource"}));
+}
+
 // An editor that answers the class check and, after a write, the request to
 // refresh its copy of the file. `refresh_answers` false makes the refresh fail
 // the way an older bridge without the route does.
@@ -10613,6 +10637,8 @@ struct RegisterToolTests {
                      test_resource_create_preserves_existing_file_without_overwrite);
     registerTest("resource_create type guard asks the attached engine",
                  test_resource_create_type_guard_asks_the_attached_engine);
+    registerTest("resource_create asks the engine about a class_name base",
+                 test_resource_create_asks_the_engine_about_a_class_name_base);
         registerTest("Tools.ResourceCreateWritesEachElementAsTheDeclaredPackedType",
                      test_resource_create_writes_each_element_as_the_declared_packed_type);
     registerTest("resource_create type guard keeps the reference when no engine answers",
