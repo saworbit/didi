@@ -306,8 +306,11 @@ static void test_mcp_phase7_parent_gate_and_alias_identity() {
     };
     for (const auto* name : phase7_delivered) {
         ASSERT_EQ(by_name[name]["_meta"]["didi"]["implemented"], true);
+        // signal_connect also writes the .tscn itself when no editor is
+        // attached (#1387). Every other delivered name is live only.
         ASSERT_EQ(by_name[name]["_meta"]["didi"]["executionModes"],
-                  didi::json::array({"live"}));
+                  std::string(name) == "signal_connect" ? didi::json::array({"live", "offline_fallback"})
+                                                        : didi::json::array({"live"}));
     }
 
     const std::array<const char*, 3> phase7 = {

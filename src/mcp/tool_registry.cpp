@@ -70,6 +70,10 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         // writing editor_plugins/enabled, and until it is enabled there is no
         // session to write it through (#382).
         "project_set_setting",
+        // signal_connect: live through the editor's own connect and UndoRedo,
+        // and into the .tscn scene_path names when no editor is attached, so a
+        // scene's signals can be wired before anything opens it (#1387).
+        "signal_connect",
         // project_set_input_action: the same file, the [input] section, written
         // straight with no editor, so a new project's actions can be set before
         // anything opens it (#1379).
@@ -116,7 +120,7 @@ static ExecutionCapability capabilityForTool(const std::string& name) {
         // extension passed the raw signal bridge trial on Godot 4.5.1, 4.6.2 and
         // 4.7.2 -- the trial the earlier attempt never ran, having only ever
         // exercised the test-seam build.
-        , "signal_list_connections", "signal_connect", "signal_disconnect", "signal_emit"
+        , "signal_list_connections", "signal_disconnect", "signal_emit"
         // Runs a method the node's own script declares, in the editor's
         // process. There is no offline meaning: the method is project code and
         // running it needs the engine that owns the scene (#389).
