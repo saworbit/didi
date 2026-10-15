@@ -237,7 +237,7 @@ A fresh project has one bus, `Master`, and a settings menu needs a `Music` and a
 
 ### Make a track loop
 
-Whether music loops is an import option, not a property of the player, so no scene edit can make it loop. With the editor attached, call `asset_configure_import` on the track: `{"loop": true}` for an OGG or MP3, `{"edit/loop_mode": 2}` for a WAV, which is Forward. `resource_inspect` on the track reports the current value under `import.options` first if you need it. The tool reimports the asset and checks what it loads, and refuses the value rather than writing one Godot would quietly misread. Do not set `stream.loop` from a script to get the same effect; that moves an asset's setting into code, and a second player of the same track would not loop.
+Whether music loops is an import option, not a property of the player, so no scene edit can make it loop. With the editor attached, call `asset_configure_import` on the track: `{"loop": true}` for an OGG or MP3, `{"edit/loop_mode": 2}` for a WAV, which is Forward. `resource_inspect` on the track reports the current value under `import.options` first if you need it. The tool reimports the asset and checks what it loads, and refuses the value rather than writing one Godot would quietly misread. Do not set `stream.loop` from a script to get the same effect; that moves an asset's setting into code, and a second player of the same track would not loop. An animation imported from a `.glb` or `.blend` loops the same way: `{"_subresources": {"animations": {"idle": {"settings/loop_mode": 1}}}}` on the model, where 1 is Linear and 2 Pingpong.
 
 ### Observe or control an already-running session
 

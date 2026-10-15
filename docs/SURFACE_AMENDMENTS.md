@@ -75,11 +75,11 @@ were checked on 2026-09-08, and [the roadmap](ROADMAP.md) records it under
 
 | Field | Value |
 | :--- | :--- |
-| **Name** | `asset_configure_import`, and one change to an existing contract: `resource_inspect` reports an imported asset's import options. |
+| **Name** | `asset_configure_import`, and one change to an existing contract: `resource_inspect` reports an imported asset's import options. Widened on 2026-10-15 to an imported scene's animation loop modes (#1425), under **The scene importer** below. |
 | **Failing workflow** | *Loop the menu music.* Walked on 4.5.1 and 4.7.2 on 2026-09-25 (#958, `tools/vibe/probes/music_loop_workflow.py`). A track the user dropped into the project imports with `asset_reimport`, a `Music` bus is added with `audio_add_bus`, and a menu gets an `AudioStreamPlayer` on that bus with `autoplay`, all saved correctly. Whether the track loops is an import option, `loop` for OGG and MP3 and `edit/loop_mode` for WAV, and nothing on the surface writes one. `scene_set_property` has no path to the stream, `resource_create` writes an `AudioStreamOggVorbis` with the flag set and no audio in it, `script_create` and `resource_create` both refuse the sidecar, and `asset_reimport` takes no options. Nothing reports the setting either: `resource_inspect` gives the track's type and uid, and `eval_gdscript` refuses the player's stream. In a game launched as the surface leaves it, the track stops at its end on both engines. The one workaround is a script that sets `stream.loop` in `_ready`, which moves the loop out of the asset and into code. Editing the sidecar outside the surface and reimporting with `asset_reimport` makes the same game loop, so the missing piece is the write. It is also Phase 8's last exit line, import changes that are previewable, explicit and verified after reimport, and the shape #770, #771 and #779 had: the read half (`project_audit_assets`) and the act half (`asset_reimport`) shipped, and the configure half did not. |
 | **Execution modes** | `live`. Editor sessions only. With no editor the tool refuses and names `resource_inspect` for reading the options. An offline write is not supported: the editor would notice it only on a scan in a later second than its last import, or at its next start, and nothing would verify the result. A game session is refused, because a game cannot reimport. The `resource_inspect` change is offline, like the rest of that tool. |
-| **Safety class** | `create/set`. Dry run, no confirmation token. It changes values in one existing sidecar. It adds no key, removes none and never changes the importer, and the same call twice leaves the same file. It registers no undo entry. The way back is the same call with the `previous` values the result carries. |
-| **Proving test** | Native, in `tests/test_asset_configure_import.cpp`. `AssetConfigureImport.RequestValidation` covers the rules under **Rules** below against the sidecars 4.5.1, 4.6.2 and 4.7.2 wrote for an OGG and a WAV, each refused with a 400 naming the argument: a missing, empty or over-long `asset_path`, a `.import` path with its asset in `retry_with`, a path under `.godot/`, a missing, empty or non-object `options`, an unknown argument, `loop` given as `1`, `"yes"` and `null`, a negative `loop_offset` and one at the track's length, `edit/loop_mode` given as `5`, `-1`, `2.5`, a word that is not a label and `true`, a negative begin, an end of 0, a window under a mode that ignores it with the mode in `retry_with`, a begin after the end, an end past the stream and a begin at its last frame, a WAV key on an OGG and an OGG key on a WAV each with the other in `retry_with`, a key the table does not hold naming the ones it does, a key the sidecar lacks, and a texture refused on `asset_path` naming its importer. `AssetConfigureImport.SidecarEdit` requires the edited file to equal the original with only the named lines changed, in an LF file, a CRLF file and one with no final newline, refuses a sidecar Godot cannot parse with its line, refuses a key that appears twice or shares its line, and checks both divergence readers against the file and the stream, including Forward loading as loop mode 1. `AssetConfigureImport.Registration` requires `live` only, editor sessions for the tool and for `asset.readImportedStream`, a mutation with `dry_run`, idempotent, and no confirmation token. `AssetConfigureImport.Gated` covers the offline refusal naming `resource_inspect` and a game session refused at the hook. `AssetConfigureImport.DryRunWritesNothing` requires a preview that says it read no stream and leaves the sidecar byte-identical, and a refused preview. `AssetConfigureImport.VerifiesAndRollsBack` drives the call against a scripted editor: a change that holds is reported with what it replaced, and a change the stream does not load with, or a reimport that fails, leaves the sidecar's bytes as they were; with the rollback removed it fails, which is the run that proves it can. `Tools.ResourceInspectReportsImportOptions` reads both sidecars through `resource_inspect`. Godot integration, on 4.5.1, 4.6.2 and 4.7.2, requests 6000 to 6045: a half-second OGG and a WAV are written into the fixture after the editor starts and imported with `asset_reimport`; a detached game on a scene playing the OGG is read after 1.6 seconds and must report durable evidence that playback started and finished naturally, with the player stopped, which is the control; then a dry run that asks the editor, `loop` and `loop_offset` on the OGG and a window on the WAV set by the name `forward`, each read back through `resource_inspect` with the uid it had and through the stream the tool loaded; seven refusals, after which both assets still read as the two changes left them; and the same game again, which must still be playing. `music_loop_workflow.py`'s fourth row, with `asset_configure_import`, loops on 4.5.1 and 4.7.2. The engine-output gate stayed clean throughout. |
+| **Safety class** | `create/set`. Dry run, no confirmation token. It changes values in one existing sidecar. It adds no `[params]` key, removes none and never changes the importer, though for a scene it adds an animation's entry inside `_subresources`, and the same call twice leaves the same file. It registers no undo entry. The way back is the same call with the `previous` values the result carries. |
+| **Proving test** | Native, in `tests/test_asset_configure_import.cpp`. `AssetConfigureImport.RequestValidation` covers the rules under **Rules** below against the sidecars 4.5.1, 4.6.2 and 4.7.2 wrote for an OGG and a WAV, each refused with a 400 naming the argument: a missing, empty or over-long `asset_path`, a `.import` path with its asset in `retry_with`, a path under `.godot/`, a missing, empty or non-object `options`, an unknown argument, `loop` given as `1`, `"yes"` and `null`, a negative `loop_offset` and one at the track's length, `edit/loop_mode` given as `5`, `-1`, `2.5`, a word that is not a label and `true`, a negative begin, an end of 0, a window under a mode that ignores it with the mode in `retry_with`, a begin after the end, an end past the stream and a begin at its last frame, a WAV key on an OGG and an OGG key on a WAV each with the other in `retry_with`, a key the table does not hold naming the ones it does, a key the sidecar lacks, and a texture refused on `asset_path` naming its importer. `AssetConfigureImport.SidecarEdit` requires the edited file to equal the original with only the named lines changed, in an LF file, a CRLF file and one with no final newline, refuses a sidecar Godot cannot parse with its line, refuses a key that appears twice or shares its line, and checks both divergence readers against the file and the stream, including Forward loading as loop mode 1. `AssetConfigureImport.Registration` requires `live` only, editor sessions for the tool and for `asset.readImportedStream`, a mutation with `dry_run`, idempotent, and no confirmation token. `AssetConfigureImport.Gated` covers the offline refusal naming `resource_inspect` and a game session refused at the hook. `AssetConfigureImport.DryRunWritesNothing` requires a preview that says it read no stream and leaves the sidecar byte-identical, and a refused preview. `AssetConfigureImport.VerifiesAndRollsBack` drives the call against a scripted editor: a change that holds is reported with what it replaced, and a change the stream does not load with, or a reimport that fails, leaves the sidecar's bytes as they were; with the rollback removed it fails, which is the run that proves it can. `Tools.ResourceInspectReportsImportOptions` reads both sidecars through `resource_inspect`. Godot integration, on 4.5.1, 4.6.2 and 4.7.2, requests 6000 to 6045: a half-second OGG and a WAV are written into the fixture after the editor starts and imported with `asset_reimport`; a detached game on a scene playing the OGG is read after 1.6 seconds and must report durable evidence that playback started and finished naturally, with the player stopped, which is the control; then a dry run that asks the editor, `loop` and `loop_offset` on the OGG and a window on the WAV set by the name `forward`, each read back through `resource_inspect` with the uid it had and through the stream the tool loaded; seven refusals, after which both assets still read as the two changes left them; and the same game again, which must still be playing. `music_loop_workflow.py`'s fourth row, with `asset_configure_import`, loops on 4.5.1 and 4.7.2. The engine-output gate stayed clean throughout. For the scene importer: `AssetConfigureImport.SceneRequestValidation`, `SceneSidecarEdit` and `SceneVerifiesAndRollsBack`, and `Tools.ResourceInspectSummarisesSubresources`, each failing with its part of the change taken out; Godot integration requests 7418 to 7427 on all three lines loop the fixture model's idle, read it back through `resource_inspect` and through `anim_list_tracks` on an instance of the model, refuse an unknown animation and mode 3 with nothing written, and take idle back out of its loop with the reported `previous`. |
 | **Reviewer** | Accepted by Shane Wall on 2026-09-25 for #958. It is a mutation, so the security argument is recorded below; nobody else has reviewed it. |
 
 The evidence below comes from `tools/vibe/probes/import_config_engine.py`, run
@@ -196,8 +196,8 @@ only.
   `.import` path are refused.
 - The sidecar must parse the way Godot's parser does, read with the reader
   `project_audit_assets` uses. A sidecar that does not is refused with its line.
-- The importer must be `wav`, `oggvorbisstr` or `mp3`. Anything else is refused,
-  naming the three. Widening that list is a contract change with its own probe
+- The importer must be `wav`, `oggvorbisstr`, `mp3` or, since #1425, `scene`.
+  Anything else is refused, naming the four. Widening that list is a contract change with its own probe
   rows, because each rule below comes from a measurement.
 - `options` holds one or more of the keys below, and each must also be under
   `[params]` in this sidecar.
@@ -232,16 +232,88 @@ parse gives the parse error and its line instead. That answers "does this track
 loop" without an editor, and it is what `previous` is checked against.
 
 **What it will not do.** It changes one asset per call. It changes no importer
-and adds or removes no key. It does not touch the texture, font, scene or
-translation importers until an amendment with its own evidence widens the
-table. It never writes under `.godot/`, never creates a sidecar, and refuses
+and adds or removes no key. It does not touch the texture, font or translation
+importers, or any scene option but an animation's loop mode, until an amendment
+with its own evidence widens the table. It never writes under `.godot/`, never creates a sidecar, and refuses
 offline and in a game.
 
 **Security.** It writes one file, the sidecar beside a project-contained asset,
 through the containment and the lock the other project writers use. Every value
 is formatted by Didi as a ConfigFile boolean, integer or number, never a
-caller's string, so nothing a caller sends becomes a new line or a new key. It
-takes no expression or script, and the reimport is the editor's own.
+caller's string, so nothing a caller sends becomes a new line or a new key. The
+one exception is a scene's animation name, which becomes a key inside
+`_subresources`: it is written only when the scene loads an animation of that
+name, read from the editor first, and Didi quotes and escapes it. It takes no
+expression or script, and the reimport is the editor's own.
+
+**The scene importer (#1425).** An animation imported from a `.glb` loops only
+when the scene importer's sub-resource option says so, and nothing wrote it:
+`asset_configure_import` refused the importer, `asset_reimport` takes no
+options, and `scene_set_property` cannot reach an imported scene's internals.
+The widening below comes from `tools/vibe/probes/scene_import_loop_engine.py`,
+run on 4.5.1, 4.6.2 and 4.7.2 on 2026-10-15 against the harness model
+`tests/godot_smoke/models/probe_model.glb` (animations idle and wave), and from
+the importer's source at the three tags. Every row was the same on all three.
+
+The importer declares `settings/loop_mode` per animation as an int with the
+enum `None,Linear,Pingpong` and default 0, read from
+`_subresources["animations"][<name>]`. It fills the animation's other options
+with their defaults only when the animation has an entry, and then always calls
+`set_loop_mode`, so an entry that names any option resets the loop to None
+unless it sets the mode too. Each probe case is a fresh project holding the
+model and the engine's baseline sidecar with only `_subresources` changed,
+imported once:
+
+| `_subresources` written | idle loads as | What the engine writes back |
+| :--- | :--- | :--- |
+| `{}`, the import's own | 0 | `{}` |
+| idle `settings/loop_mode` 1, on one line or the engine's layout | 1 | idle with all 2056 options, about 69 KB |
+| idle 2 and wave 1 | 2 and 1 | both expanded, about 139 KB |
+| idle 0 | 0 | expanded |
+| idle 3 | 3, a mode with no name | expanded |
+| idle -1 | 255 | expanded |
+| idle `"linear"` | 0 | expanded |
+| idle `true`, idle `1.0` | 1 | expanded |
+| an animation named `nope` | idle and wave unchanged | `nope` kept as written |
+| idle `settings/not_an_option` 1 | 0 | expanded, the unknown key kept |
+| idle 1 beside `"meshes": {}` | 1 | expanded, `meshes` kept |
+
+No case printed an ERROR or a WARNING, wrote `valid=false` or changed the uid.
+The 2056 options are 256 slices of eight each and eight of the animation's own.
+
+**Rules for a scene.** `options` is `{"_subresources": {"animations": {...}}}`
+and nothing else. Each named animation takes `settings/loop_mode` alone, 0 to 2
+or one of the declared labels matched without regard to case, and must be an
+animation the scene loads, read from the editor before anything is written. At
+most 64 in one call. The `_subresources` value is parsed only along the path a
+change reaches, every other entry keeps its text, and the whole value is
+written back in the engine's own layout, one entry a line. A value that does not
+read as Godot writes it, or that names a category, an animation or the option
+twice, is `hand_edited_import_metadata`. After the reimport the sidecar must
+hold each mode and the scene must load with it; otherwise the previous bytes go
+back as for audio. The sidecar cap moved from 1 MiB to 16 MiB, because the
+engine's expansion would put a model with sixteen configured animations past
+the old one. `resource_inspect` reports `_subresources` by category and name,
+with each animation's `settings/loop_mode`, instead of its text.
+
+**The read.** `asset.readImportedStream` answers a `PackedScene` with
+`animations`, read from `PackedScene.get_state` rather than an instance, so a
+`@tool` root script never runs inside the user's editor. An `AnimationMixer`
+keeps its libraries as one Dictionary property, `libraries`, on 4.5.1, and as
+one Object property per library, `libraries/<name>`, on 4.6.2 and 4.7.2. The
+probe reads both ways in every case and the state agrees with an instance. The
+binds are the same on all three lines:
+
+| Method | Hash |
+| :--- | :--- |
+| `PackedScene.get_state` | 3479783971 |
+| `SceneState.get_node_count` | 3905245786 |
+| `SceneState.get_node_property_count` | 923996154 |
+| `SceneState.get_node_property_name` | 351665558 |
+| `SceneState.get_node_property_value` | 678354945 |
+| `AnimationLibrary.get_animation_list` | 3995934104 |
+| `AnimationLibrary.get_animation` | 2933122410 |
+| `Animation.get_loop_mode` | 1988889481 |
 
 ### ACCEPTED (IMPLEMENTED): `audio_add_bus`
 

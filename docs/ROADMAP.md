@@ -331,7 +331,7 @@ These are missing capabilities that an AI agent actually requires to complete fu
 - **Debug Draw Modifiers**: Non-destructive debug wireframes passed as capture parameters rather than global sticky toggles.
 
 ### 3. Asset Import and Pipeline Management
-- **Import Preset Configuration**: Configure compression modes, 3D normal filters, and mesh collision generation. Delivered for audio loop options as `asset_configure_import` (#958); every other importer needs its own measured rows before the tool will set it.
+- **Import Preset Configuration**: Configure compression modes, 3D normal filters, and mesh collision generation. Delivered for audio loop options as `asset_configure_import` (#958), and for an imported scene's animation loop modes (#1425); every other importer needs its own measured rows before the tool will set it.
 - **Localisation and Game Data**: still open under #779. Nothing on the surface writes a translation CSV or a JSON of game data, and writing the bytes is the smaller half. The engine imports every `.csv` as translations unless a sidecar names another importer first, and an imported CSV's own text never ships in an export. The game has to register the `.translation` files the import produced, not the CSV. The engine measurements are in #987.
 
 ### 4. Animation and UI Authoring

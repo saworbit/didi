@@ -591,8 +591,8 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
          "asset first."},
         {"asset_configure_import.options",
          "The import options to set and their new values. An OGG or MP3 takes loop and "
-         "loop_offset, a WAV edit/loop_mode, edit/loop_begin and edit/loop_end. Every other key "
-         "is refused, naming the ones this asset's importer takes."},
+         "loop_offset, a WAV edit/loop_mode, edit/loop_begin and edit/loop_end, a scene "
+         "_subresources. Every other key is refused, naming the ones this asset's importer takes."},
 
         // -- Audio ------------------------------------------------------------
         {"audio_add_bus.name",

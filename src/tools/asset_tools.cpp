@@ -2920,6 +2920,16 @@ Result<ImportPlan> planImport(const json& args, const std::shared_ptr<ipc::IIpcC
         auto read = ipc->sendRequest("asset.readImportedStream", json{{"path", plan.asset_path}}, 10000);
         if (auto failed = bridgeFailure(read)) return *failed;
         plan.stream = read.value();
+        // An extension from before #1425 loads the scene and lists none of
+        // its animations, so no name could be checked before the write.
+        if (plan.sidecar.importer == "scene" &&
+            !(plan.stream.is_object() && plan.stream.contains("animations"))) {
+            return Error(501,
+                         "The attached editor's Didi extension is older than this server and "
+                         "cannot read an imported scene's animations, so a loop change could not be "
+                         "checked. Install the addon from this build.",
+                         json{{"parameter", "asset_path"}, {"retryable", false}});
+        }
         auto bounded = offline::planImportChanges(plan.sidecar, plan.options, streamFacts(plan.stream));
         if (bounded.isErr()) return bounded.error();
         plan.changes = std::move(bounded.value());
@@ -3165,11 +3175,10 @@ void ToolRegistry::registerAssetTools() {
             "Changes an imported asset's import options in its .import file, reimports it in the "
             "attached editor, and checks what the engine then loads. This is how a music track "
             "is made to loop: loop: true for an OGG or MP3, edit/loop_mode 2 (Forward) for a "
-            "WAV. An imported model's animation loops by _subresources. It sets those loop "
-            "options only, and refuses any other importer or option. Godot checks none of these "
-            "values, so the tool does: a value of the wrong type, a loop mode Godot has no name "
-            "for, an offset or a loop window outside the track, an animation the scene does not "
-            "have. If the reimported asset does not load with what was "
+            "WAV, _subresources for a model's animation. It sets those loop options only, and "
+            "refuses any other importer or option. Godot checks none of these values, so the tool "
+            "does: a value of the wrong type, a loop mode Godot has no name for, an offset or a "
+            "loop window outside the track. If the reimported asset does not load with what was "
             "asked, the previous file is put back and reimported. resource_inspect reports an "
             "asset's current import options.";
         t.inputSchema = {
@@ -3196,9 +3205,8 @@ void ToolRegistry::registerAssetTools() {
                                                            "for the last one, under loop modes 2 to 4."}}},
                         {"_subresources", {{"type", "object"},
                                            {"description",
-                                            "Scene (.glb, .gltf, .blend): {\"animations\": {\"idle\": "
-                                            "{\"settings/loop_mode\": 1}}}, 0 None, 1 Linear, 2 "
-                                            "Pingpong, as the number or the name."}}}
+                                            "Scene: animations.<name>.settings/loop_mode, 0 None, 1 "
+                                            "Linear or 2 Pingpong."}}}
                     }}
                 }}
             }},

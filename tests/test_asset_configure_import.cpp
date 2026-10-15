@@ -780,6 +780,23 @@ void scene_verifies_and_rolls_back() {
         ASSERT_EQ(reimports, 0);
         ASSERT_EQ(sidecar(), kSceneSidecar);
     }
+    {
+        // An extension from before the scene read lists no animations, so
+        // nothing could be checked: refused, and nothing is written.
+        ScopedProject project;
+        sceneProject(project);
+        int reimports = 0;
+        editor->answer = [&](const std::string& method, const json&) -> didi::Result<json> {
+            if (method == "asset.reimport") ++reimports;
+            return json{{"path", "res://models/probe_model.glb"}, {"class", "PackedScene"},
+                        {"properties", json::object()}};
+        };
+        const auto result = registry.callTool("asset_configure_import", call);
+        ASSERT_TRUE(result.isError);
+        ASSERT_TRUE(textOf(result).find("older than this server") != std::string::npos);
+        ASSERT_EQ(reimports, 0);
+        ASSERT_EQ(sidecar(), kSceneSidecar);
+    }
     registry.setIpcClient(nullptr);
 }
 
