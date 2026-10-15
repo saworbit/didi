@@ -333,6 +333,136 @@ void reloadOpenSceneTab(GDExtensionObjectPtr editor, const std::string& path,
     }
 }
 
+// Enough for any model, and a bound on a scene that is not one.
+constexpr int64_t kMaxPackedSceneNodes = 4096;
+constexpr size_t kMaxSceneAnimations = 1024;
+
+// The loop mode of every animation an imported scene holds, read from its
+// packed state, so nothing in the scene is instanced inside the user's editor
+// and no script of its runs (#1425). An AnimationMixer keeps its libraries as
+// one Dictionary property, libraries, on 4.5, and as one Object property per
+// library, libraries/<name>, from 4.6: measured on 4.5.1, 4.6.2 and 4.7.2 by
+// tools/vibe/probes/scene_import_loop_engine.py, which reads the modes this way
+// and by instancing and found them the same. A library other than the default
+// one names its animations library/name, as the mixer does. Every bind below
+// has the same hash on all three lines.
+Result<json> packedSceneAnimations(GDExtensionObjectPtr packed) {
+    for (const auto& bind : {std::make_tuple("PackedScene", "get_state", 3479783971LL),
+                             std::make_tuple("SceneState", "get_node_count", 3905245786LL),
+                             std::make_tuple("SceneState", "get_node_property_count", 923996154LL),
+                             std::make_tuple("SceneState", "get_node_property_name", 351665558LL),
+                             std::make_tuple("SceneState", "get_node_property_value", 678354945LL),
+                             std::make_tuple("AnimationLibrary", "get_animation_list", 3995934104LL),
+                             std::make_tuple("AnimationLibrary", "get_animation", 2933122410LL),
+                             std::make_tuple("Animation", "get_loop_mode", 1988889481LL)}) {
+        auto required = requireMethodBind(std::get<0>(bind), std::get<1>(bind), std::get<2>(bind));
+        if (required.isErr()) return Error(501, required.error().message);
+    }
+    const auto integer = [](Result<VariantValue> value) -> Result<int64_t> {
+        if (value.isErr()) return value.error();
+        return scalarFromVariant<int64_t>(value.value(), GDEXTENSION_VARIANT_TYPE_INT);
+    };
+    const auto text = [](VariantValue& value) {
+        return stringFromVariant(value, GodotApi::instance().variant_get_type(value.ptr()));
+    };
+    auto state_value = callObject(packed, "PackedScene", "get_state", 3479783971LL);
+    if (state_value.isErr()) return state_value.error();
+    auto state = objectFromVariant(state_value.value());
+    if (state.isErr() || !state.value()) return Error::internal("The scene has no packed state to read");
+    auto node_count = integer(callObject(state.value(), "SceneState", "get_node_count", 3905245786LL));
+    if (node_count.isErr()) return node_count.error();
+
+    json animations = json::object();
+    int64_t mixers = 0;
+    bool truncated = node_count.value() > kMaxPackedSceneNodes;
+    const auto readLibrary = [&](GDExtensionObjectPtr library, const std::string& library_name) -> Result<void> {
+        auto list = callObject(library, "AnimationLibrary", "get_animation_list", 3995934104LL);
+        if (list.isErr()) return list.error();
+        auto size = integer(callVariant(list.value(), "size"));
+        if (size.isErr()) return size.error();
+        for (int64_t index = 0; index < size.value(); ++index) {
+            if (animations.size() >= kMaxSceneAnimations) {
+                truncated = true;
+                return {};
+            }
+            auto index_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
+            if (index_value.isErr()) return index_value.error();
+            auto name_value = callVariant(list.value(), "get", {&index_value.value()});
+            if (name_value.isErr()) return name_value.error();
+            auto name = text(name_value.value());
+            if (name.isErr()) return name.error();
+            auto key = makeStringName(name.value());
+            if (key.isErr()) return key.error();
+            auto animation_value = callObject(library, "AnimationLibrary", "get_animation", 2933122410LL, {&key.value()});
+            if (animation_value.isErr()) return animation_value.error();
+            auto animation = objectFromVariant(animation_value.value());
+            if (animation.isErr() || !animation.value()) continue;
+            auto mode = integer(callObject(animation.value(), "Animation", "get_loop_mode", 1988889481LL));
+            if (mode.isErr()) return mode.error();
+            animations[library_name.empty() ? name.value() : library_name + "/" + name.value()] = mode.value();
+        }
+        return {};
+    };
+    for (int64_t node = 0; node < node_count.value() && node < kMaxPackedSceneNodes; ++node) {
+        auto node_index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, node);
+        if (node_index.isErr()) return node_index.error();
+        auto property_count = integer(callObject(state.value(), "SceneState", "get_node_property_count",
+                                                 923996154LL, {&node_index.value()}));
+        if (property_count.isErr()) return property_count.error();
+        bool mixer = false;
+        for (int64_t property = 0; property < property_count.value(); ++property) {
+            auto property_index = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, property);
+            if (property_index.isErr()) return property_index.error();
+            auto name_value = callObject(state.value(), "SceneState", "get_node_property_name", 351665558LL,
+                                         {&node_index.value(), &property_index.value()});
+            if (name_value.isErr()) return name_value.error();
+            auto name = text(name_value.value());
+            if (name.isErr()) return name.error();
+            const bool one_dictionary = name.value() == "libraries";
+            if (!one_dictionary && name.value().rfind("libraries/", 0) != 0) continue;
+            auto value = callObject(state.value(), "SceneState", "get_node_property_value", 678354945LL,
+                                    {&node_index.value(), &property_index.value()});
+            if (value.isErr()) return value.error();
+            mixer = true;
+            const auto type = GodotApi::instance().variant_get_type(value.value().ptr());
+            if (one_dictionary) {
+                if (type != GDEXTENSION_VARIANT_TYPE_DICTIONARY) continue;
+                auto keys = callVariant(value.value(), "keys");
+                auto values = callVariant(value.value(), "values");
+                if (keys.isErr()) return keys.error();
+                if (values.isErr()) return values.error();
+                auto size = integer(callVariant(keys.value(), "size"));
+                if (size.isErr()) return size.error();
+                for (int64_t index = 0; index < size.value(); ++index) {
+                    auto index_value = makeScalar(GDEXTENSION_VARIANT_TYPE_INT, index);
+                    if (index_value.isErr()) return index_value.error();
+                    auto library_key = callVariant(keys.value(), "get", {&index_value.value()});
+                    auto library_value = callVariant(values.value(), "get", {&index_value.value()});
+                    if (library_key.isErr()) return library_key.error();
+                    if (library_value.isErr()) return library_value.error();
+                    auto library_name = text(library_key.value());
+                    auto library = objectFromVariant(library_value.value());
+                    if (library_name.isErr() || library.isErr() || !library.value()) continue;
+                    if (auto read = readLibrary(library.value(), library_name.value()); read.isErr()) {
+                        return read.error();
+                    }
+                }
+            } else {
+                if (type != GDEXTENSION_VARIANT_TYPE_OBJECT) continue;
+                auto library = objectFromVariant(value.value());
+                if (library.isErr() || !library.value()) continue;
+                if (auto read = readLibrary(library.value(), name.value().substr(10)); read.isErr()) {
+                    return read.error();
+                }
+            }
+        }
+        if (mixer) ++mixers;
+    }
+    json read = {{"animations", std::move(animations)}, {"animation_mixers", mixers}};
+    if (truncated) read["truncated"] = true;
+    return read;
+}
+
 } // namespace
 
 json GodotBridge::bridgeResourceRefreshCached(const std::string& /*method*/, const json& params, const std::string& session_kind) {
@@ -414,7 +544,8 @@ json GodotBridge::bridgeAssetReadImportedStream(const std::string& /*method*/, c
     // editor's cached copy is updated in place by the reimport and is not
     // this read's business (#958). The properties are read through
     // Object.get by name, and AudioStream.get_length is the one new bind:
-    // 1740695150 on 4.5.1, 4.6.2 and 4.7.2.
+    // 1740695150 on 4.5.1, 4.6.2 and 4.7.2. An imported scene answers the
+    // loop mode of each animation it holds instead (#1425).
     if (!hasOnlyKeys(params, {"path"}) || !params.contains("path") || !params["path"].is_string()) {
         return errorJson(400, "asset.readImportedStream takes path, a res:// asset");
     }
@@ -461,6 +592,11 @@ json GodotBridge::bridgeAssetReadImportedStream(const std::string& /*method*/, c
         if (converted.isOk()) properties[name] = converted.value();
     }
     json answer = {{"path", path}, {"class", class_name}, {"properties", std::move(properties)}};
+    if (class_name == "PackedScene") {
+        auto read = packedSceneAnimations(object.value());
+        if (read.isErr()) return errorJson(read.error());
+        for (auto& [key, value] : read.value().items()) answer[key] = std::move(value);
+    }
     if (!names.empty()) {
         auto length = callObject(object.value(), "AudioStream", "get_length", 1740695150LL);
         if (length.isOk()) {

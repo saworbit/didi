@@ -15,10 +15,12 @@
 namespace didi::offline {
 namespace {
 
-constexpr size_t kMaxSidecarBytes = 1024 * 1024;
+// A scene import grows by about 69 KB for each animation configured in it,
+// because the engine writes every option the animation has (#1425).
+constexpr size_t kMaxSidecarBytes = 16 * 1024 * 1024;
 constexpr size_t kMaxOptions = 16;
 
-enum class OptionKind { boolean, seconds, loop_mode, frames };
+enum class OptionKind { boolean, seconds, loop_mode, frames, animation_loops };
 
 struct OptionRule {
     const char* importer;
@@ -38,6 +40,9 @@ constexpr OptionRule kRules[] = {
     {"oggvorbisstr", "loop_offset", OptionKind::seconds},
     {"mp3", "loop", OptionKind::boolean},
     {"mp3", "loop_offset", OptionKind::seconds},
+    // An imported scene's per-animation loop mode, which the scene importer
+    // reads from _subresources.animations.<name>.settings/loop_mode (#1425).
+    {"scene", "_subresources", OptionKind::animation_loops},
 };
 
 // The WAV importer's enum, in its declared order: Detect From WAV, Disabled,
@@ -114,6 +119,280 @@ std::optional<int64_t> currentInteger(const ImportSidecar& sidecar, const std::s
     const auto entries = paramsEntries(sidecar, key);
     if (entries.empty()) return std::nullopt;
     return integerOf(importParamValue(entries.back()->value_text));
+}
+
+// A Godot dictionary literal, parsed only as far as an edit reaches. Each entry
+// keeps its key and its value as the text the file holds, so everything an
+// edit does not touch is written back as it was. Once an animation is
+// configured the engine writes every option it has under it, 2056 keys and
+// about 69 KB, measured on 4.5.1, 4.6.2 and 4.7.2, and none of that is this
+// tool's to parse (#1425).
+struct DictionaryText {
+    struct Item {
+        std::string key_text;    // as written, quotes and escapes included
+        std::string key;         // the string the key holds
+        std::string value_text;  // as written, trimmed
+    };
+    std::vector<Item> items;
+};
+
+size_t skipSpace(std::string_view text, size_t at) {
+    while (at < text.size() && (text[at] == ' ' || text[at] == '\t' || text[at] == '\n' || text[at] == '\r')) {
+        ++at;
+    }
+    return at;
+}
+
+// One past the closing quote of the string that opens at `at`.
+std::optional<size_t> quotedEnd(std::string_view text, size_t at) {
+    for (size_t i = at + 1; i < text.size(); ++i) {
+        if (text[i] == '\\') {
+            ++i;
+            continue;
+        }
+        if (text[i] == '"') return i + 1;
+    }
+    return std::nullopt;
+}
+
+// Where the value that starts at `at` ends: the first comma or closing brace
+// outside every string and bracket.
+std::optional<size_t> valueEnd(std::string_view text, size_t at) {
+    std::vector<char> open;
+    for (size_t i = at; i < text.size(); ++i) {
+        const char c = text[i];
+        if (c == '"') {
+            const auto end = quotedEnd(text, i);
+            if (!end) return std::nullopt;
+            i = *end - 1;
+        } else if (c == '{' || c == '[' || c == '(') {
+            open.push_back(c);
+        } else if (c == '}' || c == ']' || c == ')') {
+            if (open.empty()) {
+                if (c == '}') return i;
+                return std::nullopt;
+            }
+            if (open.back() != (c == '}' ? '{' : c == ']' ? '[' : '(')) return std::nullopt;
+            open.pop_back();
+        } else if (c == ',' && open.empty()) {
+            return i;
+        }
+    }
+    return std::nullopt;
+}
+
+// Every key in these dictionaries is a string, as Godot writes them.
+std::optional<DictionaryText> parseDictionaryText(std::string_view text) {
+    DictionaryText dictionary;
+    size_t at = skipSpace(text, 0);
+    if (at >= text.size() || text[at] != '{') return std::nullopt;
+    at = skipSpace(text, at + 1);
+    while (at < text.size()) {
+        if (text[at] == '}') {
+            if (skipSpace(text, at + 1) != text.size()) return std::nullopt;
+            return dictionary;
+        }
+        if (text[at] != '"') return std::nullopt;
+        const auto key_end = quotedEnd(text, at);
+        if (!key_end) return std::nullopt;
+        DictionaryText::Item item;
+        item.key_text = std::string(text.substr(at, *key_end - at));
+        const auto decoded = config_file::stringValue(item.key_text);
+        if (!decoded || !decoded->problem.empty()) return std::nullopt;
+        item.key = decoded->text;
+        at = skipSpace(text, *key_end);
+        if (at >= text.size() || text[at] != ':') return std::nullopt;
+        at = skipSpace(text, at + 1);
+        const auto end = valueEnd(text, at);
+        if (!end) return std::nullopt;
+        item.value_text = strings::trim(text.substr(at, *end - at));
+        if (item.value_text.empty()) return std::nullopt;
+        dictionary.items.push_back(std::move(item));
+        at = *end;
+        if (text[at] == ',') at = skipSpace(text, at + 1);
+    }
+    return std::nullopt;
+}
+
+// Godot's own layout for a dictionary: one entry a line, nested ones the same.
+std::string dictionaryText(const DictionaryText& dictionary) {
+    if (dictionary.items.empty()) return "{}";
+    std::string text = "{\n";
+    for (size_t i = 0; i < dictionary.items.size(); ++i) {
+        if (i) text += ",\n";
+        text += dictionary.items[i].key_text + ": " + dictionary.items[i].value_text;
+    }
+    return text + "\n}";
+}
+
+std::string quotedKey(const std::string& key) {
+    std::string text = "\"";
+    for (const char c : key) {
+        switch (c) {
+            case '"': text += "\\\""; break;
+            case '\\': text += "\\\\"; break;
+            case '\n': text += "\\n"; break;
+            case '\r': text += "\\r"; break;
+            case '\t': text += "\\t"; break;
+            default: text += c;
+        }
+    }
+    return text + "\"";
+}
+
+// The entry for `key`. False when the dictionary names it twice, which Godot
+// never writes.
+bool findItem(DictionaryText& dictionary, const std::string& key, DictionaryText::Item*& found) {
+    found = nullptr;
+    for (auto& item : dictionary.items) {
+        if (item.key != key) continue;
+        if (found) return false;
+        found = &item;
+    }
+    return true;
+}
+
+DictionaryText::Item& itemOrNew(DictionaryText& dictionary, DictionaryText::Item* found, const std::string& key,
+                                const std::string& empty_value) {
+    if (found) return *found;
+    dictionary.items.push_back({quotedKey(key), key, empty_value});
+    return dictionary.items.back();
+}
+
+// settings/loop_mode under each animation _subresources configures, null for
+// one that does not set it. Nothing when the text does not read as Godot
+// writes it.
+std::optional<std::map<std::string, json>> configuredLoopModes(const std::string& subresources) {
+    auto root = parseDictionaryText(subresources);
+    if (!root) return std::nullopt;
+    std::map<std::string, json> modes;
+    DictionaryText::Item* animations = nullptr;
+    if (!findItem(*root, "animations", animations)) return std::nullopt;
+    if (!animations) return modes;
+    auto named = parseDictionaryText(animations->value_text);
+    if (!named) return std::nullopt;
+    for (const auto& entry : named->items) {
+        if (modes.count(entry.key)) return std::nullopt;
+        auto settings = parseDictionaryText(entry.value_text);
+        if (!settings) return std::nullopt;
+        DictionaryText::Item* mode = nullptr;
+        if (!findItem(*settings, "settings/loop_mode", mode)) return std::nullopt;
+        modes[entry.key] = mode ? importParamValue(mode->value_text) : json();
+    }
+    return modes;
+}
+
+// The scene importer's enum for settings/loop_mode, "None,Linear,Pingpong",
+// identical at 4.5.1-stable, 4.6.2-stable and 4.7.2-stable.
+constexpr const char* kAnimationLoopLabels[] = {"None", "Linear", "Pingpong"};
+constexpr size_t kMaxAnimations = 64;
+
+std::optional<Error> planAnimationLoops(const config_file::Entry& entry, const json& value,
+                                        const std::optional<ImportedStreamFacts>& stream,
+                                        std::vector<ImportOptionChange>& changes) {
+    const std::string key = "_subresources";
+    const std::string shape = "{\"animations\": {\"<name>\": {\"settings/loop_mode\": 1}}}";
+    if (!value.is_object() || value.size() != 1 || !value.contains("animations")) {
+        return refuse("options",
+                      "_subresources takes " + shape + ". This tool sets an imported animation's "
+                      "loop mode and no other sub-resource option.",
+                      {{"key", key}});
+    }
+    const auto& animations = value["animations"];
+    if (!animations.is_object() || animations.empty()) {
+        return refuse("options", "_subresources.animations must name at least one animation, as " + shape + ".",
+                      {{"key", key}});
+    }
+    if (animations.size() > kMaxAnimations) {
+        return refuse("options", "_subresources.animations may name at most 64 animations.", {{"key", key}});
+    }
+    const auto current = configuredLoopModes(entry.value_text);
+    if (!current) {
+        return Error(422,
+                     "The _subresources value in this sidecar does not read as the dictionary Godot "
+                     "writes. Reimport the asset once in the editor, which rewrites the file, and "
+                     "call again.",
+                     json{{"code", "hand_edited_import_metadata"}, {"key", key}, {"retryable", false}});
+    }
+    json known = json::array();
+    if (stream && stream->animations) {
+        for (const auto& [name, _] : *stream->animations) {
+            if (known.size() < kMaxAnimations) known.push_back(name);
+        }
+    }
+    for (const auto& [name, settings] : animations.items()) {
+        if (!settings.is_object() || settings.size() != 1 || !settings.contains("settings/loop_mode")) {
+            return refuse("options",
+                          "_subresources.animations." + name + " takes settings/loop_mode and no "
+                          "other animation option.",
+                          {{"key", key}, {"animation", name}});
+        }
+        const auto& requested = settings["settings/loop_mode"];
+        std::optional<int64_t> mode = integerOf(requested);
+        if (requested.is_string()) {
+            const auto wanted = lowered(requested.get<std::string>());
+            for (int64_t index = 0; index < 3; ++index) {
+                if (wanted == lowered(kAnimationLoopLabels[index])) mode = index;
+            }
+        }
+        if (!mode || *mode < 0 || *mode > 2) {
+            return refuse("options",
+                          "settings/loop_mode for " + name + " must be 0 None, 1 Linear or 2 Pingpong, "
+                          "as the number or the name. Godot loads 3 as a loop mode it has no name "
+                          "for, -1 as 255, and a word as 0, without a word.",
+                          {{"key", key}, {"animation", name}});
+        }
+        if (stream && stream->animations && !stream->animations->count(name)) {
+            return refuse("options",
+                          "The imported scene has no animation named " + name + ". Godot keeps a "
+                          "setting for a name it does not have and applies it to nothing.",
+                          {{"key", key}, {"animation", name}, {"animations", known}});
+        }
+        ImportOptionChange change;
+        change.key = key;
+        change.animation = name;
+        change.value = *mode;
+        change.text = std::to_string(*mode);
+        const auto held = current->find(name);
+        if (held != current->end() && !held->second.is_null()) {
+            change.previous = held->second;
+        } else if (stream && stream->animations && stream->animations->count(name)) {
+            // Configured nowhere yet, so the way back is the mode it loads
+            // with now.
+            change.previous = stream->animations->at(name);
+        }
+        change.previous_text = change.previous.is_null() ? std::string() : change.previous.dump();
+        changes.push_back(std::move(change));
+    }
+    return std::nullopt;
+}
+
+// resource_inspect's view of _subresources: each category and name, and an
+// animation's settings/loop_mode, rather than the text, which runs to about
+// 69 KB for each animation once one is configured (#1425).
+std::optional<json> subresourcesSummary(const std::string& subresources) {
+    auto root = parseDictionaryText(subresources);
+    if (!root) return std::nullopt;
+    json summary = json::object();
+    for (const auto& category : root->items) {
+        auto named = parseDictionaryText(category.value_text);
+        if (!named) return std::nullopt;
+        json entries = json::object();
+        for (const auto& entry : named->items) {
+            json kept = json::object();
+            if (category.key == "animations") {
+                auto settings = parseDictionaryText(entry.value_text);
+                if (!settings) return std::nullopt;
+                DictionaryText::Item* mode = nullptr;
+                if (findItem(*settings, "settings/loop_mode", mode) && mode) {
+                    kept["settings/loop_mode"] = importParamValue(mode->value_text);
+                }
+            }
+            entries[entry.key] = std::move(kept);
+        }
+        summary[category.key] = std::move(entries);
+    }
+    return summary;
 }
 
 } // namespace
@@ -196,7 +475,7 @@ Result<std::string> readImportSidecarFile(const std::filesystem::path& sidecar) 
     const auto size = std::filesystem::file_size(sidecar, error);
     if (error) return Error::notFound("The .import sidecar is not there");
     if (size > kMaxSidecarBytes) {
-        return Error(413, "The .import sidecar is larger than 1 MiB", json{{"code", "file_too_large"}});
+        return Error(413, "The .import sidecar is larger than 16 MiB", json{{"code", "file_too_large"}});
     }
     std::ifstream input(sidecar, std::ios::binary);
     if (!input) return Error::notFound("The .import sidecar cannot be opened");
@@ -271,13 +550,13 @@ Result<std::vector<ImportOptionChange>> planImportChanges(
     const std::optional<ImportedStreamFacts>& stream) {
     if (!configurableImporter(sidecar.importer)) {
         return Error(400,
-                     "asset_configure_import sets the loop options of WAV, OGG and MP3 imports, "
-                     "and this asset is imported by the \"" + sidecar.importer +
-                         "\" importer. resource_inspect lists every option it has.",
+                     "asset_configure_import sets the loop options of WAV, OGG and MP3 imports "
+                     "and of an imported scene's animations, and this asset is imported by the \"" +
+                         sidecar.importer + "\" importer. resource_inspect lists every option it has.",
                      json{{"code", "invalid_arguments"},
                           {"parameter", "asset_path"},
                           {"importer", sidecar.importer},
-                          {"configurable_importers", json::array({"wav", "oggvorbisstr", "mp3"})},
+                          {"configurable_importers", json::array({"wav", "oggvorbisstr", "mp3", "scene"})},
                           {"retryable", false}});
     }
     const auto keys = configurableKeys(sidecar.importer);
@@ -307,6 +586,10 @@ Result<std::vector<ImportOptionChange>> planImportChanges(
                           "that wrote it does not have that option. Reimport the asset once in "
                           "the editor, which writes every option it has.",
                           {{"key", key}});
+        }
+        if (rule->kind == OptionKind::animation_loops) {
+            if (auto refused = planAnimationLoops(*entries.back(), value, stream, changes)) return *refused;
+            continue;
         }
         ImportOptionChange change;
         change.key = key;
@@ -371,6 +654,8 @@ Result<std::vector<ImportOptionChange>> planImportChanges(
                 change.text = std::to_string(*mode);
                 break;
             }
+            case OptionKind::animation_loops:
+                break;
             case OptionKind::frames: {
                 const auto frames = integerOf(value);
                 if (!frames) {
@@ -449,8 +734,9 @@ Result<std::vector<ImportOptionChange>> planImportChanges(
         }
     }
 
-    std::sort(changes.begin(), changes.end(),
-              [](const ImportOptionChange& a, const ImportOptionChange& b) { return a.key < b.key; });
+    std::sort(changes.begin(), changes.end(), [](const ImportOptionChange& a, const ImportOptionChange& b) {
+        return a.key != b.key ? a.key < b.key : a.animation < b.animation;
+    });
     return changes;
 }
 
@@ -476,32 +762,95 @@ Result<std::string> applyImportChanges(const ImportSidecar& sidecar,
         start = newline + 1;
     }
 
+    const auto hand_edited = [](const std::string& key, const std::string& why) {
+        return Error(422,
+                     "The " + key + " line in this sidecar " + why +
+                         ", which Godot never writes. Reimport the asset once in the editor, "
+                         "which rewrites the file, and call again.",
+                     json{{"code", "hand_edited_import_metadata"}, {"key", key}, {"retryable", false}});
+    };
+    std::vector<const ImportOptionChange*> animation_loops;
     for (const auto& change : changes) {
+        if (!change.animation.empty()) {
+            animation_loops.push_back(&change);
+            continue;
+        }
         const auto entries = paramsEntries(sidecar, change.key);
-        const auto hand_edited = [&](const std::string& why) {
-            return Error(422,
-                         "The " + change.key + " line in this sidecar " + why +
-                             ", which Godot never writes. Reimport the asset once in the editor, "
-                             "which rewrites the file, and call again.",
-                         json{{"code", "hand_edited_import_metadata"},
-                              {"key", change.key},
-                              {"retryable", false}});
-        };
-        if (entries.size() != 1) return hand_edited("appears " + std::to_string(entries.size()) + " times");
+        const auto hand_edited_here = [&](const std::string& why) { return hand_edited(change.key, why); };
+        if (entries.size() != 1) return hand_edited_here("appears " + std::to_string(entries.size()) + " times");
         const auto& entry = *entries.front();
         if (entry.joined || entry.key_line != entry.line || entry.line != entry.value_end_line) {
-            return hand_edited("spans more than one line");
+            return hand_edited_here("spans more than one line");
         }
         for (const auto& other : sidecar.scan.entries) {
             if (&other != &entry && (other.line == entry.line || other.key_line == entry.line ||
                                      (other.key_line <= entry.line && entry.line <= other.value_end_line))) {
-                return hand_edited("shares its line with another key");
+                return hand_edited_here("shares its line with another key");
             }
         }
         if (entry.line < 1 || static_cast<size_t>(entry.line) > lines.size()) {
-            return hand_edited("could not be found");
+            return hand_edited_here("could not be found");
         }
         lines[static_cast<size_t>(entry.line) - 1].content = change.key + "=" + change.text;
+    }
+
+    // An imported scene's animations, all in the one _subresources value,
+    // which the engine writes over many lines. The whole value is replaced,
+    // and every entry no change reaches keeps its text.
+    if (!animation_loops.empty()) {
+        const std::string key = "_subresources";
+        const auto entries = paramsEntries(sidecar, key);
+        if (entries.size() != 1) return hand_edited(key, "appears " + std::to_string(entries.size()) + " times");
+        const auto& entry = *entries.front();
+        if (entry.joined || entry.key_line != entry.line) return hand_edited(key, "has its key split across lines");
+        for (const auto& other : sidecar.scan.entries) {
+            if (&other != &entry && other.key_line <= entry.value_end_line && entry.line <= other.value_end_line) {
+                return hand_edited(key, "shares its lines with another key");
+            }
+        }
+        if (entry.line < 1 || static_cast<size_t>(entry.value_end_line) > lines.size()) {
+            return hand_edited(key, "could not be found");
+        }
+        auto subresources = parseDictionaryText(entry.value_text);
+        if (!subresources) return hand_edited(key, "does not read as a dictionary");
+        for (const auto* change : animation_loops) {
+            DictionaryText::Item* found = nullptr;
+            if (!findItem(*subresources, "animations", found)) return hand_edited(key, "names animations twice");
+            auto& animations = itemOrNew(*subresources, found, "animations", "{}");
+            auto named = parseDictionaryText(animations.value_text);
+            if (!named) return hand_edited(key, "does not read as a dictionary");
+            if (!findItem(*named, change->animation, found)) {
+                return hand_edited(key, "names animation " + change->animation + " twice");
+            }
+            auto& animation = itemOrNew(*named, found, change->animation, "{}");
+            auto settings = parseDictionaryText(animation.value_text);
+            if (!settings) return hand_edited(key, "does not read as a dictionary");
+            if (!findItem(*settings, "settings/loop_mode", found)) {
+                return hand_edited(key, "names settings/loop_mode twice for " + change->animation);
+            }
+            itemOrNew(*settings, found, "settings/loop_mode", change->text).value_text = change->text;
+            animation.value_text = dictionaryText(*settings);
+            animations.value_text = dictionaryText(*named);
+        }
+        const auto first = static_cast<size_t>(entry.line) - 1;
+        const auto last = static_cast<size_t>(entry.value_end_line) - 1;
+        const auto inner_ending = lines[first].ending.empty() ? std::string("\n") : lines[first].ending;
+        const auto final_ending = lines[last].ending;
+        std::vector<Line> replacement;
+        const auto written = key + "=" + dictionaryText(*subresources);
+        size_t cursor = 0;
+        while (true) {
+            const auto newline = written.find('\n', cursor);
+            if (newline == std::string::npos) {
+                replacement.push_back({written.substr(cursor), final_ending});
+                break;
+            }
+            replacement.push_back({written.substr(cursor, newline - cursor), inner_ending});
+            cursor = newline + 1;
+        }
+        lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(first),
+                    lines.begin() + static_cast<std::ptrdiff_t>(last) + 1);
+        lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(first), replacement.begin(), replacement.end());
     }
 
     std::string edited;
@@ -521,6 +870,20 @@ std::vector<std::string> sidecarDivergences(const ImportSidecar& after,
         const auto entries = paramsEntries(after, change.key);
         if (entries.empty()) {
             found.push_back(change.key + " is no longer in the sidecar");
+            continue;
+        }
+        if (!change.animation.empty()) {
+            const auto modes = configuredLoopModes(entries.back()->value_text);
+            if (!modes) {
+                found.push_back("_subresources does not read as a dictionary after the reimport");
+                continue;
+            }
+            const auto held = modes->find(change.animation);
+            if (held == modes->end() || held->second != change.value) {
+                found.push_back("animation " + change.animation + " has settings/loop_mode " +
+                                (held == modes->end() ? std::string("unset") : held->second.dump()) +
+                                " in the sidecar after the reimport, not " + change.text);
+            }
             continue;
         }
         const auto held = importParamValue(entries.back()->value_text);
@@ -551,8 +914,17 @@ std::vector<std::string> streamDivergences(const json& stream,
     const auto read = [&](const char* name) -> json {
         return properties.is_object() && properties.contains(name) ? properties[name] : json();
     };
+    const auto animations = stream.is_object() ? stream.value("animations", json::object()) : json::object();
     for (const auto& change : changes) {
-        if (change.key == "loop") {
+        if (!change.animation.empty()) {
+            const auto loaded = animations.is_object() && animations.contains(change.animation)
+                                    ? animations[change.animation]
+                                    : json();
+            if (loaded != change.value) {
+                found.push_back("animation " + change.animation + " loads with loop_mode " + loaded.dump() +
+                                ", not " + change.text);
+            }
+        } else if (change.key == "loop") {
             if (read("loop") != change.value) {
                 found.push_back("the stream loads with loop " + read("loop").dump() + ", not " + change.text);
             }
@@ -593,7 +965,14 @@ json describeImportSidecar(const std::string& text) {
     }
     json options = json::object();
     for (const auto& entry : sidecar.value().scan.entries) {
-        if (entry.section == "params") options[entry.key] = importParamValue(entry.value_text);
+        if (entry.section != "params") continue;
+        if (entry.key == "_subresources") {
+            if (auto summary = subresourcesSummary(entry.value_text)) {
+                options[entry.key] = std::move(*summary);
+                continue;
+            }
+        }
+        options[entry.key] = importParamValue(entry.value_text);
     }
     json described = {{"importer", sidecar.value().importer},
                       {"type", sidecar.value().resource_type},

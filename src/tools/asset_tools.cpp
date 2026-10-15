@@ -2780,12 +2780,17 @@ CallToolResult handleAssetReimport(const json& args, std::shared_ptr<ipc::IIpcCl
         auto error = response.error();
         // The editor carries on with the work after a timeout, so the advice
         // is to wait it out as a job, not to send the same call again (#1159).
-        if (error.data.is_object() && error.data.value("code", std::string()) == "reimport_idle_timeout") {
+        const bool idle_timeout =
+            error.data.is_object() && error.data.value("code", std::string()) == "reimport_idle_timeout";
+        if (idle_timeout) {
             error.message += ". The editor is still working on it, so do not send another reimport "
                              "now; give the next call a request_id, which runs it as a job that "
                              "waits up to 900000 ms";
         }
-        return CallToolResult::fromError(error, "Failed to reimport assets: ");
+        auto refused = CallToolResult::fromError(error, "Failed to reimport assets: ");
+        // The advice is this call's own; the bare bridge error lacks it.
+        refused.answersItsOwnFailure = idle_timeout;
+        return refused;
     }
     return CallToolResult::successJson(response.value());
 }
@@ -2831,12 +2836,24 @@ std::optional<offline::ImportedStreamFacts> streamFacts(const json& stream) {
         properties["mix_rate"].is_number_integer()) {
         facts.mix_rate = properties["mix_rate"].get<int64_t>();
     }
+    // An imported scene's animations, each with the loop mode it loads with.
+    if (stream.contains("animations") && stream["animations"].is_object()) {
+        std::map<std::string, int64_t> animations;
+        for (const auto& [name, mode] : stream["animations"].items()) {
+            if (mode.is_number_integer()) animations[name] = mode.get<int64_t>();
+        }
+        facts.animations = std::move(animations);
+    }
     return facts;
 }
 
 // What the preview and the call both work from: the asset as it is spelled on
 // disk, its sidecar as Godot's parser reads it, and the lines that would
 // change, checked against the stream when an editor can say what it is.
+// How long asset_configure_import waits for its reimport, and again for the
+// one that puts the previous file back (#1425).
+constexpr int64_t kConfigureReimportMs = 45000;
+
 struct ImportPlan {
     std::filesystem::path root;
     std::filesystem::path sidecar_path;
@@ -2912,6 +2929,16 @@ Result<ImportPlan> planImport(const json& args, const std::shared_ptr<ipc::IIpcC
         auto read = ipc->sendRequest("asset.readImportedStream", json{{"path", plan.asset_path}}, 10000);
         if (auto failed = bridgeFailure(read)) return *failed;
         plan.stream = read.value();
+        // An extension from before #1425 loads the scene and lists none of
+        // its animations, so no name could be checked before the write.
+        if (plan.sidecar.importer == "scene" &&
+            !(plan.stream.is_object() && plan.stream.contains("animations"))) {
+            return Error(501,
+                         "The attached editor's Didi extension is older than this server and "
+                         "cannot read an imported scene's animations, so a loop change could not be "
+                         "checked. Install the addon from this build.",
+                         json{{"parameter", "asset_path"}, {"retryable", false}});
+        }
         auto bounded = offline::planImportChanges(plan.sidecar, plan.options, streamFacts(plan.stream));
         if (bounded.isErr()) return bounded.error();
         plan.changes = std::move(bounded.value());
@@ -2919,9 +2946,17 @@ Result<ImportPlan> planImport(const json& args, const std::shared_ptr<ipc::IIpcC
     return plan;
 }
 
+// In the shape the call takes, so the way back is the same call with these.
 json changesAsValues(const std::vector<offline::ImportOptionChange>& changes, bool previous) {
     json values = json::object();
-    for (const auto& change : changes) values[change.key] = previous ? change.previous : change.value;
+    for (const auto& change : changes) {
+        const auto& value = previous ? change.previous : change.value;
+        if (change.animation.empty()) {
+            values[change.key] = value;
+        } else {
+            values[change.key]["animations"][change.animation]["settings/loop_mode"] = value;
+        }
+    }
     return values;
 }
 
@@ -2930,6 +2965,9 @@ json streamSummary(const json& stream) {
     json summary = {{"class", stream.value("class", std::string())},
                     {"properties", stream.value("properties", json::object())}};
     if (stream.contains("length_seconds")) summary["length_seconds"] = stream["length_seconds"];
+    for (const char* key : {"animations", "animation_mixers", "truncated"}) {
+        if (stream.contains(key)) summary[key] = stream[key];
+    }
     return summary;
 }
 
@@ -2995,7 +3033,12 @@ CallToolResult handleAssetConfigureImport(const json& args, std::shared_ptr<ipc:
     }
 
     json diagnostics = json::array();
-    const json reimport_request = {{"paths", json::array({plan.asset_path})}};
+    // The edit makes the editor import the asset on its own, and reimport_files
+    // waits for that pass to close. A scene's took 8 to 11 seconds on CI's
+    // 4.7.2 runner, past the 10 one bridge command may wait (#1425), so the
+    // reimport is started detached and read until it ends, as a job's is.
+    const json reimport_request = {{"paths", json::array({plan.asset_path})},
+                                   {"timeout_ms", kConfigureReimportMs}};
     // Puts the sidecar back as it was and imports it again, so a change that
     // did not hold leaves the asset as it found it.
     const auto restore = [&]() {
@@ -3004,13 +3047,13 @@ CallToolResult handleAssetConfigureImport(const json& args, std::shared_ptr<ipc:
             if (lock.isErr()) return false;
             if (files::writeFileAtomically(plan.sidecar_path, previous_text).isErr()) return false;
         }
-        auto again = ipc->sendRequest("asset.reimport", reimport_request, ipc::kWaitForDefinitiveResponse);
+        auto again = reimportAsJob(reimport_request, ipc);
         offline::ResourceIndexer::invalidateSharedIndex();
         gatherDiagnostics(diagnostics, again);
         return !bridgeFailure(again).has_value();
     };
 
-    auto reimported = ipc->sendRequest("asset.reimport", reimport_request, ipc::kWaitForDefinitiveResponse);
+    auto reimported = reimportAsJob(reimport_request, ipc);
     offline::ResourceIndexer::invalidateSharedIndex();
     gatherDiagnostics(diagnostics, reimported);
     if (auto failed = bridgeFailure(reimported)) {
@@ -3019,12 +3062,14 @@ CallToolResult handleAssetConfigureImport(const json& args, std::shared_ptr<ipc:
         data["asset_path"] = plan.asset_path;
         data["rolled_back"] = restored;
         data["engine_diagnostics"] = diagnostics;
-        return CallToolResult::fromError(
+        auto refused = CallToolResult::fromError(
             Error(failed->code,
                   "The options were written and the reimport failed: " + failed->message +
                       (restored ? " The previous sidecar is back and reimported."
                                 : " Putting the previous sidecar back failed too."),
                   data));
+        refused.answersItsOwnFailure = true;
+        return refused;
     }
 
     // Checked against the file and the stream rather than taken from the
@@ -3054,7 +3099,7 @@ CallToolResult handleAssetConfigureImport(const json& args, std::shared_ptr<ipc:
         const bool restored = restore();
         std::string summary;
         for (size_t i = 0; i < divergences.size(); ++i) summary += (i ? "; " : "") + divergences[i];
-        return CallToolResult::errorJson(
+        auto refused = CallToolResult::errorJson(
             422,
             "The import options did not hold after the reimport: " + summary + "." +
                 (restored ? " The previous sidecar is back and reimported."
@@ -3065,6 +3110,8 @@ CallToolResult handleAssetConfigureImport(const json& args, std::shared_ptr<ipc:
              {"rolled_back", restored},
              {"engine_diagnostics", diagnostics},
              {"retryable", false}});
+        refused.answersItsOwnFailure = true;
+        return refused;
     }
 
     json payload = {
@@ -3146,10 +3193,10 @@ void ToolRegistry::registerAssetTools() {
             "Changes an imported asset's import options in its .import file, reimports it in the "
             "attached editor, and checks what the engine then loads. This is how a music track "
             "is made to loop: loop: true for an OGG or MP3, edit/loop_mode 2 (Forward) for a "
-            "WAV. It sets the loop options of WAV, OGG and MP3 imports only, and refuses any "
-            "other importer or option. Godot checks none of these values, so the tool does: a "
-            "value of the wrong type, a loop mode Godot has no name for, an offset or a loop "
-            "window outside the track. If the reimported asset does not load with what was "
+            "WAV, _subresources for a model's animation. It sets those loop options only, and "
+            "refuses any other importer or option. Godot checks none of these values, so the tool "
+            "does: a value of the wrong type, a loop mode Godot has no name for, an offset or a "
+            "loop window outside the track. If the reimported asset does not load with what was "
             "asked, the previous file is put back and reimported. resource_inspect reports an "
             "asset's current import options.";
         t.inputSchema = {
@@ -3173,7 +3220,11 @@ void ToolRegistry::registerAssetTools() {
                                                              "under loop modes 2 to 4."}}},
                         {"edit/loop_end", {{"type", "integer"}, {"minimum", -1},
                                            {"description", "WAV: the frame the loop ends at, or -1 "
-                                                           "for the last one, under loop modes 2 to 4."}}}
+                                                           "for the last one, under loop modes 2 to 4."}}},
+                        {"_subresources", {{"type", "object"},
+                                           {"description",
+                                            "Scene: animations.<name>.settings/loop_mode, 0 None, 1 "
+                                            "Linear or 2 Pingpong."}}}
                     }}
                 }}
             }},

@@ -2260,6 +2260,21 @@ try {
         (Tool-Request 7415 "scene_instantiate_node" @{ scene_path = "res://reimport_probe.svg"; parent_path = "/root/ModelCases"; name = "NotAScene" }),
         (Tool-Request 7416 "editor_save_scene" @{}),
         (Tool-Request 7417 "scene_close" @{ discard_unsaved = $true }),
+        # Its idle animation looped through the scene importer's _subresources
+        # option, which no tool wrote (#1425). The tool checks the reloaded
+        # scene itself; anim_list_tracks on the instance in model_cases.tscn is
+        # the second reader. Then two refusals that write nothing, and the way
+        # back with the previous value the change reported.
+        (Tool-Request 7418 "asset_configure_import" @{ asset_path = "res://models/probe_model.glb"; options = @{ _subresources = @{ animations = @{ idle = @{ "settings/loop_mode" = 1 } } } }; dry_run = $true }),
+        (Tool-Request 7419 "asset_configure_import" @{ asset_path = "res://models/probe_model.glb"; options = @{ _subresources = @{ animations = @{ idle = @{ "settings/loop_mode" = "linear" } } } } }),
+        (Tool-Request 7420 "resource_inspect" @{ resource_path = "res://models/probe_model.glb" }),
+        (Tool-Request 7421 "scene_open" @{ scene_path = "res://model_cases.tscn" }),
+        (Tool-Request 7422 "anim_list_tracks" @{ animation_player_path = "/root/ModelCases/Model/AnimationPlayer" }),
+        (Tool-Request 7423 "scene_close" @{ discard_unsaved = $true }),
+        (Tool-Request 7424 "asset_configure_import" @{ asset_path = "res://models/probe_model.glb"; options = @{ _subresources = @{ animations = @{ nope = @{ "settings/loop_mode" = 1 } } } } }),
+        (Tool-Request 7425 "asset_configure_import" @{ asset_path = "res://models/probe_model.glb"; options = @{ _subresources = @{ animations = @{ wave = @{ "settings/loop_mode" = 3 } } } } }),
+        (Tool-Request 7426 "resource_inspect" @{ resource_path = "res://models/probe_model.glb" }),
+        (Tool-Request 7427 "asset_configure_import" @{ asset_path = "res://models/probe_model.glb"; options = @{ _subresources = @{ animations = @{ idle = @{ "settings/loop_mode" = 0 } } } } }),
         (Tool-Request 112 "scene_create" @{ scene_path = "res:////escape.tscn" }),
         # A nested path whose parent directory does not exist yet. ResourceSaver
         # cannot create it, so this used to come back as a bare Error 19 while
@@ -4979,6 +4994,29 @@ try {
     $modelSceneText = Get-Content -LiteralPath (Join-Path $fixtureRoot "model_cases.tscn") -Raw
     Assert-True ($modelSceneText -match '\[ext_resource type="PackedScene"[^\]]*path="res://models/probe_model\.glb"' -and $modelSceneText -match '\[node name="Model" parent="\."[^\]]* instance=ExtResource\(') "The saved scene does not instance the .glb the way the editor does: $modelSceneText"
     Assert-True ((Tool-Payload $byId[7417]).closed -eq $true) "Model scene could not be closed."
+    $modelLoopPreview = @((Tool-Payload $byId[7418]).mutation_preview.changes)[0].before
+    Assert-True ($modelLoopPreview.options._subresources.animations.idle."settings/loop_mode" -eq 0 -and $modelLoopPreview.planned_options._subresources.animations.idle."settings/loop_mode" -eq 1 -and $modelLoopPreview.stream.animations.idle -eq 0) "The loop preview did not read the model's animations from the editor: $($byId[7418].result.content[0].text)"
+    $looped = Tool-Payload $byId[7419]
+    Assert-True ($looped.status -eq "configured" -and $looped.verified -eq $true -and $looped.importer -eq "scene" -and $looped.previous._subresources.animations.idle."settings/loop_mode" -eq 0 -and $looped.options._subresources.animations.idle."settings/loop_mode" -eq 1) "An imported animation was not set to loop: $($byId[7419].result.content[0].text)"
+    Assert-True ($looped.stream.animations.idle -eq 1 -and $looped.stream.animations.wave -eq 0 -and $looped.uid -eq $modelInspect.uid) "The reloaded scene did not loop idle alone, under the uid it had: $($byId[7419].result.content[0].text)"
+    $loopInspect = Tool-Payload $byId[7420]
+    Assert-True ($loopInspect.import.options._subresources.animations.idle."settings/loop_mode" -eq 1 -and ([string]$byId[7420].result.content[0].text).Length -lt 20000) "resource_inspect did not report the loop mode, or reported the whole sub-resource text: $(([string]$byId[7420].result.content[0].text).Length) bytes"
+    Assert-True (-not $byId[7421].result.isError) "The model scene could not be reopened: $($byId[7421].result.content[0].text)"
+    $instanceTracks = @((Tool-Payload $byId[7422]).animations)
+    $instanceIdle = @($instanceTracks | Where-Object { $_.name -eq "idle" })[0]
+    $instanceWave = @($instanceTracks | Where-Object { $_.name -eq "wave" })[0]
+    Assert-True ($instanceIdle.loop_mode_id -eq 1 -and $instanceWave.loop_mode_id -eq 0) "The instanced model's AnimationPlayer does not loop idle alone: $($byId[7422].result.content[0].text)"
+    Assert-True ((Tool-Payload $byId[7423]).closed -eq $true) "Model scene could not be closed after the loop read."
+    $unknownAnimation = [string]$byId[7424].result.content[0].text
+    Assert-True ($byId[7424].result.isError -and $unknownAnimation -match '"animations":\["idle","wave"\]') "A loop for an animation the model does not have was not refused naming the ones it has: $unknownAnimation"
+    Assert-True ($byId[7425].result.isError -and ([string]$byId[7425].result.content[0].text) -match 'Pingpong') "A loop mode Godot has no name for was not refused: $($byId[7425].result.content[0].text)"
+    Assert-True ((Tool-Payload $byId[7426]).import.options._subresources.animations.idle."settings/loop_mode" -eq 1) "A refused loop change touched the sidecar."
+    $unlooped = Tool-Payload $byId[7427]
+    Assert-True ($unlooped.verified -eq $true -and $unlooped.stream.animations.idle -eq 0 -and $unlooped.previous._subresources.animations.idle."settings/loop_mode" -eq 1) "The way back did not take idle out of its loop: $($byId[7427].result.content[0].text)"
+    # Read after the whole block, so it is the way back's state: idle
+    # configured, at 0, under the uid it was imported with.
+    $modelSidecar = Get-Content -LiteralPath (Join-Path $fixtureRoot "models/probe_model.glb.import") -Raw
+    Assert-True ($modelSidecar -match '"settings/loop_mode": 0' -and $modelSidecar -notmatch '"settings/loop_mode": 1' -and $modelSidecar -match ('uid="' + [regex]::Escape([string]$modelInspect.uid) + '"')) "The model's sidecar does not hold the way back's loop mode under its uid."
     Assert-True ((Tool-Payload $byId[111]).closed -eq $true) "Smoke scene cleanup failed."
     Assert-True $byId[112].result.isError "Non-normalized res:// scene path was accepted."
     Assert-True ($byId[112].result.content[0].text -match "normalized") "Non-normalized path error was not actionable."

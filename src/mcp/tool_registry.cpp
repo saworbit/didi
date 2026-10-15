@@ -599,6 +599,20 @@ CallToolResult structuredLiveToolError(const Error& error,
     return result;
 }
 
+// The error a handler's own answer carries, as errorJson writes it.
+std::optional<Error> errorCarriedBy(const CallToolResult& result) {
+    for (const auto& item : result.content) {
+        if (item.type != "text") continue;
+        const auto parsed = json::parse(item.text, nullptr, false);
+        if (!parsed.is_object() || !parsed.contains("error") || !parsed["error"].is_object()) break;
+        const auto& error = parsed["error"];
+        if (!error.contains("code") || !error["code"].is_number_integer()) break;
+        return Error(error["code"].get<int>(), error.value("message", std::string()),
+                     error.value("data", json::object()));
+    }
+    return std::nullopt;
+}
+
 } // namespace
 
 ResolvedToolBinding resolveAliasBinding(std::string_view invoked_name, const json& arguments) {
@@ -2758,12 +2772,19 @@ CallToolResult ToolRegistry::dispatchTool(const std::string& name, const json& a
             }
             if (dispatcher) {
                 if (const auto error = dispatcher->lastError(); error.has_value()) {
+                    // A handler that answered the failure itself keeps its
+                    // answer, in the same envelope. asset_configure_import puts
+                    // the previous sidecar back after a reimport fails, and the
+                    // bare reimport error in its place read as an outcome
+                    // nobody knew, with a remedy the tool does not take (#1425).
+                    std::optional<Error> own;
+                    if (result.answersItsOwnFailure) own = errorCarriedBy(result);
                     // An offline-only tool, or a live tool with no route, has no
                     // lease. A dispatcher error recorded by an earlier call must
                     // not be reported against a session that was never selected.
                     auto failure = structuredLiveToolError(
-                        *error, lease.has_value() ? lease->descriptor
-                                                  : std::optional<runtime::SessionDescriptor>{});
+                        own.value_or(*error), lease.has_value() ? lease->descriptor
+                                                                : std::optional<runtime::SessionDescriptor>{});
                     if (protected_mutation) return finish(std::move(failure));
                     return m_recovery ? withRecoveryNote(std::move(failure), m_recovery->note()) : std::move(failure);
                 }

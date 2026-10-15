@@ -57,6 +57,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Added
 
+- `2026-10-16` `asset_configure_import` loops an imported model's animation through `_subresources`, checked against the reloaded scene. [#1425](https://github.com/saworbit/didi/issues/1425) · [PR #1466](https://github.com/saworbit/didi/pull/1466)
 - `2026-10-15` `runtime_launch` runs as a job with a `request_id`, for up to 900 seconds, and cancelling the job stops its game. [#1428](https://github.com/saworbit/didi/issues/1428) · [PR #1465](https://github.com/saworbit/didi/pull/1465)
 - `2026-10-15` CI builds the local CI image and smoke-checks it when its Dockerfile, a file it copies in, or `ci.yml` changes. [#1419](https://github.com/saworbit/didi/issues/1419) · [PR #1443](https://github.com/saworbit/didi/pull/1443)
 - `2026-10-15` Closing a pull request deletes the Actions caches its runs saved, which nothing else can restore, instead of leaving them to cache eviction. [PR #1421](https://github.com/saworbit/didi/pull/1421)
@@ -141,6 +142,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 - `2026-09-23` The website and the quickstart start from the download. [PR #910](https://github.com/saworbit/didi/pull/910)
 
 ### Fixed
+- `2026-10-16` A tool's own answer to a failed reimport reaches the caller, `rolled_back` and the job advice included, not the bare bridge error. [PR #1466](https://github.com/saworbit/didi/pull/1466)
 - `2026-10-15` `script_patch_method` with `create_if_missing` puts a new member beside its kind when an earlier one holds a bracket in a string or comment. [#1460](https://github.com/saworbit/didi/issues/1460) · [PR #1464](https://github.com/saworbit/didi/pull/1464)
 - `2026-10-15` `project_list_resources` types an imported model by its `.import`, so `type_filter: "PackedScene"` finds a `.glb`, and a rescan sees a sidecar written later. [#1461](https://github.com/saworbit/didi/issues/1461) · [PR #1463](https://github.com/saworbit/didi/pull/1463)
 - `2026-10-15` The asset audit reads a uid the way Godot does, so `uid="uid://ABC"` beside a real path is no longer called unresolved. [#1446](https://github.com/saworbit/didi/issues/1446) · [PR #1463](https://github.com/saworbit/didi/pull/1463)

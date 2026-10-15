@@ -491,7 +491,13 @@ void test_a_long_launch_runs_as_a_job_and_a_cancel_stops_its_game() {
                          {"request_id", "launch-0001"}};
     const auto first = callTool(server, 10, "runtime_launch", launch);
     ASSERT_FALSE(first.result.value("isError", false));
-    const auto job_id = first.result["_meta"]["didi"]["job"]["job_id"].get<std::string>();
+    // A launch that finishes inside the server's wait answers with its result
+    // and the job under _meta; a slower one answers working with the job in the
+    // text. Which one depends on the machine, so either is read.
+    const auto& meta = first.result.contains("_meta") ? first.result["_meta"] : json::object();
+    const auto job_id = meta.contains("didi") && meta["didi"].contains("job")
+                            ? meta["didi"]["job"]["job_id"].get<std::string>()
+                            : textPayload(first)["job"]["job_id"].get<std::string>();
     const auto settled = server.jobsForTesting().waitFor(job_id, 30s);
     ASSERT_TRUE(settled.has_value());
     ASSERT_EQ(settled->state, JobState::Completed);
