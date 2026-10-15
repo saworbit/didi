@@ -219,6 +219,10 @@ unmergeable.
 Everything else -- CodeQL, OpenSSF Scorecard, dependency review, workflow
 linting, labelling -- runs alongside and does not block a merge.
 
+When a pull request closes, `cache-cleanup.yml` deletes the Actions caches its
+runs saved. Only that pull request could ever restore them, and left in place
+they push `main`'s compiler caches out of the repository's 10 GiB cache limit.
+
 ## 🧪 Testing on macOS and Linux
 
 The build matrix compiles Didi and runs the suites on all three platforms, but

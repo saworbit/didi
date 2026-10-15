@@ -98,7 +98,7 @@ jobs:
           # site/ is the project website. Its build is a gate of its own in
           # pages.yml, which runs on every pull request, and nothing in it can
           # reach the compiler or the manifest.
-          build_ignored='^(docs/brand/|site/|\.github/ISSUE_TEMPLATE/|\.github/pull_request_template\.md$|\.github/FUNDING\.yml$|\.github/CODEOWNERS$|\.github/labeler\.yml$|\.github/release\.yml$|\.github/workflows/(codeql|supply-chain|triage|pages)\.yml$|\.editorconfig$|\.gitattributes$|\.gitignore$|LICENSE$|CODE_OF_CONDUCT\.md$|AI\.md$)'
+          build_ignored='^(docs/brand/|site/|\.github/ISSUE_TEMPLATE/|\.github/pull_request_template\.md$|\.github/FUNDING\.yml$|\.github/CODEOWNERS$|\.github/labeler\.yml$|\.github/release\.yml$|\.github/workflows/(cache-cleanup|codeql|supply-chain|triage|pages)\.yml$|\.editorconfig$|\.gitattributes$|\.gitignore$|LICENSE$|CODE_OF_CONDUCT\.md$|AI\.md$)'
 
           # Only these can change what a running Godot editor or a sanitizer
           # build observes. Prose cannot, which is the whole point.
