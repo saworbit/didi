@@ -98,6 +98,14 @@ Result<ProjectSettingWrite> writeProjectSettingLiteral(const std::filesystem::pa
                                                        const std::string& setting,
                                                        const std::string& literal);
 
+// The same write for one InputMap action, input/<action>, which
+// project_set_input_action makes with no editor attached (#1379). The writers
+// above refuse that namespace, so a generic setting write cannot skip the event
+// checks the typed tool applies.
+Result<ProjectSettingWrite> writeInputActionLiteral(const std::filesystem::path& project_root,
+                                                    const std::string& action,
+                                                    const std::string& literal);
+
 // The refusal for a project.godot Godot will not load, or nothing when it loads.
 //
 // The project does not open at all, so any answer read out of the file would

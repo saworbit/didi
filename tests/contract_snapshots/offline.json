@@ -66,6 +66,7 @@
                     "project_run_tests",
                     "project_search_symbols",
                     "project_search_text",
+                    "project_set_input_action",
                     "project_set_setting",
                     "project_verify_changes",
                     "query_project_resources",
@@ -7222,10 +7223,11 @@
         "_meta": {
           "didi": {
             "confirmationsSkipped": false,
-            "currentMode": "unavailable",
+            "currentMode": "offline_fallback",
             "editorConnected": false,
             "executionModes": [
-              "live"
+              "live",
+              "offline_fallback"
             ],
             "implemented": true,
             "legacy": false,

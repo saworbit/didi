@@ -223,9 +223,30 @@ Result<ProjectSettingRead> readProjectSetting(const std::filesystem::path& proje
 }
 
 namespace {
+// typed_namespace lets the typed InputMap tool write under input/, which the
+// generic writers refuse so a setting write cannot skip its event checks.
 Result<ProjectSettingWrite> writeSettingLine(const std::filesystem::path& project_root,
                                              const std::string& setting,
-                                             const std::optional<std::string>& literal);
+                                             const std::optional<std::string>& literal,
+                                             bool typed_namespace = false);
+
+// A literal the engine would refuse makes the whole file unloadable, which is
+// worse than not writing it. valueProblem alone cannot say so: an unclosed
+// `PackedStringArray("a"` begins like a value, and only the walk over a file
+// finds that it never ends. So the literal is read as the one key of a file of
+// its own, and has to come back as exactly that key with exactly that value, or
+// it would spill into the lines below it.
+Result<void> checkSingleLineLiteral(const std::string& literal) {
+    if (literal.empty() || literal.find_first_of("\r\n") != std::string::npos) {
+        return Error::invalidArgument("Not a single-line Godot value literal: " + literal);
+    }
+    const auto probe = config_file::scan("[probe]\nkey=" + literal + "\n");
+    if (config_file::loadFailure(probe) || probe.trailing_key || probe.entries.size() != 1 ||
+        probe.entries.front().key != "key" || strings::trim(probe.entries.front().value_text) != literal) {
+        return Error::invalidArgument("Not a Godot value literal Godot would load: " + literal);
+    }
+    return Result<void>::ok();
+}
 }  // namespace
 
 namespace {
@@ -391,27 +412,22 @@ Result<ProjectSettingWrite> writeProjectSetting(const std::filesystem::path& pro
 Result<ProjectSettingWrite> writeProjectSettingLiteral(const std::filesystem::path& project_root,
                                                        const std::string& setting,
                                                        const std::string& literal) {
-    // A literal the engine would refuse makes the whole file unloadable, which
-    // is worse than not writing it. valueProblem alone cannot say so: an
-    // unclosed `PackedStringArray("a"` begins like a value, and only the walk
-    // over a file finds that it never ends. So the literal is read as the one
-    // key of a file of its own, and has to come back as exactly that key with
-    // exactly that value, or it would spill into the lines below it.
-    if (literal.empty() || literal.find_first_of("\r\n") != std::string::npos) {
-        return Error::invalidArgument("Not a single-line Godot value literal: " + literal);
-    }
-    const auto probe = config_file::scan("[probe]\nkey=" + literal + "\n");
-    if (config_file::loadFailure(probe) || probe.trailing_key || probe.entries.size() != 1 ||
-        probe.entries.front().key != "key" || strings::trim(probe.entries.front().value_text) != literal) {
-        return Error::invalidArgument("Not a Godot value literal Godot would load: " + literal);
-    }
+    if (auto checked = checkSingleLineLiteral(literal); checked.isErr()) return checked.error();
     return writeSettingLine(project_root, setting, literal);
+}
+
+Result<ProjectSettingWrite> writeInputActionLiteral(const std::filesystem::path& project_root,
+                                                    const std::string& action,
+                                                    const std::string& literal) {
+    if (auto checked = checkSingleLineLiteral(literal); checked.isErr()) return checked.error();
+    return writeSettingLine(project_root, "input/" + action, literal, true);
 }
 
 namespace {
 Result<ProjectSettingWrite> writeSettingLine(const std::filesystem::path& project_root,
                                              const std::string& setting,
-                                             const std::optional<std::string>& literal) {
+                                             const std::optional<std::string>& literal,
+                                             bool typed_namespace) {
     const bool remove = !literal.has_value();
     // The same name rules the live writer applies, so a name refused with an
     // editor attached is refused without one.
@@ -420,7 +436,7 @@ Result<ProjectSettingWrite> writeSettingLine(const std::filesystem::path& projec
         setting.find('\\') != std::string::npos) {
         return Error::invalidArgument("setting must be a non-empty slash-delimited ProjectSettings name");
     }
-    if (setting.rfind("autoload/", 0) == 0 || setting.rfind("input/", 0) == 0) {
+    if (setting.rfind("autoload/", 0) == 0 || (setting.rfind("input/", 0) == 0 && !typed_namespace)) {
         return Error::invalidArgument("Use the typed autoload or InputMap tools for this setting namespace");
     }
     const auto slash = setting.find('/');
