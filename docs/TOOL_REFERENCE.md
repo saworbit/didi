@@ -1691,7 +1691,7 @@ All four tools are live-only, and the first three return an error when no editor
 
 ## 10. Phase 2 project wiring
 
-All Phase 2 tools are live-only and execute on Godot's main thread. They do not perform disconnected text edits.
+Phase 2 tools execute on Godot's main thread when an editor is attached. Five also work with none, from the project's files: `project_get_setting`, `project_set_setting`, `project_list_autoloads`, `project_set_input_action` and `scene_create`. Every other Phase 2 tool is live only.
 
 ### Scripts
 
@@ -1777,6 +1777,36 @@ Sent while an editor is still starting, `scene_open` and `scene_create` wait unt
 Both writers report the uid the scene file carries and whether the engine has been taught it: `uid`, and `uid_registered`. `ResourceSaver.save` writes the uid into the file, but only Godot's own save callback puts it in `ResourceUID`, and that callback does nothing while `EditorFileSystem` is scanning. A scene written inside that window used to end up with a uid in the file that the engine had never heard of, so every load of a scene referencing it printed `ext_resource, invalid UID ... using text path instead`, in the editor, in `runtime_launch` and in an exported game.
 
 Didi now calls `EditorFileSystem.update_file` after each save. That call cannot take effect while a scan is running, before the editor has applied one, or for a file in a folder the editor does not list yet. So both writers wait at the front of the queue while a scan is running or unapplied. When the uid is still not indexed after the save, Didi asks the editor to scan, which is the only thing that lists a new folder, and the answer waits for the index (#1004). Only an editor that has not indexed it about 12 seconds after the call was queued answers `uid_registered: false`, `uid_registration_deferred: true` and a `limitation` saying so, and Didi keeps re-indexing the path once the scan is applied. `editor_reload_project` is no longer the repair for this.
+
+#### `scene_create` with no editor attached
+
+With no editor session attached, `scene_create` writes the `.tscn` itself
+(#1380): the `gd_scene` header with a uid, and one `[node]` line for the root.
+It answers `execution_mode: "offline_fallback"`, `saved: true` and
+`opened: false`, with `uid`, `root_type`, `root_name` and `replaced`.
+`uid_registered` is `false`, because no engine has read the file yet. The editor
+registers the uid when it next scans the project.
+
+- `root_type` is checked against the class reference, the way the live route
+  checks it against ClassDB. A class the reference does not have, one that does
+  not inherit `Node` and one the engine declares abstract are refused with
+  `400`, each naming the class. `type_check` says which reference judged it, and
+  `api_version_matches_project_features` says whether that is the Godot line the
+  project was last saved by. A class newer than the project's line is accepted,
+  and will not load there.
+- `root_name` is refused for the same reasons as live, and gets the rename
+  `Node.set_name` makes: `.`, `:`, `@`, `"` and `%` become `_`. A loaded file
+  keeps whatever name it holds, so the file holds the name the live route would
+  have set, and `root_name_requested` is there when the two differ.
+- An existing file needs `overwrite: true`, as live, and a replaced scene keeps
+  its uid.
+
+Measured on 4.5.1, 4.6.2 and 4.7.2 for every Node class the engine can
+construct: this file loads to the same stored state as the scene the engine
+saves for that root, and the editor's scan of it prints no ERROR or WARNING
+lines. The engine also writes `unique_id` from 4.6 and a few defaults, such as a
+`Control` root's `layout_mode`. None of them changes what loads, and the editor
+adds them when it next saves the scene.
 
 Scene paths reject absolute filesystem paths, backslashes, and parent-relative segments.
 

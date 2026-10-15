@@ -82,6 +82,7 @@
                     "runtime_recovery_status",
                     "runtime_restore_checkpoint",
                     "runtime_run_scenario",
+                    "scene_create",
                     "scene_get_hierarchy",
                     "script_check_syntax",
                     "script_create",
@@ -9604,10 +9605,11 @@
         "_meta": {
           "didi": {
             "confirmationsSkipped": false,
-            "currentMode": "unavailable",
+            "currentMode": "offline_fallback",
             "editorConnected": false,
             "executionModes": [
-              "live"
+              "live",
+              "offline_fallback"
             ],
             "implemented": true,
             "legacy": false,
@@ -9620,7 +9622,7 @@
           "openWorldHint": false,
           "readOnlyHint": false
         },
-        "description": "Creates, saves and opens an empty scene rooted in any Node class.",
+        "description": "Creates and saves an empty scene rooted in any Node class; an attached editor opens it.",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {
