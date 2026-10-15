@@ -228,6 +228,10 @@ void test_phase7_generated_schemas() {
     ASSERT_TRUE(alias != nullptr);
     ASSERT_TRUE(static_cast<bool>(alias->boundHandler));
     ASSERT_TRUE(!alias->handler);
+    // The generated schema is the one published, so a schema written beside a
+    // Phase 7 definition is thrown away and drifts: signal_list_connections'
+    // still required target_node after emitter_node was published (#1438).
+    ASSERT_TRUE(registry.phase7InlineSchemas().empty());
 }
 
 void test_phase7_live_forwarding_uses_exact_method_and_deadline() {

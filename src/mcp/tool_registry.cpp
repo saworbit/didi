@@ -854,6 +854,9 @@ void ToolRegistry::registerTool(ToolDefinition tool) {
     const auto phase7_names = phase7::canonicalNames();
     if (std::find(phase7_names.begin(), phase7_names.end(), binding.schema_source) !=
         phase7_names.end()) {
+        if (!tool.inputSchema.is_null() && !tool.inputSchema.empty()) {
+            m_phase7InlineSchemas.insert(name);
+        }
         tool.inputSchema = phase7::standaloneRequestSchema(binding.schema_source);
     }
     // Derived, never hand-set, but from four classifications rather than one:

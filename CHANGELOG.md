@@ -111,6 +111,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 - `2026-09-23` A release archive can be installed and checked in one command. [PR #911](https://github.com/saworbit/didi/pull/911)
 
 ### Changed
+- `2026-10-15` The 18 Phase 7 tools no longer carry a hand-written input schema that registration discarded, and a test keeps it so. [#1438](https://github.com/saworbit/didi/issues/1438) · [PR #1444](https://github.com/saworbit/didi/pull/1444)
 - `2026-10-14` Local CI uses the refreshed Ubuntu 24.04 image while keeping its base pinned by digest. [PR #1361](https://github.com/saworbit/didi/pull/1361)
 - `2026-10-14` Bridge handlers compile in domain files with shared private helpers, preserving validation, undo and resource ownership. [#1255](https://github.com/saworbit/didi/issues/1255) · [PR #1413](https://github.com/saworbit/didi/pull/1413)
 - `2026-10-13` Six remaining mutation tools compare reported state with independent witnesses in CI, including fixtures without Git identity. [#1020](https://github.com/saworbit/didi/issues/1020) [#1371](https://github.com/saworbit/didi/pull/1371)
