@@ -1,7 +1,12 @@
 #include "didi/mcp/mcp_protocol.hpp"
 #include "didi/common/ipc_channel.hpp"
 #include "didi/common/logger.hpp"
+#include "didi/common/engine_version.hpp"
 #include "didi/common/project_path.hpp"
+#include "didi/offline/class_reference.hpp"
+#include "didi/offline/new_scene.hpp"
+#include "didi/offline/project_settings_file.hpp"
+#include "didi/offline/resource_indexer.hpp"
 #include "didi/tools/editor_copy_refresh.hpp"
 #include "didi/tools/hierarchy_view.hpp"
 #include <fstream>
@@ -659,7 +664,70 @@ CallToolResult handleSceneGetGroupMembers(const json& args, std::shared_ptr<ipc:
     }
     return result;
 }
+// With no editor the scene is written as a file: one root node, its type
+// checked against the class reference rather than ClassDB, and opened by
+// nothing (#1380).
+static CallToolResult createSceneOffline(const json& args) {
+    offline::NewSceneRequest request;
+    request.scene_path = args.value("scene_path", std::string());
+    request.root_type = args.value("root_type", std::string("Node2D"));
+    request.root_name = args.value("root_name", std::string("Root"));
+    request.overwrite = args.value("overwrite", false);
+    std::error_code root_error;
+    const auto root = std::filesystem::current_path(root_error);
+    if (root_error) {
+        return CallToolResult::errorJson(500, "The project root cannot be resolved for an offline scene");
+    }
+    auto written = offline::createSceneFile(root, request);
+    if (written.isErr()) return CallToolResult::fromError(written.error());
+    offline::ResourceIndexer::invalidateSharedIndex();
+    const auto& scene = written.value();
+
+    // Which Godot judged root_type, and whether the project says it is that
+    // line, the same note script_reflect_class gives offline (#555).
+    const auto& api_version = offline::ClassReference::instance().apiVersion();
+    json type_check = {{"source", "class_reference"}, {"api_version", api_version}};
+    std::string features;
+    auto setting = offline::readProjectSetting(root, "application/config/features");
+    if (setting.isOk() && setting.value().existed) features = setting.value().literal;
+    versions::annotateProjectFeatures(type_check, api_version, features);
+    std::string limitation =
+        "The scene was written to the file because no editor session is attached, and no engine "
+        "checked it. root_type was found in the Godot " + versions::majorMinorOf(api_version) +
+        " class reference";
+    if (type_check["api_version_matches_project_features"] == false) {
+        limitation += ", and this project was last saved by Godot " +
+                      type_check["project_features_version"].get<std::string>() +
+                      ", which does not have a class added after it";
+    }
+    limitation +=
+        ". Nothing has opened the scene: scene_open opens it once an editor is attached, and the "
+        "editor registers its uid when it next scans the project.";
+    if (scene.replaced) {
+        limitation += " If an editor has this scene open without the Didi addon, close it first, "
+                      "because its next save would overwrite the file.";
+    }
+    json payload = {{"status", "success"},
+                    {"saved", true},
+                    {"opened", false},
+                    {"scene_path", scene.scene_path},
+                    {"uid", scene.uid},
+                    {"uid_registered", false},
+                    {"root_type", scene.root_type},
+                    {"root_name", scene.root_name},
+                    {"replaced", scene.replaced},
+                    {"execution_mode", "offline_fallback"},
+                    {"is_live_engine", false},
+                    {"type_check", std::move(type_check)},
+                    {"limitation", std::move(limitation)}};
+    // Node.set_name turns . : @ " and % into _, so the editor's route renames
+    // the same way and this one says so.
+    if (scene.root_name != request.root_name) payload["root_name_requested"] = request.root_name;
+    return CallToolResult::successJson(std::move(payload));
+}
+
 CallToolResult handleSceneCreate(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
+    if (!ipc || !ipc->isConnected()) return createSceneOffline(args);
     auto created = forwardLiveSceneWiring(args, ipc, "scene.create", "create a scene");
     if (created.isError || !created.structuredContent.has_value() ||
         !created.structuredContent->is_object() ||
@@ -973,7 +1041,7 @@ void ToolRegistry::registerSceneTools() {
         [this](const json& args) { return handleSceneGetGroupMembers(args, m_ipcClient); });
 
     registerPhaseTwo(
-        "scene_create", "Creates, saves and opens an empty scene rooted in any Node class.",
+        "scene_create", "Creates and saves an empty scene rooted in any Node class; an attached editor opens it.",
         {{"type", "object"}, {"properties", {
             {"scene_path", {{"type", "string"}}},
             {"root_type", {{"type", "string"}, {"minLength", 1}, {"maxLength", 128},
