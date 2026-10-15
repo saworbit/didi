@@ -10,6 +10,7 @@
 #include <sstream>
 #include <string_view>
 #include <regex>
+#include <set>
 #include <filesystem>
 #include <cstdlib>
 #include <chrono>
@@ -292,6 +293,36 @@ std::vector<ScriptDiagnostic> GDScriptDiagnostics::analyze(const std::string& fi
     }
 
     return diagnostics;
+}
+
+std::optional<Error> GDScriptDiagnostics::refuseUnbalancedPatch(const std::string& original_text,
+                                                                const SymbolPatch& patched) {
+    const auto unbalanced = [](const std::string& text) {
+        std::set<std::string> messages;
+        for (const auto& d : analyze("", text)) {
+            if (d.rule == "unbalanced_parentheses" || d.rule == "unbalanced_brackets" ||
+                d.rule == "unbalanced_braces") {
+                messages.insert(d.message);
+            }
+        }
+        return messages;
+    };
+    const auto before = unbalanced(original_text);
+    for (const auto& message : unbalanced(patched.source_text)) {
+        if (before.count(message)) continue;
+        json data = {{"code", "invalid_arguments"}, {"field", "new_definition"}};
+        std::string where;
+        if (!patched.created) {
+            data["replaced_lines"] = json::array({patched.replaced_first_line, patched.replaced_last_line});
+            where = " It would replace lines " + std::to_string(patched.replaced_first_line) + " to " +
+                    std::to_string(patched.replaced_last_line) +
+                    ", so give the whole declaration, its closing bracket included.";
+        }
+        return Error(400, "Argument 'new_definition' leaves the script unparseable: " + message +
+                              " Nothing was written." + where,
+                     std::move(data));
+    }
+    return std::nullopt;
 }
 
 std::optional<GDScriptDeclaration> GDScriptDiagnostics::parseDeclaration(
@@ -1208,7 +1239,10 @@ Result<SymbolPatch> GDScriptDiagnostics::patchSymbol(const std::string& source_t
         // Symbol not found, insert intelligently. Only reachable with
         // create_if_missing set; the refusal above is the default.
         patched.created = true;
-        if (symbol_type == "signal" || symbol_type == "variable" || symbol_type == "enum") {
+        // A constant belongs beside the constants as a variable does beside the
+        // variables; it was appended after the last function (#1453).
+        if (symbol_type == "signal" || symbol_type == "variable" || symbol_type == "enum" ||
+            symbol_type == "constant") {
             // After the header lines, and after the class doc comment below
             // them: Godot takes a class's description from the ## lines before
             // its first member, so a member put between the two took the

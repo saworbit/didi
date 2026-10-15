@@ -140,6 +140,8 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 - `2026-09-23` The website and the quickstart start from the download. [PR #910](https://github.com/saworbit/didi/pull/910)
 
 ### Fixed
+- `2026-10-15` `create_if_missing` puts a new constant after the script's last top-level constant, not after its last function. [#1453](https://github.com/saworbit/didi/issues/1453) · [PR #1456](https://github.com/saworbit/didi/pull/1456)
+- `2026-10-15` A `script_patch_method` dry run refuses a patch that would unbalance brackets, as the write does, and issues no token for it. [#1452](https://github.com/saworbit/didi/issues/1452) · [PR #1456](https://github.com/saworbit/didi/pull/1456)
 - `2026-10-15` `scene_instantiate_node` instances an imported model such as a `.glb`, and refuses a file Godot does not load as a scene by name. [#1424](https://github.com/saworbit/didi/issues/1424) · [PR #1455](https://github.com/saworbit/didi/pull/1455)
 - `2026-10-15` `resource_inspect` reports a `.glb` as the PackedScene Godot loads and lists its animations and skin bones. [#1426](https://github.com/saworbit/didi/issues/1426) · [PR #1455](https://github.com/saworbit/didi/pull/1455)
 - `2026-10-15` The managed recovery live tests give `initialize` its full 60 seconds, so a slow first editor import no longer fails an observed case. [#1431](https://github.com/saworbit/didi/issues/1431) · [PR #1442](https://github.com/saworbit/didi/pull/1442)

@@ -10229,6 +10229,19 @@ static void test_patch_method_refuses_a_patch_that_cannot_parse() {
         return std::string(std::istreambuf_iterator<char>(in), {});
     };
 
+    // The dry run refuses it too, and mints no token for a patch the write
+    // would refuse (#1452).
+    const auto previewed = registry.callTool(
+        "script_patch_method",
+        didi::json{{"file_path", "res://cases.gd"}, {"method_name", "CASES"}, {"symbol_type", "constant"},
+                   {"new_definition", "const CASES := [\n\t\"idle\", \"hit\","}, {"dry_run", true}});
+    ASSERT_TRUE(previewed.isError);
+    ASSERT_TRUE(previewed.content[0].text.find("confirmation_token") == std::string::npos);
+    const auto preview_error = didi::json::parse(previewed.content[0].text)["error"];
+    ASSERT_EQ(preview_error["code"], 400);
+    ASSERT_EQ(preview_error["data"]["field"], "new_definition");
+    ASSERT_EQ(preview_error["data"]["replaced_lines"], didi::json::array({3, 5}));
+
     const auto refused = call("CASES", "constant", "const CASES := [\n\t\"idle\", \"hit\",");
     ASSERT_TRUE(refused.isError);
     const auto error = didi::json::parse(refused.content[0].text)["error"];

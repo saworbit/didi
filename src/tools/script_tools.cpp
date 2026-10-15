@@ -758,33 +758,9 @@ CallToolResult handleScriptPatchMethod(const json& args, std::shared_ptr<ipc::II
 
     // A patch that leaves brackets open where the script had them balanced
     // cannot parse, and it was written and answered as a success (#1434).
-    // Only the count rules: they are exact, where the lexical pass's other
-    // rules are a heuristic the engine check is allowed to overrule.
-    const auto unbalanced = [](const std::string& text) {
-        std::set<std::string> rules;
-        for (const auto& d : offline::GDScriptDiagnostics::analyze("", text)) {
-            if (d.rule == "unbalanced_parentheses" || d.rule == "unbalanced_brackets" ||
-                d.rule == "unbalanced_braces") {
-                rules.insert(d.message);
-            }
-        }
-        return rules;
-    };
-    const auto before = unbalanced(working_content);
-    for (const auto& message : unbalanced(patched_content)) {
-        if (before.count(message)) continue;
-        json data = {{"code", "invalid_arguments"}, {"field", "new_definition"}};
-        std::string where;
-        if (!created) {
-            data["replaced_lines"] = replaced_lines;
-            where = " It would replace lines " + std::to_string(patch_res.value().replaced_first_line) +
-                    " to " + std::to_string(patch_res.value().replaced_last_line) +
-                    ", so give the whole declaration, its closing bracket included.";
-        }
-        return CallToolResult::errorJson(
-            400, "Argument 'new_definition' leaves the script unparseable: " + message +
-                     " Nothing was written." + where,
-            std::move(data));
+    if (auto refused = offline::GDScriptDiagnostics::refuseUnbalancedPatch(working_content,
+                                                                         patch_res.value())) {
+        return CallToolResult::fromError(*refused);
     }
     // A file that ended without a newline keeps ending without one. The
     // patcher terminates what it splices in, so the one it adds at the end of
