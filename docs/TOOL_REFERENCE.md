@@ -1432,7 +1432,7 @@ Editor sessions only. With no editor attached the tool refuses and points at `au
 Launches a separate Godot process, optionally headless, captures stdout/stderr, classifies errors after exit, and enforces a timeout.
 
 - `scene_path` (`string`, optional).
-- `timeout_seconds` (`integer`, `1`–`120`, default `10`).
+- `timeout_seconds` (`integer`, `1`–`120`, default `10`). Up to `900` when the call runs as a job, with a `request_id` or for a client that declared the tasks extension; a blocking call past `120` is refused `400` with `data.code: "launch_needs_job"` naming `request_id` (#1428). A job's repeat reads the captured output and verdict, and cancelling it stops the game the way the timeout does, with `exit_code` 130.
 - `headless` (`boolean`, default `true`).
 - `break_on_error` (`boolean`, default `true`): marks captured `ERROR:`/`SCRIPT ERROR:` lines as failure after the child exits; it does not stop the child early.
 - The timeout kills the whole process tree, and the call waits for it to go before returning. Godot is not always the process that was started -- a `godot.cmd` wrapper, or Godot's own Windows console build, launches the engine and waits on it -- so the tool terminates the job the child was spawned into rather than the child alone, and waits for the job to empty. That matters for what comes next: `runtime_list_sessions` reports a session as alive when the process behind it is alive, so a game still shutting down would be listed as attachable and then refuse the connection.

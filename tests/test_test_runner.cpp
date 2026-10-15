@@ -1,8 +1,10 @@
+#include "didi/common/cancellation.hpp"
 #include "didi/common/project_path.hpp"
 #include "didi/mcp/tool_registry.hpp"
 #include "didi/offline/test_runner.hpp"
 #include "didi/runtime/session_client.hpp"
 
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -11,6 +13,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <thread>
 
 #define ASSERT_TRUE(cond) if (!(cond)) throw std::runtime_error("Assertion failed: " #cond)
 #define ASSERT_EQ(a, b) ASSERT_TRUE((a) == (b))
@@ -64,7 +67,11 @@ void test_runtime_launch_schema_bounds_timeout() {
     ASSERT_TRUE(definition != nullptr);
     const auto& timeout = definition->inputSchema["properties"]["timeout_seconds"];
     ASSERT_EQ(timeout["minimum"], 1);
-    ASSERT_EQ(timeout["maximum"], 120);
+    // 120 for a blocking call, which the handler holds it to; 900 as a job
+    // (#1428).
+    ASSERT_EQ(timeout["maximum"], 900);
+    ASSERT_TRUE(definition->inputSchema["properties"].contains("request_id"));
+    ASSERT_TRUE(didi::mcp::toolRunsAsJob("runtime_launch"));
 }
 
 void test_runtime_launch_rejects_timeout_outside_public_range() {
@@ -77,6 +84,62 @@ void test_runtime_launch_rejects_timeout_outside_public_range() {
         {{"timeout_seconds", 0}, {"headless", false},
          {"extra_args", successfulShellArguments()}});
     ASSERT_TRUE(result.isError);
+
+    // Past 120 a blocking call is refused naming request_id, the argument that
+    // runs it as a job, and nothing is launched. Past 900 it is refused either
+    // way (#1428).
+    const auto long_run = registry.callTool(
+        "runtime_launch",
+        {{"timeout_seconds", 150}, {"headless", false},
+         {"extra_args", successfulShellArguments()}});
+    ASSERT_TRUE(long_run.isError);
+    const auto refusal = didi::json::parse(long_run.content[0].text);
+    ASSERT_EQ(refusal["error"]["data"]["code"], "launch_needs_job");
+    ASSERT_EQ(refusal["error"]["data"]["field"], "request_id");
+    std::atomic<bool> never{false};
+    const didi::CancellationScope as_job(&never);
+    const auto job_run = registry.callTool(
+        "runtime_launch",
+        {{"timeout_seconds", 150}, {"headless", false},
+         {"extra_args", successfulShellArguments()}});
+    ASSERT_TRUE(!job_run.isError);
+    const auto too_long = registry.callTool(
+        "runtime_launch",
+        {{"timeout_seconds", 901}, {"headless", false},
+         {"extra_args", successfulShellArguments()}});
+    ASSERT_TRUE(too_long.isError);
+    ASSERT_TRUE(too_long.content[0].text.find("900") != std::string::npos);
+}
+
+void test_a_cancelled_launch_job_stops_its_game() {
+    // Break caught: runSession read no cancellation, so a runtime_launch job
+    // that was cancelled ran its game to the timeout, and a server shutting
+    // down waited out the whole run, up to 900 seconds (#1428).
+    ScopedEnvironmentVariable godot_bin("GODOT_BIN");
+    godot_bin.set(commandShell());
+#if defined(_WIN32)
+    const std::vector<std::string> long_run = {"/d", "/c", "ping", "-n", "30", "127.0.0.1"};
+#else
+    const std::vector<std::string> long_run = {"-c", "sleep 30"};
+#endif
+    std::atomic<bool> cancelled{false};
+    std::thread canceller([&] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        cancelled = true;
+    });
+    const auto started = std::chrono::steady_clock::now();
+    didi::offline::TestSessionResult result;
+    {
+        const didi::CancellationScope scope(&cancelled);
+        result = didi::offline::TestRunner::runSession("", 60, false, false, long_run);
+    }
+    canceller.join();
+    ASSERT_TRUE(result.cancelled);
+    ASSERT_TRUE(!result.timed_out);
+    ASSERT_EQ(result.exit_code, 130);
+    ASSERT_TRUE(!result.success);
+    // Thirty seconds is the floor for a run that ignored the flag.
+    ASSERT_TRUE(std::chrono::steady_clock::now() - started < std::chrono::seconds(15));
 }
 
 // A stepped frame is one physics tick only at a fixed rate, so runtime_launch
@@ -641,6 +704,7 @@ struct RegisterTestRunnerTests {
                      test_a_blocking_launch_names_the_games_pid);
         registerTest("RuntimeLaunch.TimeoutSchema", test_runtime_launch_schema_bounds_timeout);
         registerTest("RuntimeLaunch.TimeoutValidation", test_runtime_launch_rejects_timeout_outside_public_range);
+        registerTest("RuntimeLaunch.CancelledJobStopsItsGame", test_a_cancelled_launch_job_stops_its_game);
         registerTest("RuntimeLaunch.FixedFps", test_runtime_launch_fixed_fps);
         registerTest("RuntimeLaunch.Godot451Discovery", test_resolver_finds_documented_godot_451_layout);
         registerTest("RuntimeLaunch.AnEngineThatWillNotStartIsEngineUnavailable",

@@ -829,6 +829,8 @@ const std::map<std::string, Rule>& rules() {
         {"reload_unread", [](const Refusal&) { return field("request_id"); }},
         {"reload_not_found", [](const Refusal&) { return field("request_id"); }},
         {"reload_status_unanswered", [](const Refusal&) { return field("request_id"); }},
+        // runtime_launch past the blocking cap runs as a job (#1428).
+        {"launch_needs_job", [](const Refusal&) { return field("request_id"); }},
         {"animation_library_unloadable", [](const Refusal&) { return field("library_path"); }},
         {"not_an_animation_library", [](const Refusal&) { return field("library_path"); }},
         {"library_path_case_mismatch", [](const Refusal&) { return field("library_path"); }},
