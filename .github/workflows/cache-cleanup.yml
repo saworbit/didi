@@ -3,10 +3,10 @@ name: Cache Cleanup
 # A cache saved by a pull request's run is scoped to refs/pull/<n>/merge, and
 # only later runs of that same pull request can restore it. Once the pull
 # request closes nothing ever will, yet every entry still counts against the
-# repository's 10 GiB Actions cache limit. At the limit GitHub evicts the least
-# recently used entries, and the ones worth keeping are main's compiler caches,
-# which every pull request restores from. On 2026-10-15 two merged pull
-# requests held 4.1 GB of a 10.64 GB total.
+# repository's 10 GiB Actions cache limit until GitHub evicts it. Eviction goes
+# by last access, so dead entries do go before live ones; deleting them at close
+# frees the space at once instead of leaving it to an eviction pass. On
+# 2026-10-15 two merged pull requests held 4.1 GB of a 10.64 GB total.
 on:
   pull_request:
     branches: [ main, master ]
