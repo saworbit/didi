@@ -197,7 +197,11 @@ class ManagedRecoveryLive(unittest.TestCase):
             self.host.stdin.flush()
         except (BrokenPipeError, OSError) as error:
             raise AssertionError(f'Host input failed: {error}\n{self._diagnostics()}') from error
-        deadline = time.monotonic() + (20 if self._testMethodName.startswith('test_observed_') else 60)
+        # initialize on a managed host waits out the editor's startup and first
+        # import, which the observed cases' shorter deadline was never meant to
+        # cover (#1431). Their own calls keep it.
+        observed = self._testMethodName.startswith('test_observed_') and method != 'initialize'
+        deadline = time.monotonic() + (20 if observed else 60)
         while True:
             try:
                 line = self.lines.get(timeout=max(0, deadline - time.monotonic()))
