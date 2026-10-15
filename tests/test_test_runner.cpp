@@ -452,9 +452,10 @@ public:
 };
 
 // A game that prints Didi's session line, or one that does not, and exits.
+// One that is not `prints` prints nothing at all.
 class ScopedPublishingEngine {
 public:
-    explicit ScopedPublishingEngine(bool publishes) {
+    explicit ScopedPublishingEngine(bool publishes, bool prints = true) {
         m_root = std::filesystem::temp_directory_path() /
                  ("didi-publishing-runner-" +
                   std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
@@ -462,8 +463,8 @@ public:
 #if defined(_WIN32)
         m_path = m_root / "fake_engine.bat";
         std::ofstream out(m_path, std::ios::binary);
-        out << "@echo off\r\n"
-               "echo Godot Engine v4.7.2.stable.official - https://godotengine.org\r\n";
+        out << "@echo off\r\n";
+        if (prints) out << "echo Godot Engine v4.7.2.stable.official - https://godotengine.org\r\n";
         if (publishes) {
             out << "echo [GDEXT_IPC] Published authenticated runtime session at "
                    "\\\\.\\pipe\\godot_didi_0f1e2d3c_32856_aaaabbbbccccddddeeeeffff00001111\r\n";
@@ -471,8 +472,8 @@ public:
 #else
         m_path = m_root / "fake_engine.sh";
         std::ofstream out(m_path, std::ios::binary);
-        out << "#!/bin/sh\n"
-               "echo 'Godot Engine v4.7.2.stable.official - https://godotengine.org'\n";
+        out << "#!/bin/sh\n";
+        if (prints) out << "echo 'Godot Engine v4.7.2.stable.official - https://godotengine.org'\n";
         if (publishes) {
             out << "echo '[GDEXT_IPC] Published authenticated runtime session at "
                    "/tmp/godot_didi_0f1e2d3c_32856_aaaabbbbcccc.sock'\n";
@@ -497,7 +498,9 @@ private:
 
 // A blocking launch answered pid: null though the game published a session
 // with its pid in it (#1314). The game's pid when it published one, the
-// process Didi started otherwise, and the summary says which.
+// process Didi started otherwise. The summary says the second may be a
+// launcher only when the run captured nothing else about the game: it said
+// so on every run that went right (#1430).
 void test_a_blocking_launch_names_the_games_pid() {
     using didi::offline::publishedSessionPid;
     ASSERT_EQ(publishedSessionPid("[INFO ] [GDEXT_IPC] Published authenticated runtime session at "
@@ -515,8 +518,8 @@ void test_a_blocking_launch_names_the_games_pid() {
     auto& registry = didi::mcp::ToolRegistry::instance();
     registry.registerAllDefaultTools();
     registry.setIpcClient(nullptr);
-    const auto launch = [&](bool publishes) {
-        ScopedPublishingEngine engine(publishes);
+    const auto launch = [&](bool publishes, bool prints = true) {
+        ScopedPublishingEngine engine(publishes, prints);
         ScopedEnvironmentVariable godot_bin("GODOT_BIN");
         godot_bin.set(engine.path());
         const auto result = registry.callTool(
@@ -531,7 +534,12 @@ void test_a_blocking_launch_names_the_games_pid() {
     const auto unpublished = launch(false);
     ASSERT_TRUE(unpublished["pid"].is_number_unsigned());
     ASSERT_TRUE(unpublished["pid"].get<uint64_t>() != 32856u);
-    ASSERT_TRUE(unpublished["summary"].get<std::string>().find("is the one Didi started") !=
+    ASSERT_TRUE(unpublished["summary"].get<std::string>().find("is the one Didi started") ==
+                std::string::npos);
+    ASSERT_TRUE(unpublished["summary"].get<std::string>().find("launcher") == std::string::npos);
+    const auto silent = launch(false, false);
+    ASSERT_TRUE(silent["pid"].is_number_unsigned());
+    ASSERT_TRUE(silent["summary"].get<std::string>().find("is the one Didi started") !=
                 std::string::npos);
 }
 

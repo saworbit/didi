@@ -1911,8 +1911,28 @@ static std::optional<MisnamedArgument> misnamedArgument(const json& schema,
 // The caller has the value already, so a long one is not sent back to it.
 constexpr size_t kMaxEchoedArgumentBytes = 1024;
 
-// A string is still refused. Its exact enum spelling can supply the value to
-// send next, before the schema's oneOf refusal loses the offending event.
+// The Key constants a sent name may mean. Godot's are upper case, and "w",
+// "Space" or "page down" is what an agent sends far more often than the
+// enum's own spelling (#1432). Upper-cased with spaces and hyphens as
+// underscores, then with the underscores dropped, which is KEY_PAGEDOWN's.
+static std::vector<std::string> keyConstantCandidates(const std::string& sent) {
+    std::string name;
+    for (const char c : sent) {
+        if (c == ' ' || c == '-') name += '_';
+        else name += (c >= 'a' && c <= 'z') ? static_cast<char>(c - 'a' + 'A') : c;
+    }
+    if (name.rfind("KEY_", 0) == 0) name.erase(0, 4);
+    std::vector<std::string> candidates{"KEY_" + name};
+    std::string joined;
+    for (const char c : name) {
+        if (c != '_') joined += c;
+    }
+    if (joined != name) candidates.push_back("KEY_" + joined);
+    return candidates;
+}
+
+// A string is still refused. Its enum spelling can supply the value to send
+// next, before the schema's oneOf refusal loses the offending event.
 static std::optional<CallToolResult> namedKeyRefusal(const ResolvedToolBinding& binding,
                                                     const json& arguments) {
     if (binding.canonical_name != "project_set_input_action" &&
@@ -1933,14 +1953,19 @@ static std::optional<CallToolResult> namedKeyRefusal(const ResolvedToolBinding& 
         for (const auto* field : {"keycode", "physical_keycode"}) {
             if (!event.contains(field) || !event[field].is_string()) continue;
             const auto& sent = event[field].get_ref<const std::string&>();
-            const auto constant = sent.rfind("KEY_", 0) == 0 ? sent : "KEY_" + sent;
             json data = {{"argument", "events[" + std::to_string(index) + "]." + field},
                          {"event_index", index}, {"field", "events"}};
             std::string message = "Argument 'events' entry " + std::to_string(index) + ": " +
                 field + " takes a Godot Key enum integer, not a string.";
-            const auto value = keys ? keys->find(constant) : json::const_iterator{};
-            if (keys && value != keys->end() && value->is_number_integer() &&
-                value->get<int64_t>() > 0) {
+            json::const_iterator value;
+            bool known = false;
+            for (const auto& constant : keys ? keyConstantCandidates(sent) : std::vector<std::string>{}) {
+                value = keys->find(constant);
+                known = value != keys->end() && value->is_number_integer() &&
+                        value->get<int64_t>() > 0;
+                if (known) break;
+            }
+            if (known) {
                 data["expected_value"] = *value;
                 data["api_version"] = reference.apiVersion();
                 // Keep the full batch's order and other fields. Truncating it
@@ -1953,7 +1978,7 @@ static std::optional<CallToolResult> namedKeyRefusal(const ResolvedToolBinding& 
                 message += " Send " + value->dump() + ", from the pinned " +
                            reference.apiVersion() + " Key enum.";
             }
-            if (!data.contains("retry_with")) {
+            if (!known) {
                 data["next_call"] = {
                     {"tool", "script_reflect_class"},
                     {"arguments", {{"class_name", "@GlobalScope"}, {"fields", {"enums"}}}},

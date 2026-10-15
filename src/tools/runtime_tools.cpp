@@ -634,9 +634,16 @@ CallToolResult handleExecuteTestSession(const json& args, std::shared_ptr<ipc::I
                                 ", the pid in the session it published.";
         } else if (session_res.spawned_pid != 0) {
             result["pid"] = session_res.spawned_pid;
-            result["summary"] = sentence + "Process " + std::to_string(session_res.spawned_pid) +
-                                " is the one Didi started. The game published no session, so on "
-                                "Windows this can be the console build's launcher and not the game.";
+            // Which process that is matters only when it is all the run
+            // reports about the game. A run that captured the game's output
+            // has reported the game, and the caveat on every such run read as
+            // a warning about a run that went right (#1430).
+            if (session_res.logs.empty()) {
+                result["summary"] = sentence + "Process " + std::to_string(session_res.spawned_pid) +
+                                    " is the one Didi started. The game published no session and "
+                                    "printed nothing, so on Windows this can be the console "
+                                    "build's launcher and not the game.";
+            }
         }
     }
     // The same comparison the two tools that shell out to a discovered Godot
@@ -966,7 +973,7 @@ void ToolRegistry::registerRuntimeTools() {
                             {"kind", {{"type", "string"},
                                       {"enum", json::array({"performance_between", "expression_between", "no_engine_errors"})}}},
                             {"metric", {{"type", "string"}, {"description", "performance_between only: a Performance monitor name such as TIME_FPS."}}},
-                            {"expression", {{"type", "string"}, {"maxLength", 512}, {"description", "expression_between only: a sandbox expression evaluating to a number or a boolean, such as node.get(\"position\").x. node.get reads native ClassDB properties only; a script's own variables are refused, because reading one can run project code."}}},
+                            {"expression", {{"type", "string"}, {"maxLength", 512}, {"description", "expression_between only: a sandbox expression evaluating to a number or a boolean, such as node.get(\"position\").x. node.get reads a native property, or a script variable with no getter, holding a bool, int, float, String, StringName, NodePath, Vector2, Vector3 or Color."}}},
                             {"context_node", {{"type", "string"}, {"maxLength", 256}, {"description", "expression_between only: the node the expression is evaluated against."}}},
                             {"minimum", {{"type", "number"}}},
                             {"maximum", {{"type", "number"}}}
@@ -1004,7 +1011,7 @@ void ToolRegistry::registerRuntimeTools() {
                         {"properties", {
                             {"name", {{"type", "string"}, {"minLength", 1}, {"maxLength", 64}}},
                             {"expression", {{"type", "string"}, {"minLength", 1}, {"maxLength", 512},
-                                            {"description", "A sandbox expression evaluating to a number or a boolean, such as node.get(\"position\").x. The same sandbox runtime_watch_invariants uses: node is the context node, a native ClassDB property is read with node.get(\"name\") and a script's own variables are refused, and a bare position.x is refused because it reads through an object. A probe that never returns a value is listed in unread_probes and sets measured to false."}}},
+                                            {"description", "A sandbox expression evaluating to a number or a boolean, such as node.get(\"position\").x. The same sandbox runtime_watch_invariants uses: node is the context node, node.get(\"name\") reads a native property or a script variable with no getter, and a bare position.x is refused because it reads through an object. A probe that never returns a value is listed in unread_probes and sets measured to false."}}},
                             {"context_node", {{"type", "string"}, {"maxLength", 256},
                                               {"description", "The node the expression is evaluated against, and what node stands for in the expression."}}}
                         }},

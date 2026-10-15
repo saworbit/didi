@@ -935,6 +935,15 @@ Result<VariantValue> makeJsonVariantForProperty(const json& value, GDExtensionVa
                                 jsonWholeMember(value, "z"));
         case GDEXTENSION_VARIANT_TYPE_COLOR:
             return makeColorFromJson(value);
+        // A String is not stored by a typed GDScript NodePath or StringName
+        // member: set() drops it and says nothing, so the documented string
+        // form never landed (#1423). Built as the declared type, it does.
+        case GDEXTENSION_VARIANT_TYPE_NODE_PATH:
+            if (value.is_string()) return makeNodePath(value.get<std::string>());
+            break;
+        case GDEXTENSION_VARIANT_TYPE_STRING_NAME:
+            if (value.is_string()) return makeStringName(value.get<std::string>());
+            break;
         default:
             break;
     }

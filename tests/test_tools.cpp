@@ -4406,6 +4406,9 @@ public:
         if (method != "engine.classExists") {
             return didi::Error(404, "Unknown method: " + method);
         }
+        if (fail_from_call >= 0 && calls++ >= fail_from_call) {
+            return didi::Error(503, "pipe closed");
+        }
         // An addon older than the route answers the way an unknown method
         // answers, which is not the same fact as a class the engine lacks.
         if (!m_routeKnown) return didi::Error(501, "Unknown method: engine.classExists");
@@ -4430,6 +4433,9 @@ public:
 
     std::string method_seen;
     didi::json names_seen;
+    // From this call on, the engine stops answering. Negative never.
+    int fail_from_call = -1;
+    int calls = 0;
 
 private:
     std::set<std::string> m_classes;
@@ -4482,6 +4488,45 @@ static void test_resource_create_type_guard_asks_the_attached_engine() {
         const auto report = didi::json::parse(written.content[0].text);
         ASSERT_EQ(report["property_check"]["type_checked_against"], "attached_engine");
     }
+}
+
+// A class_name is checked as its engine base, which was never put to the
+// engine: the answer said type_checked_against api_reference and "The attached
+// engine's answer did not name this type", with an editor attached and
+// answering (#1427). The base is asked once the class_name resolves to it.
+static void test_resource_create_asks_the_engine_about_a_class_name_base() {
+    ScopedToolProject project("resource-class-name-base");
+    std::ofstream("profile.gd", std::ios::binary)
+        << "class_name ImpactProfile\nextends Resource\n\n@export var power := 1\n";
+
+    auto client = std::make_shared<ClassListClient>(
+        std::set<std::string>{"Resource"}, "Godot Engine v4.7.2.stable.official", true);
+    const auto written = didi::mcp::handleResourceCreate(
+        {{"save_path", "res://profile.tres"}, {"resource_type", "ImpactProfile"},
+         {"properties", {{"power", 3}, {"resource_name", "pistol"}}}},
+        client);
+    if (written.isError) throw std::runtime_error(written.content[0].text);
+    const auto report = didi::json::parse(written.content[0].text);
+    const auto& check = report["property_check"];
+    ASSERT_EQ(check["script_class"], "ImpactProfile");
+    ASSERT_EQ(check["type_checked_against"], "attached_engine");
+    ASSERT_TRUE(!check.contains("engine_not_consulted"));
+    ASSERT_EQ(client->names_seen, didi::json::array({"Resource"}));
+
+    // A base question that fails says why, rather than that the engine's
+    // answer left the type out.
+    auto failing = std::make_shared<ClassListClient>(
+        std::set<std::string>{"Resource"}, "Godot Engine v4.7.2.stable.official", true);
+    failing->fail_from_call = 1;
+    const auto unasked = didi::mcp::handleResourceCreate(
+        {{"save_path", "res://profile2.tres"}, {"resource_type", "ImpactProfile"},
+         {"properties", {{"power", 3}}}},
+        failing);
+    if (unasked.isError) throw std::runtime_error(unasked.content[0].text);
+    const auto unasked_check = didi::json::parse(unasked.content[0].text)["property_check"];
+    ASSERT_EQ(unasked_check["type_checked_against"], "api_reference");
+    ASSERT_TRUE(unasked_check["engine_not_consulted"].get<std::string>().find("pipe closed") !=
+                std::string::npos);
 }
 
 // An editor that answers the class check and, after a write, the request to
@@ -10434,7 +10479,10 @@ static void test_input_key_names_are_refused_with_the_integer_to_send() {
     for (const auto* tool : {"project_set_input_action", "runtime_inject_input"}) {
         for (const auto* field : {"keycode", "physical_keycode"}) {
             for (const auto& named : std::vector<std::pair<std::string, int>>{
-                     {"KEY_W", 87}, {"W", 87}, {"KEY_ESCAPE", 4194305}, {"ESCAPE", 4194305}}) {
+                     {"KEY_W", 87}, {"W", 87}, {"KEY_ESCAPE", 4194305}, {"ESCAPE", 4194305},
+                     // Any case, and spaces for underscores (#1432).
+                     {"w", 87}, {"Space", 32}, {"escape", 4194305}, {"key_space", 32},
+                     {"page down", 4194324}, {"kp enter", 4194310}}) {
                 didi::json first = {{"type", "key"}, {"keycode", 65}};
                 didi::json second = {{"type", "key"}, {field, named.first}};
                 didi::json args = {{"events", didi::json::array({first, second})}};
@@ -10460,7 +10508,7 @@ static void test_input_key_names_are_refused_with_the_integer_to_send() {
                 ASSERT_TRUE(next.content.front().text.find("invalid_arguments") == std::string::npos);
             }
         }
-        for (const auto* unknown : {"w", "87", "Escape", "KEY_NO_SUCH_KEY", "KEY_NONE"}) {
+        for (const auto* unknown : {"87", "KEY_NO_SUCH_KEY", "KEY_NONE", "none"}) {
             didi::json event = {{"type", "key"}, {"keycode", unknown}};
             didi::json args = {{"events", didi::json::array({event})}};
             if (std::string(tool) == "project_set_input_action") args["action"] = "key_name_probe";
@@ -10486,6 +10534,8 @@ static void test_input_key_names_are_refused_with_the_integer_to_send() {
     ASSERT_EQ(large_data["event_index"], 31);
     ASSERT_EQ(large_data["expected_value"], 4194305);
     ASSERT_TRUE(!large_data.contains("retry_with"));
+    // The value is known, so nothing tells the caller to go and read the enum.
+    ASSERT_TRUE(!large_data.contains("next_call"));
     ASSERT_TRUE(large.content.front().text.size() < 1024);
     const auto reflected = registry.callTool("script_reflect_class", {{"class_name", "@GlobalScope"}});
     ASSERT_TRUE(!reflected.isError);
@@ -10613,6 +10663,8 @@ struct RegisterToolTests {
                      test_resource_create_preserves_existing_file_without_overwrite);
     registerTest("resource_create type guard asks the attached engine",
                  test_resource_create_type_guard_asks_the_attached_engine);
+    registerTest("resource_create asks the engine about a class_name base",
+                 test_resource_create_asks_the_engine_about_a_class_name_base);
         registerTest("Tools.ResourceCreateWritesEachElementAsTheDeclaredPackedType",
                      test_resource_create_writes_each_element_as_the_declared_packed_type);
     registerTest("resource_create type guard keeps the reference when no engine answers",

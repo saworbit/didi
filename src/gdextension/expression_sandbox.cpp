@@ -4,6 +4,7 @@
 
 #include "didi/gdextension/gdextension_api.hpp"
 #include "didi/gdextension/godot_values.hpp"
+#include "didi/gdextension/godot_bridge.hpp"
 
 #include <array>
 #include <chrono>
@@ -307,9 +308,15 @@ Result<void> prepareNativePropertyReads(const std::string& source,
                          {&object_value.value(), &property_name.value()});
         if (property_value.isErr()) return property_value.error();
         const auto type = GodotApi::instance().variant_get_type(property_value.value().ptr());
+        // The rule, the property and its type, so an assert on an Object
+        // property is rewritten against something it can read (#1429).
         if (!isSafePreboundPropertyType(type)) {
             return Error(415,
-                         "node.get native property has an unsupported prebound type");
+                         "node.get(\"" + read.property + "\") holds a value of type " +
+                         godotVariantTypeName(static_cast<int>(type)) +
+                         ", and node.get reads only a bool, int, float, String, StringName, "
+                         "NodePath, Vector2, Vector3 or Color. Read one of those instead, such as "
+                         "a bool the script keeps.");
         }
         if (type == GDEXTENSION_VARIANT_TYPE_STRING ||
             type == GDEXTENSION_VARIANT_TYPE_STRING_NAME ||

@@ -871,6 +871,31 @@ void writes_a_class_name_type_the_way_godot_does() {
     ASSERT_TRUE(!project.exists("art/contradicted.tres"));
 }
 
+// A typed StringName is written the way Godot writes one. Break caught: it was
+// written StringName("Pistol"), which is no constructor in the text format, so
+// the file failed to parse and the call still answered created_offline (#1422).
+void writes_a_string_name_as_godot_does() {
+    ProjectFixture project("string-name-literal");
+    std::ofstream("profile.gd", std::ios::binary)
+        << "class_name ImpactProfile\nextends Resource\n\n@export var profile_name: StringName\n"
+           "@export var tags: Array[StringName] = []\n@export var target: NodePath\n";
+
+    const auto written = create({
+        {"save_path", "res://data/profile.tres"},
+        {"resource_type", "ImpactProfile"},
+        {"properties", {
+            {"profile_name", {{"type", "StringName"}, {"value", "Pis\"tol"}}},
+            {"tags", json::array({{{"type", "StringName"}, {"value", "loud"}}})},
+            {"target", {{"type", "NodePath"}, {"value", "../FX"}}}}}
+    });
+    ASSERT_TRUE(!written.isError);
+    const auto tres = project.read("data/profile.tres");
+    ASSERT_TRUE(tres.find("profile_name = &\"Pis\\\"tol\"\n") != std::string::npos);
+    ASSERT_TRUE(tres.find("&\"loud\"") != std::string::npos);
+    ASSERT_TRUE(tres.find("target = NodePath(\"../FX\")\n") != std::string::npos);
+    ASSERT_TRUE(tres.find("StringName(") == std::string::npos);
+}
+
 // The same class_name one level down. A sub-resource of a project class was
 // refused as not a class, and with allow_unknown_type it was written as
 // [sub_resource type="ObservedItem"] with no script, which Godot loads as a
@@ -984,6 +1009,8 @@ struct Register {
                      references_a_written_tres_by_its_declared_type);
         registerTest("resource_references.class_name_type_written_as_godot_does",
                      writes_a_class_name_type_the_way_godot_does);
+        registerTest("resource_references.string_name_written_as_godot_does",
+                     writes_a_string_name_as_godot_does);
         registerTest("resource_references.class_name_sub_resource_written_as_godot_does",
                      writes_a_class_name_sub_resource_the_way_godot_does);
         registerTest("resource_references.class_name_chain_to_engine_base",

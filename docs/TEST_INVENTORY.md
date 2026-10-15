@@ -10,14 +10,14 @@ Every number here is derived from the suites themselves rather than written down
 
 | Measure | Count |
 | --- | ---: |
-| Automated tests | **1817** |
-| Live-harness assertions | 1745 |
+| Automated tests | **1819** |
+| Live-harness assertions | 1754 |
 
 The badge in the [README](../README.md) shows the automated test total. Harness assertions are counted separately because they are assertions inside one live scenario, not independently runnable cases; adding them together would flatter the number.
 
 ## Native C++ suite (`didi_tests`)
 
-**1180 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
+**1182 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
 
 | Suite | Tests |
 | --- | ---: |
@@ -104,8 +104,8 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `phase7c_input` | 8 |
 | `phase7c_profiler` | 11 |
 | `project_settings_file` | 19 |
-| `resource_create` | 5 |
-| `resource_references` | 23 |
+| `resource_create` | 6 |
+| `resource_references` | 24 |
 | `tool_annotations` | 10 |
 | `tool_input_schema` | 8 |
 | `tool_manifest` | 11 |
@@ -163,7 +163,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 
 ## Live Godot harness (`tests/*.ps1`)
 
-**1745 assertions.** Derived from `Assert-True` call sites. The harness is one long live scenario rather than a set of named cases, so this counts assertions and says so.
+**1754 assertions.** Derived from `Assert-True` call sites. The harness is one long live scenario rather than a set of named cases, so this counts assertions and says so.
 
 | File | Assertions |
 | --- | ---: |
@@ -178,7 +178,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `rectangle_cell_fills.ps1` | 19 |
 | `refusal_remedies.ps1` | 3 |
 | `reimport_job.ps1` | 19 |
-| `run_godot_integration.ps1` | 1465 |
+| `run_godot_integration.ps1` | 1474 |
 | `scenario_runner.ps1` | 37 |
 | `scene_tab_reload.ps1` | 36 |
 | `test_runner.ps1` | 15 |

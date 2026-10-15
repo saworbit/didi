@@ -8076,7 +8076,7 @@
                     "type": "string"
                   },
                   "expression": {
-                    "description": "A sandbox expression evaluating to a number or a boolean, such as node.get(\"position\").x. The same sandbox runtime_watch_invariants uses: node is the context node, a native ClassDB property is read with node.get(\"name\") and a script's own variables are refused, and a bare position.x is refused because it reads through an object. A probe that never returns a value is listed in unread_probes and sets measured to false.",
+                    "description": "A sandbox expression evaluating to a number or a boolean, such as node.get(\"position\").x. The same sandbox runtime_watch_invariants uses: node is the context node, node.get(\"name\") reads a native property or a script variable with no getter, and a bare position.x is refused because it reads through an object. A probe that never returns a value is listed in unread_probes and sets measured to false.",
                     "maxLength": 512,
                     "minLength": 1,
                     "type": "string"
@@ -9114,7 +9114,7 @@
                     "type": "string"
                   },
                   "expression": {
-                    "description": "assert, wait_until: a sandbox expression such as node.get(\"position\").y; true, or a number within minimum and maximum.",
+                    "description": "assert, wait_until: a sandbox expression such as node.get(\"position\").y; true, or a number within minimum and maximum. node.get reads a bool, int, float, String, StringName, NodePath, Vector2, Vector3 or Color, never an Object.",
                     "maxLength": 512,
                     "type": "string"
                   },
@@ -9360,7 +9360,7 @@
                     "type": "string"
                   },
                   "expression": {
-                    "description": "expression_between only: a sandbox expression evaluating to a number or a boolean, such as node.get(\"position\").x. node.get reads native ClassDB properties only; a script's own variables are refused, because reading one can run project code.",
+                    "description": "expression_between only: a sandbox expression evaluating to a number or a boolean, such as node.get(\"position\").x. node.get reads a native property, or a script variable with no getter, holding a bool, int, float, String, StringName, NodePath, Vector2, Vector3 or Color.",
                     "maxLength": 512,
                     "type": "string"
                   },
