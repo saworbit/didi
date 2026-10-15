@@ -648,6 +648,9 @@ const std::map<std::string, Rule>& rules() {
         // its own deadline passed, so later is the fix there (#1159).
         {"reimport_idle_timeout", [](const Refusal& r) {
             if (r.data.contains("reimport_id")) return retryAfter(5000);
+            // asset_configure_import runs no job: it put the previous file
+            // back, and the same call once the editor is idle is the fix.
+            if (r.tool == "asset_configure_import") return retryAfter(5000);
             return field("request_id");
         }},
         {"editor_scanning", [](const Refusal&) { return retryWith({{"timeout_ms", 10000}}); }},

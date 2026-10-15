@@ -5,6 +5,7 @@
 #include "didi/mcp/tool_registry.hpp"
 #include "didi/offline/import_options.hpp"
 #include "didi/offline/resource_indexer.hpp"
+#include "didi/runtime/session_client.hpp"
 #include "didi/runtime/session_kind_policy.hpp"
 #include "didi/tools/resolved_tool_binding.hpp"
 
@@ -223,6 +224,45 @@ public:
         methods.push_back(method);
         return answer(method, params);
     }
+    std::function<didi::Result<json>(const std::string&, const json&)> answer;
+    std::vector<std::string> methods;
+};
+
+// An attached editor behind a session route, so a call goes through the
+// registry's dispatcher the way a real one does, answered from a script.
+class RoutedEditor final : public didi::runtime::IRuntimeSessionClient,
+                           public std::enable_shared_from_this<RoutedEditor> {
+public:
+    explicit RoutedEditor(std::string project)
+        : session{1, "0123456789abcdef0123456789abcdef", std::string(64, 'a'), 77, "editor",
+                  std::move(project),
+#if defined(_WIN32)
+                  "\\\\.\\pipe\\godot_didi_77_0123456789abcdef0123456789abcdef",
+#else
+                  (std::filesystem::temp_directory_path() /
+                   "godot_didi_77_0123456789abcdef0123456789abcdef.sock").string(),
+#endif
+                  123456789, "1.3"} {}
+    bool connect(const std::string&, int) override { return true; }
+    void disconnect() override {}
+    bool isConnected() const override { return true; }
+    didi::Result<json> sendRequest(const std::string& method, const json& params, int) override {
+        methods.push_back(method);
+        return answer(method, params);
+    }
+    didi::Result<json> listSessions(const std::optional<std::string>&) override {
+        return json{{"sessions", json::array()}, {"diagnostics", json::array()}};
+    }
+    didi::Result<json> attachSession(const std::string&) override { return json::object(); }
+    didi::Result<json> detachSession() override { return json::object(); }
+    std::optional<didi::runtime::SessionDescriptor> activeSession() const override { return session; }
+    std::optional<didi::runtime::RuntimeRouteLease> acquireRouteLease() override {
+        return didi::runtime::RuntimeRouteLease{
+            std::static_pointer_cast<didi::ipc::IIpcClient>(shared_from_this()), session, 1};
+    }
+    bool quarantineRoute(const didi::runtime::RuntimeRouteLease&) override { return false; }
+
+    didi::runtime::SessionDescriptor session;
     std::function<didi::Result<json>(const std::string&, const json&)> answer;
     std::vector<std::string> methods;
 };
@@ -816,6 +856,54 @@ void resource_inspect_summarises_subresources() {
     ASSERT_TRUE(configured.dump().size() < 2048);
 }
 
+// The answer a caller gets when the reimport fails, through the registry's
+// dispatcher. On CI's 4.7.2 runner the editor's own import of the model held
+// reimport_files past its deadline, the tool put the previous sidecar back and
+// said so, and the registry reported the bare reimport error instead: an
+// unknown outcome, with request_id as its fix, which this tool does not take
+// (#1425). The same override dropped asset_reimport's advice to wait it out
+// as a job.
+void a_failure_the_tool_answered_keeps_its_answer() {
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    ScopedProject project;
+    auto editor = std::make_shared<RoutedEditor>(std::filesystem::current_path().generic_string());
+    int reimports = 0;
+    const didi::Error held_past_deadline(
+        504, "Asset reimport did not finish before timeout: the editor was still inside an import pass",
+        json{{"code", "reimport_idle_timeout"}, {"outcome", "unknown_outcome"},
+             {"editor_import_pass_open", true}, {"route_quarantine", false}});
+    editor->answer = [&](const std::string& method, const json&) -> didi::Result<json> {
+        if (method == "asset.reimport") {
+            if (++reimports == 1) return held_past_deadline;
+            return json{{"reimported", json::array({"res://music/menu.ogg"})}, {"idle", true}};
+        }
+        return oggStream(false);
+    };
+    registry.setIpcClient(editor);
+    const auto configured = registry.callTool(
+        "asset_configure_import", {{"asset_path", "res://music/menu.ogg"}, {"options", {{"loop", true}}}});
+    ASSERT_TRUE(configured.isError);
+    const auto answer = json::parse(textOf(configured));
+    ASSERT_EQ(answer["execution_mode"], json("live"));
+    ASSERT_EQ(answer["session"]["kind"], json("editor"));
+    ASSERT_TRUE(answer["error"]["message"].get<std::string>().find("The options were written") == 0);
+    ASSERT_EQ(answer["error"]["data"]["rolled_back"], json(true));
+    ASSERT_EQ(answer["error"]["data"]["asset_path"], json("res://music/menu.ogg"));
+    // The same call once the editor is idle, not a job it cannot run as.
+    ASSERT_TRUE(!answer["error"]["data"].contains("field"));
+    ASSERT_EQ(answer["error"]["data"]["retry_after_ms"], json(5000));
+    ASSERT_EQ(reimports, 2);
+    ASSERT_EQ(project.sidecar(), kOggSidecar);
+
+    reimports = 0;
+    const auto reimported = registry.callTool("asset_reimport", {{"paths", json::array({"res://music/menu.ogg"})}});
+    ASSERT_TRUE(reimported.isError);
+    ASSERT_TRUE(json::parse(textOf(reimported))["error"]["message"].get<std::string>().find(
+                    "waits up to 900000 ms") != std::string::npos);
+    registry.setIpcClient(nullptr);
+}
+
 struct Register {
     Register() {
         registerTest("AssetConfigureImport.RequestValidation", request_validation);
@@ -829,6 +917,7 @@ struct Register {
         registerTest("AssetConfigureImport.SceneSidecarEdit", scene_sidecar_edit);
         registerTest("AssetConfigureImport.SceneVerifiesAndRollsBack", scene_verifies_and_rolls_back);
         registerTest("Tools.ResourceInspectSummarisesSubresources", resource_inspect_summarises_subresources);
+        registerTest("AssetConfigureImport.KeepsItsOwnFailureAnswer", a_failure_the_tool_answered_keeps_its_answer);
     }
 } registrar;
 

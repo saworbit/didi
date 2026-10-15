@@ -151,6 +151,11 @@ struct CallToolResult {
     // unaffected. A client that reads only this half can decline the text at
     // the protocol boundary; see response_economy.hpp.
     std::optional<json> structuredContent;
+    // The handler answered a failed bridge request itself and says what it did
+    // next, so this error is the call's answer and the bridge's was one step of
+    // it. Without it the registry reports the last failed bridge request in its
+    // place, which suits a handler that only passed one on (#1425).
+    bool answersItsOwnFailure{false};
 
     json toJson() const {
         json j;

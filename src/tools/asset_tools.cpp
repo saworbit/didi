@@ -2780,12 +2780,17 @@ CallToolResult handleAssetReimport(const json& args, std::shared_ptr<ipc::IIpcCl
         auto error = response.error();
         // The editor carries on with the work after a timeout, so the advice
         // is to wait it out as a job, not to send the same call again (#1159).
-        if (error.data.is_object() && error.data.value("code", std::string()) == "reimport_idle_timeout") {
+        const bool idle_timeout =
+            error.data.is_object() && error.data.value("code", std::string()) == "reimport_idle_timeout";
+        if (idle_timeout) {
             error.message += ". The editor is still working on it, so do not send another reimport "
                              "now; give the next call a request_id, which runs it as a job that "
                              "waits up to 900000 ms";
         }
-        return CallToolResult::fromError(error, "Failed to reimport assets: ");
+        auto refused = CallToolResult::fromError(error, "Failed to reimport assets: ");
+        // The advice is this call's own; the bare bridge error lacks it.
+        refused.answersItsOwnFailure = idle_timeout;
+        return refused;
     }
     return CallToolResult::successJson(response.value());
 }
@@ -2845,6 +2850,10 @@ std::optional<offline::ImportedStreamFacts> streamFacts(const json& stream) {
 // What the preview and the call both work from: the asset as it is spelled on
 // disk, its sidecar as Godot's parser reads it, and the lines that would
 // change, checked against the stream when an editor can say what it is.
+// How long asset_configure_import waits for its reimport, and again for the
+// one that puts the previous file back (#1425).
+constexpr int64_t kConfigureReimportMs = 45000;
+
 struct ImportPlan {
     std::filesystem::path root;
     std::filesystem::path sidecar_path;
@@ -3024,7 +3033,12 @@ CallToolResult handleAssetConfigureImport(const json& args, std::shared_ptr<ipc:
     }
 
     json diagnostics = json::array();
-    const json reimport_request = {{"paths", json::array({plan.asset_path})}};
+    // The edit makes the editor import the asset on its own, and reimport_files
+    // waits for that pass to close. A scene's took 8 to 11 seconds on CI's
+    // 4.7.2 runner, past the 10 one bridge command may wait (#1425), so the
+    // reimport is started detached and read until it ends, as a job's is.
+    const json reimport_request = {{"paths", json::array({plan.asset_path})},
+                                   {"timeout_ms", kConfigureReimportMs}};
     // Puts the sidecar back as it was and imports it again, so a change that
     // did not hold leaves the asset as it found it.
     const auto restore = [&]() {
@@ -3033,13 +3047,13 @@ CallToolResult handleAssetConfigureImport(const json& args, std::shared_ptr<ipc:
             if (lock.isErr()) return false;
             if (files::writeFileAtomically(plan.sidecar_path, previous_text).isErr()) return false;
         }
-        auto again = ipc->sendRequest("asset.reimport", reimport_request, ipc::kWaitForDefinitiveResponse);
+        auto again = reimportAsJob(reimport_request, ipc);
         offline::ResourceIndexer::invalidateSharedIndex();
         gatherDiagnostics(diagnostics, again);
         return !bridgeFailure(again).has_value();
     };
 
-    auto reimported = ipc->sendRequest("asset.reimport", reimport_request, ipc::kWaitForDefinitiveResponse);
+    auto reimported = reimportAsJob(reimport_request, ipc);
     offline::ResourceIndexer::invalidateSharedIndex();
     gatherDiagnostics(diagnostics, reimported);
     if (auto failed = bridgeFailure(reimported)) {
@@ -3048,12 +3062,14 @@ CallToolResult handleAssetConfigureImport(const json& args, std::shared_ptr<ipc:
         data["asset_path"] = plan.asset_path;
         data["rolled_back"] = restored;
         data["engine_diagnostics"] = diagnostics;
-        return CallToolResult::fromError(
+        auto refused = CallToolResult::fromError(
             Error(failed->code,
                   "The options were written and the reimport failed: " + failed->message +
                       (restored ? " The previous sidecar is back and reimported."
                                 : " Putting the previous sidecar back failed too."),
                   data));
+        refused.answersItsOwnFailure = true;
+        return refused;
     }
 
     // Checked against the file and the stream rather than taken from the
@@ -3083,7 +3099,7 @@ CallToolResult handleAssetConfigureImport(const json& args, std::shared_ptr<ipc:
         const bool restored = restore();
         std::string summary;
         for (size_t i = 0; i < divergences.size(); ++i) summary += (i ? "; " : "") + divergences[i];
-        return CallToolResult::errorJson(
+        auto refused = CallToolResult::errorJson(
             422,
             "The import options did not hold after the reimport: " + summary + "." +
                 (restored ? " The previous sidecar is back and reimported."
@@ -3094,6 +3110,8 @@ CallToolResult handleAssetConfigureImport(const json& args, std::shared_ptr<ipc:
              {"rolled_back", restored},
              {"engine_diagnostics", diagnostics},
              {"retryable", false}});
+        refused.answersItsOwnFailure = true;
+        return refused;
     }
 
     json payload = {
