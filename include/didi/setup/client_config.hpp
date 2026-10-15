@@ -122,6 +122,9 @@ struct IgnoreWrite {
     // Rules the file's own last word on the path reverses, with that line.
     // Left as the person wrote them, and named, because git commits the path.
     std::vector<std::pair<std::string, int>> overridden;
+    // Rules git already applies from somewhere else, such as
+    // .git/info/exclude or a global excludes file, with where (#1451).
+    std::vector<std::pair<std::string, std::string>> already_ignored;
 };
 Result<IgnoreWrite> writeIgnoreRules(const std::filesystem::path& project_root,
                                      const std::vector<std::string>& rules);

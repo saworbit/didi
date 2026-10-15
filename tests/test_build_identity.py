@@ -1,5 +1,6 @@
 """Exercise the real CMake identity setup in disposable Git work trees."""
 
+import os
 import re
 import shutil
 import subprocess
@@ -37,15 +38,19 @@ class BuildIdentityTests(unittest.TestCase):
         self.run_command("git", "config", "core.hooksPath", str(self.root / "hooks"), cwd=self.source)
         self.commit("initial")
 
-    def run_command(self, *arguments, cwd=None):
-        result = subprocess.run(arguments, cwd=cwd, capture_output=True, text=True, timeout=10)
+    def run_command(self, *arguments, cwd=None, env=None):
+        result = subprocess.run(arguments, cwd=cwd, capture_output=True, text=True, timeout=10,
+                                env=env)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         return result.stdout.strip()
 
-    def commit(self, text):
+    def commit(self, text, date=None):
         (self.source / "revision.txt").write_text(text, encoding="utf-8")
         self.run_command("git", "add", ".", cwd=self.source)
-        self.run_command("git", "commit", "-m", text, cwd=self.source)
+        env = None
+        if date:
+            env = dict(os.environ, GIT_COMMITTER_DATE=date, GIT_AUTHOR_DATE=date)
+        self.run_command("git", "commit", "-m", text, cwd=self.source, env=env)
         return self.run_command("git", "rev-parse", "--short=12", "HEAD", cwd=self.source)
 
     def configure(self, source=None, build=None, *options):
@@ -64,7 +69,8 @@ class BuildIdentityTests(unittest.TestCase):
     def test_commit_updates_without_reconfigure_and_noop_keeps_output(self):
         self.configure()
         initial, _ = self.build_identity()
-        commit = self.commit("next")
+        # Dated before the configure, so the configure's stamp stands.
+        commit = self.commit("next", date="2001-02-03T04:05:06Z")
         updated, output = self.build_identity()
         self.assertIn("+" + commit + ".", updated)
         self.assertNotEqual(initial, updated)
@@ -74,6 +80,21 @@ class BuildIdentityTests(unittest.TestCase):
         self.assertEqual(output.stat().st_mtime_ns, modified)
         output.unlink()
         self.assertEqual(self.build_identity()[0], updated)
+
+    def test_a_commit_later_than_the_configure_raises_the_stamp(self):
+        # Two commits built in one build directory carried the configure's
+        # stamp, so setup could not tell which was newer (#1450). The later of
+        # the configure time and the commit time orders them along history.
+        self.configure()
+        configured = self.build_identity()[0].rsplit(".", 1)[1]
+        self.commit("from the past", date="2001-02-03T04:05:06Z")
+        self.assertEqual(self.build_identity()[0].rsplit(".", 1)[1], configured)
+        later = self.commit("from the future", date="2099-01-02T03:04:05Z")
+        identity, output = self.build_identity()
+        self.assertTrue(identity.endswith("+" + later + ".20990102T030405"), identity)
+        modified = output.stat().st_mtime_ns
+        self.assertEqual(self.build_identity()[0], identity)
+        self.assertEqual(output.stat().st_mtime_ns, modified)
 
     def test_checkout_detached_and_packed_refs_refresh_the_commit(self):
         original = self.run_command("git", "rev-parse", "--short=12", "HEAD", cwd=self.source)

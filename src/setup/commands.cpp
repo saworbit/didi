@@ -579,18 +579,29 @@ int runSetupCommand(const std::vector<std::string>& arguments) {
         }
         if (ignored.isErr()) {
             report.add("ignore", "Ignore rules", "fail", ignored.error().message);
-        } else if (ignored.value().added.empty()) {
-            auto& step = report.add("ignore", "Ignore rules", "unchanged",
-                                    ".gitignore already contains Didi's state and client file rules");
-            step.data["file"] = utf8(ignored.value().file);
         } else {
-            std::string added;
-            for (const auto& rule : ignored.value().added) added += (added.empty() ? "" : ", ") + rule;
-            auto& step = report.add("ignore", "Ignore rules", "done",
-                                    std::string(ignored.value().action == FileAction::Created ? "created" : "added to") +
-                                        " .gitignore: " + added +
-                                        ". A file git already tracks stays tracked until git rm --cached removes it.");
-            step.data["file"] = utf8(ignored.value().file);
+            // What git already ignores from elsewhere, and where, so leaving
+            // .gitignore alone reads as a decision rather than a miss (#1451).
+            std::string elsewhere;
+            for (const auto& [rule, detail] : ignored.value().already_ignored) {
+                elsewhere += (elsewhere.empty() ? "" : "; ") + detail;
+            }
+            if (ignored.value().added.empty()) {
+                auto& step = report.add(
+                    "ignore", "Ignore rules", "unchanged",
+                    elsewhere.empty() ? std::string(".gitignore already contains Didi's state and client file rules")
+                                      : ".gitignore left as it was: " + elsewhere);
+                step.data["file"] = utf8(ignored.value().file);
+            } else {
+                std::string added;
+                for (const auto& rule : ignored.value().added) added += (added.empty() ? "" : ", ") + rule;
+                auto& step = report.add("ignore", "Ignore rules", "done",
+                                        std::string(ignored.value().action == FileAction::Created ? "created" : "added to") +
+                                            " .gitignore: " + added +
+                                            (elsewhere.empty() ? std::string() : " (" + elsewhere + ")") +
+                                            ". A file git already tracks stays tracked until git rm --cached removes it.");
+                step.data["file"] = utf8(ignored.value().file);
+            }
         }
         if (ignored.isOk()) {
             for (auto rule : rules) {

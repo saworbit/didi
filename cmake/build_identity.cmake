@@ -1,5 +1,7 @@
 # The id pairs separately copied server and extension binaries. The commit is
-# read at build time; the stamp distinguishes configurations of the same source.
+# read at build time; the stamp distinguishes configurations of the same source,
+# and generate_build_id.cmake raises it to the commit's time when that is later,
+# so a newer commit built in the same directory orders as newer (#1450).
 find_package(Git QUIET)
 string(TIMESTAMP DIDI_BUILD_STAMP "%Y%m%dT%H%M%S" UTC)
 set(DIDI_IDENTITY_GIT "")

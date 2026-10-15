@@ -279,6 +279,23 @@ class SetupOffline(SetupFixture):
         self.assertEqual(clean["ignore-client:claude-code"]["state"], "ok")
         self.assertTrue((self.project / ".didi/journal.jsonl").is_file())
 
+    @unittest.skipUnless(shutil.which("git"), "Git is required")
+    def test_setup_leaves_gitignore_alone_when_git_already_ignores_the_paths(self):
+        # A project kept Didi's rules in .git/info/exclude, and setup still
+        # added them to the tracked .gitignore, which had to be reverted by
+        # hand (#1451).
+        self.env["GIT_CEILING_DIRECTORIES"] = str(self.root)
+        subprocess.run(["git", "init", "-q"], cwd=self.project, env=self.env, check=True,
+                       capture_output=True, timeout=10)
+        exclude = self.project / ".git" / "info" / "exclude"
+        exclude.parent.mkdir(parents=True, exist_ok=True)
+        exclude.write_text("/.didi/\n/.mcp.json\n", encoding="utf-8", newline="\n")
+        (self.project / ".gitignore").write_text(".godot/\n", encoding="utf-8", newline="\n")
+        step = self.steps(self.setup_json("--client", "claude-code"))["ignore"]
+        self.assertEqual(step["state"], "unchanged", step)
+        self.assertIn("info/exclude", step["detail"])
+        self.assertEqual((self.project / ".gitignore").read_text(encoding="utf-8"), ".godot/\n")
+
     def test_a_rerun_changes_nothing(self):
         self.setup_json("--client", "all")
         before = tree_digest(self.project)
