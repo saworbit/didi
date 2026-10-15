@@ -53,7 +53,7 @@ ProjectTextScan scanProjectText(const std::string& root_dir, ScanIndex index) {
     uintmax_t scanned_bytes = 0;
     for (const auto& resource : scan.resources) {
         const bool manifest = resource.path == kProjectManifest;
-        if (!manifest && !carriesReferences(resource.type)) continue;
+        if (!manifest && !carriesReferences(resource.extension_type)) continue;
         if (scan.sources.size() >= kSearchMaxFiles) {
             ++scan.skipped_files;
             scan.truncated = true;
