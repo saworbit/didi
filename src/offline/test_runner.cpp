@@ -1,5 +1,6 @@
 #include "didi/offline/test_runner.hpp"
 #include "didi/offline/process_runner.hpp"
+#include "didi/common/cancellation.hpp"
 #include "didi/common/logger.hpp"
 #include <algorithm>
 #include <cctype>
@@ -739,7 +740,11 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
         }
 
         auto elapsed = std::chrono::steady_clock::now() - start_time;
-        if (elapsed > timeout_dur) {
+        // A cancelled job stops its game the way the timeout does, so a
+        // runtime_launch job leaves nothing running once it is cancelled, and
+        // a server shutting down does not wait out the whole run (#1428).
+        const bool cancelled = cancellationRequested();
+        if (cancelled || elapsed > timeout_dur) {
             // The job, not the process, and then wait for the job to empty.
             //
             // TerminateProcess kills what pi.hProcess points at. That is not
@@ -800,9 +805,15 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
                     std::this_thread::sleep_for(std::chrono::milliseconds(10));
                 }
             }
-            result.exit_code = 124; // Timeout exit code
-            result.timed_out = true;
-            result.summary = "Test session timed out after " + std::to_string(timeout_seconds) + " seconds.";
+            if (cancelled) {
+                result.exit_code = 130;
+                result.cancelled = true;
+                result.summary = "Test session was cancelled.";
+            } else {
+                result.exit_code = 124; // Timeout exit code
+                result.timed_out = true;
+                result.summary = "Test session timed out after " + std::to_string(timeout_seconds) + " seconds.";
+            }
             break;
         }
 
@@ -1010,14 +1021,21 @@ TestSessionResult TestRunner::runSession(const std::string& scene_path,
         }
 
         auto elapsed = std::chrono::steady_clock::now() - start_time;
-        if (elapsed > timeout_dur) {
+        const bool cancelled = cancellationRequested();
+        if (cancelled || elapsed > timeout_dur) {
             // The group, not the process. A negative pid signals every member,
             // which is what setpgid in the child above made possible.
             if (kill(-pid, SIGKILL) != 0) kill(pid, SIGKILL);
             waitpid(pid, &status, 0);
-            result.exit_code = 124;
-            result.timed_out = true;
-            result.summary = "Test session timed out after " + std::to_string(timeout_seconds) + " seconds.";
+            if (cancelled) {
+                result.exit_code = 130;
+                result.cancelled = true;
+                result.summary = "Test session was cancelled.";
+            } else {
+                result.exit_code = 124;
+                result.timed_out = true;
+                result.summary = "Test session timed out after " + std::to_string(timeout_seconds) + " seconds.";
+            }
             break;
         }
 

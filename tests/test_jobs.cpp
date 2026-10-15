@@ -464,6 +464,58 @@ void test_a_request_id_makes_a_job_that_answers_its_repeat_without_running_again
     ASSERT_EQ(textPayload(malformed)["error"]["data"]["field"], "request_id");
 }
 
+// A launch longer than the 120 seconds one call may hold the server had to be
+// split by hand (#1428). With a request_id it runs as a job: the repeat reads
+// the captured output and the verdict, and a cancel stops the game rather than
+// leaving it to run out its timeout.
+void test_a_long_launch_runs_as_a_job_and_a_cancel_stops_its_game() {
+    ScopedJobProject project("launch");
+#if defined(_WIN32)
+    const char* shell_env = std::getenv("ComSpec");
+    const std::string shell = shell_env ? shell_env : "C:\\Windows\\System32\\cmd.exe";
+    const json quick = json::array({"/d", "/c", "echo launched-as-a-job"});
+    const json slow = json::array({"/d", "/c", "ping", "-n", "30", "127.0.0.1"});
+#else
+    const std::string shell = "/bin/sh";
+    const json quick = json::array({"-c", "echo launched-as-a-job"});
+    const json slow = json::array({"-c", "sleep 30"});
+#endif
+    const char* previous_env = std::getenv("GODOT_BIN");
+    const std::string previous = previous_env ? previous_env : "";
+    setParentVariable("GODOT_BIN", shell.c_str());
+    didi::mcp::McpServer server;
+    startLegacy(server);
+    server.setJobWaitsForTesting(200ms, 50ms);
+
+    const json launch = {{"timeout_seconds", 150}, {"headless", false}, {"extra_args", quick},
+                         {"request_id", "launch-0001"}};
+    const auto first = callTool(server, 10, "runtime_launch", launch);
+    ASSERT_FALSE(first.result.value("isError", false));
+    const auto job_id = first.result["_meta"]["didi"]["job"]["job_id"].get<std::string>();
+    const auto settled = server.jobsForTesting().waitFor(job_id, 30s);
+    ASSERT_TRUE(settled.has_value());
+    ASSERT_EQ(settled->state, JobState::Completed);
+    const auto answer = textPayload(callTool(server, 11, "runtime_launch", launch));
+    ASSERT_EQ(answer["exit_code"], 0);
+    ASSERT_EQ(answer["success"], true);
+    ASSERT_TRUE(answer.dump().find("launched-as-a-job") != std::string::npos);
+
+    const auto started = callTool(server, 12, "runtime_launch",
+                                  {{"timeout_seconds", 600}, {"headless", false}, {"extra_args", slow}},
+                                  modernMeta(true));
+    ASSERT_EQ(started.result["status"], "working");
+    const auto long_id = started.result["taskId"].get<std::string>();
+    const auto cancelled_at = std::chrono::steady_clock::now();
+    const auto cancel = request(server, 13, "tasks/cancel", {{"_meta", modernMeta(true)}, {"taskId", long_id}});
+    ASSERT_FALSE(cancel.error.has_value());
+    // Thirty seconds is the floor for a run that ignored the cancel.
+    const auto stopped = server.jobsForTesting().waitFor(long_id, 15s);
+    ASSERT_TRUE(stopped.has_value());
+    ASSERT_EQ(stopped->state, JobState::Cancelled);
+    ASSERT_TRUE(std::chrono::steady_clock::now() - cancelled_at < 15s);
+    setParentVariable("GODOT_BIN", previous.c_str());
+}
+
 // A server that stops cancels and joins the jobs it is running. main can
 // leave by _Exit, which runs no destructor, so the store's own one could not
 // be relied on, and a job writing a file was killed half way (#1169).
@@ -592,6 +644,8 @@ struct RegisterJobTests {
                      test_two_launches_with_different_environments_run_at_once);
         registerTest("Jobs.RequestIdRepeatDoesNotRunAgain",
                      test_a_request_id_makes_a_job_that_answers_its_repeat_without_running_again);
+        registerTest("Jobs.LongLaunchRunsAsJobAndCancelStopsIt",
+                     test_a_long_launch_runs_as_a_job_and_a_cancel_stops_its_game);
         registerTest("Jobs.StoppingServerCancelsAndJoinsJobs",
                      test_a_stopping_server_cancels_and_joins_its_jobs);
         registerTest("Jobs.WithoutEitherTheCallRunsAsBefore",
