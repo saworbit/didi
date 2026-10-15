@@ -216,7 +216,10 @@ only.
   its write (#953). It changes only the named keys' lines and keeps every other
   byte. A key that appears twice, or shares its line with another key, is
   refused as `hand_edited_import_metadata`, because Godot never writes one.
-- Then `reimport_files` on the one path, and a wait for that pass to close.
+- Then `reimport_files` on the one path, and a wait for that pass to close, read
+  detached for up to 45 seconds since #1425, because the edit makes the editor
+  import a scene itself for longer than one bridge command may wait on a slow
+  machine.
 - Then the result is checked. The sidecar must hold each value in the engine's
   own spelling, `valid` must not be false, the uid must be unchanged, and the
   stream loaded fresh must read back what each option decides. If any of that
