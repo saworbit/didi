@@ -10,19 +10,19 @@ Every number here is derived from the suites themselves rather than written down
 
 | Measure | Count |
 | --- | ---: |
-| Automated tests | **1834** |
-| Live-harness assertions | 1761 |
+| Automated tests | **1838** |
+| Live-harness assertions | 1773 |
 
 The badge in the [README](../README.md) shows the automated test total. Harness assertions are counted separately because they are assertions inside one live scenario, not independently runnable cases; adding them together would flatter the number.
 
 ## Native C++ suite (`didi_tests`)
 
-**1195 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
+**1199 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
 
 | Suite | Tests |
 | --- | ---: |
 | `AnimAddLibrary` | 3 |
-| `AssetConfigureImport` | 6 |
+| `AssetConfigureImport` | 9 |
 | `AudioAddBus` | 10 |
 | `Base64` | 1 |
 | `Blackboard` | 14 |
@@ -89,7 +89,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `TestRunner` | 2 |
 | `ToolManifest` | 1 |
 | `ToolProfile` | 6 |
-| `Tools` | 184 |
+| `Tools` | 185 |
 | `UiListControls` | 6 |
 | `UndoLedger` | 13 |
 | `ViewportIsolation` | 2 |
@@ -163,7 +163,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 
 ## Live Godot harness (`tests/*.ps1`)
 
-**1761 assertions.** Derived from `Assert-True` call sites. The harness is one long live scenario rather than a set of named cases, so this counts assertions and says so.
+**1773 assertions.** Derived from `Assert-True` call sites. The harness is one long live scenario rather than a set of named cases, so this counts assertions and says so.
 
 | File | Assertions |
 | --- | ---: |
@@ -178,7 +178,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `rectangle_cell_fills.ps1` | 19 |
 | `refusal_remedies.ps1` | 3 |
 | `reimport_job.ps1` | 19 |
-| `run_godot_integration.ps1` | 1481 |
+| `run_godot_integration.ps1` | 1493 |
 | `scenario_runner.ps1` | 37 |
 | `scene_tab_reload.ps1` | 36 |
 | `test_runner.ps1` | 15 |

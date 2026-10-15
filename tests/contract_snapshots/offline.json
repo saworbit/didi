@@ -2605,7 +2605,7 @@
           "openWorldHint": false,
           "readOnlyHint": false
         },
-        "description": "Changes an imported asset's import options in its .import file, reimports it in the attached editor, and checks what the engine then loads. This is how a music track is made to loop: loop: true for an OGG or MP3, edit/loop_mode 2 (Forward) for a WAV. It sets the loop options of WAV, OGG and MP3 imports only, and refuses any other importer or option. Godot checks none of these values, so the tool does: a value of the wrong type, a loop mode Godot has no name for, an offset or a loop window outside the track. If the reimported asset does not load with what was asked, the previous file is put back and reimported. resource_inspect reports an asset's current import options.",
+        "description": "Changes an imported asset's import options in its .import file, reimports it in the attached editor, and checks what the engine then loads. This is how a music track is made to loop: loop: true for an OGG or MP3, edit/loop_mode 2 (Forward) for a WAV, _subresources for a model's animation. It sets those loop options only, and refuses any other importer or option. Godot checks none of these values, so the tool does: a value of the wrong type, a loop mode Godot has no name for, an offset or a loop window outside the track. If the reimported asset does not load with what was asked, the previous file is put back and reimported. resource_inspect reports an asset's current import options.",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {
@@ -2621,8 +2621,12 @@
               "type": "boolean"
             },
             "options": {
-              "description": "The import options to set and their new values. An OGG or MP3 takes loop and loop_offset, a WAV edit/loop_mode, edit/loop_begin and edit/loop_end. Every other key is refused, naming the ones this asset's importer takes.",
+              "description": "The import options to set and their new values. An OGG or MP3 takes loop and loop_offset, a WAV edit/loop_mode, edit/loop_begin and edit/loop_end, a scene _subresources. Every other key is refused, naming the ones this asset's importer takes.",
               "properties": {
+                "_subresources": {
+                  "description": "Scene: animations.<name>.settings/loop_mode, 0 None, 1 Linear or 2 Pingpong.",
+                  "type": "object"
+                },
                 "edit/loop_begin": {
                   "description": "WAV: the first frame of the loop, under loop modes 2 to 4.",
                   "minimum": 0,
