@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -49,7 +50,8 @@ struct ImportSidecar {
 // file in that state is repaired by hand rather than edited further.
 Result<ImportSidecar> readImportSidecar(std::string text);
 
-// The sidecar beside a source asset, read whole and capped at 1 MiB.
+// The sidecar beside a source asset, read whole and capped at 16 MiB. A scene
+// import grows by about 69 KB for each animation configured in it (#1425).
 Result<std::string> readImportSidecarFile(const std::filesystem::path& sidecar);
 
 // The files the last import wrote, in the order `[deps] dest_files` names them.
@@ -72,11 +74,17 @@ std::vector<std::string> configurableKeys(const std::string& importer);
 struct ImportedStreamFacts {
     std::optional<double> length_seconds;
     std::optional<int64_t> mix_rate;
+    // An imported scene's animations and the loop mode each loads with, from
+    // asset.readImportedStream (#1425).
+    std::optional<std::map<std::string, int64_t>> animations;
 };
 
 // One key to change.
 struct ImportOptionChange {
     std::string key;
+    // For a scene import, the animation whose settings/loop_mode this change
+    // sets under _subresources. Empty for every other option (#1425).
+    std::string animation;
     json value;                 // the typed value written
     std::string text;           // as it is written into the sidecar
     json previous;              // importParamValue of the line it replaces

@@ -2831,6 +2831,14 @@ std::optional<offline::ImportedStreamFacts> streamFacts(const json& stream) {
         properties["mix_rate"].is_number_integer()) {
         facts.mix_rate = properties["mix_rate"].get<int64_t>();
     }
+    // An imported scene's animations, each with the loop mode it loads with.
+    if (stream.contains("animations") && stream["animations"].is_object()) {
+        std::map<std::string, int64_t> animations;
+        for (const auto& [name, mode] : stream["animations"].items()) {
+            if (mode.is_number_integer()) animations[name] = mode.get<int64_t>();
+        }
+        facts.animations = std::move(animations);
+    }
     return facts;
 }
 
@@ -2919,9 +2927,17 @@ Result<ImportPlan> planImport(const json& args, const std::shared_ptr<ipc::IIpcC
     return plan;
 }
 
+// In the shape the call takes, so the way back is the same call with these.
 json changesAsValues(const std::vector<offline::ImportOptionChange>& changes, bool previous) {
     json values = json::object();
-    for (const auto& change : changes) values[change.key] = previous ? change.previous : change.value;
+    for (const auto& change : changes) {
+        const auto& value = previous ? change.previous : change.value;
+        if (change.animation.empty()) {
+            values[change.key] = value;
+        } else {
+            values[change.key]["animations"][change.animation]["settings/loop_mode"] = value;
+        }
+    }
     return values;
 }
 
@@ -2930,6 +2946,9 @@ json streamSummary(const json& stream) {
     json summary = {{"class", stream.value("class", std::string())},
                     {"properties", stream.value("properties", json::object())}};
     if (stream.contains("length_seconds")) summary["length_seconds"] = stream["length_seconds"];
+    for (const char* key : {"animations", "animation_mixers", "truncated"}) {
+        if (stream.contains(key)) summary[key] = stream[key];
+    }
     return summary;
 }
 
@@ -3146,10 +3165,11 @@ void ToolRegistry::registerAssetTools() {
             "Changes an imported asset's import options in its .import file, reimports it in the "
             "attached editor, and checks what the engine then loads. This is how a music track "
             "is made to loop: loop: true for an OGG or MP3, edit/loop_mode 2 (Forward) for a "
-            "WAV. It sets the loop options of WAV, OGG and MP3 imports only, and refuses any "
-            "other importer or option. Godot checks none of these values, so the tool does: a "
-            "value of the wrong type, a loop mode Godot has no name for, an offset or a loop "
-            "window outside the track. If the reimported asset does not load with what was "
+            "WAV. An imported model's animation loops by _subresources. It sets those loop "
+            "options only, and refuses any other importer or option. Godot checks none of these "
+            "values, so the tool does: a value of the wrong type, a loop mode Godot has no name "
+            "for, an offset or a loop window outside the track, an animation the scene does not "
+            "have. If the reimported asset does not load with what was "
             "asked, the previous file is put back and reimported. resource_inspect reports an "
             "asset's current import options.";
         t.inputSchema = {
@@ -3173,7 +3193,12 @@ void ToolRegistry::registerAssetTools() {
                                                              "under loop modes 2 to 4."}}},
                         {"edit/loop_end", {{"type", "integer"}, {"minimum", -1},
                                            {"description", "WAV: the frame the loop ends at, or -1 "
-                                                           "for the last one, under loop modes 2 to 4."}}}
+                                                           "for the last one, under loop modes 2 to 4."}}},
+                        {"_subresources", {{"type", "object"},
+                                           {"description",
+                                            "Scene (.glb, .gltf, .blend): {\"animations\": {\"idle\": "
+                                            "{\"settings/loop_mode\": 1}}}, 0 None, 1 Linear, 2 "
+                                            "Pingpong, as the number or the name."}}}
                     }}
                 }}
             }},

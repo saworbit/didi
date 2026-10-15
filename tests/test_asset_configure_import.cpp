@@ -8,9 +8,11 @@
 #include "didi/runtime/session_kind_policy.hpp"
 #include "didi/tools/resolved_tool_binding.hpp"
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <map>
 #include <memory>
 #include <sstream>
 #include <stdexcept>
@@ -74,6 +76,73 @@ std::string replaced(std::string text, const std::string& from, const std::strin
     const auto at = text.find(from);
     if (at != std::string::npos) text.replace(at, from.size(), to);
     return text;
+}
+
+// The sidecar Godot 4.7.2 wrote for tests/godot_smoke/models/probe_model.glb
+// in tools/vibe/probes/scene_import_loop_engine.py. 4.5.1 and 4.6.2 wrote the
+// same text less two mesh keys and one glTF key, all far from _subresources.
+const std::string kSceneSidecar =
+    "[remap]\n\n"
+    "importer=\"scene\"\n"
+    "importer_version=1\n"
+    "type=\"PackedScene\"\n"
+    "uid=\"uid://de1kyuru8ynoj\"\n"
+    "path=\"res://.godot/imported/probe_model.glb-cd2708a7083f8fdaf4d9349c4e8813c8.scn\"\n\n"
+    "[deps]\n\n"
+    "source_file=\"res://probe_model.glb\"\n"
+    "dest_files=[\"res://.godot/imported/probe_model.glb-cd2708a7083f8fdaf4d9349c4e8813c8.scn\"]\n\n"
+    "[params]\n\n"
+    "nodes/root_type=\"\"\n"
+    "nodes/root_name=\"\"\n"
+    "nodes/root_script=null\n"
+    "animation/import=true\n"
+    "animation/fps=30\n"
+    "import_script/path=\"\"\n"
+    "materials/extract=0\n"
+    "_subresources={}\n"
+    "gltf/naming_version=2\n"
+    "gltf/embedded_image_handling=1\n"
+    "gltf/texture_map_mode=1\n";
+
+// What the engine writes for one configured animation after a reimport: every
+// option the importer declares for it, 256 slices of eight each among them,
+// one entry a line and sorted (#1425).
+std::string expandedAnimation(const std::string& name, int loop_mode) {
+    std::vector<std::string> keys = {
+        "\"save_to_file/enabled\": false", "\"save_to_file/fallback_path\": \"\"",
+        "\"save_to_file/keep_custom_tracks\": \"\"", "\"save_to_file/path\": \"\"",
+        "\"settings/loop_mode\": " + std::to_string(loop_mode)};
+    std::vector<std::string> slices;
+    for (int slice = 1; slice <= 256; ++slice) {
+        const auto prefix = "\"slice_" + std::to_string(slice) + "/";
+        for (const char* option : {"end_frame\": 0", "loop_mode\": 0", "name\": \"\"",
+                                   "save_to_file/enabled\": false", "save_to_file/fallback_path\": \"\"",
+                                   "save_to_file/keep_custom_tracks\": false", "save_to_file/path\": \"\"",
+                                   "start_frame\": 0"}) {
+            slices.push_back(prefix + option);
+        }
+    }
+    std::sort(slices.begin(), slices.end());
+    keys.insert(keys.end(), slices.begin(), slices.end());
+    keys.push_back("\"slices/amount\": 0");
+    std::string text = "\"" + name + "\": {\n";
+    for (size_t i = 0; i < keys.size(); ++i) text += (i ? ",\n" : "") + keys[i];
+    return text + "\n}";
+}
+
+std::string expandedSceneSidecar(const std::string& animations) {
+    return replaced(kSceneSidecar, "_subresources={}",
+                    "_subresources={\n\"animations\": {\n" + animations + "\n}\n}");
+}
+
+json sceneOptions(const json& animations) {
+    return {{"_subresources", {{"animations", animations}}}};
+}
+
+ImportedStreamFacts sceneFacts(int64_t idle = 0, int64_t wave = 0) {
+    ImportedStreamFacts facts;
+    facts.animations = std::map<std::string, int64_t>{{"idle", idle}, {"wave", wave}};
+    return facts;
 }
 
 didi::offline::ImportSidecar sidecarOf(const std::string& text) {
@@ -499,6 +568,237 @@ void resource_inspect_reports_import_options() {
     ASSERT_EQ(payload["import"]["importer"], json("oggvorbisstr"));
 }
 
+// An imported scene's animation loop mode, the scene importer's only option
+// this tool sets, against the rules the amendment records from the engine
+// (#1425): 0 to 2 or a declared label, an animation the scene has, and nothing
+// else under _subresources.
+void scene_request_validation() {
+    const auto facts = sceneFacts();
+    const auto linear = plannedOk(kSceneSidecar, sceneOptions({{"idle", {{"settings/loop_mode", 1}}}}), facts);
+    ASSERT_EQ(linear.size(), 1u);
+    ASSERT_EQ(linear[0].key, "_subresources");
+    ASSERT_EQ(linear[0].animation, "idle");
+    ASSERT_EQ(linear[0].value, json(1));
+    // Configured nowhere yet, so the way back is what it loads with now.
+    ASSERT_EQ(linear[0].previous, json(0));
+    const auto named = plannedOk(kSceneSidecar,
+                                 sceneOptions({{"idle", {{"settings/loop_mode", "pingpong"}}},
+                                               {"wave", {{"settings/loop_mode", "Linear"}}}}),
+                                 facts);
+    ASSERT_EQ(named.size(), 2u);
+    ASSERT_EQ(named[0].animation, "idle");
+    ASSERT_EQ(named[0].value, json(2));
+    ASSERT_EQ(named[1].value, json(1));
+    // Without an editor the names cannot be checked, and nothing claims they were.
+    ASSERT_EQ(plannedOk(kSceneSidecar, sceneOptions({{"anything", {{"settings/loop_mode", 1}}}})).size(), 1u);
+    // The previous value is the sidecar's where it holds one.
+    const auto held = plannedOk(expandedSceneSidecar(expandedAnimation("idle", 2)),
+                                sceneOptions({{"idle", {{"settings/loop_mode", 0}}}}), sceneFacts(2));
+    ASSERT_EQ(held[0].previous, json(2));
+
+    // Godot loads 3 as a mode with no name, -1 as 255, a word as 0, and true
+    // and 1.0 as 1, all without a word, so each is refused.
+    for (const auto& bad : {json(3), json(-1), json("linear-ish"), json(true), json(1.0), json(nullptr)}) {
+        const auto refused = refusedPlan(kSceneSidecar, sceneOptions({{"idle", {{"settings/loop_mode", bad}}}}), facts);
+        ASSERT_EQ(refused.data["animation"], json("idle"));
+    }
+    // An animation the scene does not have, which Godot keeps and applies to
+    // nothing, names the ones it has.
+    const auto missing = refusedPlan(kSceneSidecar, sceneOptions({{"nope", {{"settings/loop_mode", 1}}}}), facts);
+    ASSERT_EQ(missing.data["animations"], json::array({"idle", "wave"}));
+    // Nothing but settings/loop_mode, and nothing but animations.
+    refusedPlan(kSceneSidecar, sceneOptions({{"idle", {{"settings/loop_mode", 1}, {"slices/amount", 1}}}}), facts);
+    refusedPlan(kSceneSidecar, sceneOptions({{"idle", {{"save_to_file/enabled", true}}}}), facts);
+    refusedPlan(kSceneSidecar, sceneOptions({{"idle", 1}}), facts);
+    refusedPlan(kSceneSidecar, sceneOptions(json::object()), facts);
+    refusedPlan(kSceneSidecar, {{"_subresources", {{"animations", {{"idle", {{"settings/loop_mode", 1}}}}},
+                                                   {"meshes", json::object()}}}}, facts);
+    refusedPlan(kSceneSidecar, {{"_subresources", true}}, facts);
+    refusedPlan(kSceneSidecar, {{"animation/fps", 24}}, facts);
+    json many = json::object();
+    for (int i = 0; i < 65; ++i) many["a" + std::to_string(i)] = {{"settings/loop_mode", 1}};
+    refusedPlan(kSceneSidecar, sceneOptions(many));
+    // A sidecar from a scene importer without the key is refused like any
+    // other missing key.
+    refusedPlan(replaced(kSceneSidecar, "_subresources={}\n", ""), sceneOptions({{"idle", {{"settings/loop_mode", 1}}}}));
+    // The audio importers' list now names the scene importer too.
+    const auto texture = refusedPlan(replaced(kOggSidecar, "importer=\"oggvorbisstr\"", "importer=\"texture\""),
+                                     {{"loop", true}});
+    ASSERT_EQ(texture.data["configurable_importers"], json::array({"wav", "oggvorbisstr", "mp3", "scene"}));
+}
+
+// The edit replaces the one _subresources value, which the engine writes over
+// thousands of lines once an animation is configured, and keeps every byte no
+// change reaches, in the engine's own layout (#1425).
+void scene_sidecar_edit() {
+    const auto edit = [](const std::string& sidecar, const json& animations) {
+        const auto parsed = sidecarOf(sidecar);
+        auto planned = planImportChanges(parsed, sceneOptions(animations), std::nullopt);
+        ASSERT_TRUE(planned.isOk());
+        auto edited = applyImportChanges(parsed, planned.value());
+        ASSERT_TRUE(edited.isOk());
+        return edited.value();
+    };
+    // From the {} every import writes, to the engine's layout.
+    ASSERT_EQ(edit(kSceneSidecar, {{"idle", {{"settings/loop_mode", 1}}}}),
+              expandedSceneSidecar("\"idle\": {\n\"settings/loop_mode\": 1\n}"));
+    // Inside an animation the engine has already expanded, one line changes.
+    const auto expanded = expandedSceneSidecar(expandedAnimation("idle", 1));
+    ASSERT_EQ(edit(expanded, {{"idle", {{"settings/loop_mode", 2}}}}),
+              expandedSceneSidecar(expandedAnimation("idle", 2)));
+    // A second animation goes beside it, and the first keeps every byte.
+    ASSERT_EQ(edit(expanded, {{"wave", {{"settings/loop_mode", 1}}}}),
+              expandedSceneSidecar(expandedAnimation("idle", 1) + ",\n\"wave\": {\n\"settings/loop_mode\": 1\n}"));
+    // A sibling category is kept as it was written.
+    const auto with_meshes = replaced(kSceneSidecar, "_subresources={}",
+                                      "_subresources={\n\"meshes\": {\n\"Body\": {\n\"lods/lod_count\": 4\n}\n}\n}");
+    ASSERT_EQ(edit(with_meshes, {{"idle", {{"settings/loop_mode", 1}}}}),
+              replaced(kSceneSidecar, "_subresources={}",
+                       "_subresources={\n\"meshes\": {\n\"Body\": {\n\"lods/lod_count\": 4\n}\n},\n"
+                       "\"animations\": {\n\"idle\": {\n\"settings/loop_mode\": 1\n}\n}\n}"));
+    // A name the key syntax has to escape, and CRLF kept, one terminator a line.
+    const auto crlf = [](std::string text) {
+        std::string out;
+        for (const char c : text) out += c == '\n' ? std::string("\r\n") : std::string(1, c);
+        return out;
+    };
+    ASSERT_EQ(edit(crlf(kSceneSidecar), {{"say \"hi\"", {{"settings/loop_mode", 1}}}}),
+              crlf(expandedSceneSidecar("\"say \\\"hi\\\"\": {\n\"settings/loop_mode\": 1\n}")));
+
+    // Text the engine never writes is refused rather than rewritten.
+    for (const auto& hand_edited : {
+             replaced(kSceneSidecar, "_subresources={}", "_subresources={}\n_subresources={}"),
+             replaced(kSceneSidecar, "_subresources={}",
+                      "_subresources={\"animations\": {}, \"animations\": {}}"),
+             replaced(kSceneSidecar, "_subresources={}", "_subresources=[]"),
+             replaced(kSceneSidecar, "_subresources={}",
+                      "_subresources={\"animations\": {\"idle\": {\"settings/loop_mode\": 1}, "
+                      "\"idle\": {}}}")}) {
+        const auto parsed = readImportSidecar(hand_edited);
+        if (parsed.isErr()) continue;
+        auto planned = planImportChanges(parsed.value(), sceneOptions({{"idle", {{"settings/loop_mode", 1}}}}),
+                                         std::nullopt);
+        if (planned.isErr()) {
+            ASSERT_EQ(planned.error().data["code"], json("hand_edited_import_metadata"));
+            continue;
+        }
+        auto edited = applyImportChanges(parsed.value(), planned.value());
+        ASSERT_TRUE(edited.isErr());
+        ASSERT_EQ(edited.error().data["code"], json("hand_edited_import_metadata"));
+    }
+
+    // The readers that decide whether the change held.
+    const auto planned = plannedOk(kSceneSidecar, sceneOptions({{"idle", {{"settings/loop_mode", 1}}}}), sceneFacts());
+    ASSERT_TRUE(didi::offline::sidecarDivergences(sidecarOf(expandedSceneSidecar(expandedAnimation("idle", 1))),
+                                                  planned, "uid://de1kyuru8ynoj").empty());
+    ASSERT_EQ(didi::offline::sidecarDivergences(sidecarOf(expandedSceneSidecar(expandedAnimation("idle", 0))),
+                                                planned, "uid://de1kyuru8ynoj").size(), 1u);
+    ASSERT_EQ(didi::offline::sidecarDivergences(sidecarOf(kSceneSidecar), planned, "uid://de1kyuru8ynoj").size(), 1u);
+    const json loaded = {{"class", "PackedScene"}, {"animations", {{"idle", 1}, {"wave", 0}}}};
+    ASSERT_TRUE(didi::offline::streamDivergences(loaded, planned).empty());
+    const json unchanged = {{"class", "PackedScene"}, {"animations", {{"idle", 0}, {"wave", 0}}}};
+    ASSERT_EQ(didi::offline::streamDivergences(unchanged, planned).size(), 1u);
+}
+
+// The call on an imported model, against a scripted editor: the change that
+// holds reports the animation's mode before and after in the call's own shape,
+// and one the reloaded scene does not show puts the old sidecar back (#1425).
+void scene_verifies_and_rolls_back() {
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    auto editor = std::make_shared<ScriptedEditor>();
+    registry.setIpcClient(editor);
+    const json call = {{"asset_path", "res://models/probe_model.glb"},
+                       {"options", sceneOptions({{"idle", {{"settings/loop_mode", 1}}}})}};
+    const auto sceneProject = [](ScopedProject&) {
+        std::filesystem::create_directories("models");
+        std::ofstream("models/probe_model.glb", std::ios::binary) << "glTF";
+        std::ofstream("models/probe_model.glb.import", std::ios::binary) << kSceneSidecar;
+        didi::offline::ResourceIndexer::invalidateSharedIndex();
+    };
+    const auto sidecar = []() {
+        std::ifstream input("models/probe_model.glb.import", std::ios::binary);
+        std::ostringstream buffer;
+        buffer << input.rdbuf();
+        return buffer.str();
+    };
+    const auto scene = [](int64_t idle) {
+        return json{{"path", "res://models/probe_model.glb"}, {"class", "PackedScene"}, {"properties", json::object()},
+                    {"animations", {{"idle", idle}, {"wave", 0}}}, {"animation_mixers", 1}};
+    };
+    {
+        ScopedProject project;
+        sceneProject(project);
+        bool reimported = false;
+        editor->answer = [&](const std::string& method, const json&) -> didi::Result<json> {
+            if (method == "asset.reimport") {
+                reimported = true;
+                return json{{"reimported", json::array({"res://models/probe_model.glb"})}, {"idle", true}};
+            }
+            return scene(reimported ? 1 : 0);
+        };
+        const auto result = registry.callTool("asset_configure_import", call);
+        ASSERT_TRUE(!result.isError);
+        const auto payload = json::parse(textOf(result));
+        ASSERT_EQ(payload["status"], json("configured"));
+        ASSERT_EQ(payload["importer"], json("scene"));
+        ASSERT_EQ(payload["previous"]["_subresources"]["animations"]["idle"]["settings/loop_mode"], json(0));
+        ASSERT_EQ(payload["options"]["_subresources"]["animations"]["idle"]["settings/loop_mode"], json(1));
+        ASSERT_EQ(payload["stream"]["animations"]["idle"], json(1));
+        ASSERT_EQ(sidecar(), expandedSceneSidecar("\"idle\": {\n\"settings/loop_mode\": 1\n}"));
+    }
+    {
+        // The reloaded scene still loads idle without a loop: the old file goes back.
+        ScopedProject project;
+        sceneProject(project);
+        editor->answer = [&](const std::string& method, const json&) -> didi::Result<json> {
+            if (method == "asset.reimport") return json{{"reimported", json::array({"res://models/probe_model.glb"})}};
+            return scene(0);
+        };
+        const auto result = registry.callTool("asset_configure_import", call);
+        ASSERT_TRUE(result.isError);
+        const auto text = textOf(result);
+        ASSERT_TRUE(text.find("import_change_not_held") != std::string::npos);
+        ASSERT_TRUE(text.find("\"rolled_back\":true") != std::string::npos);
+        ASSERT_EQ(sidecar(), kSceneSidecar);
+    }
+    {
+        // A name the scene does not have is refused before anything is written.
+        ScopedProject project;
+        sceneProject(project);
+        int reimports = 0;
+        editor->answer = [&](const std::string& method, const json&) -> didi::Result<json> {
+            if (method == "asset.reimport") ++reimports;
+            return scene(0);
+        };
+        const auto result = registry.callTool(
+            "asset_configure_import",
+            {{"asset_path", "res://models/probe_model.glb"},
+             {"options", sceneOptions({{"Idle", {{"settings/loop_mode", 1}}}})}});
+        ASSERT_TRUE(result.isError);
+        ASSERT_TRUE(textOf(result).find("\"idle\"") != std::string::npos);
+        ASSERT_EQ(reimports, 0);
+        ASSERT_EQ(sidecar(), kSceneSidecar);
+    }
+    registry.setIpcClient(nullptr);
+}
+
+// resource_inspect reports _subresources by category and name, with each
+// animation's loop mode, not as the text, which runs to about 69 KB an
+// animation once one is configured (#1425).
+void resource_inspect_summarises_subresources() {
+    const auto fresh = didi::offline::describeImportSidecar(kSceneSidecar);
+    ASSERT_EQ(fresh["options"]["_subresources"], json::object());
+    ASSERT_EQ(fresh["configurable"], json::array({"_subresources"}));
+    const auto configured = didi::offline::describeImportSidecar(
+        replaced(expandedSceneSidecar(expandedAnimation("idle", 1) + ",\n\"wave\": {\n\"slices/amount\": 0\n}"),
+                 "_subresources={\n", "_subresources={\n\"meshes\": {\n\"Body\": {\n\"lods/lod_count\": 4\n}\n},\n"));
+    ASSERT_EQ(configured["options"]["_subresources"],
+              json({{"animations", {{"idle", {{"settings/loop_mode", 1}}}, {"wave", json::object()}}},
+                    {"meshes", {{"Body", json::object()}}}}));
+    ASSERT_TRUE(configured.dump().size() < 2048);
+}
+
 struct Register {
     Register() {
         registerTest("AssetConfigureImport.RequestValidation", request_validation);
@@ -508,6 +808,10 @@ struct Register {
         registerTest("AssetConfigureImport.DryRunWritesNothing", dry_run_writes_nothing);
         registerTest("AssetConfigureImport.VerifiesAndRollsBack", verifies_and_rolls_back);
         registerTest("Tools.ResourceInspectReportsImportOptions", resource_inspect_reports_import_options);
+        registerTest("AssetConfigureImport.SceneRequestValidation", scene_request_validation);
+        registerTest("AssetConfigureImport.SceneSidecarEdit", scene_sidecar_edit);
+        registerTest("AssetConfigureImport.SceneVerifiesAndRollsBack", scene_verifies_and_rolls_back);
+        registerTest("Tools.ResourceInspectSummarisesSubresources", resource_inspect_summarises_subresources);
     }
 } registrar;
 
