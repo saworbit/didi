@@ -5656,7 +5656,7 @@
               "type": "string"
             },
             "new_definition": {
-              "description": "New method implementation. It has to declare the symbol named by method_name.",
+              "description": "New method implementation. It has to declare the symbol named by method_name, and it replaces the ## doc comments and annotations above it too.",
               "maxLength": 1048576,
               "minLength": 1,
               "type": "string"
@@ -10879,7 +10879,7 @@
               "type": "string"
             },
             "new_definition": {
-              "description": "New method implementation. It has to declare the symbol named by method_name.",
+              "description": "New method implementation. It has to declare the symbol named by method_name, and it replaces the ## doc comments and annotations above it too.",
               "maxLength": 1048576,
               "minLength": 1,
               "type": "string"

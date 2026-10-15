@@ -138,6 +138,8 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 - `2026-09-23` The website and the quickstart start from the download. [PR #910](https://github.com/saworbit/didi/pull/910)
 
 ### Fixed
+- `2026-10-15` `script_patch_method` finds an inner class declared `class Name extends Base:`. [#1435](https://github.com/saworbit/didi/issues/1435)
+- `2026-10-15` `script_patch_method` replaces a multi-line value through its closing bracket, refuses a patch that unbalances brackets, and names the lines replaced. [#1434](https://github.com/saworbit/didi/issues/1434)
 - `2026-10-15` A key name in any case, or with spaces for underscores, such as "w", "Space" or "page down", refuses with the integer to send. [#1432](https://github.com/saworbit/didi/issues/1432) · [PR #1439](https://github.com/saworbit/didi/pull/1439)
 - `2026-10-15` A blocking `runtime_launch` that captured the game's output no longer ends its summary with the console launcher caveat. [#1430](https://github.com/saworbit/didi/issues/1430) · [PR #1439](https://github.com/saworbit/didi/pull/1439)
 - `2026-10-15` `node.get` refusing a property names it, its type and the types it reads, and the expression schemas list those types. [#1429](https://github.com/saworbit/didi/issues/1429) · [PR #1439](https://github.com/saworbit/didi/pull/1439)

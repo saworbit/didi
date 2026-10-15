@@ -18,6 +18,7 @@
 #include <cctype>
 #include <fstream>
 #include <map>
+#include <set>
 #include <mutex>
 #include <sstream>
 #include <optional>
@@ -750,6 +751,41 @@ CallToolResult handleScriptPatchMethod(const json& args, std::shared_ptr<ipc::II
 
     const bool created = patch_res.value().created;
     std::string patched_content = patch_res.value().source_text;
+    const json replaced_lines =
+        created ? json(nullptr)
+                : json::array({patch_res.value().replaced_first_line,
+                               patch_res.value().replaced_last_line});
+
+    // A patch that leaves brackets open where the script had them balanced
+    // cannot parse, and it was written and answered as a success (#1434).
+    // Only the count rules: they are exact, where the lexical pass's other
+    // rules are a heuristic the engine check is allowed to overrule.
+    const auto unbalanced = [](const std::string& text) {
+        std::set<std::string> rules;
+        for (const auto& d : offline::GDScriptDiagnostics::analyze("", text)) {
+            if (d.rule == "unbalanced_parentheses" || d.rule == "unbalanced_brackets" ||
+                d.rule == "unbalanced_braces") {
+                rules.insert(d.message);
+            }
+        }
+        return rules;
+    };
+    const auto before = unbalanced(working_content);
+    for (const auto& message : unbalanced(patched_content)) {
+        if (before.count(message)) continue;
+        json data = {{"code", "invalid_arguments"}, {"field", "new_definition"}};
+        std::string where;
+        if (!created) {
+            data["replaced_lines"] = replaced_lines;
+            where = " It would replace lines " + std::to_string(patch_res.value().replaced_first_line) +
+                    " to " + std::to_string(patch_res.value().replaced_last_line) +
+                    ", so give the whole declaration, its closing bracket included.";
+        }
+        return CallToolResult::errorJson(
+            400, "Argument 'new_definition' leaves the script unparseable: " + message +
+                     " Nothing was written." + where,
+            std::move(data));
+    }
     // A file that ended without a newline keeps ending without one. The
     // patcher terminates what it splices in, so the one it adds at the end of
     // the file is the only byte here that was not asked for.
@@ -789,13 +825,18 @@ CallToolResult handleScriptPatchMethod(const json& args, std::shared_ptr<ipc::II
     }
 
     json result = {
-        {"status", "success"},
+        // A file written with errors in it is not a success, and has_errors
+        // beside "success" was easy to miss (#1434).
+        {"status", has_error ? "written_with_errors" : "success"},
         {"file_path", reported_path},
         {"method_name", symbol_name},
         // Which of the two things happened. One response shape stood in for
         // both, so a caller who asked to replace a method and got a new one
         // appended had nothing in the answer that said so (#569).
         {"created", created},
+        // The lines of the old text the replacement took, doc comments and
+        // annotations above the declaration included (#1434).
+        {"replaced_lines", replaced_lines},
         {"has_errors", has_error},
         {"diagnostics", diag_arr}
     };
@@ -1030,7 +1071,7 @@ void ToolRegistry::registerScriptTools() {
                 {"file_path", {{"type", "string"}, {"minLength", 1}, {"description", "Target script path"}}},
                 {"method_name", {{"type", "string"}, {"minLength", 1}, {"description", "Method name to replace"}}},
                 {"new_definition", {{"type", "string"}, {"minLength", 1},
-                                    {"description", "New method implementation. It has to declare the symbol named by method_name."}}},
+                                    {"description", "New method implementation. It has to declare the symbol named by method_name, and it replaces the ## doc comments and annotations above it too."}}},
                 {"symbol_type", {{"type", "string"},
                                  {"enum", offline::GDScriptDiagnostics::symbolTypes()},
                                  {"default", "function"}}},

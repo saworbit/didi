@@ -909,7 +909,10 @@ std::vector<size_t> findDeclarationLines(const std::vector<std::string>& lines,
     } else if (symbol_type == "enum") {
         pattern = R"re(^\s*enum\s+)re" + escaped_name + R"re(\s*(\{|\s|$))re";
     } else if (symbol_type == "class") {
-        pattern = R"re(^\s*class\s+)re" + escaped_name + R"re(\s*:)re";
+        // class Name extends Base: is the usual form for an inner class, and
+        // the colon straight after the name missed it (#1435).
+        pattern = R"re(^\s*class\s+)re" + escaped_name +
+                  R"re(\s*(extends\s+("[^"]*"|[\w.]+)\s*)?:)re";
     }
     // "constant" is matched by parseDeclaration, which reads it as a variable,
     // so it builds no pattern and needs none. Every value outside the published
@@ -1137,21 +1140,42 @@ Result<SymbolPatch> GDScriptDiagnostics::patchSymbol(const std::string& source_t
             // so every patch quietly glued the following func to the end of
             // the patched body. Track the last line that actually held code
             // and stop there instead.
+            //
+            // A value that spans lines, such as a const array, closes with its
+            // bracket at the declaration's own indent. That line is still the
+            // declaration's: ending the span above it left the old bracket
+            // under the replacement's, and the script stopped parsing (#1434).
+            // Brackets are counted outside strings and comments, as the lexical
+            // check counts them.
             size_t base_indent = getIndentLevel(lines[i]);
+            std::string literal_state;
+            int open_depth = 0;
+            const auto count_brackets = [&](const std::string& line) {
+                for (const char c : codeOutsideGdscriptLiterals(line, literal_state)) {
+                    if (c == '(' || c == '[' || c == '{') {
+                        ++open_depth;
+                    } else if ((c == ')' || c == ']' || c == '}') && open_depth > 0) {
+                        --open_depth;
+                    }
+                }
+            };
+            count_brackets(lines[i]);
             size_t j = i + 1;
             size_t last_body_line = i;
             while (j < lines.size()) {
                 std::string cur = lines[j];
                 std::string trimmed_cur = strings::trim(cur);
-                if (trimmed_cur.empty()) {
+                const bool continued = open_depth > 0 || !literal_state.empty();
+                if (trimmed_cur.empty() && !continued) {
                     j++;
                     continue;
                 }
                 size_t cur_indent = getIndentLevel(cur);
-                if (cur_indent <= base_indent) {
+                if (cur_indent <= base_indent && !continued) {
                     break;
                 }
-                last_body_line = j;
+                count_brackets(cur);
+                if (!trimmed_cur.empty()) last_body_line = j;
                 j++;
             }
             end_line = static_cast<int>(last_body_line + 1);
@@ -1166,6 +1190,8 @@ Result<SymbolPatch> GDScriptDiagnostics::patchSymbol(const std::string& source_t
     std::ostringstream result;
     if (start_line != -1 && end_line != -1) {
         // Replace existing block
+        patched.replaced_first_line = start_line + 1;
+        patched.replaced_last_line = end_line;
         for (int i = 0; i < start_line; ++i) {
             result << lines[i] << "\n";
         }

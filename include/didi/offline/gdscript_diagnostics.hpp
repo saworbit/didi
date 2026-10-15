@@ -50,6 +50,11 @@ struct GDScriptDeclaration {
 struct SymbolPatch {
     std::string source_text;
     bool created{false};
+    // The 1-based first and last line of the original text the replacement
+    // took the place of, doc comments and annotations included. Zero when the
+    // symbol was created.
+    int replaced_first_line{0};
+    int replaced_last_line{0};
 };
 
 class GDScriptDiagnostics {
