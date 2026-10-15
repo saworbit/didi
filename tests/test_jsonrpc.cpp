@@ -263,7 +263,9 @@ static void test_mcp_tool_list_reports_current_availability() {
     // Delivered but with no live route in this fixture, so it reports
     // unavailable rather than unimplemented. The distinction is the point:
     // "no session" and "no implementation" are different answers.
-    ASSERT_EQ(by_name["signal_connect"]["_meta"]["didi"]["currentMode"], "unavailable");
+    ASSERT_EQ(by_name["signal_disconnect"]["_meta"]["didi"]["currentMode"], "unavailable");
+    // signal_connect writes the scene file with no session (#1387).
+    ASSERT_EQ(by_name["signal_connect"]["_meta"]["didi"]["currentMode"], "offline_fallback");
     ASSERT_EQ(by_name["tilemap_get_used_rect"]["_meta"]["didi"]["currentMode"], "unavailable");
     ASSERT_EQ(by_name["scene_instantiate_node"]["_meta"]["didi"]["liveAvailable"], false);
 }
@@ -306,8 +308,11 @@ static void test_mcp_phase7_parent_gate_and_alias_identity() {
     };
     for (const auto* name : phase7_delivered) {
         ASSERT_EQ(by_name[name]["_meta"]["didi"]["implemented"], true);
+        // signal_connect also writes the .tscn itself when no editor is
+        // attached (#1387). Every other delivered name is live only.
         ASSERT_EQ(by_name[name]["_meta"]["didi"]["executionModes"],
-                  didi::json::array({"live"}));
+                  std::string(name) == "signal_connect" ? didi::json::array({"live", "offline_fallback"})
+                                                        : didi::json::array({"live"}));
     }
 
     const std::array<const char*, 3> phase7 = {

@@ -57,6 +57,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Added
 
+- `2026-10-16` `signal_connect` writes the connection into the `.tscn` that `scene_path` names when no editor is attached, checking the signal and the method first. [#1387](https://github.com/saworbit/didi/issues/1387) · [PR #1468](https://github.com/saworbit/didi/pull/1468)
 - `2026-10-16` `project_set_input_action` writes the action into `project.godot` with no editor attached, so a new project's input map can be set first. [#1379](https://github.com/saworbit/didi/issues/1379) · [PR #1467](https://github.com/saworbit/didi/pull/1467)
 - `2026-10-16` `asset_configure_import` loops an imported model's animation through `_subresources`, checked against the reloaded scene. [#1425](https://github.com/saworbit/didi/issues/1425) · [PR #1466](https://github.com/saworbit/didi/pull/1466)
 - `2026-10-15` `runtime_launch` runs as a job with a `request_id`, for up to 900 seconds, and cancelling the job stops its game. [#1428](https://github.com/saworbit/didi/issues/1428) · [PR #1465](https://github.com/saworbit/didi/pull/1465)

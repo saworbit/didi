@@ -258,6 +258,55 @@ class Phase7SchemaContractTests(unittest.TestCase):
         self.assertIn("tilemap_get_used_rect at (top level)", problems[0])
         self.assertIn("cells", problems[0])
 
+    def test_an_offline_connection_meets_its_success_contract(self):
+        # With no editor attached signal_connect writes into the .tscn
+        # (#1387), and its answer is the contract's offline branch. The
+        # harness checks the live answer against the live branch.
+        try:
+            import didi_binary
+        except ImportError:
+            from tests import didi_binary
+        checker = load_success_checker()
+        call = dict(VALID["signal_connect"], emitter_node="Clock", signal_name="timeout",
+                    target_node=".", target_method="_on_timeout", scene_path="res://main.tscn")
+        messages = [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize",
+             "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+                        "clientInfo": {"name": "phase7-offline", "version": "1"}}},
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+             "params": {"name": "signal_connect", "arguments": call}},
+        ]
+        with tempfile.TemporaryDirectory(prefix="didi-connect-") as project:
+            root = Path(project)
+            files = {
+                "project.godot": "config_version=5\n",
+                "main.gd": "extends Node2D\n\nfunc _on_timeout() -> void:\n\tpass\n",
+                "main.tscn": ('[gd_scene load_steps=2 format=3]\n\n'
+                              '[ext_resource type="Script" path="res://main.gd" id="1"]\n\n'
+                              '[node name="Main" type="Node2D"]\nscript = ExtResource("1")\n\n'
+                              '[node name="Clock" type="Timer" parent="."]\n'),
+            }
+            for name, text in files.items():
+                (root / name).write_bytes(text.encode("utf-8"))
+            completed = subprocess.run(
+                [str(didi_binary.resolve()), "--project", project],
+                input="".join(json.dumps(m) + "\n" for m in messages).encode("utf-8"),
+                capture_output=True, timeout=120)
+            scene = (root / "main.tscn").read_bytes().decode("utf-8")
+        answers = [json.loads(line) for line in completed.stdout.decode("utf-8").splitlines()
+                   if line.startswith("{")]
+        answer = next(a for a in answers if a.get("id") == 2)
+        payload = checker.payload_of(answer)
+        self.assertIsNotNone(payload, answer)
+        self.assertEqual(payload["execution_mode"], "offline_fallback")
+        self.assertIn('[connection signal="timeout" from="Clock" to="." method="_on_timeout"]\n',
+                      scene)
+        self.assertEqual(checker.problems([("signal_connect", payload)])[0], [])
+        # Neither branch takes a mix of the two: a file write has no undo.
+        mixed, _ = checker.problems([("signal_connect", dict(payload, undo_redo_registered=True))])
+        self.assertEqual(len(mixed), 1, mixed)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -10,14 +10,14 @@ Every number here is derived from the suites themselves rather than written down
 
 | Measure | Count |
 | --- | ---: |
-| Automated tests | **1842** |
+| Automated tests | **1848** |
 | Live-harness assertions | 1773 |
 
 The badge in the [README](../README.md) shows the automated test total. Harness assertions are counted separately because they are assertions inside one live scenario, not independently runnable cases; adding them together would flatter the number.
 
 ## Native C++ suite (`didi_tests`)
 
-**1203 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
+**1208 tests.** Derived from `didi_tests --list`, which prints the registry the runner iterates.
 
 | Suite | Tests |
 | --- | ---: |
@@ -82,6 +82,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `RuntimeTree` | 1 |
 | `ScenarioRunner` | 21 |
 | `SceneCallMethod` | 6 |
+| `SceneConnections` | 5 |
 | `SceneExploration` | 12 |
 | `Schema` | 2 |
 | `Segmentation` | 5 |
@@ -115,7 +116,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 
 ## Python contract suites (`tests/test_*.py`)
 
-**639 tests.** Derived from `test_*` methods on every `unittest.TestCase` subclass, read with `ast`.
+**640 tests.** Derived from `test_*` methods on every `unittest.TestCase` subclass, read with `ast`.
 
 | File | Tests |
 | --- | ---: |
@@ -148,7 +149,7 @@ The badge in the [README](../README.md) shows the automated test total. Harness 
 | `test_mcp_wire_contract.py` | 15 |
 | `test_observed_post_state.py` | 12 |
 | `test_phase7_plan_ownership.py` | 10 |
-| `test_phase7_schema_contract.py` | 6 |
+| `test_phase7_schema_contract.py` | 7 |
 | `test_phase7_signal_admission.py` | 3 |
 | `test_project_run_tests_live.py` | 4 |
 | `test_refusal_codes.py` | 13 |

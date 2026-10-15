@@ -3,6 +3,10 @@
 #include "didi/common/connection_flags.hpp"
 #include "didi/common/ipc_channel.hpp"
 #include "didi/common/logger.hpp"
+#include "didi/offline/resource_indexer.hpp"
+#include "didi/offline/scene_connections.hpp"
+
+#include <filesystem>
 
 #include <cmath>
 #include <limits>
@@ -227,20 +231,86 @@ CallToolResult handleSignalListConnections(const ResolvedToolBinding& binding, c
 
 CallToolResult handleSignalConnect(const ResolvedToolBinding& binding, const json& args,
                          std::shared_ptr<ipc::IIpcClient> ipc) {
-    if (!validateRelationshipRequest(args, true)) {
+    // scene_path names the scene for a call with no editor attached, and is
+    // never sent to the bridge, which acts on the edited scene (#1387).
+    auto relationship = args;
+    if (relationship.is_object()) relationship.erase("scene_path");
+    if (!validateRelationshipRequest(relationship, true) ||
+        (args.contains("scene_path") && !isBoundedUtf8String(args["scene_path"], 7, 1024))) {
         return invalidSignalRequest(binding, "invalid_signal_connect_request");
     }
     if (auto refused = refuseSignalConnectFlags(args)) {
         return invalidSignalRequest(binding, *refused);
     }
-    auto normalized = args;
+    auto normalized = relationship;
     // CONNECT_INHERITED is the engine's note that a connection came from an
     // instanced scene, so it is not the caller's to set. A caller round-tripping
     // a listing hands it back; connect() gets the part they chose.
     normalized["flags"] = args.contains("flags")
                               ? connection_flags::authored(args["flags"].get<int64_t>())
                               : connection_flags::kPersist;
-    return sendPhase7LiveRequest(binding, normalized, ipc);
+    if (ipc && ipc->isConnected()) {
+        if (args.contains("scene_path")) {
+            return CallToolResult::errorJson(
+                400,
+                "With an editor attached, signal_connect connects in the edited scene, so "
+                "scene_path is not taken. Open the scene with scene_open and call again without it.",
+                {{"code", "invalid_arguments"}, {"field", "scene_path"}, {"retryable", false}});
+        }
+        return sendPhase7LiveRequest(binding, normalized, ipc);
+    }
+    if (!args.contains("scene_path")) {
+        return CallToolResult::errorJson(
+            400,
+            "No editor is attached, so name the scene to connect in with scene_path, or attach an "
+            "editor to connect in the scene it has open.",
+            {{"code", "invalid_arguments"}, {"field", "scene_path"}, {"retryable", false}});
+    }
+    // With no editor the connection goes into the scene file itself, judged
+    // from the project's scripts and the class reference (#1387).
+    offline::SceneConnectionRequest request;
+    request.scene_path = args["scene_path"].get<std::string>();
+    request.emitter_node = normalized["emitter_node"].get<std::string>();
+    request.signal_name = normalized["signal_name"].get<std::string>();
+    request.target_node = normalized["target_node"].get<std::string>();
+    request.target_method = normalized["target_method"].get<std::string>();
+    request.flags = normalized["flags"].get<int64_t>();
+    std::error_code root_error;
+    const auto root = std::filesystem::current_path(root_error);
+    if (root_error) {
+        return CallToolResult::errorJson(500, "The project root cannot be resolved for an offline connection");
+    }
+    auto written = offline::connectSignalInScene(root, request);
+    if (written.isErr()) return CallToolResult::fromError(written.error());
+    offline::ResourceIndexer::invalidateSharedIndex();
+    json payload = {
+        {"connected", true},
+        {"flags", request.flags},
+        {"before", {{"connected", false}}},
+        {"undo_redo_registered", false},
+        {"outcome", "completed"},
+        {"rollback", "none"},
+        {"execution_mode", "offline_fallback"},
+        {"is_live_engine", false},
+        {"written_to", written.value().scene_path},
+        {"connection", {{"signal", request.signal_name},
+                        {"from", written.value().from},
+                        {"to", written.value().to},
+                        {"method", request.target_method}}},
+        {"line_written", written.value().line},
+        {"arity_checked", written.value().arity_checked},
+        {"limitation",
+         std::string("The connection was written into the scene file because no editor session is "
+                     "attached, and no engine checked it. The signal and the method were found in the "
+                     "project's scripts and the class reference. ") +
+             (written.value().arity_checked
+                  ? "The signal's arguments were matched against the method's."
+                  : "An engine class's signals are known by name alone, so whether the method takes "
+                    "the signal's arguments was not checked; Godot reports a mismatch when the "
+                    "signal fires.") +
+             " If an editor has this scene open without the Didi addon, close it first, because "
+             "its next save would overwrite the file."}};
+    return CallToolResult::successJson(std::move(payload));
 }
 
 CallToolResult handleSignalDisconnect(const ResolvedToolBinding& binding, const json& args,

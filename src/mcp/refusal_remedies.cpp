@@ -832,6 +832,12 @@ const std::map<std::string, Rule>& rules() {
         {"reload_unread", [](const Refusal&) { return field("request_id"); }},
         {"reload_not_found", [](const Refusal&) { return field("request_id"); }},
         {"reload_status_unanswered", [](const Refusal&) { return field("request_id"); }},
+        // signal_connect offline could not resolve what a node declares; an
+        // attached editor answers from the running objects (#1387).
+        {"connection_not_judged", [](const Refusal&) {
+            return nextCall("runtime_list_sessions", json::object(),
+                            "Attach an editor, which judges the connection from the running objects.");
+        }},
         // runtime_launch past the blocking cap runs as a job (#1428).
         {"launch_needs_job", [](const Refusal&) { return field("request_id"); }},
         {"animation_library_unloadable", [](const Refusal&) { return field("library_path"); }},

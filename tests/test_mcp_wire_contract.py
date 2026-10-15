@@ -236,7 +236,7 @@ class LegacySurface(_ServerTest):
         self.assertIs(self.meta("script_attach_to_node")["implemented"], True)
         self.assertEqual(self.meta("script_attach_to_node")["executionModes"], live)
         self.assertIs(self.meta("signal_connect")["implemented"], True)
-        self.assertEqual(self.meta("signal_connect")["executionModes"], live)
+        self.assertEqual(self.meta("signal_connect")["executionModes"], live + ["offline_fallback"])
         for name in ("tilemap_set_cells", "tilemap_get_used_rect", "gridmap_set_cells"):
             self.assertIs(self.meta(name)["implemented"], True, name)
             self.assertEqual(self.meta(name)["executionModes"], live, name)
