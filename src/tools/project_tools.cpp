@@ -185,10 +185,10 @@ CallToolResult handleProjectSetInputAction(const json& args, std::shared_ptr<ipc
     // nothing says which ui_* names are the engine's, so each counts as there.
     const bool engine_default = strings::startsWith(action, "ui_");
     if ((current.value().existed || engine_default) && !args.value("replace", false)) {
-        json data = {{"code", "already_exists"}, {"retry_with", {{"replace", true}}}};
-        if (!current.value().existed) data["engine_default"] = true;
         return CallToolResult::errorJson(409, "Input action already exists; pass replace: true to update it",
-                                         std::move(data));
+                                         {{"code", "already_exists"},
+                                          {"engine_default", !current.value().existed},
+                                          {"retry_with", {{"replace", true}}}});
     }
     const auto literal = offline::inputActionLiteral(deadzone, events);
     auto written = offline::writeInputActionLiteral(root, action, literal);

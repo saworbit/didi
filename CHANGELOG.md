@@ -57,6 +57,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Added
 
+- `2026-10-16` `project_set_input_action` writes the action into `project.godot` with no editor attached, so a new project's input map can be set first. [#1379](https://github.com/saworbit/didi/issues/1379)
 - `2026-10-16` `asset_configure_import` loops an imported model's animation through `_subresources`, checked against the reloaded scene. [#1425](https://github.com/saworbit/didi/issues/1425) · [PR #1466](https://github.com/saworbit/didi/pull/1466)
 - `2026-10-15` `runtime_launch` runs as a job with a `request_id`, for up to 900 seconds, and cancelling the job stops its game. [#1428](https://github.com/saworbit/didi/issues/1428) · [PR #1465](https://github.com/saworbit/didi/pull/1465)
 - `2026-10-15` CI builds the local CI image and smoke-checks it when its Dockerfile, a file it copies in, or `ci.yml` changes. [#1419](https://github.com/saworbit/didi/issues/1419) · [PR #1443](https://github.com/saworbit/didi/pull/1443)

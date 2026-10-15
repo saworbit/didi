@@ -2,6 +2,7 @@
 #include "didi/offline/input_actions.hpp"
 #include "didi/offline/resource_indexer.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -133,6 +134,13 @@ void offline_write() {
     auto& registry = didi::mcp::ToolRegistry::instance();
     registry.registerAllDefaultTools();
     registry.setIpcClient(nullptr);
+    // The registry refuses a live-only tool before its handler runs, which a
+    // registry with no client never reaches, so the declaration is checked here.
+    const auto* tool = registry.getTool("project_set_input_action");
+    ASSERT_TRUE(tool != nullptr);
+    const auto& modes = tool->capability.modes;
+    ASSERT_TRUE(std::find(modes.begin(), modes.end(), "offline_fallback") != modes.end());
+    ASSERT_TRUE(std::find(modes.begin(), modes.end(), "live") != modes.end());
     ScopedInputProject project;
     const json call = {{"action", "thrust_main"},
                        {"deadzone", 0.5},
