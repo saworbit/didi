@@ -1786,6 +1786,61 @@ static void test_path_validation_failures_carry_a_code_too() {
                     "Invalid script file path: ", 0) == 0);
 }
 
+// A .glb is reported as what Godot loads it as, a PackedScene, and its
+// animations and skin bones are listed from the file. It was reported as
+// MeshResource, which is not a class, with nothing about what it held (#1426).
+static void test_resource_inspect_reads_an_imported_model() {
+    ScopedToolProject project("resource-inspect-glb");
+    writeAuditFile("project.godot", "config_version=5\n");
+    std::string body = R"({"asset":{"version":"2.0"},"nodes":[{"name":"Dummy"},{"name":"root"},)"
+                       R"({"name":"hand"}],"skins":[{"joints":[1,2]},{"joints":[2]}],)"
+                       R"("accessors":[{"count":2,"max":[1.0]},{"count":2,"max":[0.5]}],)"
+                       R"("animations":[{"name":"idle","samplers":[{"input":0,"output":0}]},)"
+                       R"({"name":"wave","samplers":[{"input":1,"output":1}]}]})";
+    while (body.size() % 4) body += ' ';
+    std::string glb = "glTF";
+    const auto put = [&](uint32_t value) {
+        for (int shift = 0; shift < 32; shift += 8) glb.push_back(static_cast<char>((value >> shift) & 0xFF));
+    };
+    put(2);
+    put(static_cast<uint32_t>(12 + 8 + body.size()));
+    put(static_cast<uint32_t>(body.size()));
+    glb += "JSON" + body;
+    writeAuditFile("models/dummy.glb", glb);
+    writeAuditFile("models/dummy.glb.import",
+                   "[remap]\n\nimporter=\"scene\"\nimporter_version=1\ntype=\"PackedScene\"\n"
+                   "uid=\"uid://b1dummy\"\npath=\"res://.godot/imported/dummy.glb-0.scn\"\n\n"
+                   "[deps]\n\nsource_file=\"res://models/dummy.glb\"\n\n[params]\n\n_subresources={}\n");
+    // A file that only starts like glTF.
+    writeAuditFile("models/broken.glb", "glTF-not-a-model");
+    writeAuditFile("models/broken.glb.import",
+                   "[remap]\n\nimporter=\"scene\"\ntype=\"PackedScene\"\n");
+
+    auto& registry = didi::mcp::ToolRegistry::instance();
+    registry.registerAllDefaultTools();
+    const auto inspected = registry.callTool(
+        "resource_inspect", didi::json{{"resource_path", "res://models/dummy.glb"}});
+    if (inspected.isError) throw std::runtime_error(inspected.content[0].text);
+    const auto payload = didi::json::parse(inspected.content[0].text);
+    ASSERT_EQ(payload["type"], "PackedScene");
+    const auto& summary = payload["scene_summary"];
+    ASSERT_EQ(summary["read_from"], "gltf_file");
+    ASSERT_EQ(summary["animations"].size(), 2u);
+    ASSERT_EQ(summary["animations"][0]["name"], "idle");
+    ASSERT_EQ(summary["animations"][0]["length_seconds"], 1.0);
+    ASSERT_EQ(summary["animations"][1]["name"], "wave");
+    ASSERT_EQ(summary["animations"][1]["length_seconds"], 0.5);
+    // A joint two skins share is one bone.
+    ASSERT_EQ(summary["skeleton_bones"], didi::json::array({"root", "hand"}));
+    ASSERT_EQ(summary["truncated"], false);
+
+    // And one that cannot be read as glTF says why nothing was listed.
+    const auto broken = registry.callTool(
+        "resource_inspect", didi::json{{"resource_path", "res://models/broken.glb"}});
+    if (broken.isError) throw std::runtime_error(broken.content[0].text);
+    ASSERT_TRUE(didi::json::parse(broken.content[0].text)["scene_summary"].contains("unread"));
+}
+
 static void test_resource_inspect_tells_a_directory_from_an_absent_path() {
     // Break caught: one message stood in for two states a caller has to tell
     // apart, and they lead to different next actions -- fix the argument, or go
@@ -10918,6 +10973,8 @@ struct RegisterToolTests {
                      test_path_validation_failures_carry_a_code_too);
         registerTest("Tools.ResourceInspectDirectoryVersusAbsent",
                      test_resource_inspect_tells_a_directory_from_an_absent_path);
+        registerTest("Tools.ResourceInspectReadsAnImportedModel",
+                     test_resource_inspect_reads_an_imported_model);
         registerTest("Tools.ResourceInspectReadsDeclaredType",
                      test_resource_inspect_reads_the_type_out_of_the_file);
         registerTest("Tools.ApiVersionNoteComparesEngineLine",

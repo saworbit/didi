@@ -2250,6 +2250,16 @@ try {
         (Tool-Request 7410 "scene_get_property" @{ target_node = "/root/NodeSlots/Holder"; property_name = "profile:profile_name" }),
         (Tool-Request 2557 "editor_save_scene" @{}),
         (Tool-Request 2558 "scene_close" @{ discard_unsaved = $true }),
+        # An imported model. models/probe_model.glb is a skinned box with bones
+        # root and hand and animations idle (1 s) and wave (0.5 s), written by
+        # Godot's own GLTFDocument. It was refused as not a .tscn (#1424) and
+        # inspected as MeshResource with nothing about what it held (#1426).
+        (Tool-Request 7412 "resource_inspect" @{ resource_path = "res://models/probe_model.glb" }),
+        (Tool-Request 7413 "scene_create" @{ scene_path = "res://model_cases.tscn"; root_type = "Node3D"; root_name = "ModelCases"; overwrite = $true }),
+        (Tool-Request 7414 "scene_instantiate_node" @{ scene_path = "res://models/probe_model.glb"; parent_path = "/root/ModelCases"; name = "Model" }),
+        (Tool-Request 7415 "scene_instantiate_node" @{ scene_path = "res://reimport_probe.svg"; parent_path = "/root/ModelCases"; name = "NotAScene" }),
+        (Tool-Request 7416 "editor_save_scene" @{}),
+        (Tool-Request 7417 "scene_close" @{ discard_unsaved = $true }),
         (Tool-Request 112 "scene_create" @{ scene_path = "res:////escape.tscn" }),
         # A nested path whose parent directory does not exist yet. ResourceSaver
         # cannot create it, so this used to come back as a bare Error 19 while
@@ -4958,6 +4968,17 @@ try {
     Assert-True ($slotSceneText -match 'node_paths=PackedStringArray\("target"\)' -and $slotSceneText -match 'target = NodePath\("\.\./Point"\)') "The saved scene did not keep the node slot as Godot keeps one: $slotSceneText"
     Assert-True ($slotSceneText -match 'marker_path = NodePath\("\.\./Point"\)' -and $slotSceneText -match 'tag = &"loud"') "The saved scene did not keep the NodePath and StringName exports written as strings: $slotSceneText"
     Assert-True ((Tool-Payload $byId[2558]).closed -eq $true) "Node slot scene could not be closed."
+    $modelInspect = Tool-Payload $byId[7412]
+    Assert-True ((-not $byId[7412].result.isError) -and $modelInspect.type -eq "PackedScene") "An imported .glb was not inspected as the PackedScene Godot loads: $($byId[7412].result.content[0].text)"
+    $modelAnimations = @($modelInspect.scene_summary.animations)
+    Assert-True ((@($modelAnimations | ForEach-Object { $_.name }) -join ",") -eq "idle,wave" -and [double]$modelAnimations[0].length_seconds -eq 1.0 -and [double]$modelAnimations[1].length_seconds -eq 0.5 -and (@($modelInspect.scene_summary.skeleton_bones) -join ",") -eq "root,hand") "An imported .glb did not list its animations and bones: $($byId[7412].result.content[0].text)"
+    Assert-True ((-not $byId[7413].result.isError) -and (-not $byId[7414].result.isError)) "An imported .glb could not be instanced into a scene: $($byId[7414].result.content[0].text)"
+    $notAScene = [string]$byId[7415].result.content[0].text
+    Assert-True ($byId[7415].result.isError -and (($notAScene | ConvertFrom-Json).error.data.code -eq "not_a_packed_scene")) "A texture was not refused as something Godot does not load as a scene: $notAScene"
+    Assert-True (-not $byId[7416].result.isError) "The model scene could not be saved: $($byId[7416].result.content[0].text)"
+    $modelSceneText = Get-Content -LiteralPath (Join-Path $fixtureRoot "model_cases.tscn") -Raw
+    Assert-True ($modelSceneText -match '\[ext_resource type="PackedScene"[^\]]*path="res://models/probe_model\.glb"' -and $modelSceneText -match '\[node name="Model" parent="\."[^\]]* instance=ExtResource\(') "The saved scene does not instance the .glb the way the editor does: $modelSceneText"
+    Assert-True ((Tool-Payload $byId[7417]).closed -eq $true) "Model scene could not be closed."
     Assert-True ((Tool-Payload $byId[111]).closed -eq $true) "Smoke scene cleanup failed."
     Assert-True $byId[112].result.isError "Non-normalized res:// scene path was accepted."
     Assert-True ($byId[112].result.content[0].text -match "normalized") "Non-normalized path error was not actionable."

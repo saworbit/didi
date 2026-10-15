@@ -1736,6 +1736,105 @@ CallToolResult handleResourceCreate(const json& args, std::shared_ptr<ipc::IIpcC
     return CallToolResult::successJson(std::move(created));
 }
 
+// What a glTF model holds, read from the file before Godot imports it: the
+// animations with their lengths and the bones its skins name. Godot imported
+// those unchanged on 4.5.1, 4.6.2 and 4.7.2 for a skinned model with two
+// animations, but its import options can rename, loop or drop them, so the
+// summary says where it came from (#1426). Empty when the file is not glTF or
+// cannot be read as one, with the reason under "unread".
+static json gltfSceneSummary(const std::filesystem::path& file) {
+    constexpr size_t kMaxJsonBytes = 16 * 1024 * 1024;
+    constexpr size_t kMaxListed = 256;
+    std::ifstream in(file, std::ios::binary);
+    if (!in) return {{"unread", "The file could not be opened."}};
+    std::string text;
+    char header[12] = {};
+    in.read(header, sizeof(header));
+    const auto read_u32 = [](const char* bytes) {
+        return static_cast<uint32_t>(static_cast<unsigned char>(bytes[0])) |
+               static_cast<uint32_t>(static_cast<unsigned char>(bytes[1])) << 8 |
+               static_cast<uint32_t>(static_cast<unsigned char>(bytes[2])) << 16 |
+               static_cast<uint32_t>(static_cast<unsigned char>(bytes[3])) << 24;
+    };
+    if (in.gcount() == 12 && std::string(header, 4) == "glTF") {
+        // GLB: a 12-byte header, then the JSON chunk's length and type.
+        char chunk[8] = {};
+        in.read(chunk, sizeof(chunk));
+        if (in.gcount() != 8 || std::string(chunk + 4, 4) != "JSON") {
+            return {{"unread", "The binary glTF has no JSON chunk first."}};
+        }
+        const auto length = read_u32(chunk);
+        if (length > kMaxJsonBytes) return {{"unread", "The glTF JSON is larger than 16 MiB."}};
+        text.resize(length);
+        in.read(text.data(), length);
+        if (static_cast<size_t>(in.gcount()) != length) {
+            return {{"unread", "The binary glTF ends inside its JSON chunk."}};
+        }
+    } else {
+        in.clear();
+        in.seekg(0);
+        std::ostringstream all;
+        all << in.rdbuf();
+        text = all.str();
+        if (text.size() > kMaxJsonBytes) return {{"unread", "The glTF JSON is larger than 16 MiB."}};
+    }
+    const auto gltf = json::parse(text, nullptr, false);
+    if (gltf.is_discarded() || !gltf.is_object()) return {{"unread", "The glTF JSON does not parse."}};
+
+    const auto& nodes = gltf.contains("nodes") && gltf["nodes"].is_array() ? gltf["nodes"] : json::array();
+    const auto& accessors =
+        gltf.contains("accessors") && gltf["accessors"].is_array() ? gltf["accessors"] : json::array();
+    bool truncated = false;
+    json animations = json::array();
+    if (gltf.contains("animations") && gltf["animations"].is_array()) {
+        for (const auto& animation : gltf["animations"]) {
+            if (animations.size() == kMaxListed) {
+                truncated = true;
+                break;
+            }
+            // A sampler's input accessor holds the key times, and the spec
+            // requires its max, so the latest one is the animation's length.
+            std::optional<double> length;
+            if (animation.contains("samplers") && animation["samplers"].is_array()) {
+                for (const auto& sampler : animation["samplers"]) {
+                    const auto input = sampler.value("input", -1);
+                    if (input < 0 || static_cast<size_t>(input) >= accessors.size()) continue;
+                    const auto& max = accessors[static_cast<size_t>(input)].value("max", json::array());
+                    if (max.is_array() && !max.empty() && max[0].is_number()) {
+                        length = std::max(length.value_or(0.0), max[0].get<double>());
+                    }
+                }
+            }
+            animations.push_back({{"name", animation.value("name", json(nullptr))},
+                                  {"length_seconds", length ? json(*length) : json(nullptr)}});
+        }
+    }
+    json bones = json::array();
+    std::set<int64_t> seen;
+    if (gltf.contains("skins") && gltf["skins"].is_array()) {
+        for (const auto& skin : gltf["skins"]) {
+            if (!skin.contains("joints") || !skin["joints"].is_array()) continue;
+            for (const auto& joint : skin["joints"]) {
+                if (!joint.is_number_integer() || !seen.insert(joint.get<int64_t>()).second) continue;
+                if (bones.size() == kMaxListed) {
+                    truncated = true;
+                    break;
+                }
+                const auto index = joint.get<int64_t>();
+                bones.push_back(index >= 0 && static_cast<size_t>(index) < nodes.size()
+                                    ? nodes[static_cast<size_t>(index)].value("name", json(nullptr))
+                                    : json(nullptr));
+            }
+        }
+    }
+    return {{"read_from", "gltf_file"},
+            {"animations", std::move(animations)},
+            {"skeleton_bones", std::move(bones)},
+            {"truncated", truncated},
+            {"note", "Read from the file before import. The import options under "
+                     "import.options can rename, loop or drop what is listed."}};
+}
+
 CallToolResult handleResourceInspect(const json& args, std::shared_ptr<ipc::IIpcClient> ipc) {
     std::string resource_path = args.value("resource_path", "");
     if (resource_path.empty()) {
@@ -1758,6 +1857,21 @@ CallToolResult handleResourceInspect(const json& args, std::shared_ptr<ipc::IIpc
             if (std::filesystem::is_regular_file(sidecar, error) && !error) {
                 if (auto text = offline::readImportSidecarFile(sidecar); text.isOk()) {
                     described["import"] = offline::describeImportSidecar(text.value());
+                    // What Godot loads the asset as. The index guesses from the
+                    // extension, and its guess for a model, MeshResource, is
+                    // not a class at all: a .glb loads as a PackedScene (#1426).
+                    const auto& imported = described["import"];
+                    if (imported.contains("type") && imported["type"].is_string() &&
+                        !imported["type"].get<std::string>().empty()) {
+                        described["type"] = imported["type"];
+                    }
+                    auto extension = resolved.value().extension().string();
+                    std::transform(extension.begin(), extension.end(), extension.begin(),
+                                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                    if (imported.value("importer", std::string()) == "scene" &&
+                        (extension == ".glb" || extension == ".gltf")) {
+                        described["scene_summary"] = gltfSceneSummary(resolved.value());
+                    }
                 } else {
                     // A sidecar that is there and could not be read left no
                     // trace, which read exactly like an asset with no import
@@ -2999,7 +3113,10 @@ json resourceInspectOutputSchema() {
                           // The import sidecar's options (#958), or why a
                           // sidecar that is there could not be read.
                           {"import", {{"type", "object"}}},
-                          {"import_error", string_type}},
+                          {"import_error", string_type},
+                          // An imported glTF model's animations and skin
+                          // bones, read from the file (#1426).
+                          {"scene_summary", {{"type", "object"}}}},
                          {"execution_mode", "path"});
 }
 
