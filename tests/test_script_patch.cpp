@@ -618,6 +618,48 @@ static void test_gdscript_symbol_patch_creates_a_constant_beside_the_constants()
                 std::string::npos);
 }
 
+static void test_gdscript_symbol_patch_places_a_member_past_brackets_in_strings() {
+    // Break caught: the placement scan counted brackets inside strings and
+    // comments, so the "[" in OPEN's value never closed and CLOSE went after
+    // the last function (#1460). A multi-line string has to end before the
+    // declaration does, or the new member lands inside its text.
+    const std::string original =
+        "extends Node\n\n"
+        "const OPEN := \"[\"\n\n"
+        "func f() -> void:\n"
+        "\tpass\n";
+    auto created = didi::offline::GDScriptDiagnostics::patchSymbol(
+        original, "CLOSE", "const CLOSE := \"]\"", "constant", true);
+    ASSERT_TRUE(created.isOk());
+    ASSERT_TRUE(created.value().created);
+    ASSERT_TRUE(created.value().source_text.find("const OPEN := \"[\"\nconst CLOSE := \"]\"\n\nfunc f()") !=
+                std::string::npos);
+
+    const std::string commented =
+        "extends Node\n\n"
+        "var tiles := 3 # see grid[x\n\n"
+        "func f() -> void:\n"
+        "\tpass\n";
+    auto after_comment = didi::offline::GDScriptDiagnostics::patchSymbol(
+        commented, "rows", "var rows := 2", "variable", true);
+    ASSERT_TRUE(after_comment.isOk());
+    ASSERT_TRUE(after_comment.value().source_text.find("# see grid[x\nvar rows := 2\n\nfunc f()") !=
+                std::string::npos);
+
+    const std::string multi_line =
+        "extends Node\n\n"
+        "const HELP := \"\"\"\n"
+        "(not code\n"
+        "\"\"\"\n\n"
+        "func f() -> void:\n"
+        "\tpass\n";
+    auto after_string = didi::offline::GDScriptDiagnostics::patchSymbol(
+        multi_line, "TITLE", "const TITLE := \"t\"", "constant", true);
+    ASSERT_TRUE(after_string.isOk());
+    ASSERT_TRUE(after_string.value().source_text.find("(not code\n\"\"\"\nconst TITLE := \"t\"\n\nfunc f()") !=
+                std::string::npos);
+}
+
 static void test_gdscript_symbol_patch_finds_an_inner_class_with_a_base() {
     // Break caught: an inner class was matched only as class Name:, so the
     // usual class Name extends Base: was "not declared" and the refusal
@@ -1140,6 +1182,8 @@ struct RegisterScriptPatchTests {
                      test_gdscript_symbol_patch_takes_a_multi_line_value_whole);
         registerTest("GDScript.PatchCreatesAConstantBesideTheConstants",
                      test_gdscript_symbol_patch_creates_a_constant_beside_the_constants);
+        registerTest("GDScript.PatchPlacesPastBracketsInStrings",
+                     test_gdscript_symbol_patch_places_a_member_past_brackets_in_strings);
         registerTest("GDScript.PatchFindsAnInnerClassWithABase",
                      test_gdscript_symbol_patch_finds_an_inner_class_with_a_base);
         registerTest("GDScript.PatchKeepsNestedMethodNested",
