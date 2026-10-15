@@ -293,7 +293,7 @@ void MutationSafety::decorateSchema(const ResolvedToolBinding& binding, json& sc
         schema["properties"]["confirmation_token"] = {
             {"type", "string"}, {"minLength", 64}, {"maxLength", 64},
             {"pattern", "^[0-9a-f]{64}$"},
-            {"description", "Single-use token from an exact dry-run preview when confirmation is required."}
+            {"description", "Single-use token from a dry run of this exact call."}
         };
     }
 }

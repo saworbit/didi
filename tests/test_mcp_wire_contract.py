@@ -213,6 +213,27 @@ class LegacySurface(_ServerTest):
         for name in ("script_create", "scene_create", "resource_create"):
             self.assertIs(self.by_name[name]["annotations"]["destructiveHint"], True, name)
 
+    def test_only_a_gated_tool_says_it_is_confirmation_gated(self):
+        # The shared overwrite text told scene_create and scene_pack_branch
+        # callers to dry-run for a token, and neither tool can require one.
+        # A tool that can publishes confirmation_token, so that is the witness.
+        def texts(value):
+            if isinstance(value, dict):
+                for key, inner in value.items():
+                    if key == "description" and isinstance(inner, str):
+                        yield inner
+                    else:
+                        yield from texts(inner)
+            elif isinstance(value, list):
+                for inner in value:
+                    yield from texts(inner)
+
+        claiming = {name for name, tool in self.by_name.items()
+                    if any("confirmation-gated" in text for text in texts(tool))}
+        self.assertIn("script_create", claiming)
+        for name in sorted(claiming):
+            self.assertIn("confirmation_token", self.properties(name), name)
+
     def test_open_world_is_per_tool(self):
         # A tool that starts Godot or dotnet against the project runs code the
         # project chose, so a client cannot treat it as a closed local call.

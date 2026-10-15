@@ -994,8 +994,8 @@ void ToolRegistry::registerTool(ToolDefinition tool) {
     // so through _meta.didi.legacy alone.
     if (tool.legacy && tool.canonical_name != name) {
         tool.description += " Legacy name for " + tool.canonical_name +
-                            ", which is listed separately and is the same tool. Prefer the "
-                            "canonical name: it is what error data reports as canonical_tool.";
+                            ", the same tool, listed too. Prefer " + tool.canonical_name +
+                            ", the name error data reports as canonical_tool.";
     } else if (tool.legacy) {
         // The other two. A host that routes legacy: true entries by
         // _meta.didi.canonical handled eight and fell through on these
@@ -1005,10 +1005,8 @@ void ToolRegistry::registerTool(ToolDefinition tool) {
         // name, so the legacy name is the only name and canonical_tool in
         // error data correctly reports it.
         tool.description +=
-            " This legacy name has no canonical replacement: the capability was never "
-            "re-registered under a canonical name, so this name is the only one and is "
-            "what error data reports as canonical_tool. _meta.didi carries no canonical "
-            "for that reason rather than by omission.";
+            " This legacy name has no canonical replacement, so error data reports it as "
+            "canonical_tool and _meta.didi has no canonical.";
     }
     m_tools[name] = std::move(tool);
     DIDI_LOG_DEBUG("TOOL_REG", "Registered tool: ", name);
