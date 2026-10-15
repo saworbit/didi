@@ -38,6 +38,7 @@ jobs:
     outputs:
       build: ${{ steps.classify.outputs.build }}
       engine: ${{ steps.classify.outputs.engine }}
+      localci: ${{ steps.classify.outputs.localci }}
     steps:
       - name: Checkout Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -78,8 +79,11 @@ jobs:
           esac
 
           if [ -z "$changed" ] || [ "$changed" = "__ALL__" ]; then
-            echo "build=true" >> "$GITHUB_OUTPUT"
-            echo "engine=true" >> "$GITHUB_OUTPUT"
+            {
+              echo "build=true"
+              echo "engine=true"
+              echo "localci=true"
+            } >> "$GITHUB_OUTPUT"
             echo "Running everything (no usable diff for a $EVENT_NAME event)."
             exit 0
           fi
@@ -104,8 +108,13 @@ jobs:
           # build observes. Prose cannot, which is the whole point.
           engine_relevant='^(src/|include/|tests/|addons/|demo/|cmake/|resources/|schemas/|tools/|CMakeLists\.txt$|requirements-dev\.txt$|\.github/workflows/ci\.yml$)'
 
+          # What the local CI image is built from: its Dockerfile, the files
+          # it copies in, and this workflow, which builds it (#1419).
+          localci_inputs='^(tools/localci/|requirements-dev\.txt$|\.github/workflows/ci\.yml$)'
+
           build=false
           engine=false
+          localci=false
           while IFS= read -r file; do
             [ -n "$file" ] || continue
             if ! printf '%s\n' "$file" | grep -Eq "$build_ignored"; then
@@ -114,11 +123,17 @@ jobs:
             if printf '%s\n' "$file" | grep -Eq "$engine_relevant"; then
               engine=true
             fi
+            if printf '%s\n' "$file" | grep -Eq "$localci_inputs"; then
+              localci=true
+            fi
           done <<< "$changed"
 
-          echo "build=$build" >> "$GITHUB_OUTPUT"
-          echo "engine=$engine" >> "$GITHUB_OUTPUT"
-          echo "build=$build engine=$engine"
+          {
+            echo "build=$build"
+            echo "engine=$engine"
+            echo "localci=$localci"
+          } >> "$GITHUB_OUTPUT"
+          echo "build=$build engine=$engine localci=$localci"
 
   fast-build-and-test:
     name: ${{ matrix.os }} (${{ matrix.compiler }})
@@ -870,10 +885,32 @@ jobs:
   # a branch rule that named the matrix directly would block every docs-only
   # pull request forever. This job always runs, and fails only when something
   # that did run came back red.
+  # The image tools/localci builds for the lanes. No other job uses it, so a
+  # digest bump or a broken install passed every check here while the next
+  # local lane failed (#1419). Built and smoke-checked only when its inputs
+  # change.
+  localci-image:
+    name: Local CI image
+    needs: changes
+    if: needs.changes.outputs.localci == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build the pinned image
+        run: docker build -t didi-localci -f tools/localci/Dockerfile .
+
+      - name: Smoke-check the image
+        run: docker run --rm -v "$PWD/tools/localci/smoke.sh:/smoke.sh:ro" didi-localci bash /smoke.sh
+
   ci-gate:
     name: CI Gate
     if: always()
-    needs: [ changes, fast-build-and-test, godot-integration, sanitizers ]
+    needs: [ changes, fast-build-and-test, godot-integration, sanitizers, localci-image ]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

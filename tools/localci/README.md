@@ -224,10 +224,12 @@ offers the rebuilt image as a pull request -- see
 staying unpatched. The release number is still a manual decision; only the
 digest is automated.
 
-GitHub CI does not build this Dockerfile, so green checks do not verify the
-local image. After changing the digest or copied inputs, run the lanes with
-Docker available. An automated image build and smoke check is tracked in
-[#1419](https://github.com/saworbit/didi/issues/1419).
+CI builds this Dockerfile when it, a file it copies in or `ci.yml` changes,
+and runs [`smoke.sh`](smoke.sh) in the result: the compilers, libc++'s
+floating-point `from_chars`, `python`, the pinned `requirements-dev.txt` and
+the baked-in `lane.sh` (#1419). A failure there fails CI Gate. It does not run
+a lane, so after changing the digest or copied inputs, still run the lanes
+with Docker available.
 
 The same goes for `lane.sh`: it duplicates steps from `ci.yml` rather than
 reading them, so the two can drift. The duplication is deliberate — `act` and
