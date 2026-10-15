@@ -1302,9 +1302,15 @@ json GodotBridge::bridgeSceneInstantiateNode(const std::string& /*method*/, cons
         // scenes nothing in the surface could then consume. The instance is
         // made the way the editor makes one, so what is saved is an
         // instance of the scene rather than a copy of its nodes.
-        auto valid_scene = validateResPath(instance_scene_path, ".tscn");
+        //
+        // Any path Godot loads as a PackedScene, not only a .tscn: an imported
+        // model (.glb, .gltf, .fbx, .blend) is one, and the editor instances
+        // it when it is dropped into the scene dock (#1424).
+        auto valid_scene = validateResPath(instance_scene_path, "");
         if (valid_scene.isErr()) {
-            return errorJson(valid_scene.error());
+            return errorJson(400, "scene_path must be a normalized res:// path to a scene, such as "
+                                  "a .tscn or an imported .glb",
+                             {{"code", "invalid_arguments"}, {"field", "scene_path"}});
         }
         auto loader = singleton("ResourceLoader");
         if (loader.isErr()) return errorJson(loader.error());
@@ -1325,6 +1331,21 @@ json GodotBridge::bridgeSceneInstantiateNode(const std::string& /*method*/, cons
             return errorJson(scene_exists.error());
         }
         if (!scene_exists.value()) {
+            // A file Godot loads as something else is not missing, and saying
+            // so sent a caller looking for a file that is there.
+            auto any_hint = makeString("");
+            if (any_hint.isOk()) {
+                auto loads_as_other = callObject(loader.value(), "ResourceLoader", "exists", 4185558881LL,
+                                                 {&scene_path_value.value(), &any_hint.value()});
+                auto other = loads_as_other.isOk()
+                    ? scalarFromVariant<GDExtensionBool>(loads_as_other.value(), GDEXTENSION_VARIANT_TYPE_BOOL)
+                    : Result<GDExtensionBool>(loads_as_other.error());
+                if (other.isOk() && other.value()) {
+                    return errorJson(400, instance_scene_path + " is not a scene: Godot does not load it "
+                                          "as a PackedScene. Instance a .tscn or an imported model.",
+                                     {{"code", "not_a_packed_scene"}, {"field", "scene_path"}});
+                }
+            }
             return errorJson(404, "PackedScene not found: " + instance_scene_path);
         }
         if (auto refused = refuseInstanceCycle(root.value(), instance_scene_path)) return *refused;

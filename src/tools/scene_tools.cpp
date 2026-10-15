@@ -793,7 +793,7 @@ void ToolRegistry::registerSceneTools() {
             {"type", "object"},
             {"properties", {
                 {"node_type", {{"type", "string"}, {"minLength", 1}, {"description", "Built-in ClassDB Node type to instantiate. One of node_type or scene_path is required; there is no default, because an empty request must not add a node. Ignored when scene_path is given: the instance is whatever the scene's root is, and the result reports its class."}}},
-                {"scene_path", {{"type", "string"}, {"description", "A res:// .tscn to instance instead of constructing a type, as the editor does when a scene is dropped into the tree. What the scene file records is an instance of that scene, not a copy of its nodes."}}},
+                {"scene_path", {{"type", "string"}, {"description", "A res:// scene to instance instead of constructing a type, a .tscn or an imported model such as a .glb, as the editor does when one is dropped into the tree. What the scene file records is an instance of that scene, not a copy of its nodes."}}},
                 {"parent_path", {{"type", "string"}, {"default", "/root"}}},
                 {"name", {{"type", "string"}, {"description", "Node name"}}},
                 // These values reach the same validator as scene_set_property's
