@@ -4074,6 +4074,9 @@
             "selected_session": {
               "type": "string"
             },
+            "selected_session_attached": {
+              "type": "boolean"
+            },
             "server": {
               "type": "object"
             },

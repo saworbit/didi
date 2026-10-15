@@ -2612,6 +2612,11 @@ void test_modern_call_without_a_handle_does_not_inherit_the_attached_route() {
     const auto payload = didi::json::parse(inherited.content[0].text);
     ASSERT_EQ(payload["error"]["code"], 400);
     ASSERT_EQ(payload["error"]["data"]["missing"], "_meta.didi.runtime_session_id");
+    // The selected route was not chosen by an attach, so the refusal names it
+    // and the call that chooses it, as the control room names it (#1436).
+    ASSERT_EQ(payload["error"]["data"]["selected_session"], std::string(kSessionA));
+    ASSERT_EQ(payload["error"]["data"]["next_call"]["tool"], "runtime_attach_session");
+    ASSERT_EQ(payload["error"]["data"]["next_call"]["arguments"]["session_id"], std::string(kSessionA));
     // Never reached the engine, and the legacy route is untouched.
     ASSERT_TRUE(fake->served.empty());
     ASSERT_EQ(fake->activeSession()->session_id, std::string(kSessionA));

@@ -659,7 +659,13 @@ const std::map<std::string, Rule>& rules() {
             if (action != r.data.end() && action->is_string() && *action == "cancel") {
                 return retryAfter(0);
             }
-            return noRemedy("The person declined this change. Do not send it again unless they ask for it.");
+            // The client answered decline, and a client can answer without
+            // showing anything, so whose decline it was is not known here
+            // (#1433).
+            return noRemedy("The client declined this change, as the person's answer or on their "
+                            "behalf. Do not send it again unless the person asks. If they say the "
+                            "decline was not theirs, send the same arguments with dry_run: true, "
+                            "then with the confirmation_token it returns.");
         }},
         {"forbidden", [](const Refusal& r) {
             if (r.tool == "eval_gdscript") return field("expression");

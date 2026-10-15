@@ -156,6 +156,11 @@ CallToolResult handleControlRoom(const json& args, const std::shared_ptr<ipc::II
         const auto active = sessions->activeSession();
         if (active.has_value()) inputs.selected_session_id = active->session_id;
     }
+    if (inputs.selected_session_id.has_value() && sessions) {
+        const auto chosen = sessions->explicitlyAttachedSessionId();
+        inputs.selected_session_attached =
+            chosen.has_value() && *chosen == *inputs.selected_session_id;
+    }
     inputs.managed_unavailable = managedRouteUnavailable(ipc, inputs.connected);
     inputs.managed_recovery_enabled = ToolRegistry::instance().managedRecoveryEnabled();
     if (lease.has_value() && lease->descriptor.has_value()) {
@@ -225,6 +230,9 @@ json didiControlRoomOutputSchema() {
                           // Only when a route is selected, which is the
                           // point of the field.
                           {"selected_session", string_type},
+                          // False for a session the server re-attached by
+                          // itself (#1436).
+                          {"selected_session_attached", boolean_type},
                           {"session_note", string_type},
                           {"log", {{"type", "array"}}},
                           // A count of what the ring holds, not a flag.
