@@ -1266,7 +1266,10 @@ Result<SymbolPatch> GDScriptDiagnostics::patchSymbol(const std::string& source_t
             // Beside the members of its kind: after the last top-level one, and
             // after the last @onready one for an @onready variable. A
             // declaration that runs over several lines ends where its brackets
-            // close.
+            // close and its strings end. Brackets are counted outside strings
+            // and comments, as the replace branch counts them: a "[" in a value
+            // opened a bracket nothing closed, and the new member went after
+            // the last function (#1460).
             const bool onready = strings::startsWith(strings::trim(new_definition), "@onready");
             std::optional<size_t> last_of_kind;
             std::optional<size_t> last_onready;
@@ -1276,13 +1279,14 @@ Result<SymbolPatch> GDScriptDiagnostics::patchSymbol(const std::string& source_t
                 if (!declaration || declaration->kind != symbol_type) continue;
                 size_t end = i;
                 int depth = 0;
+                std::string literal_state;
                 for (size_t at = i; at < lines.size(); ++at) {
-                    for (const char c : lines[at]) {
+                    for (const char c : codeOutsideGdscriptLiterals(lines[at], literal_state)) {
                         if (c == '(' || c == '[' || c == '{') ++depth;
-                        else if (c == ')' || c == ']' || c == '}') --depth;
+                        else if ((c == ')' || c == ']' || c == '}') && depth > 0) --depth;
                     }
                     end = at;
-                    if (depth <= 0) break;
+                    if (depth == 0 && literal_state.empty()) break;
                 }
                 last_of_kind = end;
                 if (strings::startsWith(strings::trim(lines[i]), "@onready")) last_onready = end;
