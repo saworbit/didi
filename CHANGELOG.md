@@ -56,8 +56,8 @@ The three Phase 7 blockers are unchanged; the newest name is `project_run_tests`
 Full write-ups for these entries: [as first written](https://github.com/saworbit/didi/blob/fd9d0e5e8517143c0e892166c225485a840b2d87/CHANGELOG.md#unreleased).
 
 ### Added
-- `2026-10-15` CI builds the local CI image and smoke-checks it when its Dockerfile, a file it copies in, or `ci.yml` changes. [#1419](https://github.com/saworbit/didi/issues/1419)
 
+- `2026-10-15` CI builds the local CI image and smoke-checks it when its Dockerfile, a file it copies in, or `ci.yml` changes. [#1419](https://github.com/saworbit/didi/issues/1419) · [PR #1443](https://github.com/saworbit/didi/pull/1443)
 - `2026-10-15` Closing a pull request deletes the Actions caches its runs saved, so they no longer push `main`'s compiler caches out of the 10 GiB limit. [PR #1421](https://github.com/saworbit/didi/pull/1421)
 - `2026-10-12` `node.get` in `eval_gdscript` and the tools on its sandbox reads a game's script variables when nothing in their declaration runs code. [#1298](https://github.com/saworbit/didi/issues/1298) · [PR #1353](https://github.com/saworbit/didi/pull/1353)
 - `2026-10-12` `scene_set_property` writes a node slot such as `@export var target: Node2D` from a node path, and reads it back as that path. [#1292](https://github.com/saworbit/didi/issues/1292) · [PR #1352](https://github.com/saworbit/didi/pull/1352)
