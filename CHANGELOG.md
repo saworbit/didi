@@ -138,6 +138,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 - `2026-09-23` The website and the quickstart start from the download. [PR #910](https://github.com/saworbit/didi/pull/910)
 
 ### Fixed
+- `2026-10-15` The managed recovery live tests give `initialize` its full 60 seconds, so a slow first editor import no longer fails an observed case. [#1431](https://github.com/saworbit/didi/issues/1431)
 - `2026-10-15` After an automatic re-attach, a modern request's refusal names the session and `runtime_attach_session`, and the control room marks it not attached. [#1436](https://github.com/saworbit/didi/issues/1436) · [PR #1441](https://github.com/saworbit/didi/pull/1441)
 - `2026-10-15` A declined approval says the client declined, for the person or on their behalf, and names the dry run and token route. [#1433](https://github.com/saworbit/didi/issues/1433) · [PR #1441](https://github.com/saworbit/didi/pull/1441)
 - `2026-10-15` `script_patch_method` finds an inner class declared `class Name extends Base:`. [#1435](https://github.com/saworbit/didi/issues/1435) · [PR #1440](https://github.com/saworbit/didi/pull/1440)
