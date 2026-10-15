@@ -218,7 +218,7 @@ fire when something could have changed their answer:
 | :--- | :--- | :--- |
 | C++, tests, addon, CMake, tools, fixtures | ✅ | ✅ |
 | Documentation, README, CHANGELOG | ✅ (the docs contract is checked against the built binary) | ❌ |
-| Issue templates, funding, brand assets, editor config | ❌ | ❌ |
+| Issue templates, funding, brand assets, editor config, housekeeping workflows (`codeql`, `supply-chain`, `triage`, `pages`, `cache-cleanup`) | ❌ | ❌ |
 
 **CI Gate** and **Validate Docs** report on every pull request regardless, and
 they are the required checks. Path filters at workflow level are deliberately
@@ -234,8 +234,10 @@ local CI image and runs `tools/localci/smoke.sh` in it. CI Gate needs that job,
 so a broken image fails the pull request; any other change skips it (#1419).
 
 When a pull request closes, `cache-cleanup.yml` deletes the Actions caches its
-runs saved. Only that pull request could ever restore them, and left in place
-they push `main`'s compiler caches out of the repository's 10 GiB cache limit.
+runs saved. Only that pull request could ever restore them. GitHub evicts by
+last access once the repository reaches its 10 GiB cache limit, so they would
+go before any cache still in use; deleting them at close frees the space at
+once instead of leaving it to an eviction pass.
 
 ## 🧪 Testing on macOS and Linux
 

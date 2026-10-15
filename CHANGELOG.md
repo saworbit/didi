@@ -58,7 +58,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 ### Added
 
 - `2026-10-15` CI builds the local CI image and smoke-checks it when its Dockerfile, a file it copies in, or `ci.yml` changes. [#1419](https://github.com/saworbit/didi/issues/1419) · [PR #1443](https://github.com/saworbit/didi/pull/1443)
-- `2026-10-15` Closing a pull request deletes the Actions caches its runs saved, so they no longer push `main`'s compiler caches out of the 10 GiB limit. [PR #1421](https://github.com/saworbit/didi/pull/1421)
+- `2026-10-15` Closing a pull request deletes the Actions caches its runs saved, which nothing else can restore, instead of leaving them to cache eviction. [PR #1421](https://github.com/saworbit/didi/pull/1421)
 - `2026-10-12` `node.get` in `eval_gdscript` and the tools on its sandbox reads a game's script variables when nothing in their declaration runs code. [#1298](https://github.com/saworbit/didi/issues/1298) · [PR #1353](https://github.com/saworbit/didi/pull/1353)
 - `2026-10-12` `scene_set_property` writes a node slot such as `@export var target: Node2D` from a node path, and reads it back as that path. [#1292](https://github.com/saworbit/didi/issues/1292) · [PR #1352](https://github.com/saworbit/didi/pull/1352)
 - `2026-10-10` `ui_hit_test` takes a game's window pixels with `space: "screen"`, and a game's hits carry `screen_rect`, so list, hit test and click share one space. [#1223](https://github.com/saworbit/didi/issues/1223) · [PR #1260](https://github.com/saworbit/didi/pull/1260)
@@ -140,6 +140,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 - `2026-09-23` The website and the quickstart start from the download. [PR #910](https://github.com/saworbit/didi/pull/910)
 
 ### Fixed
+- `2026-10-15` CONTRIBUTING names the workflows that start no build, and says a closed pull request's caches are deleted to free space, not to save `main`'s. [PR #1462](https://github.com/saworbit/didi/pull/1462)
 - `2026-10-15` The guides describe key names in any case, model instancing, `script_patch_method`'s replaced lines, the held Bridge light and setup's ignore rules. [PR #1459](https://github.com/saworbit/didi/pull/1459)
 - `2026-10-15` The control room lights a bridge another MCP client holds as held, with the editor's pid, instead of Detached. [#1448](https://github.com/saworbit/didi/issues/1448) · [PR #1458](https://github.com/saworbit/didi/pull/1458)
 - `2026-10-15` CONTRIBUTING says how to rebuild on Windows while an MCP client runs `didi.exe`. [#1449](https://github.com/saworbit/didi/issues/1449) · [PR #1458](https://github.com/saworbit/didi/pull/1458)
