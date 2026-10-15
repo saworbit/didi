@@ -6,6 +6,7 @@
 #include "didi/offline/project_search.hpp"
 #include "didi/common/atomic_write.hpp"
 #include "didi/offline/class_reference.hpp"
+#include "didi/offline/resource_uid.hpp"
 #include <string_view>
 #include <vector>
 
@@ -52,10 +53,7 @@ bool looksLikeFileTarget(const std::string& target) {
 }
 
 bool isValidFileTarget(const std::string& target) {
-    if (strings::startsWith(target, "uid://")) {
-        static const std::regex uid(R"re(^uid://[a-z0-9]+$)re");
-        return std::regex_match(target, uid);
-    }
+    if (strings::startsWith(target, "uid://")) return isResourceUidText(target);
     if (!strings::startsWith(target, "res://") || target.size() == 6 || target.back() == '/') {
         return false;
     }

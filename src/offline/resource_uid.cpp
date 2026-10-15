@@ -96,15 +96,22 @@ std::string decodeUid(const std::string& text, size_t first, size_t last) {
         if (character > 127) return {};
         value.push_back(static_cast<char>(character));
     }
-    if (value.rfind("uid://", 0) != 0 || value.size() == 6) return {};
-    for (size_t index = 6; index < value.size(); ++index) {
-        if (!((value[index] >= 'a' && value[index] <= 'z') ||
-              (value[index] >= '0' && value[index] <= '9'))) return {};
-    }
+    if (!isResourceUidText(value)) return {};
     return value;
 }
 
 } // namespace
+
+bool isResourceUidText(std::string_view text) {
+    constexpr std::string_view scheme = "uid://";
+    if (text.size() <= scheme.size() || text.substr(0, scheme.size()) != scheme) return false;
+    for (const char character : text.substr(scheme.size())) {
+        if (!((character >= 'a' && character <= 'z') || (character >= '0' && character <= '9'))) {
+            return false;
+        }
+    }
+    return true;
+}
 
 ResourceUidHeader inspectTextResourceUidHeader(const std::string& text) {
     const auto [start, end] = resourceHeaderRange(text);

@@ -18,11 +18,6 @@ namespace fs = std::filesystem;
 
 namespace {
 
-bool isValidUid(const std::string& uid) {
-    static const std::regex uid_regex(R"re(^uid:\/\/[a-z0-9]+$)re");
-    return std::regex_match(uid, uid_regex);
-}
-
 void foldAsciiLower(std::string& value) {
     std::transform(value.begin(), value.end(), value.begin(), [](unsigned char character) {
         if (character >= 'A' && character <= 'Z') {
@@ -43,29 +38,49 @@ std::string extractUidSidecar(const fs::path& file_path) {
     if (bytes_read > 256) return "";
     const std::string uid = strings::trim(
         std::string(buffer.data(), static_cast<size_t>(bytes_read)));
-    return isValidUid(uid) ? uid : "";
+    return isResourceUidText(uid) ? uid : "";
 }
+
+// What an imported asset's .import file says about it.
+struct ImportMetadata {
+    std::string uid;
+    // [remap] type, the class Godot loads the asset as.
+    std::string type;
+};
 
 // Godot writes no .uid sidecar for an imported asset. Its UID lives in the
 // .import file the import pipeline already generates beside it, so a texture,
 // audio clip or mesh never appeared in the map and project_audit_assets called
 // every uid:// reference to one a broken reference.
-std::string extractUidFromImportMetadata(const fs::path& file_path) {
+ImportMetadata extractImportMetadata(const fs::path& file_path) {
     auto import_path = file_path;
     import_path += ".import";
     std::ifstream metadata(import_path);
-    if (!metadata.is_open()) return "";
+    if (!metadata.is_open()) return {};
     static const std::regex uid_regex(R"re(^\s*uid\s*=\s*"(uid:\/\/[^"]+)")re");
+    // A class name, bounded the way a declared type is. Only [remap]'s: a key
+    // of the same name in a later section says nothing about the asset.
+    static const std::regex type_regex(R"re(^\s*type\s*=\s*"([A-Za-z_][A-Za-z0-9_]{0,127})"\s*$)re");
+    ImportMetadata found;
+    std::string section;
     std::string line;
     int count = 0;
     while (std::getline(metadata, line) && count++ < 32) {
+        const auto trimmed = strings::trim(line);
+        if (!trimmed.empty() && trimmed.front() == '[') {
+            section = trimmed;
+            continue;
+        }
         std::smatch match;
         if (std::regex_search(line, match, uid_regex) && match.size() > 1) {
             const auto uid = match[1].str();
-            if (isValidUid(uid)) return uid;
+            if (found.uid.empty() && isResourceUidText(uid)) found.uid = uid;
+        } else if (section == "[remap]" && found.type.empty() &&
+                   std::regex_search(line, match, type_regex) && match.size() > 1) {
+            found.type = match[1].str();
         }
     }
-    return "";
+    return found;
 }
 
 std::string extractUidFromPath(const fs::path& file_path) {
@@ -81,7 +96,7 @@ std::string extractUidFromPath(const fs::path& file_path) {
             header += line + '\n';
             const auto facts = inspectTextResourceUidHeader(header);
             if (facts.complete) {
-                if (isValidUid(facts.uid)) return facts.uid;
+                if (isResourceUidText(facts.uid)) return facts.uid;
                 break;
             }
         }
@@ -152,12 +167,31 @@ std::string extractDeclaredTypeFromPath(const fs::path& file_path) {
 struct FileFacts {
     std::string uid;
     std::string declared_type;
+    std::string imported_type;
     std::vector<std::string> dependencies;
 };
+
+// The sidecars a file's facts are also read from. Godot writes them without
+// touching the file they describe: the editor adds a script's .uid when it
+// first scans it, and an asset's .import when it first imports it. Keyed on the
+// file alone, the memo kept what it read before either existed, so a model
+// indexed before its import stayed untyped and without a uid (#1461).
+struct SidecarStamps {
+    std::filesystem::file_time_type uid_modified{};
+    std::filesystem::file_time_type import_modified{};
+    bool operator==(const SidecarStamps&) const = default;
+};
+
+std::filesystem::file_time_type modifiedOrNone(const fs::path& path) {
+    std::error_code error;
+    const auto modified = fs::last_write_time(path, error);
+    return error ? std::filesystem::file_time_type{} : modified;
+}
 
 struct FileMemoEntry {
     std::filesystem::file_time_type modified;
     uintmax_t size{0};
+    SidecarStamps sidecars;
     FileFacts facts;
 };
 
@@ -172,25 +206,27 @@ std::unordered_map<std::filesystem::path::string_type, FileMemoEntry>& fileMemo(
 }
 
 bool lookupFileFacts(const std::filesystem::path::string_type& key,
-                     std::filesystem::file_time_type modified, uintmax_t size, FileFacts& out) {
+                     std::filesystem::file_time_type modified, uintmax_t size,
+                     const SidecarStamps& sidecars, FileFacts& out) {
     std::lock_guard<std::mutex> lock(fileMemoMutex());
     const auto found = fileMemo().find(key);
     if (found == fileMemo().end()) return false;
     if (found->second.modified != modified || found->second.size != size) return false;
+    if (!(found->second.sidecars == sidecars)) return false;
     out = found->second.facts;
     return true;
 }
 
 void rememberFileFacts(const std::filesystem::path::string_type& key,
                        std::filesystem::file_time_type modified, uintmax_t size,
-                       const FileFacts& facts) {
+                       const SidecarStamps& sidecars, const FileFacts& facts) {
     std::lock_guard<std::mutex> lock(fileMemoMutex());
     auto& memo = fileMemo();
     // One entry per indexable file is the natural ceiling. Past it the memo is
     // holding paths that no longer exist, so it is cheaper to start again than
     // to track deletions.
     if (memo.size() > ResourceIndexer::kMaxIndexedResources) memo.clear();
-    memo[key] = FileMemoEntry{modified, size, facts};
+    memo[key] = FileMemoEntry{modified, size, sidecars, facts};
 }
 
 void clearFileMemo() {
@@ -295,7 +331,12 @@ void ResourceIndexer::scan(const std::string& root_dir) {
 
                 const std::string ext = paths::projectPathToUtf8(entry.path().extension());
                 const std::string filename = paths::projectPathToUtf8(entry.path().filename());
-                std::string type = detectResourceType(ext);
+                // What the extension says decides what is read from the file,
+                // whatever the file is reported as below.
+                const std::string type = detectResourceType(ext);
+                const bool text_kind =
+                    type == "PackedScene" || type == "Resource" || type == "GDScript";
+                const bool sidecar = ext == ".uid" || ext == ".import";
 
                 uintmax_t file_size = 0;
                 std::error_code size_error;
@@ -312,8 +353,19 @@ void ResourceIndexer::scan(const std::string& root_dir) {
                 FileFacts facts;
                 const auto native = entry.path().native();
                 const bool stampable = !size_error && !time_error;
-                if (!stampable || !lookupFileFacts(native, modified, file_size, facts)) {
-                    if (type == "PackedScene" || type == "Resource" || type == "GDScript") {
+                SidecarStamps sidecars;
+                if (!sidecar) {
+                    auto uid_sidecar = entry.path();
+                    uid_sidecar += ".uid";
+                    sidecars.uid_modified = modifiedOrNone(uid_sidecar);
+                }
+                if (!sidecar && !text_kind) {
+                    auto import_sidecar = entry.path();
+                    import_sidecar += ".import";
+                    sidecars.import_modified = modifiedOrNone(import_sidecar);
+                }
+                if (!stampable || !lookupFileFacts(native, modified, file_size, sidecars, facts)) {
+                    if (text_kind) {
                         facts.uid = extractUidFromPath(entry.path());
                         // .tres and .res carry [ext_resource] references to
                         // textures, scripts and shaders exactly as scenes do, so
@@ -327,13 +379,13 @@ void ResourceIndexer::scan(const std::string& root_dir) {
                         if (type == "Resource") {
                             facts.declared_type = extractDeclaredTypeFromPath(entry.path());
                         }
-                    } else if (ext != ".uid" && ext != ".import") {
+                    } else if (!sidecar) {
+                        const auto imported = extractImportMetadata(entry.path());
                         facts.uid = extractUidSidecar(entry.path());
-                        if (facts.uid.empty()) {
-                            facts.uid = extractUidFromImportMetadata(entry.path());
-                        }
+                        if (facts.uid.empty()) facts.uid = imported.uid;
+                        facts.imported_type = imported.type;
                     }
-                    if (stampable) rememberFileFacts(native, modified, file_size, facts);
+                    if (stampable) rememberFileFacts(native, modified, file_size, sidecars, facts);
                 }
                 std::string uid = facts.uid;
                 std::vector<std::string> deps = std::move(facts.dependencies);
@@ -341,7 +393,17 @@ void ResourceIndexer::scan(const std::string& root_dir) {
                 ResourceInfo info;
                 info.path = rel_path;
                 info.filename = filename;
-                info.type = type;
+                // A model's extension names no class at all, MeshResource, and
+                // an extension Didi does not know names only GenericResource.
+                // For those, what Godot loads the import as: a .glb the scene
+                // importer took is a PackedScene (#1461). A texture or audio
+                // clip keeps the class its extension names, Texture2D or
+                // AudioStream, which is how Godot spells a reference to one in
+                // a scene, though it loads a CompressedTexture2D or an
+                // AudioStreamWAV.
+                const bool untyped = type == "MeshResource" || type == "GenericResource";
+                info.type = untyped && !facts.imported_type.empty() ? facts.imported_type : type;
+                info.extension_type = type;
                 info.uid = uid;
                 info.declared_type = facts.declared_type;
                 info.file_size = file_size;
