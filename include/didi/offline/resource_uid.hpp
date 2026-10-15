@@ -3,8 +3,16 @@
 #include "didi/common/types.hpp"
 #include <filesystem>
 #include <string>
+#include <string_view>
 
 namespace didi::offline {
+
+// Whether text is a UID as Godot's ResourceUID::text_to_id reads one: uid://
+// and then at least one character, each a-z or 0-9. Every check of a uid's
+// form goes through this, so the index, the audit and the impact analysis
+// agree on what one is (#1446). A caller that only routes uid:// text to the
+// engine, which answers validity itself, needs the prefix and not this.
+bool isResourceUidText(std::string_view text);
 
 struct ResourceUidHeader {
     bool matched{false};
