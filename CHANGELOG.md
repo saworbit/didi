@@ -138,9 +138,9 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 - `2026-09-23` The website and the quickstart start from the download. [PR #910](https://github.com/saworbit/didi/pull/910)
 
 ### Fixed
-- `2026-10-15` A key name in any case, or with spaces for underscores, such as "w", "Space" or "page down", refuses with the integer to send. [#1432](https://github.com/saworbit/didi/issues/1432)
-- `2026-10-15` A blocking `runtime_launch` that captured the game's output no longer ends its summary with the console launcher caveat. [#1430](https://github.com/saworbit/didi/issues/1430)
-- `2026-10-15` `node.get` refusing a property names it, its type and the types it reads, and the expression schemas list those types. [#1429](https://github.com/saworbit/didi/issues/1429)
+- `2026-10-15` A key name in any case, or with spaces for underscores, such as "w", "Space" or "page down", refuses with the integer to send. [#1432](https://github.com/saworbit/didi/issues/1432) · [PR #1439](https://github.com/saworbit/didi/pull/1439)
+- `2026-10-15` A blocking `runtime_launch` that captured the game's output no longer ends its summary with the console launcher caveat. [#1430](https://github.com/saworbit/didi/issues/1430) · [PR #1439](https://github.com/saworbit/didi/pull/1439)
+- `2026-10-15` `node.get` refusing a property names it, its type and the types it reads, and the expression schemas list those types. [#1429](https://github.com/saworbit/didi/issues/1429) · [PR #1439](https://github.com/saworbit/didi/pull/1439)
 - `2026-10-15` `resource_create` writes a typed StringName as `&"..."`, so the file loads instead of failing to parse. [#1422](https://github.com/saworbit/didi/issues/1422) · [PR #1437](https://github.com/saworbit/didi/pull/1437)
 - `2026-10-15` `scene_set_property` stores a string in a script-exported NodePath or StringName, reads it back and saves it. [#1423](https://github.com/saworbit/didi/issues/1423) · [PR #1437](https://github.com/saworbit/didi/pull/1437)
 - `2026-10-15` `resource_create` checks a `class_name` resource's engine base against the attached engine instead of reporting it unconsulted. [#1427](https://github.com/saworbit/didi/issues/1427) · [PR #1437](https://github.com/saworbit/didi/pull/1437)
