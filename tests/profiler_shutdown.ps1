@@ -30,6 +30,9 @@ function Invoke-ProfilerShutdownBlock {
             -ArgumentList @("--headless", "--path", ('"' + $FixtureRoot + '"'), "--log-file", ('"' + $engineLog + '"'), "res://profiler_shutdown.tscn") `
             -PassThru -WindowStyle Hidden `
             -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+        # Windows PowerShell 5.1 reads ExitCode only through a handle opened
+        # before the process exits; without it the fixture's exit read as empty.
+        [void]$game.Handle
         $gameStartedAt = Process-StartedAtMs $game
         $published = $null
         $deadline = [DateTime]::UtcNow.AddSeconds(10)
