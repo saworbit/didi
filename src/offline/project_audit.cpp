@@ -138,7 +138,11 @@ std::vector<Reference> referencesIn(const std::string& text) {
     // more uid-only references since 4.4. Following only path= would call a
     // referenced asset an orphan.
     static const std::regex ext_path(R"re(\[ext_resource[^\]]*path="(res://[^"]+)")re");
-    static const std::regex ext_uid(R"re(\[ext_resource[^\]]*uid="(uid://[^"]+)")re");
+    // Only a uid Godot can read, the same rule the index applies. For any other
+    // uid text the engine warns "invalid UID" and loads the path beside it, on
+    // 4.5.1, 4.6.2 and 4.7.2, so one counted here was reported broken while
+    // the scene loaded (#1446).
+    static const std::regex ext_uid(R"re(\[ext_resource[^\]]*uid="(uid://[a-z0-9]+)")re");
     // Scripts reference assets too, and skipping them is the difference between
     // a useful orphan list and a wrong one.
     static const std::regex gd_load(R"re((?:preload|load)\s*\(\s*"(res://[^"]+)")re");
@@ -177,7 +181,7 @@ bool isAssetType(const std::string& type) {
 // A scene or script is an entry point by nature: nothing has to reference a
 // level for it to be the one you open. Only assets are judged.
 bool isOrphanCandidate(const ResourceInfo& resource) {
-    if (!isAssetType(resource.type)) return false;
+    if (!isAssetType(resource.extension_type)) return false;
     // Godot's own sidecars describe an asset rather than using it.
     return !strings::endsWith(resource.path, ".import") &&
            !strings::endsWith(resource.path, ".uid");

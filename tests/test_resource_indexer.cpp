@@ -1,5 +1,7 @@
 #include "didi/offline/resource_indexer.hpp"
+#include "didi/offline/project_audit.hpp"
 #include "didi/offline/project_text_scan.hpp"
+#include "didi/offline/resource_uid.hpp"
 #include "didi/mcp/mcp_protocol.hpp"
 #include "didi/common/ipc_channel.hpp"
 
@@ -424,6 +426,164 @@ static void test_uid_belongs_to_the_root_header_not_references_or_script_text() 
     ASSERT_EQ(indexer.findExact("res://player.gd")->uid, "uid://d1d1player123");
 }
 
+static void test_imported_model_reports_the_type_its_import_records() {
+    // Break caught: the index typed a .glb by its extension as MeshResource,
+    // which is no Godot class, so type_filter "PackedScene" never found a model
+    // Godot loads as one (#1461). The type has to come from the .import, and
+    // the reads still from the extension: these bytes look like scene text, and
+    // a model typed PackedScene that reached the scanners would grow a
+    // dependency and a broken reference out of its own binary.
+    IndexFixture fixture;
+    const std::string model_bytes =
+        "glTF binary [ext_resource type=\"Texture2D\" path=\"res://art/inside_the_model.png\" id=\"1\"]";
+    fixture.write("models/probe.glb", model_bytes);
+    fixture.write("models/probe.glb.import",
+                  "[remap]\n\n"
+                  "importer=\"scene\"\n"
+                  "importer_version=1\n"
+                  "type=\"PackedScene\"\n"
+                  "uid=\"uid://bmodelprobe1\"\n"
+                  "path=\"res://.godot/imported/probe.glb-abc.scn\"\n\n"
+                  "[params]\n\n"
+                  "nodes/root_type=\"\"\n");
+    // Not imported yet, so the extension's guess is all there is.
+    fixture.write("models/fresh.glb", "glTF");
+    // A later section's key of the same name is not the asset's type.
+    fixture.write("models/mesh.obj", "o mesh\n");
+    fixture.write("models/mesh.obj.import",
+                  "[remap]\n\nimporter=\"wavefront_obj\"\n\n[params]\n\ntype=\"Node3D\"\n");
+    // A texture keeps Texture2D. Godot loads a CompressedTexture2D and writes a
+    // scene's reference to it as Texture2D, measured on 4.5.1, 4.6.2 and 4.7.2,
+    // and resource_create writes a reference with this type.
+    fixture.write("art/wall.png", "not-a-real-png");
+    fixture.write("art/wall.png.import",
+                  "[remap]\n\nimporter=\"texture\"\ntype=\"CompressedTexture2D\"\n"
+                  "uid=\"uid://bwalltexture1\"\n");
+    // An extension the index does not know names only GenericResource.
+    fixture.write("i18n/strings.csv", "keys,en\nHELLO,Hello\n");
+    fixture.write("i18n/strings.csv.import",
+                  "[remap]\n\nimporter=\"csv_translation\"\ntype=\"Translation\"\n");
+
+    didi::offline::ResourceIndexer::invalidateSharedIndex();
+    didi::offline::ResourceIndexer indexer;
+    indexer.scan(fixture.root());
+
+    const auto* model = indexer.findExact("res://models/probe.glb");
+    ASSERT_TRUE(model != nullptr);
+    ASSERT_EQ(model->type, "PackedScene");
+    ASSERT_EQ(model->extension_type, "MeshResource");
+    ASSERT_EQ(model->uid, "uid://bmodelprobe1");
+    ASSERT_TRUE(model->dependencies.empty());
+    ASSERT_EQ(model->toJson()["type"], "PackedScene");
+    ASSERT_TRUE(!model->toJson().contains("extension_type"));
+
+    ASSERT_EQ(indexer.findExact("res://models/fresh.glb")->type, "MeshResource");
+    ASSERT_EQ(indexer.findExact("res://models/mesh.obj")->type, "MeshResource");
+    ASSERT_EQ(indexer.findExact("res://art/wall.png")->type, "Texture2D");
+    ASSERT_EQ(indexer.findExact("res://art/wall.png")->uid, "uid://bwalltexture1");
+    ASSERT_EQ(indexer.findExact("res://i18n/strings.csv")->type, "Translation");
+
+    const auto scenes = indexer.query("res://", "PackedScene");
+    ASSERT_EQ(scenes.size(), 1u);
+    ASSERT_EQ(scenes[0].path, "res://models/probe.glb");
+
+    // The audit reads text through the same index. The model's bytes must not
+    // be read as a scene, and an unused model is still an orphan.
+    didi::offline::ProjectAuditOptions options;
+    options.include_dead_signals = false;
+    options.include_broken_connections = false;
+    options.include_import_health = false;
+    const auto report = didi::offline::auditProject(fixture.root(), options);
+    ASSERT_TRUE(report["broken_references"].empty());
+    bool model_orphaned = false;
+    for (const auto& orphan : report["orphans"]) {
+        if (orphan["path"] == "res://models/probe.glb") {
+            model_orphaned = true;
+            ASSERT_EQ(orphan["type"], "PackedScene");
+        }
+    }
+    ASSERT_TRUE(model_orphaned);
+    didi::offline::ResourceIndexer::invalidateSharedIndex();
+}
+
+static void test_rescan_notices_a_sidecar_written_after_its_file() {
+    // Break caught: the per file memo was keyed on the file alone. Godot writes
+    // an asset's .import when it first imports it and a script's .uid when it
+    // first scans it, touching neither file, so both kept the facts read before
+    // the sidecar existed: a model untyped and without a uid, a script without
+    // its uid, until the file itself changed (#1461).
+    IndexFixture fixture;
+    fixture.write("models/probe.glb", "glTF");
+    fixture.write("scripts/player.gd", "extends Node\n");
+
+    didi::offline::ResourceIndexer::invalidateSharedIndex();
+    didi::offline::ResourceIndexer before;
+    before.scan(fixture.root());
+    ASSERT_EQ(before.findExact("res://models/probe.glb")->type, "MeshResource");
+    ASSERT_TRUE(before.findExact("res://models/probe.glb")->uid.empty());
+    ASSERT_TRUE(before.findExact("res://scripts/player.gd")->uid.empty());
+
+    fixture.write("models/probe.glb.import",
+                  "[remap]\n\nimporter=\"scene\"\ntype=\"PackedScene\"\nuid=\"uid://bmodelprobe1\"\n");
+    fixture.write("scripts/player.gd.uid", "uid://bplayerscript1\n");
+
+    // No invalidation: only the editor wrote, and the memo must see it alone.
+    didi::offline::ResourceIndexer after;
+    after.scan(fixture.root());
+    ASSERT_EQ(after.findExact("res://models/probe.glb")->type, "PackedScene");
+    ASSERT_EQ(after.findExact("res://models/probe.glb")->uid, "uid://bmodelprobe1");
+    ASSERT_EQ(after.findExact("res://scripts/player.gd")->uid, "uid://bplayerscript1");
+    didi::offline::ResourceIndexer::invalidateSharedIndex();
+}
+
+static void test_one_rule_says_what_a_uid_is() {
+    // The index, the audit and the impact analysis each had their own
+    // definition, and the audit's took any text up to a quote (#1446). This is
+    // the one they share, and it is ResourceUID::text_to_id's: uid:// and then
+    // a-z and 0-9 only.
+    using didi::offline::isResourceUidText;
+    ASSERT_TRUE(isResourceUidText("uid://a"));
+    ASSERT_TRUE(isResourceUidText("uid://btgxunai7rduq"));
+    ASSERT_TRUE(isResourceUidText("uid://0123456789"));
+    ASSERT_TRUE(!isResourceUidText(""));
+    ASSERT_TRUE(!isResourceUidText("uid://"));
+    ASSERT_TRUE(!isResourceUidText("uid:/abc"));
+    ASSERT_TRUE(!isResourceUidText("UID://abc"));
+    ASSERT_TRUE(!isResourceUidText("uid://ABC"));
+    ASSERT_TRUE(!isResourceUidText("uid://abc-def"));
+    ASSERT_TRUE(!isResourceUidText("uid://abc def"));
+    ASSERT_TRUE(!isResourceUidText("uid://abc\n"));
+    ASSERT_TRUE(!isResourceUidText("uid://<invalid>"));
+    ASSERT_TRUE(!isResourceUidText(utf8(u8"uid://caf\u00e9")));
+    ASSERT_TRUE(!isResourceUidText("res://abc"));
+}
+
+static void test_audit_follows_the_path_beside_a_uid_godot_cannot_read() {
+    // Break caught: the audit took uid="uid://ABC" as a uid and called it
+    // unresolved, while Godot warns "invalid UID", loads the path beside it and
+    // the scene works, on 4.5.1, 4.6.2 and 4.7.2 (#1446). A uid it can read and
+    // nothing carries is still reported.
+    IndexFixture fixture;
+    fixture.write("art/icon.png", "not-a-real-png");
+    fixture.write("main.tscn",
+                  "[gd_scene load_steps=3 format=3]\n\n"
+                  "[ext_resource type=\"Texture2D\" uid=\"uid://ABC\" path=\"res://art/icon.png\" id=\"1\"]\n"
+                  "[ext_resource type=\"Texture2D\" uid=\"uid://gonegone\" id=\"2\"]\n\n"
+                  "[node name=\"Root\" type=\"Sprite2D\"]\ntexture = ExtResource(\"1\")\n");
+
+    didi::offline::ResourceIndexer::invalidateSharedIndex();
+    didi::offline::ProjectAuditOptions options;
+    options.include_dead_signals = false;
+    options.include_broken_connections = false;
+    options.include_import_health = false;
+    const auto report = didi::offline::auditProject(fixture.root(), options);
+    ASSERT_EQ(report["broken_references"].size(), 1u);
+    ASSERT_EQ(report["broken_references"][0]["target"], "uid://gonegone");
+    ASSERT_EQ(report["broken_references"][0]["kind"], "unresolved_uid");
+    for (const auto& orphan : report["orphans"]) ASSERT_TRUE(orphan["path"] != "res://art/icon.png");
+    didi::offline::ResourceIndexer::invalidateSharedIndex();
+}
+
 struct RegisterResourceIndexerTests {
     RegisterResourceIndexerTests() {
         registerTest("ResourceIndexer.ExactLookupAndDirectoryListing",
@@ -451,5 +611,12 @@ struct RegisterResourceIndexerTests {
                      test_offline_reload_project_drops_the_shared_index);
         registerTest("ResourceIndexer.ProjectTextScanIndexSharing",
                      test_project_text_scan_shares_the_index_and_rename_does_not);
+        registerTest("ResourceIndexer.ImportedModelType",
+                     test_imported_model_reports_the_type_its_import_records);
+        registerTest("ResourceIndexer.RescanNoticesLateSidecars",
+                     test_rescan_notices_a_sidecar_written_after_its_file);
+        registerTest("ResourceIndexer.UidTextRule", test_one_rule_says_what_a_uid_is);
+        registerTest("ResourceIndexer.AuditFollowsPathBesideUnreadableUid",
+                     test_audit_follows_the_path_beside_a_uid_godot_cannot_read);
     }
 } g_registerResourceIndexerTests;

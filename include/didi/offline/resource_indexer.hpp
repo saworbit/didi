@@ -17,6 +17,11 @@ struct ResourceInfo {
     std::string path;        // e.g. "res://scenes/player.tscn"
     std::string filename;    // "player.tscn"
     std::string type;        // "PackedScene", "GDScript", "Texture2D", "Mesh", etc.
+    // The class the extension implies. It decides what is read from the file,
+    // so a model reported as a PackedScene is never sent through a scanner that
+    // reads scene text (#1461). Equal to `type` except for an imported model or
+    // an extension the index does not know.
+    std::string extension_type;
     std::string uid;         // "uid://..." if found
     // What a .tres or .res declares in its [gd_resource] header. `type` is
     // derived from the extension, so it can never be more specific than
