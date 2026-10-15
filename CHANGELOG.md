@@ -140,6 +140,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 - `2026-09-23` The website and the quickstart start from the download. [PR #910](https://github.com/saworbit/didi/pull/910)
 
 ### Fixed
+- `2026-10-15` `script_patch_method` with `create_if_missing` puts a new member beside its kind when an earlier one holds a bracket in a string or comment. [#1460](https://github.com/saworbit/didi/issues/1460)
 - `2026-10-15` CONTRIBUTING names the workflows that start no build, and says a closed pull request's caches are deleted to free space, not to save `main`'s. [PR #1462](https://github.com/saworbit/didi/pull/1462)
 - `2026-10-15` The guides describe key names in any case, model instancing, `script_patch_method`'s replaced lines, the held Bridge light and setup's ignore rules. [PR #1459](https://github.com/saworbit/didi/pull/1459)
 - `2026-10-15` The control room lights a bridge another MCP client holds as held, with the editor's pid, instead of Detached. [#1448](https://github.com/saworbit/didi/issues/1448) · [PR #1458](https://github.com/saworbit/didi/pull/1458)
