@@ -57,6 +57,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 
 ### Added
 
+- `2026-10-15` Closing a pull request deletes the Actions caches its runs saved, so they no longer push `main`'s compiler caches out of the 10 GiB limit. [PR #1421](https://github.com/saworbit/didi/pull/1421)
 - `2026-10-12` `node.get` in `eval_gdscript` and the tools on its sandbox reads a game's script variables when nothing in their declaration runs code. [#1298](https://github.com/saworbit/didi/issues/1298) · [PR #1353](https://github.com/saworbit/didi/pull/1353)
 - `2026-10-12` `scene_set_property` writes a node slot such as `@export var target: Node2D` from a node path, and reads it back as that path. [#1292](https://github.com/saworbit/didi/issues/1292) · [PR #1352](https://github.com/saworbit/didi/pull/1352)
 - `2026-10-10` `ui_hit_test` takes a game's window pixels with `space: "screen"`, and a game's hits carry `screen_rect`, so list, hit test and click share one space. [#1223](https://github.com/saworbit/didi/issues/1223) · [PR #1260](https://github.com/saworbit/didi/pull/1260)

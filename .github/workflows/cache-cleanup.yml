@@ -1,0 +1,44 @@
+name: Cache Cleanup
+
+# A cache saved by a pull request's run is scoped to refs/pull/<n>/merge, and
+# only later runs of that same pull request can restore it. Once the pull
+# request closes nothing ever will, yet every entry still counts against the
+# repository's 10 GiB Actions cache limit. At the limit GitHub evicts the least
+# recently used entries, and the ones worth keeping are main's compiler caches,
+# which every pull request restores from. On 2026-10-15 two merged pull
+# requests held 4.1 GB of a 10.64 GB total.
+on:
+  pull_request:
+    branches: [ main, master ]
+    types: [ closed ]
+
+permissions: {}
+
+jobs:
+  delete-pr-caches:
+    name: Delete Pull Request Caches
+    # Deliberately `pull_request` and not `pull_request_target`, for the reason
+    # triage.yml gives. A fork pull request gets a read-only token here whatever
+    # this job asks for, so it is skipped and its caches age out on their own
+    # after seven days unused.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write  # list and delete this pull request's caches
+    steps:
+      - name: Delete the caches this pull request saved
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          CACHE_REF: refs/pull/${{ github.event.pull_request.number }}/merge
+        run: |
+          set -euo pipefail
+          ids=$(gh cache list --ref "$CACHE_REF" --limit 1000 --json id --jq '.[].id')
+          count=0
+          for id in $ids; do
+            gh cache delete "$id"
+            count=$((count + 1))
+          done
+          echo "Deleted ${count} cache entries saved for ${CACHE_REF}."
