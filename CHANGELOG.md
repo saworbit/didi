@@ -116,7 +116,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 - `2026-09-23` A release archive can be installed and checked in one command. [PR #911](https://github.com/saworbit/didi/pull/911)
 
 ### Changed
-- `2026-10-16` Didi is archived. The README says what it was, what it proved and why it stopped, and the `archive/experiment-complete` tag keeps everything. [PR #0](https://github.com/saworbit/didi/pull/0)
+- `2026-10-16` Didi is archived. The README says what it was, what it proved and why it stopped, and the `archive/experiment-complete` tag keeps everything. [PR #1478](https://github.com/saworbit/didi/pull/1478)
 - `2026-10-16` The capability matrix, README, site and agent guide say which tools write `project.godot` or a `.tscn` with no editor attached. [PR #1475](https://github.com/saworbit/didi/pull/1475)
 - `2026-10-16` Text repeated across tools is shorter, so `tools/list` is 1.9 KB smaller in the full profile and 0.7 KB in core. [PR #1470](https://github.com/saworbit/didi/pull/1470)
 - `2026-10-15` The 18 Phase 7 tools no longer carry a hand-written input schema that registration discarded, and a test keeps it so. [#1438](https://github.com/saworbit/didi/issues/1438) · [PR #1444](https://github.com/saworbit/didi/pull/1444)
