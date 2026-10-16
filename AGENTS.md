@@ -1,5 +1,11 @@
 # Working in this repository
 
+**Didi is archived.** I stopped work on it on 16 October 2026, and
+[README.md](README.md) says why. There is no next capability to build: the
+build queue and the pointers below are a record of how the work was done, not a
+list of work to do. The state of the project when it stopped is at the
+`archive/experiment-complete` tag.
+
 Pointers for anyone, person or coding agent, asked to pick up work on Didi.
 
 - **What to work on next.** Open `P0` and `P1` issues first, as
