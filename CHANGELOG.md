@@ -116,6 +116,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 - `2026-09-23` A release archive can be installed and checked in one command. [PR #911](https://github.com/saworbit/didi/pull/911)
 
 ### Changed
+- `2026-10-16` Text repeated across tools is shorter, so `tools/list` is 1.9 KB smaller in the full profile and 0.7 KB in core. [PR #1470](https://github.com/saworbit/didi/pull/1470)
 - `2026-10-15` The 18 Phase 7 tools no longer carry a hand-written input schema that registration discarded, and a test keeps it so. [#1438](https://github.com/saworbit/didi/issues/1438) · [PR #1444](https://github.com/saworbit/didi/pull/1444)
 - `2026-10-14` Local CI uses the refreshed Ubuntu 24.04 image while keeping its base pinned by digest. [PR #1361](https://github.com/saworbit/didi/pull/1361)
 - `2026-10-14` Bridge handlers compile in domain files with shared private helpers, preserving validation, undo and resource ownership. [#1255](https://github.com/saworbit/didi/issues/1255) · [PR #1413](https://github.com/saworbit/didi/pull/1413)
@@ -145,6 +146,7 @@ Full write-ups for these entries: [as first written](https://github.com/saworbit
 - `2026-09-23` The website and the quickstart start from the download. [PR #910](https://github.com/saworbit/didi/pull/910)
 
 ### Fixed
+- `2026-10-16` `scene_create` and `scene_pack_branch` no longer say `overwrite` needs a confirmation token, and `scene_create` says its root is named Root. [PR #1470](https://github.com/saworbit/didi/pull/1470)
 - `2026-10-16` A tool's own answer to a failed reimport reaches the caller, `rolled_back` and the job advice included, not the bare bridge error. [PR #1466](https://github.com/saworbit/didi/pull/1466)
 - `2026-10-15` `script_patch_method` with `create_if_missing` puts a new member beside its kind when an earlier one holds a bracket in a string or comment. [#1460](https://github.com/saworbit/didi/issues/1460) · [PR #1464](https://github.com/saworbit/didi/pull/1464)
 - `2026-10-15` `project_list_resources` types an imported model by its `.import`, so `type_filter: "PackedScene"` finds a `.glb`, and a rescan sees a sidecar written later. [#1461](https://github.com/saworbit/didi/issues/1461) · [PR #1463](https://github.com/saworbit/didi/pull/1463)

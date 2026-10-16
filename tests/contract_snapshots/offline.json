@@ -2311,7 +2311,7 @@
           "openWorldHint": true,
           "readOnlyHint": true
         },
-        "description": "Checks GDScript with Didi's lexical rules and the open editor's language server, or for a file with no editor a headless Godot compile. Legacy name for script_check_syntax, which is listed separately and is the same tool. Prefer the canonical name: it is what error data reports as canonical_tool.",
+        "description": "Checks GDScript with Didi's lexical rules and the open editor's language server, or for a file with no editor a headless Godot compile. Legacy name for script_check_syntax, the same tool, listed too. Prefer script_check_syntax, the name error data reports as canonical_tool.",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {
@@ -2933,7 +2933,7 @@
               "type": "string"
             },
             "confirmation_token": {
-              "description": "Single-use token from an exact dry-run preview when confirmation is required.",
+              "description": "Single-use token from a dry run of this exact call.",
               "maxLength": 64,
               "minLength": 64,
               "pattern": "^[0-9a-f]{64}$",
@@ -3341,7 +3341,7 @@
             },
             "board": {
               "default": "default",
-              "description": "Which blackboard to read or write. Defaults to the default board, so a single-agent session never needs to pass it.",
+              "description": "Which blackboard to read or write. Defaults to the default board.",
               "maxLength": 64,
               "type": "string"
             },
@@ -3402,7 +3402,7 @@
             },
             "board": {
               "default": "default",
-              "description": "Which blackboard to read or write. Defaults to the default board, so a single-agent session never needs to pass it.",
+              "description": "Which blackboard to read or write. Defaults to the default board.",
               "maxLength": 64,
               "type": "string"
             },
@@ -3490,7 +3490,7 @@
             },
             "board": {
               "default": "default",
-              "description": "Which blackboard to read or write. Defaults to the default board, so a single-agent session never needs to pass it.",
+              "description": "Which blackboard to read or write. Defaults to the default board.",
               "maxLength": 64,
               "type": "string"
             },
@@ -3583,7 +3583,7 @@
             },
             "board": {
               "default": "default",
-              "description": "Which blackboard to read or write. Defaults to the default board, so a single-agent session never needs to pass it.",
+              "description": "Which blackboard to read or write. Defaults to the default board.",
               "maxLength": 64,
               "type": "string"
             },
@@ -3741,7 +3741,7 @@
           "openWorldHint": false,
           "readOnlyHint": true
         },
-        "description": "Captures the active editor 2D/3D viewport as PNG when live, or returns an attributed synthetic grid preview offline. Legacy name for viewport_capture_frame, which is listed separately and is the same tool. Prefer the canonical name: it is what error data reports as canonical_tool.",
+        "description": "Captures the active editor 2D/3D viewport as PNG when live, or returns an attributed synthetic grid preview offline. Legacy name for viewport_capture_frame, the same tool, listed too. Prefer viewport_capture_frame, the name error data reports as canonical_tool.",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {
@@ -3777,7 +3777,7 @@
             },
             "select_main_screen": {
               "default": false,
-              "description": "Select the editor main screen this camera_identifier belongs to before capturing, then put the previous one back. An editor viewport has no size unless its main screen is showing, so without this an unattended agent cannot capture one at all. Editor sessions only.",
+              "description": "Select the editor main screen this camera_identifier belongs to before capturing, then put the previous one back. An editor viewport has no size unless its main screen is showing. Editor sessions only.",
               "type": "boolean"
             }
           },
@@ -3873,7 +3873,7 @@
           "openWorldHint": false,
           "readOnlyHint": false
         },
-        "description": "Writes a basic offline sandbox .tscn at res://didi_test_lab.tscn with lighting, a ground box, and three cameras. A PackedScene target is instanced under the lab as TargetInstance; any other resource is attached to a TargetInstance holder as metadata/didi_target, and the result says which with target_instanced. Legacy name for viewport_create_test_lab, which is listed separately and is the same tool. Prefer the canonical name: it is what error data reports as canonical_tool.",
+        "description": "Writes a basic offline sandbox .tscn at res://didi_test_lab.tscn with lighting, a ground box, and three cameras. A PackedScene target is instanced under the lab as TargetInstance; any other resource is attached to a TargetInstance holder as metadata/didi_target, and the result says which with target_instanced. Legacy name for viewport_create_test_lab, the same tool, listed too. Prefer viewport_create_test_lab, the name error data reports as canonical_tool.",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {
@@ -3887,7 +3887,7 @@
               "type": "array"
             },
             "confirmation_token": {
-              "description": "Single-use token from an exact dry-run preview when confirmation is required.",
+              "description": "Single-use token from a dry run of this exact call.",
               "maxLength": 64,
               "minLength": 64,
               "pattern": "^[0-9a-f]{64}$",
@@ -4207,7 +4207,7 @@
           "additionalProperties": false,
           "properties": {
             "confirmation_token": {
-              "description": "Single-use token from an exact dry-run preview when confirmation is required.",
+              "description": "Single-use token from a dry run of this exact call.",
               "maxLength": 64,
               "minLength": 64,
               "pattern": "^[0-9a-f]{64}$",
@@ -4462,7 +4462,7 @@
           "openWorldHint": true,
           "readOnlyHint": false
         },
-        "description": "Starts a separate Godot process. Blocking by default: captures stdout/stderr, classifies errors after exit, and enforces a 1-120 second timeout, or up to 900 as a job with request_id. With detach: true it leaves the game running and answers with the session to drive it through. Legacy name for runtime_launch, which is listed separately and is the same tool. Prefer the canonical name: it is what error data reports as canonical_tool.",
+        "description": "Starts a separate Godot process. Blocking by default: captures stdout/stderr, classifies errors after exit, and enforces a 1-120 second timeout, or up to 900 as a job with request_id. With detach: true it leaves the game running and answers with the session to drive it through. Legacy name for runtime_launch, the same tool, listed too. Prefer runtime_launch, the name error data reports as canonical_tool.",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {
@@ -4544,7 +4544,7 @@
           "openWorldHint": false,
           "readOnlyHint": true
         },
-        "description": "Returns a live name/type/path hierarchy or an offline parsed .tscn hierarchy; live bulk properties, scripts, and signals are explicitly omitted. Legacy name for scene_get_hierarchy, which is listed separately and is the same tool. Prefer the canonical name: it is what error data reports as canonical_tool.",
+        "description": "Returns a live name/type/path hierarchy or an offline parsed .tscn hierarchy; live bulk properties, scripts, and signals are explicitly omitted. Legacy name for scene_get_hierarchy, the same tool, listed too. Prefer scene_get_hierarchy, the name error data reports as canonical_tool.",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {
@@ -4700,7 +4700,7 @@
           "additionalProperties": false,
           "properties": {
             "confirmation_token": {
-              "description": "Single-use token from an exact dry-run preview when confirmation is required.",
+              "description": "Single-use token from a dry run of this exact call.",
               "maxLength": 64,
               "minLength": 64,
               "pattern": "^[0-9a-f]{64}$",
@@ -4963,7 +4963,7 @@
           "openWorldHint": false,
           "readOnlyHint": false
         },
-        "description": "Dispatches input events into the running game. A mouse event's position is in window pixels, as ui_list_controls' screen_rect is. While the game is paused a batch is held for the first frame that processes, unless paused_delivery is now. Legacy name for runtime_inject_input, which is listed separately and is the same tool. Prefer the canonical name: it is what error data reports as canonical_tool.",
+        "description": "Dispatches input events into the running game. A mouse event's position is in window pixels, as ui_list_controls' screen_rect is. While the game is paused a batch is held for the first frame that processes, unless paused_delivery is now. Legacy name for runtime_inject_input, the same tool, listed too. Prefer runtime_inject_input, the name error data reports as canonical_tool.",
         "inputSchema": {
           "$id": "https://didi.local/schemas/phase7/generated/runtime_inject_input.request.schema.json",
           "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -5348,7 +5348,7 @@
           "openWorldHint": false,
           "readOnlyHint": false
         },
-        "description": "UNIMPLEMENTED: Reserved schema; calls are rejected. Intended contract: Creates an instance of a resource or scene and parents it with automatic collision assignment. This legacy name has no canonical replacement: the capability was never re-registered under a canonical name, so this name is the only one and is what error data reports as canonical_tool. _meta.didi carries no canonical for that reason rather than by omission.",
+        "description": "UNIMPLEMENTED: Reserved schema; calls are rejected. Intended contract: Creates an instance of a resource or scene and parents it with automatic collision assignment. This legacy name has no canonical replacement, so error data reports it as canonical_tool and _meta.didi has no canonical.",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {
@@ -5407,7 +5407,7 @@
           "openWorldHint": false,
           "readOnlyHint": false
         },
-        "description": "UNIMPLEMENTED: Reserved schema; calls are rejected. Intended contract: Adds, removes, reparents, duplicates, or edits nodes via UndoRedo transactions. This legacy name has no canonical replacement: the capability was never re-registered under a canonical name, so this name is the only one and is what error data reports as canonical_tool. _meta.didi carries no canonical for that reason rather than by omission.",
+        "description": "UNIMPLEMENTED: Reserved schema; calls are rejected. Intended contract: Adds, removes, reparents, duplicates, or edits nodes via UndoRedo transactions. This legacy name has no canonical replacement, so error data reports it as canonical_tool and _meta.didi has no canonical.",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {
@@ -5637,12 +5637,12 @@
           "openWorldHint": false,
           "readOnlyHint": false
         },
-        "description": "Safely rewrites a single method or symbol body in a .gd file without touching other functions. Legacy name for script_patch_method, which is listed separately and is the same tool. Prefer the canonical name: it is what error data reports as canonical_tool.",
+        "description": "Safely rewrites a single method or symbol body in a .gd file without touching other functions. Legacy name for script_patch_method, the same tool, listed too. Prefer script_patch_method, the name error data reports as canonical_tool.",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {
             "confirmation_token": {
-              "description": "Single-use token from an exact dry-run preview when confirmation is required.",
+              "description": "Single-use token from a dry run of this exact call.",
               "maxLength": 64,
               "minLength": 64,
               "pattern": "^[0-9a-f]{64}$",
@@ -5650,7 +5650,7 @@
             },
             "create_if_missing": {
               "default": false,
-              "description": "Add the symbol when the script does not declare it. Off by default: a patch names a symbol that is there, and appending one for a misspelt name leaves dead code beside the symbol you meant to edit. The result says which happened with created.",
+              "description": "Add the symbol when the script does not declare it. Off by default, so a misspelt name is refused rather than appended as dead code. The result says which happened with created.",
               "type": "boolean"
             },
             "dry_run": {
@@ -5678,7 +5678,7 @@
             },
             "symbol_type": {
               "default": "function",
-              "description": "Which kind of symbol the name refers to: function, variable, constant, signal, enum or class. Defaults to function. Anything else is refused, because an unrecognised kind cannot be checked against the replacement.",
+              "description": "Which kind of symbol the name refers to: function, variable, constant, signal, enum or class. Defaults to function. Anything else is refused.",
               "enum": [
                 "function",
                 "variable",
@@ -6104,7 +6104,7 @@
               "type": "array"
             },
             "confirmation_token": {
-              "description": "Single-use token from an exact dry-run preview when confirmation is required.",
+              "description": "Single-use token from a dry run of this exact call.",
               "maxLength": 64,
               "minLength": 64,
               "pattern": "^[0-9a-f]{64}$",
@@ -6240,7 +6240,7 @@
           "additionalProperties": false,
           "properties": {
             "confirmation_token": {
-              "description": "Single-use token from an exact dry-run preview when confirmation is required.",
+              "description": "Single-use token from a dry run of this exact call.",
               "maxLength": 64,
               "minLength": 64,
               "pattern": "^[0-9a-f]{64}$",
@@ -6714,7 +6714,7 @@
           "additionalProperties": false,
           "properties": {
             "confirmation_token": {
-              "description": "Single-use token from an exact dry-run preview when confirmation is required.",
+              "description": "Single-use token from a dry run of this exact call.",
               "maxLength": 64,
               "minLength": 64,
               "pattern": "^[0-9a-f]{64}$",
@@ -7601,7 +7601,7 @@
           "openWorldHint": false,
           "readOnlyHint": true
         },
-        "description": "Scans res:// for assets filtered by type (e.g., .glb, .png, .tres). Legacy name for project_list_resources, which is listed separately and is the same tool. Prefer the canonical name: it is what error data reports as canonical_tool.",
+        "description": "Scans res:// for assets filtered by type (e.g., .glb, .png, .tres). Legacy name for project_list_resources, the same tool, listed too. Prefer project_list_resources, the name error data reports as canonical_tool.",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {
@@ -7706,7 +7706,7 @@
               "type": "boolean"
             },
             "confirmation_token": {
-              "description": "Single-use token from an exact dry-run preview when confirmation is required.",
+              "description": "Single-use token from a dry run of this exact call.",
               "maxLength": 64,
               "minLength": 64,
               "pattern": "^[0-9a-f]{64}$",
@@ -7719,7 +7719,7 @@
             },
             "overwrite": {
               "default": false,
-              "description": "Replace the file when one is already at that path. Off by default, and a call with overwrite: true is confirmation-gated: dry-run it first and repeat the call with the token that comes back.",
+              "description": "Replace the file when one is already at that path. Off by default, and replacing one is confirmation-gated.",
               "type": "boolean"
             },
             "properties": {
@@ -9049,7 +9049,7 @@
               "type": "string"
             },
             "confirmation_token": {
-              "description": "Single-use token from an exact dry-run preview when confirmation is required.",
+              "description": "Single-use token from a dry run of this exact call.",
               "maxLength": 64,
               "minLength": 64,
               "pattern": "^[0-9a-f]{64}$",
@@ -9521,7 +9521,7 @@
               "type": "array"
             },
             "confirmation_token": {
-              "description": "Single-use token from an exact dry-run preview when confirmation is required.",
+              "description": "Single-use token from a dry run of this exact call.",
               "maxLength": 64,
               "minLength": 64,
               "pattern": "^[0-9a-f]{64}$",
@@ -9633,12 +9633,12 @@
             },
             "overwrite": {
               "default": false,
-              "description": "Replace the file when one is already at that path. Off by default, and a call with overwrite: true is confirmation-gated: dry-run it first and repeat the call with the token that comes back.",
+              "description": "Replace the file when one is already at that path. Off by default.",
               "type": "boolean"
             },
             "root_name": {
               "default": "Root",
-              "description": "Name for the root node. Defaults to a name derived from the file.",
+              "description": "Name for the root node. Defaults to Root.",
               "type": "string"
             },
             "root_type": {
@@ -10183,7 +10183,7 @@
             },
             "overwrite": {
               "default": false,
-              "description": "Replace the file when one is already at that path. Off by default, and a call with overwrite: true is confirmation-gated: dry-run it first and repeat the call with the token that comes back.",
+              "description": "Replace the file when one is already at that path. Off by default.",
               "type": "boolean"
             },
             "scene_path": {
@@ -10676,7 +10676,7 @@
           "additionalProperties": false,
           "properties": {
             "confirmation_token": {
-              "description": "Single-use token from an exact dry-run preview when confirmation is required.",
+              "description": "Single-use token from a dry run of this exact call.",
               "maxLength": 64,
               "minLength": 64,
               "pattern": "^[0-9a-f]{64}$",
@@ -10875,7 +10875,7 @@
           "additionalProperties": false,
           "properties": {
             "confirmation_token": {
-              "description": "Single-use token from an exact dry-run preview when confirmation is required.",
+              "description": "Single-use token from a dry run of this exact call.",
               "maxLength": 64,
               "minLength": 64,
               "pattern": "^[0-9a-f]{64}$",
@@ -10883,7 +10883,7 @@
             },
             "create_if_missing": {
               "default": false,
-              "description": "Add the symbol when the script does not declare it. Off by default: a patch names a symbol that is there, and appending one for a misspelt name leaves dead code beside the symbol you meant to edit. The result says which happened with created.",
+              "description": "Add the symbol when the script does not declare it. Off by default, so a misspelt name is refused rather than appended as dead code. The result says which happened with created.",
               "type": "boolean"
             },
             "dry_run": {
@@ -10911,7 +10911,7 @@
             },
             "symbol_type": {
               "default": "function",
-              "description": "Which kind of symbol the name refers to: function, variable, constant, signal, enum or class. Defaults to function. Anything else is refused, because an unrecognised kind cannot be checked against the replacement.",
+              "description": "Which kind of symbol the name refers to: function, variable, constant, signal, enum or class. Defaults to function. Anything else is refused.",
               "enum": [
                 "function",
                 "variable",
@@ -11486,7 +11486,7 @@
               "type": "array"
             },
             "confirmation_token": {
-              "description": "Single-use token from an exact dry-run preview when confirmation is required.",
+              "description": "Single-use token from a dry run of this exact call.",
               "maxLength": 64,
               "minLength": 64,
               "pattern": "^[0-9a-f]{64}$",
@@ -12314,7 +12314,7 @@
             },
             "select_main_screen": {
               "default": false,
-              "description": "Select the editor main screen this camera_identifier belongs to before capturing, then put the previous one back. An editor viewport has no size unless its main screen is showing, so without this an unattended agent cannot capture one at all. Editor sessions only.",
+              "description": "Select the editor main screen this camera_identifier belongs to before capturing, then put the previous one back. An editor viewport has no size unless its main screen is showing. Editor sessions only.",
               "type": "boolean"
             }
           },
@@ -12442,7 +12442,7 @@
             },
             "select_main_screen": {
               "default": false,
-              "description": "Select the editor main screen this camera_identifier belongs to before capturing, then put the previous one back. An editor viewport has no size unless its main screen is showing, so without this an unattended agent cannot capture one at all. Editor sessions only.",
+              "description": "Select the editor main screen this camera_identifier belongs to before capturing, then put the previous one back. An editor viewport has no size unless its main screen is showing. Editor sessions only.",
               "type": "boolean"
             }
           },
@@ -12488,7 +12488,7 @@
               "type": "array"
             },
             "confirmation_token": {
-              "description": "Single-use token from an exact dry-run preview when confirmation is required.",
+              "description": "Single-use token from a dry run of this exact call.",
               "maxLength": 64,
               "minLength": 64,
               "pattern": "^[0-9a-f]{64}$",
@@ -12596,7 +12596,7 @@
             },
             "select_main_screen": {
               "default": false,
-              "description": "Select the editor main screen this camera_identifier belongs to before capturing, then put the previous one back. An editor viewport has no size unless its main screen is showing, so without this an unattended agent cannot capture one at all. Editor sessions only.",
+              "description": "Select the editor main screen this camera_identifier belongs to before capturing, then put the previous one back. An editor viewport has no size unless its main screen is showing. Editor sessions only.",
               "type": "boolean"
             },
             "threshold": {

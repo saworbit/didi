@@ -38,33 +38,30 @@ const std::unordered_map<std::string, std::string>& sharedDescriptions() {
         {"group",
          "Group name, without path separators. Groups are Godot's own tagging, and a node "
          "can be in any number of them."},
+        // Not "confirmation-gated": scene_create and scene_pack_branch take this
+        // and are not, and a gated call's refusal says how to get the token.
         {"overwrite",
-         "Replace the file when one is already at that path. Off by default, and a call "
-         "with overwrite: true is confirmation-gated: dry-run it first and repeat the call "
-         "with the token that comes back."},
+         "Replace the file when one is already at that path. Off by default."},
         {"search_path",
          "A res:// directory to work beneath, not a prefix: res://scenes matches "
          "res://scenes/player.tscn and res://scenes itself, never res://scenes_v2. Defaults "
          "to the project root."},
         {"symbol_type",
          "Which kind of symbol the name refers to: function, variable, constant, signal, "
-         "enum or class. Defaults to function. Anything else is refused, because an "
-         "unrecognised kind cannot be checked against the replacement."},
+         "enum or class. Defaults to function. Anything else is refused."},
         {"create_if_missing",
-         "Add the symbol when the script does not declare it. Off by default: a patch names "
-         "a symbol that is there, and appending one for a misspelt name leaves dead code "
-         "beside the symbol you meant to edit. The result says which happened with created."},
+         "Add the symbol when the script does not declare it. Off by default, so a misspelt "
+         "name is refused rather than appended as dead code. The result says which happened "
+         "with created."},
         {"select_main_screen",
          "Select the editor main screen this camera_identifier belongs to before capturing, "
          "then put the previous one back. An editor viewport has no size unless its main "
-         "screen is showing, so without this an unattended agent cannot capture one at all. "
-         "Editor sessions only."},
+         "screen is showing. Editor sessions only."},
         {"collision_mask",
          "Physics layers to test against, as a 32-bit bit mask. The default, 1, is layer one "
          "only; 4294967295 tests every layer."},
         {"board",
-         "Which blackboard to read or write. Defaults to the default board, so a single-agent "
-         "session never needs to pass it."},
+         "Which blackboard to read or write. Defaults to the default board."},
         {"timeout_ms",
          "How long to wait before giving up, in milliseconds."},
         {"paths",
@@ -88,10 +85,10 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
         {"scene_create.scene_path",
          "Where to write the new scene, a normalized res:// path ending in .tscn. This is "
          "the output path; the argument is scene_path."},
-        {"scene_create.root_type",
-         "Class of the scene's root node: Node2D, Node3D or Control."},
+        // root_type carries its own text in the schema, which wins over this
+        // table. The default name is Root on both routes, never the file's.
         {"scene_create.root_name",
-         "Name for the root node. Defaults to a name derived from the file."},
+         "Name for the root node. Defaults to Root."},
         {"scene_open.scene_path",
          "The res:// .tscn to open as the edited scene. Every later scene_* call answers "
          "about this scene until another is opened."},
@@ -295,6 +292,9 @@ const std::unordered_map<std::string, std::string>& toolDescriptions() {
          "overwrite: true is confirmation-gated."},
 
         // -- Resources ----------------------------------------------------
+        {"resource_create.overwrite",
+         "Replace the file when one is already at that path. Off by default, and replacing "
+         "one is confirmation-gated."},
         {"resource_create.resource_type",
          "The Godot class to write into the [gd_resource] header, such as CanvasItemMaterial, "
          "or a project script's class_name, written as its engine base with the script set. "
