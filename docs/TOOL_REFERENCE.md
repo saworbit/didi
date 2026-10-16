@@ -515,9 +515,10 @@ than the running objects:
 - A connection the file already has is `409`. `flags` is written as the editor
   writes it: no `flags` for `2`, `flags=N` for the others.
 
-Measured on 4.5.1, 4.6.2 and 4.7.2: a scene with connections written this way
-loads with each one connected and no ERROR lines. An editor that has the scene
-open without the Didi addon saves its own copy over the file, so close it first.
+Measured on 4.5.1, 4.6.2 and 4.7.2 by `tools/vibe/probes/scene_connection_engine.py`:
+a scene with connections written this way loads with each one connected and no
+ERROR lines. An editor that has the scene open without the Didi addon saves its
+own copy over the file, so close it first.
 
 ### `signal_emit` — Live
 
@@ -1709,7 +1710,7 @@ Mutations use Godot's `autoload/<name>` representation, call `ProjectSettings.sa
 ### InputMap
 
 - `project_list_input_actions`: returns sorted `{action, deadzone, events, defined_by_project}` entries for what `project.godot` declares, and reports `omitted_engine_default_count`. `include_engine_defaults: true` adds the engine's own `ui_*` actions, which are `defined_by_project: false`; before #1108 that was the default, and about 69 KB of a typical answer was the engine's map. `action` reads one entry by exact name, and a name the project does not have is `404`. When `project.godot` cannot be parsed, entries carry no `defined_by_project`, `defined_by_project_unavailable` says why, a listing that did not ask lists every action, and an explicit `include_engine_defaults: false` is refused.
-- `project_set_input_action`: requires `action`; `deadzone` defaults to `0.2`, `events` to an empty array, and existing actions require `replace: true`. Up to 64 events. With no editor attached it writes `input/<action>` into `project.godot` itself and answers `execution_mode: "offline_fallback"`, `written_to`, `value_written` (the literal the file now holds), `replaced_existing` and, for a replacement, `previous_value` (#1379). Each event is written with its class, its device and the properties the call set, on one line, and Godot fills the rest with its defaults when it loads the file. Once an engine loads and saves the project, the action's text is byte for byte what the live route saves for the same events, on 4.5.1, 4.6.2 and 4.7.2. Offline nothing says which `ui_*` names the engine defines, so every `ui_*` name needs `replace: true` there, as the engine's own do live.
+- `project_set_input_action`: requires `action`; `deadzone` defaults to `0.2`, `events` to an empty array, and existing actions require `replace: true`. Up to 64 events. With no editor attached it writes `input/<action>` into `project.godot` itself and answers `execution_mode: "offline_fallback"`, `written_to`, `value_written` (the literal the file now holds), `replaced_existing` and, for a replacement, `previous_value` (#1379). Each event is written with its class, its device and the properties the call set, on one line, and Godot fills the rest with its defaults when it loads the file. Once an engine loads and saves the project, the action's text is byte for byte what the live route saves for the same events, on 4.5.1, 4.6.2 and 4.7.2 (`tools/vibe/probes/input_action_literal.py`). Offline nothing says which `ui_*` names the engine defines, so every `ui_*` name needs `replace: true` there, as the engine's own do live.
 - Both writers answer `defined_by_project`, whether `project.godot` declares the action after the save, read back from the file. `deadzone` and `event_count` are the request, or what the action held before a removal (#1019).
 - `project_remove_input_action`: requires `action` and rejects missing entries. It also refuses an action the project does not define. `ProjectSettings.has_setting` answers true for an engine default such as `ui_accept`, because the engine registers the built-in map as settings, so removing one used to leave the running editor's InputMap without the action, write nothing to `project.godot`, and report `persisted: true`. The refusal is a `409` carrying `engine_default: true`. Give the project its own events for that name with `project_set_input_action` instead. A removal that goes ahead reports the deadzone and event count the action actually had. A `project.godot` Godot will not load is refused with a `409` naming the line, rather than answered: the parse stops where the file breaks, so an action below that point is absent and "the project does not define it" would be a claim with nothing behind it -- and the removal writes this editor's whole settings map over the file, which would take the hand edit that broke it as well.
 
@@ -1802,11 +1803,13 @@ registers the uid when it next scans the project.
   its uid.
 
 Measured on 4.5.1, 4.6.2 and 4.7.2 for every Node class the engine can
-construct: this file loads to the same stored state as the scene the engine
-saves for that root, and the editor's scan of it prints no ERROR or WARNING
-lines. The engine also writes `unique_id` from 4.6 and a few defaults, such as a
-`Control` root's `layout_mode`. None of them changes what loads, and the editor
-adds them when it next saves the scene.
+construct (`tools/vibe/probes/scene_root_engine.py`): this file loads to the
+same stored state as the scene the engine saves for that root, and the editor's
+scan of it prints no ERROR or WARNING lines
+(`tools/vibe/probes/offline_scene_create.py`). The engine also writes
+`unique_id` from 4.6 and a few defaults, such as a `Control` root's
+`layout_mode`. None of them changes what loads, and the editor adds them when it
+next saves the scene.
 
 Scene paths reject absolute filesystem paths, backslashes, and parent-relative segments.
 
