@@ -4,6 +4,91 @@
   <img alt="Didi — godot-mcp-native" src="docs/brand/png/readme-banner.png" width="100%">
 </picture>
 
+# Archived: experiment complete
+
+I've stopped work on Didi. This wasn't a failure. It was a question, and it got
+answered.
+
+Nothing has been deleted. Everything as it stood when I stopped, the code, the
+design records and the reasoning behind each decision, is kept at the
+[`archive/experiment-complete`](https://github.com/saworbit/didi/tree/archive/experiment-complete)
+tag.
+
+## What Didi was
+
+A native [MCP](https://modelcontextprotocol.io/) server for Godot 4.5+, written
+in C++20. A standalone `didi` binary talks to the AI assistant, and a
+GDExtension inside the editor or the running game does the work, joined by a
+local named pipe or Unix socket. It went from ten tools on 26 August 2026 to
+122, with 119 implemented, released for Windows, macOS and Linux, and tested in
+CI against live Godot 4.5, 4.6 and 4.7 editors.
+
+The parts I cared about most let an agent see and act. The Vision & Render tools
+capture the viewport and diff two frames pixel for pixel. The runtime tools
+launch a game, inject input, step it a frame at a time, read its output and
+watch invariants while it runs. [Q9](docs/BUILD_QUEUE.md#q9-proof-in-one-call)
+folded that loop into a single call that returns a verdict and its evidence.
+
+I also designed [Gogo](docs/GOGO_DESIGN.md), a farm of parallel headless Godot
+benches behind the same server, and never built it. I held it behind Q9 on
+purpose: running many agents multiplies whatever a single agent still gets
+wrong. The design and [that gate](docs/BUILD_QUEUE.md#paused) are both in the
+tag.
+
+## What it proved
+
+A single agent loop, with failure kept under control and iteration kept fast,
+works as a sandbox for figuring out how agents and tools should talk to each
+other. What six [field trials](docs/FIELD_TRIAL_RESULTS.md) with real agents
+taught me is written down as [design principles](docs/DESIGN_PRINCIPLES.md),
+and I'd apply them to any tool an agent uses:
+
+- Success means the change was observed, not that a call returned.
+- Reject what can't be interpreted, and say what would fix it.
+- Proof is a result, not a claim.
+- The agent pays only for what it uses.
+
+That knowledge is what I'm keeping. The code was how I got it.
+
+## Why I stopped
+
+MCP isn't dead. The ecosystem just moved fast enough that rebuilding what
+already exists stopped making sense. The 2026-07-28 revision made the protocol
+stateless, the value moved into frameworks like
+[FastMCP](https://github.com/PrefectHQ/fastmcp), and mature external drivers for
+Godot arrived. A hand-rolled C++ server was optimising for a problem the SDKs
+had already solved. Didi kept up, and it serves both protocol eras, but keeping
+up had stopped being the interesting part.
+
+## If you have the same itch
+
+Use [gda](https://pypi.org/project/gda/)
+([source](https://github.com/aigengame/godot-agent)). It's MIT licensed and
+free, and 0.24.1 is the current release as of October 2026. It drives Godot
+4.4+ headless and 4.6+ live on macOS, Linux and Windows, and gives you screen
+capture, frame sequences, input simulation, logs and performance metrics through
+one CLI or MCP surface. One command runs it, with no permanent install:
+
+```bash
+uvx --from "gda[mcp]" gda-mcp
+```
+
+One caveat: it has a single maintainer. Treat it as a dependency to keep an eye
+on, not a foundation to bet a product on.
+
+## What's left here
+
+- The tag holds the full state of the repository. Nothing was deleted.
+- The [releases](https://github.com/saworbit/didi/releases) stay up. 2.0.1 is
+  the last one.
+- The issues that were still open stay open, as a record of the gaps I knew
+  about. Nobody is working on them.
+
+Below is the README as it stood when I stopped. It's kept as it was, so anything
+it asks of you, such as opening an issue, no longer applies.
+
+---
+
 # Didi (godot-mcp-native) 🎭
 
 [![CI](https://github.com/saworbit/didi/actions/workflows/ci.yml/badge.svg)](https://github.com/saworbit/didi/actions/workflows/ci.yml)
